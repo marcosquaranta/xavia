@@ -1,0 +1,338 @@
+/* app/globals.css
+   Estilos globales de XaviaApp.
+   Paleta:
+     - Verde principal: #059669
+     - Lechuga: #65a30d
+     - Rúcula: #166534
+     - Albahaca: #047857
+*/
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+  background: #f3f4f6;
+  color: #1f2937;
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+a {
+  color: #059669;
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: white;
+  width: 100%;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: #059669;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.1);
+}
+
+input:disabled {
+  background: #f9fafb;
+  color: #6b7280;
+  cursor: not-allowed;
+}
+
+label {
+  display: block;
+  font-size: 11px;
+  margin-bottom: 4px;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.btn {
+  display: inline-block;
+  background: #059669;
+  color: white;
+  border: none;
+  padding: 9px 14px;
+  border-radius: 6px;
+  font-weight: 500;
+  font-size: 13px;
+}
+.btn:hover {
+  background: #047857;
+}
+.btn.secondary {
+  background: white;
+  border: 1px solid #e5e7eb;
+  color: #374151;
+}
+.btn.secondary:hover {
+  background: #f9fafb;
+}
+.btn.danger {
+  background: #dc2626;
+  color: white;
+}
+.btn.danger:hover {
+  background: #b91c1c;
+}
+.btn.small {
+  padding: 5px 10px;
+  font-size: 11px;
+}
+
+.card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin-bottom: 14px;
+}
+.card-title {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.card-sub {
+  margin: -6px 0 12px;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.pill {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.pill.fase2 {
+  background: #d1fae5;
+  color: #065f46;
+}
+.pill.fase1 {
+  background: #dbeafe;
+  color: #1e40af;
+}
+.pill.plantin {
+  background: #fef3c7;
+  color: #78350f;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+th {
+  color: #6b7280;
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 8px 6px;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+}
+td {
+  padding: 10px 6px;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: top;
+}
+tr:last-child td {
+  border-bottom: none;
+}
+
+.alert-box {
+  padding: 12px 14px;
+  border-radius: 6px;
+  border-left: 3px solid;
+  font-size: 13px;
+  margin: 10px 0;
+}
+.alert-box.info {
+  background: #dbeafe;
+  border-color: #2563eb;
+  color: #1e40af;
+}
+.alert-box.success {
+  background: #d1fae5;
+  border-color: #059669;
+  color: #065f46;
+}
+.alert-box.warning {
+  background: #fef3c7;
+  border-color: #d97706;
+  color: #78350f;
+}
+.alert-box.error {
+  background: #fee2e2;
+  border-color: #dc2626;
+  color: #7f1d1d;
+}
+
+.lote-id {
+  font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+  background: #f3f4f6;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #4b5563;
+}
+
+/* Filas de lotes con colores por variedad */
+.lote-row {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  border-left: 4px solid;
+}
+.lote-row.v-lechuga {
+  border-left-color: #65a30d;
+  background: linear-gradient(90deg, #f7fee7 0%, white 80px);
+}
+.lote-row.v-rucula {
+  border-left-color: #166534;
+  background: linear-gradient(90deg, #dcfce7 0%, white 80px);
+}
+.lote-row.v-rucula-bandeja {
+  border-left-color: #166534;
+  background: repeating-linear-gradient(45deg, #dcfce7 0, #dcfce7 5px, #bbf7d0 5px, #bbf7d0 10px)
+    left/70px 100% no-repeat,
+    white;
+}
+.lote-row.v-albahaca {
+  border-left-color: #047857;
+  background: linear-gradient(90deg, #d1fae5 0%, white 80px);
+}
+
+/* Layout */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: white;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 13px;
+}
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #111827;
+}
+.logo-box {
+  width: 28px;
+  height: 28px;
+  background: #059669;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+}
+.topbar-menu {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.topbar-menu a {
+  color: #6b7280;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  text-decoration: none;
+}
+.topbar-menu a:hover {
+  background: #f3f4f6;
+  color: #059669;
+}
+.topbar-menu a.current {
+  color: #059669;
+  font-weight: 500;
+  background: #d1fae5;
+}
+.topbar-user {
+  font-size: 12px;
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.topbar-user form button {
+  background: none;
+  border: none;
+  color: #6b7280;
+  font-size: 12px;
+  padding: 0;
+}
+.topbar-user form button:hover {
+  color: #dc2626;
+}
+
+.page-title {
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-weight: 600;
+}
+.page-subtitle {
+  margin: 0 0 20px;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+@media (max-width: 640px) {
+  .topbar {
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+  }
+  .topbar-menu {
+    width: 100%;
+    justify-content: center;
+  }
+  .container {
+    padding: 16px;
+  }
+}
