@@ -1,12 +1,10 @@
 // app/cultivos/[id]/cosechar/page.tsx
-// Cosecha de un lote.
-
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { codigoCultivo } from '@/lib/lotes';
-import type { Lote, Variedad, Usuario } from '@/lib/types';
+import type { Lote, Variedad } from '@/lib/types';
 import Header from '@/components/Header';
 import CosechaForm from './CosechaForm';
 
@@ -22,10 +20,9 @@ export default async function CosecharPage({
 
   const idLote = decodeURIComponent(params.id);
 
-  const [lotes, variedades, usuarios] = await Promise.all([
+  const [lotes, variedades] = await Promise.all([
     readSheet<Lote>('Lotes'),
     readSheet<Variedad>('Variedades'),
-    readSheet<Usuario>('Usuarios'),
   ]);
 
   const lote = lotes.find((l) => l.id_lote === idLote);
@@ -38,10 +35,9 @@ export default async function CosecharPage({
   if (!variedad) notFound();
 
   const cultivo = codigoCultivo(lote.variedad);
-  // Solo lechuga se cosecha por planta. Rúcula y albahaca por paquete.
   const esPorPaquete = cultivo !== 'L';
-
-  const cosechadores = usuarios.filter((u) => u.activo === 'SI');
+  const plantasEstimadas =
+    Number(lote.plantas_estimadas_actual) || Number(lote.plantines_iniciales) || 0;
 
   return (
     <>
@@ -55,25 +51,17 @@ export default async function CosecharPage({
         </Link>
 
         <h1 className="page-title">
-          Cosechar lote <span className="lote-id">{lote.id_lote}</span>
+          Cosechar <span className="lote-id">Nro Lote: {lote.id_lote}</span>
         </h1>
         <p className="page-subtitle">
           {lote.variedad} · {lote.ubicacion_actual} ·{' '}
-          {lote.plantas_estimadas_actual
-            ? `~${lote.plantas_estimadas_actual} plantas estimadas`
-            : ''}
-          {esPorPaquete &&
-            ` · esperado: ${variedad.plantas_por_unidad_esperado} plantas/paquete`}
+          {plantasEstimadas > 0 ? `~${plantasEstimadas} plantas estimadas` : ''}
         </p>
 
         <CosechaForm
           lote={lote}
           variedad={variedad}
           esPorPaquete={esPorPaquete}
-          cosechadores={cosechadores.map((u) => ({
-            email: u.email,
-            nombre: u.nombre,
-          }))}
           usuario={user.email}
         />
       </div>

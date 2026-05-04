@@ -1,6 +1,5 @@
 // app/api/lotes/cosecha/route.ts
 // Registra la cosecha de un lote y lo marca como cosechado.
-// Calcula desvíos y nivel de alerta (que el operario NO ve).
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
@@ -19,26 +18,18 @@ export async function POST(req: NextRequest) {
     const {
       id_lote,
       fecha,
-      cosechador,
       es_por_paquete,
       plantas_cosechadas,
       descarte,
-      peso_muestra_kg,
+      peso_muestra_gr,        // gramos, opcional
       paquetes_armados,
-      plantas_por_paquete,
-      peso_muestra_paquete_kg,
+      plantas_por_paquete,    // calculado automático en el form
+      peso_muestra_paquete_gr,
       bandejas_armadas,
       tubos_consumidos_bandejas,
-      peso_muestra_bandeja_kg,
-      foto_url,
+      peso_muestra_bandeja_gr,
+      plantas_estimadas_lote, // lo manda el form para calcular descarte
     } = body;
-
-    if (!foto_url) {
-      return NextResponse.json(
-        { error: 'foto_obligatoria' },
-        { status: 400 }
-      );
-    }
 
     const lotes = await readSheet<Lote>('Lotes');
     const lote = lotes.find((l) => l.id_lote === id_lote);
@@ -46,51 +37,56 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'lote_no_encontrado' }, { status: 404 });
     }
 
-    const plantasEsperadas = Number(lote.plantas_estimadas_actual) || 0;
+    const plantasEstimadas =
+      Number(plantas_estimadas_lote) ||
+      Number(lote.plantas_estimadas_actual) ||
+      Number(lote.plantines_iniciales) ||
+      0;
 
-    // Calcular cuántas unidades se cosecharon, peso total estimado, y desvío.
     let unidadesCosechadas: number;
     let plantasUsadasTotal: number;
-    let pesoTotalEstimado: number;
+    let pesoTotalEstimadoKg: number;
     let descarteEfectivo: number;
 
     if (!es_por_paquete) {
       // Lechuga: por planta
-      unidadesCosechadas = plantas_cosechadas;
-      plantasUsadasTotal = plantas_cosechadas + (descarte || 0);
-      pesoTotalEstimado = plantas_cosechadas * (peso_muestra_kg || 0);
-      descarteEfectivo = descarte || 0;
+      unidadesCosechadas = Number(plantas_cosechadas) || 0;
+      descarteEfectivo = Math.max(0, plantasEstimadas - unidadesCosechadas);
+      plantasUsadasTotal = unidadesCosechadas + descarteEfectivo;
+      // Convertir gramos a kg para guardar
+      const pesoGr = Number(peso_muestra_gr) || 0;
+      pesoTotalEstimadoKg =
+        pesoGr > 0 ? (unidadesCosechadas * pesoGr) / 1000 : 0;
     } else {
-      // Rúcula/Albahaca: por paquete (+ bandejas opcionales)
-      const plantasEnPaquetes = paquetes_armados * (plantas_por_paquete || 0);
-      const plantasEnBandejas = (tubos_consumidos_bandejas || 0) * 30; // aprox
-      // El cálculo correcto sería leer la ubicación y usar orificios_por_perfil,
-      // pero a este nivel uno tiene el lote; el dato exacto se calculará en estadísticas.
-      unidadesCosechadas = paquetes_armados;
-      plantasUsadasTotal = plantasEnPaquetes + plantasEnBandejas;
-      pesoTotalEstimado =
-        paquetes_armados * (peso_muestra_paquete_kg || 0) +
-        bandejas_armadas * (peso_muestra_bandeja_kg || 0);
-      descarteEfectivo = Math.max(0, plantasEsperadas - plantasUsadasTotal);
+      // Rúcula/Albahaca: por paquete (sin descarte)
+      unidadesCosechadas = Number(paquetes_armados) || 0;
+      plantasUsadasTotal = plantasEstimadas; // todas las plantas del lote
+      descarteEfectivo = 0; // rúcula no tiene descarte
+      const pesoGrPaq = Number(peso_muestra_paquete_gr) || 0;
+      const pesoGrBand = Number(peso_muestra_bandeja_gr) || 0;
+      pesoTotalEstimadoKg =
+        (pesoGrPaq * unidadesCosechadas + pesoGrBand * (Number(bandejas_armadas) || 0)) / 1000;
     }
 
-    const { desvio, nivel } = calcularDesvioCosecha(
-      plantasUsadasTotal,
-      plantasEsperadas
-    );
+    // Calcular desvío (para alertas — el operario no lo ve)
+    const { desvio, nivel } = calcularDesvioCosecha(plantasUsadasTotal, plantasEstimadas);
+
+    // Peso de muestra a guardar en kg
+    const pesoMuestraGuardar = es_por_paquete
+      ? (Number(peso_muestra_paquete_gr) || 0) / 1000
+      : (Number(peso_muestra_gr) || 0) / 1000;
 
     // Actualizar el lote como cosechado
     await updateRow('Lotes', 'id_lote', id_lote, {
-      fase_actual: lote.fase_actual,
       fecha_cosecha: fecha,
       unidades_cosechadas: unidadesCosechadas,
-      plantas_por_unidad_real: es_por_paquete ? plantas_por_paquete : 1,
+      plantas_por_unidad_real: es_por_paquete ? (Number(plantas_por_paquete) || 0) : 1,
       descarte_reportado: descarteEfectivo,
-      peso_muestra_kg: es_por_paquete ? peso_muestra_paquete_kg : peso_muestra_kg,
-      peso_total_estimado_kg: pesoTotalEstimado.toFixed(3),
-      foto_url,
+      peso_muestra_kg: pesoMuestraGuardar,
+      peso_total_estimado_kg:
+        pesoTotalEstimadoKg > 0 ? pesoTotalEstimadoKg.toFixed(3) : '',
       destino_cosecha: es_por_paquete
-        ? bandejas_armadas > 0
+        ? Number(bandejas_armadas) > 0
           ? 'bandeja'
           : 'paquete'
         : 'planta',
@@ -109,10 +105,10 @@ export async function POST(req: NextRequest) {
       '',
       lote.ubicacion_actual,
       '',
-      lote.tubos_ocupados_actual,
+      lote.tubos_ocupados_actual || '',
       plantasUsadasTotal,
       unidadesCosechadas,
-      es_por_paquete ? plantas_por_paquete : '',
+      es_por_paquete ? (Number(plantas_por_paquete) || 0) : '',
       tubos_consumidos_bandejas || '',
       bandejas_armadas || '',
       descarteEfectivo,
@@ -121,12 +117,12 @@ export async function POST(req: NextRequest) {
       nivel,
       '',
       '',
-      cosechador,
+      '',
       user.email,
-      foto_url,
+      '',
       es_por_paquete
         ? `Cosecha ${unidadesCosechadas} paquetes${
-            bandejas_armadas ? ` + ${bandejas_armadas} bandejas` : ''
+            Number(bandejas_armadas) > 0 ? ` + ${bandejas_armadas} bandejas` : ''
           }`
         : `Cosecha ${plantas_cosechadas} plantas`,
     ]);

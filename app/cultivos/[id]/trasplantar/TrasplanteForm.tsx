@@ -4,6 +4,7 @@
 import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Lote, Ubicacion } from '@/lib/types';
+import NumberInput from '@/components/NumberInput';
 
 const HOY = new Date().toISOString().split('T')[0];
 
@@ -30,16 +31,19 @@ export default function TrasplanteForm({
   );
   const [tubosOcupados, setTubosOcupados] = useState(0);
   const [descarte, setDescarte] = useState(0);
+  // Decisión: qué pasa con lo que queda en origen
+  const [destinoRestante, setDestinoRestante] = useState<'queda' | 'descartar'>('queda');
 
   const ubicacionDestino = ubicacionesDestino.find(
     (u) => u.id_ubicacion === ubicacionDestinoId
   );
 
-  // Cuántas plantas/plantines hay actualmente disponibles
-  const cantidadActual =
-    lote.fase_actual === 'plantin'
-      ? Number(lote.plantines_iniciales) || 0
-      : Number(lote.plantas_estimadas_actual) || 0;
+  // Fuente de verdad para cantidad actual: plantas_estimadas_actual si existe, sino plantines_iniciales
+  const cantidadActual = useMemo(() => {
+    const est = Number(lote.plantas_estimadas_actual);
+    if (est && est > 0) return est;
+    return Number(lote.plantines_iniciales) || 0;
+  }, [lote.plantas_estimadas_actual, lote.plantines_iniciales]);
 
   // Plantas que se trasplantan = tubos × orificios
   const plantasTrasplantadas = useMemo(() => {
@@ -47,12 +51,17 @@ export default function TrasplanteForm({
     return tubosOcupados * Number(ubicacionDestino.orificios_por_perfil || 0);
   }, [tubosOcupados, ubicacionDestino]);
 
-  const plantasQueQuedan = Math.max(
+  const restanteCalculado = Math.max(
     0,
     cantidadActual - plantasTrasplantadas - descarte
   );
 
+  // Plantas que efectivamente quedan en el lote madre (si descartar = 0)
+  const plantasQueQuedan = destinoRestante === 'queda' ? restanteCalculado : 0;
+  const descarteFinal = destinoRestante === 'descartar' ? descarte + restanteCalculado : descarte;
+
   const seDivide = plantasQueQuedan > 0 && plantasTrasplantadas > 0;
+  const hayRestante = restanteCalculado > 0 && plantasTrasplantadas > 0;
 
   const labelOrigen =
     lote.fase_actual === 'plantin'
@@ -95,7 +104,7 @@ export default function TrasplanteForm({
           tubos_ocupados: tubosOcupados,
           plantas_trasplantadas: plantasTrasplantadas,
           plantas_quedan: plantasQueQuedan,
-          descarte,
+          descarte: descarteFinal,
           fase_destino: faseDestino,
           usuario,
         }),
@@ -164,10 +173,9 @@ export default function TrasplanteForm({
               </span>
             )}
           </label>
-          <input
-            type="number"
+          <NumberInput
             value={tubosOcupados}
-            onChange={(e) => setTubosOcupados(Number(e.target.value))}
+            onChange={setTubosOcupados}
             min={0}
             required
             disabled={loading}
@@ -175,11 +183,10 @@ export default function TrasplanteForm({
         </div>
 
         <div>
-          <label>Descarte (opcional)</label>
-          <input
-            type="number"
+          <label>Descarte detectado al trasplantar</label>
+          <NumberInput
             value={descarte}
-            onChange={(e) => setDescarte(Number(e.target.value))}
+            onChange={setDescarte}
             min={0}
             disabled={loading}
           />
@@ -203,14 +210,11 @@ export default function TrasplanteForm({
           </span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <span style={{ color: '#6b7280' }}>
-            Plantas que se trasplantan ({tubosOcupados} tubos × ?{' '}
-            orif)
-          </span>
+          <span style={{ color: '#6b7280' }}>Plantas que se trasplantan</span>
           <span>{plantasTrasplantadas}</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <span style={{ color: '#6b7280' }}>Descarte</span>
+          <span style={{ color: '#6b7280' }}>Descarte detectado</span>
           <span>{descarte}</span>
         </div>
         <div
@@ -223,20 +227,105 @@ export default function TrasplanteForm({
             fontWeight: 500,
           }}
         >
-          <span>Quedan en {lote.fase_actual === 'plantin' ? 'plantinera' : 'F1'}</span>
-          <span>{plantasQueQuedan}</span>
+          <span>Restante calculado</span>
+          <span>{restanteCalculado}</span>
         </div>
       </div>
 
-      {seDivide && (
+      {/* Pregunta clave: ¿qué hacemos con lo que queda? */}
+      {hayRestante && (
+        <div
+          style={{
+            marginTop: '14px',
+            padding: '14px 16px',
+            background: '#fffbeb',
+            border: '1px solid #fde68a',
+            borderRadius: '8px',
+          }}
+        >
+          <p style={{ margin: '0 0 10px', fontWeight: 600, fontSize: '13px', color: '#78350f' }}>
+            ¿Qué hacemos con las {restanteCalculado} {labelOrigen} restantes?
+          </p>
+          <div style={{ display: 'flex', gap: '8px', flexDirection: 'column' }}>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                cursor: 'pointer',
+                padding: '8px 12px',
+                background: destinoRestante === 'queda' ? '#fef3c7' : 'transparent',
+                borderRadius: '6px',
+                fontSize: '13px',
+                textTransform: 'none',
+                letterSpacing: 'normal',
+                margin: 0,
+                color: '#1f2937',
+              }}
+            >
+              <input
+                type="radio"
+                name="destinoRestante"
+                value="queda"
+                checked={destinoRestante === 'queda'}
+                onChange={() => setDestinoRestante('queda')}
+                disabled={loading}
+                style={{ width: 'auto' }}
+              />
+              <span>
+                <strong>Quedan en {lote.fase_actual === 'plantin' ? 'plantinera' : 'F1'}</strong> (el lote
+                actual sigue con {restanteCalculado} {labelOrigen})
+              </span>
+            </label>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                cursor: 'pointer',
+                padding: '8px 12px',
+                background: destinoRestante === 'descartar' ? '#fee2e2' : 'transparent',
+                borderRadius: '6px',
+                fontSize: '13px',
+                textTransform: 'none',
+                letterSpacing: 'normal',
+                margin: 0,
+                color: '#1f2937',
+              }}
+            >
+              <input
+                type="radio"
+                name="destinoRestante"
+                value="descartar"
+                checked={destinoRestante === 'descartar'}
+                onChange={() => setDestinoRestante('descartar')}
+                disabled={loading}
+                style={{ width: 'auto' }}
+              />
+              <span>
+                <strong>Descarte / desperdicio</strong> (el lote actual se cierra y queda con 0)
+              </span>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {seDivide && destinoRestante === 'queda' && (
         <div className="alert-box info" style={{ marginTop: '14px' }}>
-          <strong>Atención: el lote se va a dividir.</strong>
+          <strong>El lote se va a dividir.</strong>
           <br />
-          Se trasplantan <strong>{plantasTrasplantadas}</strong> a la nueva ubicación →
-          se crea un lote nuevo con un ID nuevo.
+          Se trasplantan <strong>{plantasTrasplantadas}</strong> a la nueva ubicación → se crea un lote
+          nuevo.
           <br />
-          Quedan <strong>{plantasQueQuedan}</strong> plantines/plantas en la ubicación
-          actual → el lote <code>{lote.id_lote}</code> sigue con esa cantidad.
+          Quedan <strong>{plantasQueQuedan}</strong> en el lote original <code>{lote.id_lote}</code>.
+        </div>
+      )}
+
+      {hayRestante && destinoRestante === 'descartar' && (
+        <div className="alert-box warning" style={{ marginTop: '14px' }}>
+          Las <strong>{restanteCalculado}</strong> restantes se contarán como descarte. Se trasplantan{' '}
+          <strong>{plantasTrasplantadas}</strong> al destino. El lote original{' '}
+          <code>{lote.id_lote}</code> se cerrará con 0 plantas.
         </div>
       )}
 

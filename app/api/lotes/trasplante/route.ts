@@ -1,7 +1,7 @@
 // app/api/lotes/trasplante/route.ts
 // Trasplanta un lote (parcial o total) a una nueva ubicación.
-// Si queda parte en la ubicación actual, divide el lote: el original mantiene
-// lo que queda, y se crea un nuevo lote con lo trasplantado.
+// Si queda parte en la ubicación actual y el usuario eligió "queda", divide el lote.
+// Si eligió "descartar", el lote original se cierra con 0.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
@@ -61,13 +61,13 @@ export async function POST(req: NextRequest) {
       // Si el lote no tiene cultivo+mesada en su id (porque está en plantinera),
       // generamos el id completo
       let nuevoId = lote.id_lote;
-      if (!/M?[LRA][12]/.test(lote.id_lote.slice(2))) {
+      const tieneSufijo = /^N[12][LRA][12]-/.test(lote.id_lote);
+      if (!tieneSufijo) {
         nuevoId = completarIdEnTrasplante(lote.id_lote, cultivo, numMesada);
       }
 
       // Si cambia el id, reemplazamos en Lotes y Movimientos
       if (nuevoId !== lote.id_lote) {
-        // Actualizar todos los movimientos del lote viejo a usar el id nuevo
         const movimientos = await readSheet<{ id_movimiento: number; id_lote: string }>(
           'Movimientos'
         );
@@ -78,7 +78,6 @@ export async function POST(req: NextRequest) {
             });
           }
         }
-        // Actualizar el lote con su nuevo id
         await updateRow('Lotes', 'id_lote', lote.id_lote, {
           id_lote: nuevoId,
           fase_actual: fase_destino,
@@ -86,6 +85,10 @@ export async function POST(req: NextRequest) {
           tubos_ocupados_actual: tubos_ocupados,
           plantas_estimadas_actual: plantas_trasplantadas,
           fecha_ult_movimiento: fecha,
+          // Importante: actualizo plantines_iniciales también para que refleje lo que
+          // realmente arrancó esta etapa. Esto evita el bug de rúcula donde el lote
+          // madre seguía mostrando los plantines originales después de un trasplante.
+          plantines_iniciales: plantas_trasplantadas,
         });
       } else {
         await updateRow('Lotes', 'id_lote', lote.id_lote, {
@@ -114,7 +117,7 @@ export async function POST(req: NextRequest) {
         '',
         '',
         descarte || 0,
-        '', // descarte calculado se completa en cosecha
+        descarte || 0,
         '',
         '',
         '',
@@ -122,7 +125,7 @@ export async function POST(req: NextRequest) {
         '',
         user.email,
         '',
-        seDivide ? 'Trasplante con división' : 'Trasplante completo',
+        'Trasplante completo',
       ]);
 
       return NextResponse.json({ ok: true, id_lote_resultante: nuevoId });
@@ -132,7 +135,6 @@ export async function POST(req: NextRequest) {
     // El lote original sigue con plantas_quedan en la ubicación actual.
     // Se crea un nuevo lote con id nuevo (a partir del correlativo de la nave).
 
-    // Extraer nave del id original (ej: N1-007 → 1, N1L1-007 → 1)
     const matchNave = /^N([12])/.exec(lote.id_lote);
     const naveOrigen = matchNave ? (Number(matchNave[1]) as 1 | 2) : 1;
 
@@ -140,8 +142,11 @@ export async function POST(req: NextRequest) {
     const idProvNuevo = await generarIdSiembra(naveOrigen);
     const idNuevoLote = completarIdEnTrasplante(idProvNuevo, cultivo, numMesada);
 
-    // Actualizar el lote original (sigue en su ubicación, con menos plantas)
+    // Actualizar el lote original (sigue en su ubicación, con menos plantas).
+    // CLAVE: actualizar también plantines_iniciales para que la próxima vez que
+    // se trasplante, el cálculo de "cantidad actual" sea correcto.
     await updateRow('Lotes', 'id_lote', lote.id_lote, {
+      plantines_iniciales: plantas_quedan,
       plantas_estimadas_actual: plantas_quedan,
       fecha_ult_movimiento: fecha,
       notas: `${lote.notas || ''} [se dividió ${fecha}: ${plantas_trasplantadas} → ${idNuevoLote}]`.trim(),
@@ -191,7 +196,7 @@ export async function POST(req: NextRequest) {
       '',
       '',
       descarte || 0,
-      '',
+      descarte || 0,
       '',
       '',
       '',

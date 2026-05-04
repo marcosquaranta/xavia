@@ -1,10 +1,10 @@
 // app/cultivos/[id]/page.tsx
-// Pantalla detalle de un lote: muestra info actual + historial de movimientos.
+// Pantalla detalle de un lote: muestra info actual, historial, y permite deshacer/editar.
 
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
-import { readSheet, deleteRow } from '@/lib/sheets';
+import { readSheet } from '@/lib/sheets';
 import { calcularDiasPorFase, claseVariedad } from '@/lib/lotes';
 import type { Lote, Movimiento, Variedad } from '@/lib/types';
 import Header from '@/components/Header';
@@ -21,19 +21,67 @@ export default async function DetalleLotePage({
 
   const idLote = decodeURIComponent(params.id);
 
-  const [lotes, movimientos, variedades] = await Promise.all([
-    readSheet<Lote>('Lotes'),
-    readSheet<Movimiento>('Movimientos'),
-    readSheet<Variedad>('Variedades'),
-  ]);
+  // Manejo tolerante: si algo falla al leer, mostramos mensaje en lugar de crashear
+  let lotes: Lote[] = [];
+  let movimientos: Movimiento[] = [];
+  let variedades: Variedad[] = [];
+  let errorLectura: string | null = null;
+
+  try {
+    [lotes, movimientos, variedades] = await Promise.all([
+      readSheet<Lote>('Lotes'),
+      readSheet<Movimiento>('Movimientos'),
+      readSheet<Variedad>('Variedades'),
+    ]);
+  } catch (err: any) {
+    errorLectura = err?.message || 'Error al leer datos';
+  }
+
+  if (errorLectura) {
+    return (
+      <>
+        <Header user={user} current="cultivos" />
+        <div className="container">
+          <div className="alert-box error">
+            <strong>Error al leer la base de datos:</strong> {errorLectura}
+          </div>
+          <Link href="/cultivos" className="btn secondary">
+            ← Volver a Mis cultivos
+          </Link>
+        </div>
+      </>
+    );
+  }
 
   const lote = lotes.find((l) => l.id_lote === idLote);
   if (!lote) notFound();
 
-  const dias = calcularDiasPorFase(lote, movimientos);
+  // Calcular días con tolerancia a fallos
+  let dias;
+  try {
+    dias = calcularDiasPorFase(lote, movimientos);
+  } catch {
+    dias = {
+      plantinera: 0,
+      fase_1: null,
+      fase_2: 0,
+      total: 0,
+      fechas: { siembra: lote.fecha_siembra, fase_1_inicio: null, fase_2_inicio: null, cosecha: null },
+    };
+  }
+
+  // Movimientos del lote, ordenados de forma segura
   const movsLote = movimientos
     .filter((m) => m.id_lote === idLote)
-    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+    .sort((a, b) => {
+      const fa = String(a.fecha || '');
+      const fb = String(b.fecha || '');
+      return fa.localeCompare(fb);
+    });
+
+  const ultimoMovimiento = movsLote[movsLote.length - 1];
+  const puedeDeshacer =
+    ultimoMovimiento && (ultimoMovimiento.tipo === 'trasplante' || ultimoMovimiento.tipo === 'cosecha');
 
   const variedad = variedades.find((v) => v.variedad === lote.variedad);
 
@@ -58,7 +106,7 @@ export default async function DetalleLotePage({
         <div className={`lote-row ${claseVariedad(lote)}`} style={{ marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <span className="lote-id" style={{ fontSize: '14px' }}>
-              {lote.id_lote}
+              Nro Lote: {lote.id_lote}
             </span>
             <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600 }}>
               {lote.variedad}
@@ -68,10 +116,10 @@ export default async function DetalleLotePage({
             </span>
           </div>
           <p style={{ margin: '8px 0 0', fontSize: '13px', color: '#6b7280' }}>
-            {lote.ubicacion_actual} ·{' '}
+            {lote.ubicacion_actual || '—'} ·{' '}
             {lote.estado === 'cosechado'
               ? `cosechado el ${formatearFecha(lote.fecha_cosecha)}`
-              : `plantines iniciales: ${lote.plantines_iniciales}`}
+              : `plantines iniciales: ${lote.plantines_iniciales || 0}`}
           </p>
         </div>
 
@@ -98,49 +146,76 @@ export default async function DetalleLotePage({
           )}
         </div>
 
-        {lote.estado === 'activo' && (
-          <div className="card">
-            <p className="card-title">Acciones</p>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {lote.fase_actual !== 'fase_2' && (
-                <Link
-                  href={`/cultivos/${encodeURIComponent(lote.id_lote)}/trasplantar`}
-                  className="btn"
+        <div className="card">
+          <p className="card-title">Acciones</p>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {lote.estado === 'activo' && lote.fase_actual !== 'fase_2' && (
+              <Link
+                href={`/cultivos/${encodeURIComponent(lote.id_lote)}/trasplantar`}
+                className="btn"
+              >
+                Trasplantar
+              </Link>
+            )}
+            {lote.estado === 'activo' && lote.fase_actual === 'fase_2' && (
+              <Link
+                href={`/cultivos/${encodeURIComponent(lote.id_lote)}/cosechar`}
+                className="btn"
+              >
+                Cosechar
+              </Link>
+            )}
+            <Link
+              href={`/cultivos/${encodeURIComponent(lote.id_lote)}/editar`}
+              className="btn secondary"
+            >
+              Editar lote
+            </Link>
+            {puedeDeshacer && (
+              <form action="/api/lotes/deshacer" method="POST" style={{ display: 'inline' }}>
+                <input type="hidden" name="id_lote" value={lote.id_lote} />
+                <input type="hidden" name="id_movimiento" value={String(ultimoMovimiento.id_movimiento)} />
+                <button
+                  type="submit"
+                  className="btn secondary"
+                  onClick={(e) => {
+                    if (
+                      !confirm(
+                        `¿Deshacer el último movimiento (${labelTipo(
+                          ultimoMovimiento.tipo
+                        )} del ${formatearFecha(ultimoMovimiento.fecha)})?`
+                      )
+                    ) {
+                      e.preventDefault();
+                    }
+                  }}
                 >
-                  Trasplantar
-                </Link>
-              )}
-              {lote.fase_actual === 'fase_2' && (
-                <Link
-                  href={`/cultivos/${encodeURIComponent(lote.id_lote)}/cosechar`}
-                  className="btn"
+                  ↶ Deshacer último
+                </button>
+              </form>
+            )}
+            {user.rol === 'admin' && (
+              <form action="/api/lotes/borrar" method="POST" style={{ display: 'inline' }}>
+                <input type="hidden" name="id_lote" value={lote.id_lote} />
+                <button
+                  type="submit"
+                  className="btn danger"
+                  onClick={(e) => {
+                    if (
+                      !confirm(
+                        `¿Borrar permanentemente el lote ${lote.id_lote} y todos sus movimientos?`
+                      )
+                    ) {
+                      e.preventDefault();
+                    }
+                  }}
                 >
-                  Cosechar
-                </Link>
-              )}
-              {user.rol === 'admin' && (
-                <form action="/api/lotes/borrar" method="POST" style={{ display: 'inline' }}>
-                  <input type="hidden" name="id_lote" value={lote.id_lote} />
-                  <button
-                    type="submit"
-                    className="btn danger"
-                    onClick={(e) => {
-                      if (
-                        !confirm(
-                          `¿Borrar permanentemente el lote ${lote.id_lote} y todos sus movimientos?`
-                        )
-                      ) {
-                        e.preventDefault();
-                      }
-                    }}
-                  >
-                    Borrar lote
-                  </button>
-                </form>
-              )}
-            </div>
+                  Borrar lote
+                </button>
+              </form>
+            )}
           </div>
-        )}
+        </div>
 
         <div className="card">
           <p className="card-title">Historial de movimientos</p>
@@ -217,7 +292,9 @@ function Stat({ label, value, sub }: { label: string; value: string | number; su
 function formatearFecha(fecha: string): string {
   if (!fecha) return '-';
   try {
-    const [y, m, d] = fecha.split('-');
+    const partes = String(fecha).split('-');
+    if (partes.length !== 3) return fecha;
+    const [, m, d] = partes;
     return `${d}/${m}`;
   } catch {
     return fecha;
@@ -227,7 +304,9 @@ function formatearFecha(fecha: string): string {
 function formatearFechaCompleta(fecha: string): string {
   if (!fecha) return '-';
   try {
-    const [y, m, d] = fecha.split('-');
+    const partes = String(fecha).split('-');
+    if (partes.length !== 3) return fecha;
+    const [y, m, d] = partes;
     return `${d}/${m}/${y}`;
   } catch {
     return fecha;
