@@ -2,7 +2,6 @@
   "name": "xaviaapp",
   "version": "1.0.0",
   "private": true,
-  "description": "Gestión de cultivos hidropónicos",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -27,8 +26,5 @@
     "typescript": "5.5.3",
     "eslint": "8.57.0",
     "eslint-config-next": "14.2.5"
-  },
-  "engines": {
-    "node": ">=18.17.0"
   }
 }

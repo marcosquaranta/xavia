@@ -1,47 +1,34 @@
-// app/admin/semillas/page.tsx
-// Catálogo de semillas (CRUD).
-
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
-import { readSheet } from '@/lib/sheets';
-import type { Semilla, Variedad } from '@/lib/types';
 import Header from '@/components/Header';
-import SemillasManager from './SemillasManager';
-
 export const dynamic = 'force-dynamic';
-
-export default async function AdminSemillasPage() {
+export default async function AdminPage() {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
   if (user.rol !== 'admin') redirect('/panel');
-
-  const [semillas, variedades] = await Promise.all([
-    readSheet<Semilla>('Semillas'),
-    readSheet<Variedad>('Variedades'),
-  ]);
-
+  const secciones = [
+    { href: '/admin/naves', titulo: 'Naves y mesadas', desc: 'Configurar capacidades y ubicaciones' },
+    { href: '/admin/semillas', titulo: 'Semillas', desc: 'Stock de semillas y batches' },
+    { href: '/admin/usuarios', titulo: 'Usuarios', desc: 'Gestionar accesos y roles' },
+    { href: '/admin/clientes', titulo: 'Clientes', desc: 'Base de datos de clientes' },
+  ];
   return (
     <>
       <Header user={user} current="admin" />
       <div className="container">
-        <Link
-          href="/admin"
-          style={{ fontSize: '13px', display: 'inline-block', marginBottom: '14px' }}
-        >
-          ← Volver a Admin
-        </Link>
-
-        <h1 className="page-title">Semillas</h1>
-        <p className="page-subtitle">
-          Catálogo de batches de semilla. Se eligen al sembrar un lote para luego
-          poder cruzar rendimiento por proveedor.
-        </p>
-
-        <SemillasManager
-          semillas={semillas}
-          variedades={variedades.filter((v) => v.activo === 'SI')}
-        />
+        <h1 className="page-title">Administración</h1>
+        <p className="page-subtitle">Solo admin · Configuración del sistema</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+          {secciones.map((s) => (
+            <Link key={s.href} href={s.href} style={{ textDecoration: 'none' }}>
+              <div className="card" style={{ cursor: 'pointer', transition: 'box-shadow 0.1s' }}>
+                <p className="card-title">{s.titulo}</p>
+                <p style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}>{s.desc}</p>
+              </div>
+            </Link>
+          ))}
+        </div>
       </div>
     </>
   );

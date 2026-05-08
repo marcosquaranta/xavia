@@ -1,46 +1,31 @@
-// app/admin/clientes/page.tsx
-// Catálogo de clientes (preparado para fase 2 de Ventas).
-
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import type { Cliente } from '@/lib/types';
 import Header from '@/components/Header';
-import ClientesManager from './ClientesManager';
-
 export const dynamic = 'force-dynamic';
-
 export default async function AdminClientesPage() {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
   if (user.rol !== 'admin') redirect('/panel');
-
-  const clientes = await readSheet<Cliente>('Clientes');
-
+  let rows: any[] = [];
+  try { rows = await readSheet('Clientes'); } catch {}
   return (
     <>
       <Header user={user} current="admin" />
       <div className="container">
-        <Link
-          href="/admin"
-          style={{ fontSize: '13px', display: 'inline-block', marginBottom: '14px' }}
-        >
-          ← Volver a Admin
-        </Link>
-
+        <Link href="/admin" style={ fontSize: '13px', display: 'inline-block', marginBottom: '14px' }>← Admin</Link>
         <h1 className="page-title">Clientes</h1>
-        <p className="page-subtitle">
-          Base de clientes. La pantalla de Ventas (fase 2) los va a usar para asignar
-          entregas y trazabilidad de lotes.
-        </p>
-
-        <div className="alert-box info" style={{ marginBottom: '14px' }}>
-          <strong>Fase 2:</strong> ya podés cargar clientes acá. La pantalla de Ventas
-          se construye en una próxima iteración.
+        <p className="page-subtitle">Base de datos de clientes · {rows.length} registros</p>
+        <div className="alert-box info">Gestión de clientes disponible. Edición directa en Google Sheets recomendada para cambios de estructura.</div>
+        <div className="card">
+          {rows.length === 0 ? <p style={{ color: '#9ca3af', textAlign: 'center', padding: '20px' }}>Sin registros cargados.</p> : (
+            <table>
+              <thead><tr>{Object.keys(rows[0] || {}).slice(0, 6).map((k) => <th key={k}>{k}</th>)}</tr></thead>
+              <tbody>{rows.slice(0, 20).map((r, i) => <tr key={i}>{Object.values(r).slice(0, 6).map((v: any, j) => <td key={j}>{String(v ?? '')}</td>)}</tr>)}</tbody>
+            </table>
+          )}
         </div>
-
-        <ClientesManager clientes={clientes} />
       </div>
     </>
   );
