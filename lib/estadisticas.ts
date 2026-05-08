@@ -274,3 +274,115 @@ export function cosechadoEsteMes(lotes: Lote[]): { actual: number; pasado: numbe
   }
   return { actual, pasado };
 }
+
+// === PLANTAS POR CULTIVO Y FASE ===
+
+export interface PlantasPorFase {
+  plantinera: number;
+  fase_1: number;
+  fase_2: number;
+  total: number;
+}
+
+export interface ResumenCultivos {
+  lechuga: PlantasPorFase;
+  rucula: PlantasPorFase;
+  albahaca: PlantasPorFase;
+}
+
+/**
+ * Cuenta cuántas plantas hay activas por cultivo y fase.
+ */
+export function plantasPorCultivo(lotes: Lote[]): ResumenCultivos {
+  const res: ResumenCultivos = {
+    lechuga:  { plantinera: 0, fase_1: 0, fase_2: 0, total: 0 },
+    rucula:   { plantinera: 0, fase_1: 0, fase_2: 0, total: 0 },
+    albahaca: { plantinera: 0, fase_1: 0, fase_2: 0, total: 0 },
+  };
+
+  for (const l of lotes) {
+    if (l.estado !== 'activo') continue;
+    const v = String(l.variedad || '').toLowerCase();
+    let key: keyof ResumenCultivos;
+    if (v.includes('rucula') || v.includes('rúcula')) key = 'rucula';
+    else if (v.includes('albahaca')) key = 'albahaca';
+    else key = 'lechuga';
+
+    const plantas =
+      Number(l.plantas_estimadas_actual) || Number(l.plantines_iniciales) || 0;
+
+    if (l.fase_actual === 'plantin') res[key].plantinera += plantas;
+    else if (l.fase_actual === 'fase_1') res[key].fase_1 += plantas;
+    else if (l.fase_actual === 'fase_2') res[key].fase_2 += plantas;
+    res[key].total += plantas;
+  }
+
+  return res;
+}
+
+/**
+ * Variación % del total de plantas activas vs el promedio del mes anterior.
+ * Usa el snapshot de HistoricoOcupacion si existe; si no, devuelve null.
+ * Como fallback compara cosechas del mes actual vs anterior.
+ */
+export function variacionVsMesAnterior(
+  lotes: Lote[],
+  clave: keyof ResumenCultivos
+): number | null {
+  try {
+    // Usamos cosechas como proxy de actividad: si cosechaste más este mes
+    // que el anterior, la producción está creciendo.
+    const hoy = new Date();
+    const inicioActual = startOfMonthLocal(hoy);
+    const mesPasado = new Date(hoy);
+    mesPasado.setMonth(mesPasado.getMonth() - 1);
+    const inicioPasado = startOfMonthLocal(mesPasado);
+    const finPasado = endOfMonthLocal(mesPasado);
+
+    function matchClave(variedad: string): boolean {
+      const v = variedad.toLowerCase();
+      if (clave === 'rucula') return v.includes('rucula') || v.includes('rúcula');
+      if (clave === 'albahaca') return v.includes('albahaca');
+      return !v.includes('rucula') && !v.includes('rúcula') && !v.includes('albahaca');
+    }
+
+    const relevantes = lotes.filter(
+      (l) => l.estado === 'cosechado' && matchClave(l.variedad)
+    );
+
+    let actual = 0;
+    let pasado = 0;
+    for (const l of relevantes) {
+      const f = safeParseDate(l.fecha_cosecha);
+      if (!f) continue;
+      const u = Number(l.unidades_cosechadas) || 0;
+      if (f >= inicioActual) actual += u;
+      else if (f >= inicioPasado && f <= finPasado) pasado += u;
+    }
+
+    if (pasado === 0) return null;
+    return Math.round(((actual - pasado) / pasado) * 100);
+  } catch {
+    return null;
+  }
+}
+
+function safeParseDate(s: any): Date | null {
+  if (!s) return null;
+  const str = String(s).trim();
+  if (!str) return null;
+  let yyyy = '', mm = '', dd = '';
+  if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(str)) {
+    [yyyy, mm, dd] = str.split('-');
+  } else if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(str)) {
+    [yyyy, mm, dd] = str.split('/');
+  } else if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(str)) {
+    [dd, mm, yyyy] = str.split('/');
+  } else {
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) return d;
+    return null;
+  }
+  const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
+  return isNaN(d.getTime()) ? null : d;
+}

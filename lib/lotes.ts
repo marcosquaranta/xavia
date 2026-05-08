@@ -199,19 +199,16 @@ export function naveDeLote(idLote: string): 1 | 2 | null {
 }
 
 /**
- * Filtros para Mis Cultivos.
+ * Filtros para Mis Cultivos y Panel.
  */
 export type FiltroCultivos =
   | 'todos'
+  | 'lechuga'
+  | 'rucula'
+  | 'albahaca'
   | 'plantinera'
   | 'fase_1'
   | 'fase_2'
-  | 'lechugas-f2'
-  | 'lechugas-f1'
-  | 'lechugas-plantin'
-  | 'rucula-f2'
-  | 'rucula-plantin'
-  | 'albahaca'
   | 'cosechados';
 
 export type FiltroNave = 'todas' | '1' | '2';
@@ -221,7 +218,6 @@ export function aplicarFiltros(
   filtro: FiltroCultivos,
   nave: FiltroNave
 ): Lote[] {
-  // Primero por estado (cosechados es una vista aparte)
   let base: Lote[];
   if (filtro === 'cosechados') {
     base = lotes.filter((l) => l.estado === 'cosechado');
@@ -235,68 +231,52 @@ export function aplicarFiltros(
     base = base.filter((l) => naveDeLote(l.id_lote) === naveNum);
   }
 
-  // Filtro por tipo
   if (filtro === 'todos' || filtro === 'cosechados') return base;
-
   if (filtro === 'plantinera') return base.filter((l) => l.fase_actual === 'plantin');
   if (filtro === 'fase_1') return base.filter((l) => l.fase_actual === 'fase_1');
   if (filtro === 'fase_2') return base.filter((l) => l.fase_actual === 'fase_2');
-
-  return base.filter((l) => {
-    const codigo = codigoCultivo(l.variedad);
-    const fase = l.fase_actual;
-    if (filtro === 'lechugas-f2') return codigo === 'L' && fase === 'fase_2';
-    if (filtro === 'lechugas-f1') return codigo === 'L' && fase === 'fase_1';
-    if (filtro === 'lechugas-plantin') return codigo === 'L' && fase === 'plantin';
-    if (filtro === 'rucula-f2') return codigo === 'R' && fase === 'fase_2';
-    if (filtro === 'rucula-plantin') return codigo === 'R' && fase === 'plantin';
-    if (filtro === 'albahaca') return codigo === 'A';
-    return true;
-  });
+  if (filtro === 'lechuga') return base.filter((l) => codigoCultivo(l.variedad) === 'L');
+  if (filtro === 'rucula') return base.filter((l) => codigoCultivo(l.variedad) === 'R');
+  if (filtro === 'albahaca') return base.filter((l) => codigoCultivo(l.variedad) === 'A');
+  return base;
 }
 
-export function contarPorFiltro(
-  lotes: Lote[],
-  nave: FiltroNave
-): Record<FiltroCultivos, number> {
-  const filtrados = (() => {
-    let base = lotes;
-    if (nave !== 'todas') {
-      const naveNum = Number(nave);
-      base = base.filter((l) => naveDeLote(l.id_lote) === naveNum);
-    }
-    return base;
-  })();
+export interface ConteosFiltros {
+  todos: number;
+  lechuga: number;
+  rucula: number;
+  albahaca: number;
+  plantinera: number;
+  fase_1: number;
+  fase_2: number;
+  cosechados: number;
+}
 
-  const activos = filtrados.filter((l) => l.estado === 'activo');
-  const cont: Record<FiltroCultivos, number> = {
+export function contarPorFiltro(lotes: Lote[], nave: FiltroNave): ConteosFiltros {
+  let base = lotes;
+  if (nave !== 'todas') {
+    const naveNum = Number(nave);
+    base = base.filter((l) => naveDeLote(l.id_lote) === naveNum);
+  }
+  const activos = base.filter((l) => l.estado === 'activo');
+  const cont: ConteosFiltros = {
     todos: activos.length,
+    lechuga: 0,
+    rucula: 0,
+    albahaca: 0,
     plantinera: 0,
     fase_1: 0,
     fase_2: 0,
-    'lechugas-f2': 0,
-    'lechugas-f1': 0,
-    'lechugas-plantin': 0,
-    'rucula-f2': 0,
-    'rucula-plantin': 0,
-    albahaca: 0,
-    cosechados: filtrados.filter((l) => l.estado === 'cosechado').length,
+    cosechados: base.filter((l) => l.estado === 'cosechado').length,
   };
   for (const l of activos) {
     const codigo = codigoCultivo(l.variedad);
+    if (codigo === 'L') cont.lechuga++;
+    else if (codigo === 'R') cont.rucula++;
+    else if (codigo === 'A') cont.albahaca++;
     if (l.fase_actual === 'plantin') cont.plantinera++;
     else if (l.fase_actual === 'fase_1') cont.fase_1++;
     else if (l.fase_actual === 'fase_2') cont.fase_2++;
-
-    if (codigo === 'A') cont.albahaca++;
-    else if (codigo === 'L') {
-      if (l.fase_actual === 'fase_2') cont['lechugas-f2']++;
-      else if (l.fase_actual === 'fase_1') cont['lechugas-f1']++;
-      else cont['lechugas-plantin']++;
-    } else if (codigo === 'R') {
-      if (l.fase_actual === 'fase_2') cont['rucula-f2']++;
-      else cont['rucula-plantin']++;
-    }
   }
   return cont;
 }
