@@ -1,3 +1,4 @@
+// v6 - fix event handlers client components
 import './globals.css';
 import type { Metadata } from 'next';
 export const metadata: Metadata = { title: 'XaviaApp · Gestión de cultivos hidropónicos', description: 'Sistema de gestión integral para cultivos hidropónicos' };
