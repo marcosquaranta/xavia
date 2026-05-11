@@ -155,3 +155,83 @@ export function variacionVsMesAnterior(lotes: Lote[], clave: keyof ResumenCultiv
     return Math.round(((actual - pasado) / pasado) * 100);
   } catch { return null; }
 }
+
+// === DISTRIBUCIÓN DE LOTES POR SEMANA DE CICLO ===
+
+export interface BarraSemana {
+  semana: number;
+  plantas_f1: number;
+  plantas_f2: number;
+  lotes: string[];
+}
+
+export interface DatosCicloGrafico {
+  barras: BarraSemana[];
+  semanasCosecha: number;  // semana estimada de cosecha según la variedad
+}
+
+/**
+ * Agrupa los lotes activos en F1/F2 por semana de ciclo (días desde siembra ÷ 7).
+ * Excluye plantinera porque no ocupa espacio en mesadas.
+ * Usa el promedio de días estimados de las variedades del cultivo para marcar la línea de cosecha.
+ */
+export function distribucionPorSemana(
+  lotes: Lote[],
+  variedades: import('./types').Variedad[],
+  cultivo: 'lechuga' | 'rucula'
+): DatosCicloGrafico {
+  const hoy = new Date();
+
+  // Filtrar lotes activos en F1 o F2 del cultivo correspondiente
+  const activos = lotes.filter((l) => {
+    if (l.estado !== 'activo') return false;
+    if (l.fase_actual !== 'fase_1' && l.fase_actual !== 'fase_2') return false;
+    const v = String(l.variedad || '').toLowerCase();
+    if (cultivo === 'rucula') return v.includes('rucula') || v.includes('rúcula');
+    return !v.includes('rucula') && !v.includes('rúcula') && !v.includes('albahaca');
+  });
+
+  // Calcular semana de ciclo de cada lote (desde siembra)
+  const mapa = new Map<number, BarraSemana>();
+
+  for (const l of activos) {
+    const siembra = safeParseDate2(l.fecha_siembra);
+    if (!siembra) continue;
+    const diasVida = Math.max(0, Math.round((hoy.getTime() - siembra.getTime()) / 86400000));
+    const semana = Math.max(1, Math.ceil(diasVida / 7));
+    const plantas = Number(l.plantas_estimadas_actual) || Number(l.plantines_iniciales) || 0;
+
+    if (!mapa.has(semana)) mapa.set(semana, { semana, plantas_f1: 0, plantas_f2: 0, lotes: [] });
+    const b = mapa.get(semana)!;
+    if (l.fase_actual === 'fase_1') b.plantas_f1 += plantas;
+    else b.plantas_f2 += plantas;
+    b.lotes.push(l.id_lote);
+  }
+
+  // Días estimados promedio del cultivo → semana de cosecha
+  const varsCultivo = variedades.filter((v) => {
+    if (v.activo !== 'SI') return false;
+    const vl = String(v.variedad || '').toLowerCase();
+    if (cultivo === 'rucula') return vl.includes('rucula') || vl.includes('rúcula');
+    return !vl.includes('rucula') && !vl.includes('rúcula') && !vl.includes('albahaca');
+  });
+  const diasProm = varsCultivo.length > 0
+    ? varsCultivo.reduce((acc, v) => acc + (Number(v.dias_estimados_cosecha) || 35), 0) / varsCultivo.length
+    : 35;
+  const semanasCosecha = Math.ceil(diasProm / 7);
+
+  const barras = Array.from(mapa.values()).sort((a, b) => a.semana - b.semana);
+  return { barras, semanasCosecha };
+}
+
+function safeParseDate2(s: any): Date | null {
+  if (!s) return null;
+  const str = String(s).trim();
+  if (!str) return null;
+  let yyyy = '', mm = '', dd = '';
+  if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(str)) { [yyyy, mm, dd] = str.split('-'); }
+  else if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(str)) { [dd, mm, yyyy] = str.split('/'); }
+  else { const d = new Date(str); return isNaN(d.getTime()) ? null : d; }
+  const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
+  return isNaN(d.getTime()) ? null : d;
+}
