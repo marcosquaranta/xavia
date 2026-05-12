@@ -78,9 +78,13 @@ export default async function PanelPage({ searchParams }: { searchParams: { filt
             <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px', flex: 1 }}>
               <p style={{ margin: '0 0 8px', fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Ocupación global</p>
               <p style={{ margin: '0 0 4px', fontSize: '26px', fontWeight: 700 }}>{Math.round(ocGlobal * 100)}%</p>
-              <div style={{ fontSize: '11px', color: '#6b7280', lineHeight: 1.7 }}>
+              <div style={{ fontSize: '11px', color: '#6b7280', lineHeight: 1.9 }}>
                 {navesOcup.map((n: any) => (
-                  <div key={n.nave}>Nave {n.nave}: <strong style={{ color: '#1f2937' }}>{n.ocupacion_pct}%</strong><span style={{ color: '#9ca3af' }}> · {n.densidad_actual} pl/m²</span></div>
+                  <div key={n.nave}>
+                    Nave {n.nave}: <strong style={{ color: '#1f2937' }}>{n.ocupacion_pct}%</strong>
+                    <span style={{ color: '#9ca3af' }}> · {n.densidad_actual} pl/m²</span>
+                    {n.tubos_libres > 0 && <span style={{ color: '#059669' }}> · {n.tubos_libres} tubos libres</span>}
+                  </div>
                 ))}
               </div>
             </div>

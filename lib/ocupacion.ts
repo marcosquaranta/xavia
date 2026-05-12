@@ -2,10 +2,12 @@ import type { Lote, Ubicacion } from './types';
 import { codigoCultivo } from './lotes';
 
 export interface OcupacionMesada { id_ubicacion: string; nombre: string; nave: number; capacidad: number; plantas_vivas: number; ocupacion_pct: number; huecos_libres: number; lotes_count: number; }
-export interface OcupacionNave { nave: number; metros_cuadrados: number; capacidad_total: number; plantas_vivas: number; densidad_actual: number; densidad_maxima: number; ocupacion_pct: number; }
+export interface OcupacionNave { nave: number; metros_cuadrados: number; capacidad_total: number; tubos_totales: number; tubos_ocupados: number; tubos_libres: number; plantas_vivas: number; densidad_actual: number; densidad_maxima: number; ocupacion_pct: number; }
 
 export function ocupacionPorMesada(ubicaciones: Ubicacion[], lotes: Lote[]): OcupacionMesada[] {
-  const activos = lotes.filter((l) => l.estado === 'activo');
+  // Solo lotes en F1 o F2 (excluir plantineras — no ocupan tubos de mesada)
+  const enMesadas = lotes.filter((l) => l.estado === 'activo' && (l.fase_actual === 'fase_1' || l.fase_actual === 'fase_2'));
+  const activos = enMesadas;
   return ubicaciones.filter((u) => u.activo === 'SI' && u.tipo === 'mesada')
     .sort((a, b) => Number(a.orden_visual) - Number(b.orden_visual))
     .map((u) => {
@@ -18,15 +20,45 @@ export function ocupacionPorMesada(ubicaciones: Ubicacion[], lotes: Lote[]): Ocu
 }
 
 export function ocupacionPorNave(ubicaciones: Ubicacion[], lotes: Lote[]): OcupacionNave[] {
-  const activos = lotes.filter((l) => l.estado === 'activo');
+  // Solo lotes en mesadas (F1 y F2) — excluir plantineras del cálculo de ocupación
+  const enMesadas = lotes.filter((l) =>
+    l.estado === 'activo' && (l.fase_actual === 'fase_1' || l.fase_actual === 'fase_2')
+  );
   return [1, 2].map((nave) => {
-    const ubics = ubicaciones.filter((u) => Number(u.nave) === nave && u.activo === 'SI');
-    const cap = ubics.reduce((acc, u) => acc + (Number(u.capacidad_calculada) || 0), 0);
-    const plantas = activos.filter((l) => { const u = ubicaciones.find((u) => u.nombre === l.ubicacion_actual); return u && Number(u.nave) === nave; })
-      .reduce((acc, l) => acc + (Number(l.plantas_estimadas_actual) || Number(l.plantines_iniciales) || 0), 0);
-    const m2 = Number(ubics[0]?.metros_cuadrados) || 0;
+    // Solo mesadas (no plantineras) para capacidad
+    const mesadas = ubicaciones.filter((u) => Number(u.nave) === nave && u.activo === 'SI' && u.tipo === 'mesada');
+    const cap = mesadas.reduce((acc, u) => acc + (Number(u.capacidad_calculada) || 0), 0);
+
+    // Calcular tubos totales y ocupados
+    // orificios_por_perfil × perfiles_por_modulo × modulos = capacidad
+    // tubos = perfiles_por_modulo × modulos (un "tubo" = un perfil)
+    const tubosTotales = mesadas.reduce((acc, u) => {
+      const perfiles = Number(u.perfiles_por_modulo) || 0;
+      const modulos = Number(u.modulos) || 0;
+      return acc + perfiles * modulos;
+    }, 0);
+
+    // Plantas vivas en mesadas de esta nave
+    const lotesNave = enMesadas.filter((l) => {
+      const u = ubicaciones.find((ub) => ub.nombre === l.ubicacion_actual);
+      return u && Number(u.nave) === nave && u.tipo === 'mesada';
+    });
+    const plantas = lotesNave.reduce((acc, l) => acc + (Number(l.plantas_estimadas_actual) || 0), 0);
+
+    // Tubos ocupados = suma de tubos_ocupados_actual de lotes en mesadas
+    const tubosOcupados = lotesNave.reduce((acc, l) => acc + (Number(l.tubos_ocupados_actual) || 0), 0);
+    const tubosLibres = Math.max(0, tubosTotales - tubosOcupados);
+
+    const m2 = mesadas.reduce((acc, u) => acc + (Number(u.metros_cuadrados) || 0), 0) || Number(mesadas[0]?.metros_cuadrados) || 0;
     const pct = cap > 0 ? (plantas / cap) * 100 : 0;
-    return { nave, metros_cuadrados: m2, capacidad_total: cap, plantas_vivas: plantas, densidad_actual: m2 > 0 ? Math.round((plantas / m2) * 10) / 10 : 0, densidad_maxima: m2 > 0 ? Math.round((cap / m2) * 10) / 10 : 0, ocupacion_pct: Math.round(pct * 10) / 10 };
+    return {
+      nave, metros_cuadrados: m2, capacidad_total: cap,
+      tubos_totales: tubosTotales, tubos_ocupados: tubosOcupados, tubos_libres: tubosLibres,
+      plantas_vivas: plantas,
+      densidad_actual: m2 > 0 ? Math.round((plantas / m2) * 10) / 10 : 0,
+      densidad_maxima: m2 > 0 ? Math.round((cap / m2) * 10) / 10 : 0,
+      ocupacion_pct: Math.round(pct * 10) / 10,
+    };
   });
 }
 

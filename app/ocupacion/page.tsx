@@ -21,9 +21,13 @@ export default async function OcupacionPage() {
       <Header user={user} current="ocupacion" />
       <div className="container">
         <h1 className="page-title">Ocupación e indicadores</h1>
-        <p className="page-subtitle">El espacio es tu recurso más caro · Capacidad instalada: {capTotal.toLocaleString('es-AR')} posiciones</p>
+        <p className="page-subtitle">Ocupación de mesadas (F1 y F2) · Plantineras excluidas · Capacidad instalada: {capTotal.toLocaleString('es-AR')} posiciones</p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '20px' }}>
-          {[['Ocupación global', ocGlobal + '%', plantasTot.toLocaleString('es-AR') + ' de ' + capTotal.toLocaleString('es-AR')], ['Plantas activas', plantasTot.toLocaleString('es-AR'), 'en mesadas'], ['Huecos libres', (capTotal - plantasTot).toLocaleString('es-AR'), 'disponibles']].map(([label, value, sub]: any) => (
+          {[
+            ['Ocupación global', ocGlobal + '%', plantasTot.toLocaleString('es-AR') + ' de ' + capTotal.toLocaleString('es-AR')],
+            ['Plantas en mesadas', plantasTot.toLocaleString('es-AR'), 'F1 y F2 · excluye plantineras'],
+            ['Tubos libres', naves.reduce((a: number, n: any) => a + (n.tubos_libres || 0), 0).toLocaleString('es-AR'), 'disponibles en mesadas'],
+          ].map(([label, value, sub]: any) => (
             <div key={label} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px' }}>
               <p style={{ margin: 0, fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{label}</p>
               <p style={{ margin: '6px 0 0', fontSize: '22px', fontWeight: 600 }}>{value}</p>
