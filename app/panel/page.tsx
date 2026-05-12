@@ -10,14 +10,16 @@ import Header from '@/components/Header';
 import FiltrosLotes from '@/components/FiltrosLotes';
 import LoteCard from '@/components/LoteCard';
 import GraficoCiclos from '@/components/GraficoCiclos';
+import BuscadorLote from '@/components/BuscadorLote';
 
 export const dynamic = 'force-dynamic';
 
-export default async function PanelPage({ searchParams }: { searchParams: { filtro?: string; nave?: string } }) {
+export default async function PanelPage({ searchParams }: { searchParams: { filtro?: string; nave?: string; q?: string } }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
   const filtro = (searchParams.filtro || 'todos') as FiltroCultivos;
   const nave = (searchParams.nave || 'todas') as FiltroNave;
+  const query = (searchParams.q || '').trim().toLowerCase();
 
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [], variedades: Variedad[] = [];
   try {
@@ -56,7 +58,9 @@ export default async function PanelPage({ searchParams }: { searchParams: { filt
     : 0;
 
   const conteos = contarPorFiltro(lotes, nave);
-  const lotesFiltrados = aplicarFiltros(lotes, filtro, nave);
+  const lotesFiltrados = query
+    ? lotes.filter((l) => String(l.id_lote || '').toLowerCase().includes(query))
+    : aplicarFiltros(lotes, filtro, nave);
   const hoy = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
 
   return (
@@ -135,10 +139,12 @@ export default async function PanelPage({ searchParams }: { searchParams: { filt
         {/* Lotes con filtros */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
           <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>
-            Cultivos activos {filtro !== 'todos' || nave !== 'todas' ? '— ' + lotesFiltrados.length + ' de ' + conteos.todos : '(' + conteos.todos + ')'}
+            Cultivos activos {filtro !== 'todos' || nave !== 'todas' || query ? '— ' + lotesFiltrados.length + ' de ' + conteos.todos : '(' + conteos.todos + ')'}
           </h2>
         </div>
-        <FiltrosLotes filtroActivo={filtro} naveActiva={nave} conteos={conteos} baseUrl="/panel" />
+        <BuscadorLote baseUrl="/panel" />
+        {!query && <FiltrosLotes filtroActivo={filtro} naveActiva={nave} conteos={conteos} baseUrl="/panel" />}
+        {query && <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '10px' }}>{lotesFiltrados.length === 0 ? 'Sin resultados para "' + searchParams.q + '"' : lotesFiltrados.length + ' resultado' + (lotesFiltrados.length > 1 ? 's' : '') + ' para "' + searchParams.q + '"'}</p>}
         {lotesFiltrados.length === 0 ? (
           <div className="card" style={{ textAlign: 'center', padding: '40px' }}>
             <p style={{ margin: 0, color: '#6b7280' }}>No hay lotes con este filtro.</p>

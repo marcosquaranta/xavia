@@ -16,25 +16,20 @@ export async function POST(req: NextRequest) {
 
     if (!id_lote) return NextResponse.json({ error: 'falta_id' }, { status: 400 });
 
-    // 1. Actualizar hoja Lotes
     const updatesLote: Record<string, any> = {
       fase_actual, estado, ubicacion_actual,
-      plantas_estimadas_actual, tubos_ocupados_actual, notas,
+      // Guardar en AMBOS campos para que no haya discrepancia
+      plantas_estimadas_actual,
+      plantines_iniciales: plantas_estimadas_actual,
+      tubos_ocupados_actual, notas,
     };
-    // Siembra y cosecha también viven en Lotes
-    if (fechas?.siembra?.fecha) updatesLote.fecha_siembra   = fechas.siembra.fecha;
-    if (fechas?.cosecha?.fecha) updatesLote.fecha_cosecha   = fechas.cosecha.fecha;
+    if (fechas?.siembra?.fecha) updatesLote.fecha_siembra = fechas.siembra.fecha;
+    if (fechas?.cosecha?.fecha) updatesLote.fecha_cosecha = fechas.cosecha.fecha;
 
     await updateRow('Lotes', 'id_lote', id_lote, updatesLote);
 
-    // 2. Actualizar fecha en cada movimiento que tenga ID registrado
-    const movFechas = [
-      fechas?.siembra,
-      fechas?.f1,
-      fechas?.f2,
-      fechas?.cosecha,
-    ];
-    for (const mov of movFechas) {
+    // Actualizar fechas en los movimientos correspondientes
+    for (const mov of [fechas?.siembra, fechas?.f1, fechas?.f2, fechas?.cosecha]) {
       if (mov?.id && mov?.fecha) {
         await updateRow('Movimientos', 'id_movimiento', String(mov.id), { fecha: mov.fecha });
       }

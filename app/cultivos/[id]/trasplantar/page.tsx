@@ -21,6 +21,7 @@ export default async function TrasplantarPage({ params }: { params: { id: string
   const v = lote.variedad.toLowerCase();
   const variedadAsignada = (v.includes('rucula') || v.includes('rúcula') || v.includes('albahaca')) ? 'rucula' : 'lechuga';
   const destinos = ubicaciones.filter((u) => u.activo === 'SI' && u.tipo === 'mesada' && u.sector_fase === faseDestino && (u.variedad_asignada === variedadAsignada || u.variedad_asignada === 'mixta'));
+  const esRucula = variedadAsignada === 'rucula';
   return (
     <>
       <Header user={user} current="cultivos" />
@@ -28,7 +29,7 @@ export default async function TrasplantarPage({ params }: { params: { id: string
         <Link href="/cultivos" style={{ fontSize: '13px', display: 'inline-block', marginBottom: '14px' }}>← Volver a Mis cultivos</Link>
         <h1 className="page-title">Trasplantar lote <span className="lote-id">Nro Lote: {lote.id_lote}</span></h1>
         <p className="page-subtitle">{lote.variedad} · {lote.ubicacion_actual} · pasa a {faseDestino === 'fase_1' ? 'Fase 1' : 'Fase 2'}</p>
-        <TrasplanteForm lote={lote} faseDestino={faseDestino} ubicacionesDestino={destinos} usuario={user.email} />
+        <TrasplanteForm lote={lote} faseDestino={faseDestino} ubicacionesDestino={destinos} usuario={user.email} esRucula={esRucula} />
       </div>
     </>
   );
