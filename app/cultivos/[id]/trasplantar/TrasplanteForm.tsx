@@ -182,11 +182,18 @@ export default function TrasplanteForm({
               <div style={{ flex: 1 }}>
                 <NumberInput value={plantines} onChange={handlePlantines} min={0} disabled={loading} />
               </div>
-              <div style={{ fontSize: '13px', whiteSpace: 'nowrap' }}>
+              <div style={{ fontSize: '13px' }}>
                 {superaDisponibles ? (
                   <span style={{ color: '#dc2626', fontWeight: 500 }}>⚠ Superás los {cantidadActual} disponibles</span>
                 ) : plantines > 0 ? (
-                  <span style={{ color: '#059669', fontWeight: 500 }}>de {cantidadActual} disponibles</span>
+                  <div>
+                    <span style={{ color: '#059669', fontWeight: 500 }}>de {cantidadActual} disponibles</span>
+                    {esRucula && plantines > 0 && (
+                      <div style={{ fontSize: '11px', color: '#166534', marginTop: '2px' }}>
+                        = {Math.round(plantines / 2)} plantas en mesada
+                      </div>
+                    )}
+                  </div>
                 ) : null}
               </div>
             </div>
@@ -208,9 +215,15 @@ export default function TrasplanteForm({
             <span>{cantidadActual} plantines</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: '#6b7280' }}>Se trasplantan</span>
+            <span style={{ color: '#6b7280' }}>Plantines a trasplantar</span>
             <span>{plantines}</span>
           </div>
+          {esRucula && plantines > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: '#6b7280' }}>Plantas en mesada (÷ 2)</span>
+              <span style={{ fontWeight: 500 }}>{Math.round(plantines / 2)}</span>
+            </div>
+          )}
           {descarte > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: '#6b7280' }}>Descarte</span>
