@@ -19,7 +19,7 @@ function getClient(): sheets_v4.Sheets {
 export async function readSheet<T = Record<string, any>>(sheetName: string): Promise<T[]> {
   const sheets = getClient();
   const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: SHEET_ID, range: `${sheetName}!A:Z`,
+    spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`,
   });
   const rows = response.data.values;
   if (!rows || rows.length < 2) return [];
@@ -39,14 +39,14 @@ export async function readSheet<T = Record<string, any>>(sheetName: string): Pro
 export async function appendRow(sheetName: string, values: any[]): Promise<void> {
   const sheets = getClient();
   await sheets.spreadsheets.values.append({
-    spreadsheetId: SHEET_ID, range: `${sheetName}!A:Z`,
+    spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`,
     valueInputOption: 'USER_ENTERED', requestBody: { values: [values] },
   });
 }
 
 export async function updateRow(sheetName: string, keyColumn: string, keyValue: string, updates: Record<string, any>): Promise<boolean> {
   const sheets = getClient();
-  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:Z` });
+  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH` });
   const rows = response.data.values;
   if (!rows || rows.length < 2) return false;
   const headers = rows[0];
@@ -81,7 +81,7 @@ export async function deleteRow(sheetName: string, keyColumn: string, keyValue: 
   const sheet = sheetMeta.data.sheets?.find((s) => s.properties?.title === sheetName);
   if (!sheet) throw new Error(`Pestaña ${sheetName} no encontrada`);
   const sheetId = sheet.properties?.sheetId;
-  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:Z` });
+  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH` });
   const rows = response.data.values;
   if (!rows || rows.length < 2) return false;
   const headers = rows[0];
