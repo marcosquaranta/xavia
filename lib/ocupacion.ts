@@ -108,3 +108,33 @@ function nextDayOfWeek(base: Date, day: string, weeks: number): Date {
   result.setDate(result.getDate() + diff + weeks * 7);
   return result;
 }
+
+export interface OcupacionPlantinera {
+  nave: number;
+  nombre: string;
+  capacidad: number;
+  plantines: number;
+  ocupacion_pct: number;
+  libres: number;
+}
+
+export function ocupacionPlantineras(ubicaciones: Ubicacion[], lotes: Lote[]): OcupacionPlantinera[] {
+  const enPlantin = lotes.filter((l) => l.estado === 'activo' && l.fase_actual === 'plantin');
+  return ubicaciones
+    .filter((u) => u.activo === 'SI' && u.tipo === 'plantinera')
+    .sort((a, b) => Number(a.orden_visual) - Number(b.orden_visual))
+    .map((u) => {
+      const lotesAqui = enPlantin.filter((l) => l.ubicacion_actual === u.nombre);
+      const plantines = lotesAqui.reduce((acc, l) => acc + (Number(l.plantines_iniciales) || Number(l.plantas_estimadas_actual) || 0), 0);
+      const cap = Number(u.capacidad_calculada) || 0;
+      const pct = cap > 0 ? (plantines / cap) * 100 : 0;
+      return {
+        nave: Number(u.nave),
+        nombre: u.nombre,
+        capacidad: cap,
+        plantines,
+        ocupacion_pct: Math.round(pct * 10) / 10,
+        libres: Math.max(0, cap - plantines),
+      };
+    });
+}

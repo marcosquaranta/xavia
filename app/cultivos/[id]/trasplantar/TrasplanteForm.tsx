@@ -62,7 +62,11 @@ export default function TrasplanteForm({
     if (!ubic) { setError('Seleccioná una ubicación destino'); setLoading(false); return; }
     if (plantasTrasplantadas <= 0) { setError('Tenés que trasplantar al menos un tubo'); setLoading(false); return; }
     if (plantasTrasplantadas + descarte > cantidadActual) {
-      setError('No podés trasplantar + descartar más de ' + cantidadActual + ' ' + labelOrigen);
+      const tubosSugeridos = Math.ceil(cantidadActual / (orificios * factorPlantines));
+      setError(
+        'Con ' + tubos + ' tubos necesitás ' + plantasTrasplantadas + ' plantines pero solo tenés ' + cantidadActual + '. ' +
+        'Para trasplantar todos tus plantines usá ' + tubosSugeridos + ' tubo' + (tubosSugeridos !== 1 ? 's' : '') + '.'
+      );
       setLoading(false); return;
     }
     try {
@@ -116,7 +120,27 @@ export default function TrasplanteForm({
               </span>
             )}
           </label>
-          <NumberInput value={tubos} onChange={setTubos} min={0} required disabled={loading} />
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+            <div style={{ flex: 1 }}>
+              <NumberInput value={tubos} onChange={setTubos} min={0} required disabled={loading} />
+            </div>
+            {ubic && orificios > 0 && (
+              <button
+                type="button"
+                className="btn secondary small"
+                style={{ whiteSpace: 'nowrap', marginTop: '1px' }}
+                onClick={() => setTubos(Math.ceil(cantidadActual / (orificios * factorPlantines)))}
+                disabled={loading}
+                title={
+                  'Para ' + cantidadActual + ' plantines en ' + ubic.nombre +
+                  ' (' + orificios + ' pos/tubo' + (esRucula ? ' × 2' : '') + '): ' +
+                  Math.ceil(cantidadActual / (orificios * factorPlantines)) + ' tubos'
+                }
+              >
+                Usar todos ({Math.ceil(cantidadActual / (orificios * factorPlantines))} tubos)
+              </button>
+            )}
+          </div>
         </div>
         <div>
           <label>Descarte al trasplantar</label>

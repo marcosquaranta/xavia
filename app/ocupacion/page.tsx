@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import { ocupacionPorMesada, ocupacionPorNave, proyectarEntregas, nivelOcupacion } from '@/lib/ocupacion';
+import { ocupacionPorMesada, ocupacionPorNave, proyectarEntregas, nivelOcupacion, ocupacionPlantineras } from '@/lib/ocupacion';
 import { diasPromedioPorVariedad, mapaDiasPromedio } from '@/lib/estadisticas';
 import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
@@ -11,8 +11,8 @@ export default async function OcupacionPage() {
   if (!user) redirect('/login');
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [];
   try { [lotes, movimientos, ubicaciones] = await Promise.all([readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'), readSheet<Ubicacion>('Ubicaciones')]); } catch {}
-  let mesadas: any[] = [], naves: any[] = [], tiempos: any[] = [], entregas: any[] = [];
-  try { mesadas = ocupacionPorMesada(ubicaciones, lotes); naves = ocupacionPorNave(ubicaciones, lotes); tiempos = diasPromedioPorVariedad(lotes, movimientos, 60); const diasMap = mapaDiasPromedio(lotes, movimientos); entregas = proyectarEntregas(lotes, diasMap, 2); } catch {}
+  let mesadas: any[] = [], naves: any[] = [], tiempos: any[] = [], entregas: any[] = [], plantineras: any[] = [];
+  try { mesadas = ocupacionPorMesada(ubicaciones, lotes); naves = ocupacionPorNave(ubicaciones, lotes); plantineras = ocupacionPlantineras(ubicaciones, lotes); tiempos = diasPromedioPorVariedad(lotes, movimientos, 60); const diasMap = mapaDiasPromedio(lotes, movimientos); entregas = proyectarEntregas(lotes, diasMap, 2); } catch {}
   const capTotal = naves.reduce((a: number, n: any) => a + n.capacidad_total, 0);
   const plantasTot = naves.reduce((a: number, n: any) => a + n.plantas_vivas, 0);
   const ocGlobal = capTotal > 0 ? Math.round((plantasTot / capTotal) * 100) : 0;
@@ -90,6 +90,36 @@ export default async function OcupacionPage() {
             );
           })}
         </div>
+        {/* Sección plantineras */}
+        {plantineras.length > 0 && (
+          <div className="card">
+            <p className="card-title">Plantineras</p>
+            <p className="card-sub">Capacidad de bandejas de germinación · No incluida en ocupación de mesadas</p>
+            {plantineras.map((p: any) => {
+              const color = p.ocupacion_pct >= 85 ? '#d97706' : p.ocupacion_pct >= 50 ? '#059669' : '#9ca3af';
+              return (
+                <div key={p.nombre} style={{ marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
+                    <span style={{ fontWeight: 500 }}>{p.nombre}</span>
+                    <span style={{ color: '#6b7280' }}>
+                      <strong style={{ color: '#1f2937' }}>{p.plantines.toLocaleString('es-AR')}</strong>
+                      {' / '}{p.capacidad.toLocaleString('es-AR')} plantines
+                      {' · '}
+                      <span style={{ color }}>
+                        {p.ocupacion_pct}%
+                      </span>
+                      {p.libres > 0 && <span style={{ color: '#059669' }}> · {p.libres.toLocaleString('es-AR')} libres</span>}
+                    </span>
+                  </div>
+                  <div style={{ height: '7px', background: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
+                    <div style={{ width: Math.min(100, p.ocupacion_pct) + '%', height: '100%', background: color, borderRadius: '4px' }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {tiempos.length > 0 && (
           <div className="card">
             <p className="card-title">Tiempos promedio por fase (últimos 60 días)</p>
