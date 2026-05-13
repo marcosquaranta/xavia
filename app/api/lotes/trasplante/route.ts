@@ -5,7 +5,6 @@ import { generarIdSiembra, completarIdEnTrasplante } from '@/lib/loteId';
 import { proximoIdMovimiento, codigoCultivo } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
 
-// Calcula días entre dos fechas ISO (YYYY-MM-DD)
 function diasEntre(desde: string, hasta: string): number {
   if (!desde || !hasta) return 0;
   try {
@@ -20,13 +19,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const {
-      id_lote, fecha, ubicacion_destino_id,
-      tubos_ocupados,
-      plantas_trasplantadas,
-      plantas_quedan,
-      descarte, fase_destino,
-    } = body;
+    const { id_lote, fecha, ubicacion_destino_id, tubos_ocupados, plantas_trasplantadas, plantas_quedan, descarte, fase_destino } = body;
 
     const [lotes, ubicaciones, movimientos] = await Promise.all([
       readSheet<Lote>('Lotes'),
@@ -50,7 +43,7 @@ export async function POST(req: NextRequest) {
     const matchMesada = /M[LR]([12])/.exec(ubicDestino.id_ubicacion);
     const numMesada = matchMesada ? Number(matchMesada[1]) as 1 | 2 : 1;
 
-    // Movimientos previos del lote para calcular días por fase
+    // Fechas previas para calcular días
     const movsLote = movimientos
       .filter((m) => m.id_lote === id_lote)
       .sort((a, b) => String(a.fecha || '').localeCompare(String(b.fecha || '')));
@@ -58,19 +51,18 @@ export async function POST(req: NextRequest) {
     const movSiembra = movsLote.find((m) => m.tipo === 'siembra');
     const movF1 = movsLote.find((m) => m.tipo === 'trasplante' && m.fase_destino === 'fase_1');
     const fechaSiembra = String(movSiembra?.fecha || lote.fecha_siembra || '');
-    const fechaF1 = String(movF1?.fecha || '');
+    const fechaF1existente = String(movF1?.fecha || '');
 
-    // Calcular campos de análisis según la fase a la que se pasa
+    // Campos de análisis según fase destino
     const camposAnalisis: Record<string, any> = {};
     if (fase_destino === 'fase_1') {
       camposAnalisis.fecha_f1 = fecha;
       camposAnalisis.dias_plantinera = diasEntre(fechaSiembra, fecha);
     } else if (fase_destino === 'fase_2') {
       camposAnalisis.fecha_f2 = fecha;
-      if (fechaF1) {
-        camposAnalisis.dias_f1 = diasEntre(fechaF1, fecha);
+      if (fechaF1existente) {
+        camposAnalisis.dias_f1 = diasEntre(fechaF1existente, fecha);
       } else {
-        // Si no pasó por F1, dias_plantinera se calcula hasta acá
         camposAnalisis.dias_plantinera = diasEntre(fechaSiembra, fecha);
       }
     }
@@ -105,11 +97,9 @@ export async function POST(req: NextRequest) {
         lote.fase_actual, fase_destino,
         lote.ubicacion_actual, ubicDestino.nombre,
         tubos_ocupados, plantasReales,
-        '', '', '', '',
-        descarte || 0, descarte || 0,
-        '', '', '', '', '',
-        user.email, '',
-        `Trasplante: ${tubos_ocupados} tubos, ${plantasReales} plantas${esRucula ? ` (${plantas_trasplantadas} plantines)` : ''}`,
+        '', '', '', '', descarte || 0, descarte || 0,
+        '', '', '', '', '', user.email, '',
+        `Trasplante: ${tubos_ocupados} tubos, ${plantasReales} plantas`,
       ]);
       return NextResponse.json({ ok: true, id_lote_resultante: nuevoId });
     }
@@ -127,19 +117,37 @@ export async function POST(req: NextRequest) {
       notas: (String(lote.notas || '') + ` [dividido ${fecha}: ${plantasReales} plantas → ${idNuevo}]`).trim(),
     });
 
-    // Lote nuevo con campos de análisis incluidos
+    // Nuevo lote con orden exacto de columnas
     await appendRow('Lotes', [
-      idNuevo, lote.variedad, lote.fecha_siembra,
-      plantas_trasplantadas,
-      fase_destino, ubicDestino.nombre,
-      tubos_ocupados, plantasReales,
-      fecha, '', '', '', '', '', '',
-      user.email, '', lote.id_lote, lote.semilla_id || '', '',
-      `Lote hijo de ${lote.id_lote}`, 'activo',
+      idNuevo,                    // id_lote
+      lote.variedad,              // variedad
+      lote.fecha_siembra,         // fecha_siembra
+      plantas_trasplantadas,      // plantines_iniciales
+      fase_destino,               // fase_actual
+      ubicDestino.nombre,         // ubicacion_actual
+      tubos_ocupados,             // tubos_ocupados_actual
+      plantasReales,              // plantas_estimadas_actual
+      fecha,                      // fecha_ult_movimiento
+      camposAnalisis.fecha_f1 || '', // fecha_f1
+      camposAnalisis.fecha_f2 || '', // fecha_f2
+      '',                         // fecha_cosecha
+      camposAnalisis.dias_plantinera || '', // dias_plantinera
+      camposAnalisis.dias_f1 || '',         // dias_f1
+      '',                         // dias_f2
+      '',                         // dias_total
+      '',                         // unidades_cosechadas
+      '',                         // plantas_por_unidad_real
+      '',                         // descarte_reportado
+      '',                         // peso_muestra_kg
+      '',                         // peso_total_estimado_kg
+      user.email,                 // usuario_creador
+      '',                         // foto_url
+      lote.id_lote,               // lote_origen
+      lote.semilla_id || '',      // semilla_id
+      '',                         // destino_cosecha
+      `Lote hijo de ${lote.id_lote}`, // notas
+      'activo',                   // estado
     ]);
-
-    // Actualizar campos de análisis en el lote nuevo
-    await updateRow('Lotes', 'id_lote', idNuevo, camposAnalisis);
 
     const idMov = await proximoIdMovimiento();
     await appendRow('Movimientos', [
@@ -147,10 +155,8 @@ export async function POST(req: NextRequest) {
       lote.fase_actual, fase_destino,
       lote.ubicacion_actual, ubicDestino.nombre,
       tubos_ocupados, plantasReales,
-      '', '', '', '',
-      descarte || 0, descarte || 0,
-      '', '', '', '', '',
-      user.email, '',
+      '', '', '', '', descarte || 0, descarte || 0,
+      '', '', '', '', '', user.email, '',
       `Trasplante con división desde ${lote.id_lote}: ${plantasReales} plantas`,
     ]);
 
