@@ -1,0 +1,140 @@
+import type { Lote, Ubicacion } from './types';
+import { codigoCultivo } from './lotes';
+
+export interface OcupacionMesada { id_ubicacion: string; nombre: string; nave: number; capacidad: number; plantas_vivas: number; ocupacion_pct: number; huecos_libres: number; lotes_count: number; }
+export interface OcupacionNave { nave: number; metros_cuadrados: number; capacidad_total: number; tubos_totales: number; tubos_ocupados: number; tubos_libres: number; plantas_vivas: number; densidad_actual: number; densidad_maxima: number; ocupacion_pct: number; }
+
+export function ocupacionPorMesada(ubicaciones: Ubicacion[], lotes: Lote[]): OcupacionMesada[] {
+  // Solo lotes en F1 o F2 (excluir plantineras — no ocupan tubos de mesada)
+  const enMesadas = lotes.filter((l) => l.estado === 'activo' && (l.fase_actual === 'fase_1' || l.fase_actual === 'fase_2'));
+  const activos = enMesadas;
+  return ubicaciones.filter((u) => u.activo === 'SI' && u.tipo === 'mesada')
+    .sort((a, b) => Number(a.orden_visual) - Number(b.orden_visual))
+    .map((u) => {
+      const enMesada = activos.filter((l) => l.ubicacion_actual === u.nombre);
+      const plantas = enMesada.reduce((acc, l) => acc + (Number(l.plantas_estimadas_actual) || 0), 0);
+      const cap = Number(u.capacidad_calculada) || 0;
+      const pct = cap > 0 ? (plantas / cap) * 100 : 0;
+      return { id_ubicacion: u.id_ubicacion, nombre: u.nombre, nave: Number(u.nave), capacidad: cap, plantas_vivas: plantas, ocupacion_pct: Math.round(pct * 10) / 10, huecos_libres: Math.max(0, cap - plantas), lotes_count: enMesada.length };
+    });
+}
+
+export function ocupacionPorNave(ubicaciones: Ubicacion[], lotes: Lote[]): OcupacionNave[] {
+  // Solo lotes en mesadas (F1 y F2) — excluir plantineras del cálculo de ocupación
+  const enMesadas = lotes.filter((l) =>
+    l.estado === 'activo' && (l.fase_actual === 'fase_1' || l.fase_actual === 'fase_2')
+  );
+  return [1, 2].map((nave) => {
+    // Solo mesadas (no plantineras) para capacidad
+    const mesadas = ubicaciones.filter((u) => Number(u.nave) === nave && u.activo === 'SI' && u.tipo === 'mesada');
+    const cap = mesadas.reduce((acc, u) => acc + (Number(u.capacidad_calculada) || 0), 0);
+
+    // Calcular tubos totales y ocupados
+    // orificios_por_perfil × perfiles_por_modulo × modulos = capacidad
+    // tubos = perfiles_por_modulo × modulos (un "tubo" = un perfil)
+    const tubosTotales = mesadas.reduce((acc, u) => {
+      const perfiles = Number(u.perfiles_por_modulo) || 0;
+      const modulos = Number(u.modulos) || 0;
+      return acc + perfiles * modulos;
+    }, 0);
+
+    // Plantas vivas en mesadas de esta nave
+    const lotesNave = enMesadas.filter((l) => {
+      const u = ubicaciones.find((ub) => ub.nombre === l.ubicacion_actual);
+      return u && Number(u.nave) === nave && u.tipo === 'mesada';
+    });
+    const plantas = lotesNave.reduce((acc, l) => acc + (Number(l.plantas_estimadas_actual) || 0), 0);
+
+    // Tubos ocupados = suma de tubos_ocupados_actual de lotes en mesadas
+    const tubosOcupados = lotesNave.reduce((acc, l) => acc + (Number(l.tubos_ocupados_actual) || 0), 0);
+    const tubosLibres = Math.max(0, tubosTotales - tubosOcupados);
+
+    const m2 = mesadas.reduce((acc, u) => acc + (Number(u.metros_cuadrados) || 0), 0) || Number(mesadas[0]?.metros_cuadrados) || 0;
+    const pct = cap > 0 ? (plantas / cap) * 100 : 0;
+    return {
+      nave, metros_cuadrados: m2, capacidad_total: cap,
+      tubos_totales: tubosTotales, tubos_ocupados: tubosOcupados, tubos_libres: tubosLibres,
+      plantas_vivas: plantas,
+      densidad_actual: m2 > 0 ? Math.round((plantas / m2) * 10) / 10 : 0,
+      densidad_maxima: m2 > 0 ? Math.round((cap / m2) * 10) / 10 : 0,
+      ocupacion_pct: Math.round(pct * 10) / 10,
+    };
+  });
+}
+
+export function nivelOcupacion(pct: number): 'ok' | 'warn' | 'danger' {
+  if (pct >= 85) return 'warn'; if (pct < 50) return 'danger'; return 'ok';
+}
+
+export interface ProyeccionEntrega { fecha: string; diaSemana: string; lechuga_crespa: number; lechuga_roble: number; rucula_plantas: number; rucula_paquetes_aprox: number; albahaca_plantas: number; albahaca_paquetes_aprox: number; total_plantas: number; }
+
+export function proyectarEntregas(lotes: Lote[], diasPromedio: Map<string, number>, semanasAdelante: number = 2): ProyeccionEntrega[] {
+  const hoy = new Date();
+  const entregas: ProyeccionEntrega[] = [];
+  for (let s = 0; s < semanasAdelante; s++) {
+    for (const dia of ['lunes', 'jueves']) {
+      const fecha = nextDayOfWeek(hoy, dia, s);
+      const p: ProyeccionEntrega = { fecha: fecha.toISOString().split('T')[0], diaSemana: dia, lechuga_crespa: 0, lechuga_roble: 0, rucula_plantas: 0, rucula_paquetes_aprox: 0, albahaca_plantas: 0, albahaca_paquetes_aprox: 0, total_plantas: 0 };
+      for (const l of lotes.filter((l) => l.estado === 'activo')) {
+        try {
+          const dias = diasPromedio.get(l.variedad) || 35;
+          const siembra = new Date(l.fecha_siembra);
+          const cosEst = new Date(siembra); cosEst.setDate(cosEst.getDate() + dias);
+          if (Math.abs((cosEst.getTime() - fecha.getTime()) / 86400000) <= 2) {
+            const plantas = Number(l.plantas_estimadas_actual) || Number(l.plantines_iniciales) || 0;
+            const v = String(l.variedad).toLowerCase();
+            if (v.includes('crespa')) p.lechuga_crespa += plantas;
+            else if (v.includes('roble')) p.lechuga_roble += plantas;
+            else if (codigoCultivo(l.variedad) === 'R') p.rucula_plantas += plantas;
+            else if (codigoCultivo(l.variedad) === 'A') p.albahaca_plantas += plantas;
+          }
+        } catch { continue; }
+      }
+      p.rucula_paquetes_aprox = Math.round(p.rucula_plantas / 3);
+      p.albahaca_paquetes_aprox = Math.round(p.albahaca_plantas / 2);
+      p.total_plantas = p.lechuga_crespa + p.lechuga_roble + p.rucula_plantas + p.albahaca_plantas;
+      entregas.push(p);
+    }
+  }
+  return entregas;
+}
+
+function nextDayOfWeek(base: Date, day: string, weeks: number): Date {
+  const map: Record<string, number> = { lunes: 1, martes: 2, jueves: 4, viernes: 5 };
+  const target = map[day] ?? 1;
+  const result = new Date(base);
+  const cur = result.getDay();
+  let diff = target - cur; if (diff <= 0) diff += 7;
+  result.setDate(result.getDate() + diff + weeks * 7);
+  return result;
+}
+
+export interface OcupacionPlantinera {
+  nave: number;
+  nombre: string;
+  capacidad: number;
+  plantines: number;
+  ocupacion_pct: number;
+  libres: number;
+}
+
+export function ocupacionPlantineras(ubicaciones: Ubicacion[], lotes: Lote[]): OcupacionPlantinera[] {
+  const enPlantin = lotes.filter((l) => l.estado === 'activo' && l.fase_actual === 'plantin');
+  return ubicaciones
+    .filter((u) => u.activo === 'SI' && u.tipo === 'plantinera')
+    .sort((a, b) => Number(a.orden_visual) - Number(b.orden_visual))
+    .map((u) => {
+      const lotesAqui = enPlantin.filter((l) => l.ubicacion_actual === u.nombre);
+      const plantines = lotesAqui.reduce((acc, l) => acc + (Number(l.plantines_iniciales) || Number(l.plantas_estimadas_actual) || 0), 0);
+      const cap = Number(u.capacidad_calculada) || 0;
+      const pct = cap > 0 ? (plantines / cap) * 100 : 0;
+      return {
+        nave: Number(u.nave),
+        nombre: u.nombre,
+        capacidad: cap,
+        plantines,
+        ocupacion_pct: Math.round(pct * 10) / 10,
+        libres: Math.max(0, cap - plantines),
+      };
+    });
+}
