@@ -1,4 +1,3 @@
-// fix v35
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet, updateRow } from '@/lib/sheets';

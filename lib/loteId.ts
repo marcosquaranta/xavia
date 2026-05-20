@@ -110,3 +110,13 @@ export function codigoCultivoDesdeVariedad(variedad: string): 'L' | 'R' | 'A' {
 function pad(n: number): string {
   return n >= 1000 ? String(n) : String(n).padStart(3, '0');
 }
+
+// Alias para compatibilidad con versiones anteriores
+// (el renombrado por mesada ya no aplica con el nuevo formato sin mesada)
+export async function generarIdCambioMesada(
+  idActual: string,
+  _nuevaMesada: 1 | 2,
+  _lotesExistentes: string[]
+): Promise<string> {
+  return idActual;
+}
