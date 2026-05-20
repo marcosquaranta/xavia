@@ -26,7 +26,6 @@ export async function POST(req: NextRequest) {
 
     await updateRow('Lotes', 'id_lote', id_lote, updatesLote);
 
-    // Actualizar fechas en movimientos
     for (const mov of [fechas?.siembra, fechas?.f1, fechas?.f2, fechas?.cosecha]) {
       if (mov?.id && mov?.fecha) {
         await updateRow('Movimientos', 'id_movimiento', String(mov.id), { fecha: mov.fecha });
