@@ -121,10 +121,3 @@ export async function generarIdCambioMesada(
   return idActual;
 }
 
-export async function generarIdCambioMesada(
-  idActual: string,
-  _nuevaMesada: 1 | 2,
-  _lotesExistentes: string[]
-): Promise<string> {
-  return idActual;
-}
