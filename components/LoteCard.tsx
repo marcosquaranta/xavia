@@ -40,7 +40,7 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades }:
             {lote.variedad.toLowerCase().includes('crespa') && <span style={{ fontSize: '11px', color: '#6b7280' }}>Crespa</span>}
             {lote.variedad.toLowerCase().includes('roble') && <span style={{ fontSize: '11px', color: '#6b7280' }}>Hoja de Roble</span>}
             {nave && <span style={{ background: nave === 1 ? '#1e40af' : '#7c3aed', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>Nave {nave}</span>}
-            {mesada && <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151', background: '#f3f4f6', padding: '2px 8px', borderRadius: '4px', border: '1px solid #e5e7eb' }}>{mesada}</span>}
+            {mesada && mesada !== 'Plantinera' && <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151', background: '#f3f4f6', padding: '2px 8px', borderRadius: '4px', border: '1px solid #e5e7eb' }}>{mesada}</span>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             <span className={'pill ' + claseFase}>{labelFase}</span>
@@ -57,6 +57,24 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades }:
           <Link href={'/cultivos/' + encodeURIComponent(lote.id_lote)} className="btn secondary small">Ver</Link>
         </div>
       </div>
+      {/* Barra de progreso del ciclo — solo lotes activos */}
+      {varDef && lote.estado === 'activo' && (() => {
+        const diasEst = Number(varDef.dias_estimados_cosecha) || 35;
+        const pct = Math.min(Math.round((dias.total / diasEst) * 100), 100);
+        const colorBarra = pct >= 100 ? '#dc2626' : pct >= 80 ? '#d97706' : '#16a34a';
+        return (
+          <div style={{ marginTop: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#9ca3af', marginBottom: '3px' }}>
+              <span>Día {dias.total} de ~{diasEst}</span>
+              <span style={{ color: colorBarra, fontWeight: 600 }}>{pct}%</span>
+            </div>
+            <div style={{ height: '4px', background: '#f3f4f6', borderRadius: '2px', overflow: 'hidden' }}>
+              <div style={{ width: pct + '%', height: '100%', background: colorBarra, borderRadius: '2px' }} />
+            </div>
+          </div>
+        );
+      })()}
+
       <div style={{ display: 'flex', gap: '12px', fontSize: '11px', paddingTop: '8px', borderTop: '1px solid rgba(0,0,0,0.06)', marginTop: '8px', flexWrap: 'wrap' }}>
         <span><span style={{ color: '#6b7280' }}>Sembrado:</span> {fmt(dias.fechas.siembra)}</span>
         <span><span style={{ color: '#6b7280' }}>Plantinera:</span> <strong>{dias.plantinera}d</strong></span>

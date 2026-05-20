@@ -235,3 +235,92 @@ function safeParseDate2(s: any): Date | null {
   const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
   return isNaN(d.getTime()) ? null : d;
 }
+
+// === RESUMEN DE COSECHA POR CULTIVO ===
+
+export interface ResumenCosechaCultivo {
+  cultivo: 'lechuga' | 'rucula';
+  label: string;
+  cosechadoMes: number;
+  cosechadoMesAntProporcional: number; // solo hasta el mismo día del mes anterior
+  variacionPct: number | null;
+  proyectadoRestoMes: number; // plantas de lotes activos que cosecharían este mes
+}
+
+export function resumenCosechaPorCultivo(
+  lotes: Lote[],
+  variedades: import('./types').Variedad[]
+): ResumenCosechaCultivo[] {
+  const hoy = new Date();
+  const diaHoy = hoy.getDate();
+  const mesActual = hoy.getMonth();
+  const anioActual = hoy.getFullYear();
+
+  // Inicio del mes actual
+  const inicioMesActual = new Date(anioActual, mesActual, 1);
+
+  // Mes anterior — mismo día
+  const mesPasado = new Date(anioActual, mesActual - 1, 1);
+  const finProporcionalMesPasado = new Date(anioActual, mesActual - 1, diaHoy, 23, 59, 59);
+
+  // Fin del mes actual (para proyección)
+  const finMesActual = new Date(anioActual, mesActual + 1, 0, 23, 59, 59);
+
+  function matchCultivo(variedad: string, cultivo: 'lechuga' | 'rucula'): boolean {
+    const v = String(variedad || '').toLowerCase();
+    if (cultivo === 'rucula') return v.includes('rucula') || v.includes('rúcula');
+    return !v.includes('rucula') && !v.includes('rúcula') && !v.includes('albahaca');
+  }
+
+  function calcularFechaCosechaEstimada(lote: Lote): Date | null {
+    try {
+      const siembra = safeParseDate(lote.fecha_siembra);
+      if (!siembra) return null;
+      const varDef = variedades.find((v) => v.variedad === lote.variedad);
+      const diasCiclo = Number(varDef?.dias_estimados_cosecha) || 35;
+      const est = new Date(siembra);
+      est.setDate(est.getDate() + diasCiclo);
+      return est;
+    } catch { return null; }
+  }
+
+  return (['lechuga', 'rucula'] as const).map((cultivo) => {
+    const label = cultivo === 'lechuga' ? 'Lechuga' : 'Rúcula';
+
+    // Cosechados este mes
+    const cosechadoMes = lotes
+      .filter((l) => {
+        if (l.estado !== 'cosechado') return false;
+        if (!matchCultivo(l.variedad, cultivo)) return false;
+        const f = safeParseDate(l.fecha_cosecha);
+        return f && f >= inicioMesActual && f <= hoy;
+      })
+      .reduce((acc, l) => acc + (Number(l.unidades_cosechadas) || 0), 0);
+
+    // Cosechados mes anterior (solo hasta el mismo día)
+    const cosechadoMesAntProporcional = lotes
+      .filter((l) => {
+        if (l.estado !== 'cosechado') return false;
+        if (!matchCultivo(l.variedad, cultivo)) return false;
+        const f = safeParseDate(l.fecha_cosecha);
+        return f && f >= mesPasado && f <= finProporcionalMesPasado;
+      })
+      .reduce((acc, l) => acc + (Number(l.unidades_cosechadas) || 0), 0);
+
+    const variacionPct = cosechadoMesAntProporcional > 0
+      ? Math.round(((cosechadoMes - cosechadoMesAntProporcional) / cosechadoMesAntProporcional) * 100)
+      : null;
+
+    // Proyectado: lotes activos cuya fecha estimada de cosecha cae en el resto del mes
+    const proyectadoRestoMes = lotes
+      .filter((l) => {
+        if (l.estado !== 'activo') return false;
+        if (!matchCultivo(l.variedad, cultivo)) return false;
+        const est = calcularFechaCosechaEstimada(l);
+        return est && est >= hoy && est <= finMesActual;
+      })
+      .reduce((acc, l) => acc + (Number(l.plantas_estimadas_actual) || Number(l.plantines_iniciales) || 0), 0);
+
+    return { cultivo, label, cosechadoMes, cosechadoMesAntProporcional, variacionPct, proyectadoRestoMes };
+  });
+}

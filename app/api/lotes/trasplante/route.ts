@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { appendRow, readSheet, updateRow } from '@/lib/sheets';
-import { generarIdSiembra, completarIdEnTrasplante } from '@/lib/loteId';
+import { completarIdEnTrasplante, generarIdDivision } from '@/lib/loteId';
 import { proximoIdMovimiento, codigoCultivo } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
 
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     if (!seDivide) {
       let nuevoId = lote.id_lote;
       if (!/^N[12][LRA][12]-/.test(lote.id_lote)) {
-        nuevoId = completarIdEnTrasplante(lote.id_lote, cultivo, numMesada);
+        nuevoId = completarIdEnTrasplante(lote.id_lote, cultivo);
       }
       if (nuevoId !== lote.id_lote) {
         const movs = await readSheet<{ id_movimiento: number; id_lote: string }>('Movimientos');
@@ -104,11 +104,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, id_lote_resultante: nuevoId });
     }
 
-    // División
-    const matchNave = /^N([12])/.exec(lote.id_lote);
-    const naveOrigen = matchNave ? Number(matchNave[1]) as 1 | 2 : 1;
-    const idProv = await generarIdSiembra(naveOrigen);
-    const idNuevo = completarIdEnTrasplante(idProv, cultivo, numMesada);
+    // División — generar ID hijo sin mesada
+    const todosLosIds = (await readSheet<any>('Lotes')).map((l: any) => l.id_lote);
+    // Aseguramos que el ID padre esté completo antes de dividir
+    const idPadreCompleto = /^N[12][LRA]-/.test(lote.id_lote)
+      ? lote.id_lote
+      : completarIdEnTrasplante(lote.id_lote, cultivo);
+    const idNuevo = await generarIdDivision(idPadreCompleto, todosLosIds.filter((id: string) => id !== lote.id_lote));
 
     await updateRow('Lotes', 'id_lote', lote.id_lote, {
       plantines_iniciales: plantas_quedan,

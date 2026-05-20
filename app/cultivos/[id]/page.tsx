@@ -42,7 +42,19 @@ export default async function DetalleLotePage({ params }: { params: { id: string
           <p style={{ margin: '8px 0 0', fontSize: '13px', color: '#6b7280' }}>{lote.ubicacion_actual || '—'} · {lote.estado === 'cosechado' ? 'cosechado el ' + fmt(lote.fecha_cosecha) : 'plantines iniciales: ' + (lote.plantines_iniciales || 0)}</p>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '20px' }}>
-          {[['Sembrado', fmtFull(dias.fechas.siembra), 'hace ' + dias.total + ' días'], ['Plantinera', dias.plantinera + ' d', null], ...(dias.fase_1 !== null ? [['Fase 1', dias.fase_1 + ' d', null]] : []), ...(dias.fase_2 > 0 ? [['Fase 2', dias.fase_2 + ' d', null]] : []), ...(variedad ? [['Ciclo est.', variedad.dias_estimados_cosecha + ' d', 'de la variedad']] : []), ...(lote.estado === 'cosechado' ? [['Cosechado', (lote.unidades_cosechadas || 0) + (lote.destino_cosecha === 'planta' ? ' plantas' : ' paq.'), null]] : [])].map(([label, value, sub]: any) => (
+          {[
+            ['Sembrado', fmtFull(dias.fechas.siembra), 'hace ' + dias.total + ' días'],
+            ['Plantinera', dias.plantinera + ' d', null],
+            ...(dias.fase_1 !== null ? [['Fase 1', dias.fase_1 + ' d', null]] : []),
+            ...(dias.fase_2 > 0 ? [['Fase 2', dias.fase_2 + ' d', null]] : []),
+            ...(variedad ? [['Ciclo est.', variedad.dias_estimados_cosecha + ' d', 'de la variedad']] : []),
+            ...(lote.estado === 'cosechado' ? [
+              ['Cosechado', (lote.unidades_cosechadas || 0) + (lote.destino_cosecha === 'planta' ? ' plantas' : ' paq.'), 'unidades'],
+              ...((lote.descarte_reportado && Number(lote.descarte_reportado) > 0) ? [['Descarte', lote.descarte_reportado + ' plantas', null]] : []),
+              ...((lote.plantas_por_unidad_real && Number(lote.plantas_por_unidad_real) > 1) ? [['Plantas/paquete', lote.plantas_por_unidad_real, 'real']] : []),
+              ...((lote.plantines_iniciales) ? [['Plantines usados', lote.plantines_iniciales, 'total del lote']] : []),
+            ] : []),
+          ].map(([label, value, sub]: any) => (
             <div key={label} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '14px' }}>
               <p style={{ margin: 0, fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{label}</p>
               <p style={{ margin: '4px 0 0', fontSize: '18px', fontWeight: 600 }}>{value}</p>

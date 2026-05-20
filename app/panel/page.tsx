@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave } from '@/lib/ocupacion';
-import { cosechadoEsteMes, plantasPorCultivo, variacionVsMesAnterior, distribucionPorSemana } from '@/lib/estadisticas';
+import { cosechadoEsteMes, plantasPorCultivo, variacionVsMesAnterior, distribucionPorSemana, resumenCosechaPorCultivo } from '@/lib/estadisticas';
 import { aplicarFiltros, contarPorFiltro, type FiltroCultivos, type FiltroNave } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad } from '@/lib/types';
 import Header from '@/components/Header';
@@ -38,6 +38,7 @@ export default async function PanelPage({ searchParams }: { searchParams: { filt
   let varL: number | null = null, varR: number | null = null;
   let ciclosLechuga = { barras: [] as any[], semanasCosecha: 5 };
   let ciclosRucula  = { barras: [] as any[], semanasCosecha: 3 };
+  let resumenCosecha: any[] = [];
 
   try {
     const mes = cosechadoEsteMes(lotes);
@@ -48,6 +49,7 @@ export default async function PanelPage({ searchParams }: { searchParams: { filt
     varR = variacionVsMesAnterior(lotes, 'rucula');
     ciclosLechuga = distribucionPorSemana(lotes, variedades, 'lechuga');
     ciclosRucula  = distribucionPorSemana(lotes, variedades, 'rucula');
+    resumenCosecha = resumenCosechaPorCultivo(lotes, variedades);
   } catch {}
 
   const difPct = cosechadoMesPasado > 0
@@ -99,6 +101,51 @@ export default async function PanelPage({ searchParams }: { searchParams: { filt
             </div>
           </div>
         </div>
+
+        {/* Resumen de cosecha por cultivo */}
+        {resumenCosecha.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+            {resumenCosecha.map((r: any) => (
+              <div key={r.cultivo} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <span style={{ background: r.cultivo === 'lechuga' ? '#4d7c0f' : '#166534', color: 'white', padding: '2px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 800, letterSpacing: '0.5px' }}>
+                    {r.label.toUpperCase()}
+                  </span>
+                  <span style={{ fontSize: '11px', color: '#6b7280' }}>Este mes</span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+                  {/* Cosechado este mes */}
+                  <div style={{ textAlign: 'center', padding: '10px 8px', background: '#f9fafb', borderRadius: '6px' }}>
+                    <p style={{ margin: '0 0 2px', fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Cosechado</p>
+                    <p style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#111827' }}>{r.cosechadoMes.toLocaleString('es-AR')}</p>
+                    <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#9ca3af' }}>{r.cultivo === 'rucula' ? 'paq.' : 'plantas'}</p>
+                  </div>
+
+                  {/* vs mes anterior proporcional */}
+                  <div style={{ textAlign: 'center', padding: '10px 8px', background: '#f9fafb', borderRadius: '6px' }}>
+                    <p style={{ margin: '0 0 2px', fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Mes ant. (al día {new Date().getDate()})</p>
+                    <p style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#111827' }}>{r.cosechadoMesAntProporcional.toLocaleString('es-AR')}</p>
+                    {r.variacionPct !== null && (
+                      <p style={{ margin: '2px 0 0', fontSize: '11px', fontWeight: 600, color: r.variacionPct >= 0 ? '#059669' : '#dc2626' }}>
+                        {r.variacionPct >= 0 ? '↑' : '↓'} {Math.abs(r.variacionPct)}%
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Proyectado resto del mes */}
+                  <div style={{ textAlign: 'center', padding: '10px 8px', background: r.proyectadoRestoMes > 0 ? '#f0fdf4' : '#f9fafb', borderRadius: '6px' }}>
+                    <p style={{ margin: '0 0 2px', fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Proyectado</p>
+                    <p style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: r.proyectadoRestoMes > 0 ? '#059669' : '#9ca3af' }}>
+                      {r.proyectadoRestoMes > 0 ? r.proyectadoRestoMes.toLocaleString('es-AR') : '—'}
+                    </p>
+                    <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#9ca3af' }}>resto del mes</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Gráficos de ciclos — solo F1/F2 */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px', marginBottom: '16px' }}>
