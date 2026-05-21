@@ -49,4 +49,124 @@ export async function POST(req: NextRequest) {
       .sort((a, b) => String(a.fecha || '').localeCompare(String(b.fecha || '')));
 
     const movSiembra = movsLote.find((m) => m.tipo === 'siembra');
-    const movF1 = movsLote.find((m) => m.tipo === 'trasplante' && m.fase_destino === 'fase_1
+    const movF1 = movsLote.find((m) => m.tipo === 'trasplante' && m.fase_destino === 'fase_1');
+    const fechaSiembra = String(movSiembra?.fecha || lote.fecha_siembra || '');
+    const fechaF1existente = String(movF1?.fecha || '');
+
+    // Campos de análisis según fase destino
+    const camposAnalisis: Record<string, any> = {};
+    if (fase_destino === 'fase_1') {
+      camposAnalisis.fecha_f1 = fecha;
+      camposAnalisis.dias_plantinera = diasEntre(fechaSiembra, fecha);
+    } else if (fase_destino === 'fase_2') {
+      camposAnalisis.fecha_f2 = fecha;
+      if (fechaF1existente) {
+        camposAnalisis.dias_f1 = diasEntre(fechaF1existente, fecha);
+      } else {
+        camposAnalisis.dias_plantinera = diasEntre(fechaSiembra, fecha);
+      }
+    }
+
+    let nuevoId = lote.id_lote;
+
+    if (!seDivide) {
+      if (!/^N[12][LRA]-/.test(lote.id_lote)) {
+        nuevoId = completarIdEnTrasplante(lote.id_lote, cultivo);
+      }
+
+      if (nuevoId !== lote.id_lote) {
+        const movs = await readSheet<{ id_movimiento: number; id_lote: string }>('Movimientos');
+        for (const m of movs) {
+          if (m.id_lote === lote.id_lote) {
+            await updateRow('Movimientos', 'id_movimiento', String(m.id_movimiento), { id_lote: nuevoId });
+          }
+        }
+      }
+
+      await updateRow('Lotes', 'id_lote', lote.id_lote, {
+        ...(nuevoId !== lote.id_lote ? { id_lote: nuevoId } : {}),
+        fase_actual: fase_destino,
+        ubicacion_actual: ubicDestino.nombre,
+        tubos_ocupados_actual: tubos_ocupados,
+        plantas_estimadas_actual: plantasReales,
+        plantines_iniciales: plantas_trasplantadas,
+        fecha_ult_movimiento: fecha,
+        ...camposAnalisis,
+      });
+
+      const idMov = await proximoIdMovimiento();
+      await appendRow('Movimientos', [
+        idMov, nuevoId, fecha, 'trasplante',
+        lote.fase_actual, fase_destino,
+        lote.ubicacion_actual, ubicDestino.nombre,
+        tubos_ocupados, plantasReales,
+        '', '', '', '', descarte || 0, descarte || 0,
+        '', '', '', '', '', user.email, '',
+        `Trasplante: ${tubos_ocupados} tubos, ${plantasReales} plantas`,
+      ]);
+      return NextResponse.json({ ok: true, id_lote_resultante: nuevoId });
+    }
+
+    // División
+    const matchNave = /^N([12])/.exec(lote.id_lote);
+    const naveOrigen = matchNave ? Number(matchNave[1]) as 1 | 2 : 1;
+    const idProv = await generarIdSiembra(naveOrigen);
+    const idNuevo = completarIdEnTrasplante(idProv, cultivo, numMesada);
+
+    await updateRow('Lotes', 'id_lote', lote.id_lote, {
+      plantines_iniciales: plantas_quedan,
+      plantas_estimadas_actual: plantasQuedanReales,
+      fecha_ult_movimiento: fecha,
+      notas: (String(lote.notas || '') + ` [dividido ${fecha}: ${plantasReales} plantas → ${idNuevo}]`).trim(),
+    });
+
+    // Nuevo lote con orden exacto de columnas
+    await appendRow('Lotes', [
+      idNuevo,                      // id_lote
+      lote.variedad,                // variedad
+      lote.fecha_siembra,           // fecha_siembra
+      plantas_trasplantadas,        // plantines_iniciales
+      fase_destino,                 // fase_actual
+      ubicDestino.nombre,           // ubicacion_actual
+      tubos_ocupados,               // tubos_ocupados_actual
+      plantasReales,                // plantas_estimadas_actual
+      fecha,                        // fecha_ult_movimiento
+      camposAnalisis.fecha_f1 || '', // fecha_f1
+      camposAnalisis.fecha_f2 || '', // fecha_f2
+      '',                           // fecha_cosecha
+      camposAnalisis.dias_plantinera || '', // dias_plantinera
+      camposAnalisis.dias_f1 || '',         // dias_f1
+      '',                           // dias_f2
+      '',                           // dias_total
+      '',                           // unidades_cosechadas
+      '',                           // plantas_por_unidad_real
+      '',                           // descarte_reportado
+      '',                           // peso_muestra_kg
+      '',                           // peso_total_estimado_kg
+      user.email,                   // usuario_creador
+      '',                           // foto_url
+      lote.id_lote,                 // lote_origen
+      lote.semilla_id || '',        // semilla_id
+      '',                           // destino_cosecha
+      `Lote hijo de ${lote.id_lote}`, // notas
+      'activo',                     // estado
+    ]);
+
+    const idMov = await proximoIdMovimiento();
+    await appendRow('Movimientos', [
+      idMov, idNuevo, fecha, 'trasplante',
+      lote.fase_actual, fase_destino,
+      lote.ubicacion_actual, ubicDestino.nombre,
+      tubos_ocupados, plantasReales,
+      '', '', '', '', descarte || 0, descarte || 0,
+      '', '', '', '', '', user.email, '',
+      `Trasplante con división desde ${lote.id_lote}: ${plantasReales} plantas`,
+    ]);
+
+    return NextResponse.json({ ok: true, id_lote_padre: lote.id_lote, id_lote_nuevo: idNuevo, dividido: true });
+
+  } catch (err: any) {
+    console.error('Error trasplantando:', err);
+    return NextResponse.json({ error: err.message || 'server_error' }, { status: 500 });
+  }
+}
