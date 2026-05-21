@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
     const matchNave = /^N([12])/.exec(lote.id_lote);
     const naveOrigen = matchNave ? Number(matchNave[1]) as 1 | 2 : 1;
     const idProv = await generarIdSiembra(naveOrigen);
-    const idNuevo = completarIdEnTrasplante(idProv, cultivo, numMesada);
+    const idNuevo = completarIdEnTrasplante(idProv, cultivo); // <--- Corregido a 2 argumentos aquí también
 
     await updateRow('Lotes', 'id_lote', lote.id_lote, {
       plantines_iniciales: plantas_quedan,
