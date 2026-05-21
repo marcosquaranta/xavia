@@ -69,8 +69,8 @@ export async function POST(req: NextRequest) {
 
     if (!seDivide) {
       let nuevoId = lote.id_lote;
-      if (!/^N[12][LRA][12]-/.test(lote.id_lote)) {
-        nuevoId = completarIdEnTrasplante(lote.id_lote, cultivo);
+      if (!/^N[12][LRA]-/.test(lote.id_lote)) {
+  nuevoId = completarIdEnTrasplante(lote.id_lote, cultivo);
       }
       if (nuevoId !== lote.id_lote) {
         const movs = await readSheet<{ id_movimiento: number; id_lote: string }>('Movimientos');
