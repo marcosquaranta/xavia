@@ -67,21 +67,21 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!seDivide) {
-let nuevoId = lote.id_lote;
-if (!/^N[12][LRA]-/.test(lote.id_lote)) {
-  nuevoId = completarIdEnTrasplante(lote.id_lote, cultivo);
-}
-if (nuevoId !== lote.id_lote)
-{
-      if (nuevoId !== lote.id_lote) {
-        const movs = await readSheet<{ id_movimiento: number; id_lote: string }>('Movimientos');
-        for (const m of movs) {
-          if (m.id_lote === lote.id_lote) {
-            await updateRow('Movimientos', 'id_movimiento', String(m.id_movimiento), { id_lote: nuevoId });
-          }
-        }
+if (!seDivide) {
+  let nuevoId = lote.id_lote;
+  if (!/^N[12][LRA]-/.test(lote.id_lote)) {
+    nuevoId = completarIdEnTrasplante(lote.id_lote, cultivo);
+  }
+
+  if (nuevoId !== lote.id_lote) {
+    const movs = await readSheet<{ id_movimiento: number; id_lote: string }>('Movimientos');
+    for (const m of movs) {
+      if (m.id_lote === lote.id_lote) {
+        await updateRow('Movimientos', 'id_movimiento', String(m.id_movimiento), { id_lote: nuevoId });
       }
+    }
+  }
+}
       await updateRow('Lotes', 'id_lote', lote.id_lote, {
         ...(nuevoId !== lote.id_lote ? { id_lote: nuevoId } : {}),
         fase_actual: fase_destino,
