@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
       descarteEf, descarteEf,
       desvio, nivel,
       '', '', '',
-      user || lote.usuario_creador, '',
+      user.email || lote.usuario_creador, '',
       es_por_paquete
         ? `Cosecha ${unidades} paquetes${Number(bandejas_armadas) > 0 ? ` + ${bandejas_armadas} bandejas` : ''}`
         : `Cosecha ${plantas_cosechadas} plantas`,
