@@ -94,20 +94,29 @@ export async function proximoIdMovimiento(): Promise<number> {
   return movimientos.reduce((acc, m) => Math.max(acc, Number(m.id_movimiento) || 0), 0) + 1;
 }
 
-export type FiltroCultivos = 'todos' | 'lechuga' | 'rucula' | 'albahaca' | 'plantinera' | 'fase_1' | 'fase_2' | 'cosechados';
+export type FiltroCultivo = 'todos' | 'lechuga' | 'rucula' | 'albahaca';
+export type FiltroFase = 'todas' | 'plantinera' | 'fase_1' | 'fase_2' | 'cosechados';
 export type FiltroNave = 'todas' | '1' | '2';
+// Alias para compatibilidad
+export type FiltroCultivos = FiltroCultivo;
+
+export function aplicarFiltros3(lotes: Lote[], cultivo: FiltroCultivo, fase: FiltroFase, nave: FiltroNave): Lote[] {
+  let base = fase === 'cosechados'
+    ? lotes.filter((l) => l.estado === 'cosechado')
+    : lotes.filter((l) => l.estado === 'activo');
+  if (nave !== 'todas') { const n = Number(nave); base = base.filter((l) => naveDeLote(l.id_lote) === n); }
+  if (cultivo !== 'todos') {
+    const cod = cultivo === 'lechuga' ? 'L' : cultivo === 'rucula' ? 'R' : 'A';
+    base = base.filter((l) => codigoCultivo(l.variedad) === cod);
+  }
+  if (fase === 'plantinera') base = base.filter((l) => l.fase_actual === 'plantin');
+  else if (fase === 'fase_1') base = base.filter((l) => l.fase_actual === 'fase_1');
+  else if (fase === 'fase_2') base = base.filter((l) => l.fase_actual === 'fase_2');
+  return base;
+}
 
 export function aplicarFiltros(lotes: Lote[], filtro: FiltroCultivos, nave: FiltroNave): Lote[] {
-  let base = filtro === 'cosechados' ? lotes.filter((l) => l.estado === 'cosechado') : lotes.filter((l) => l.estado === 'activo');
-  if (nave !== 'todas') { const n = Number(nave); base = base.filter((l) => naveDeLote(l.id_lote) === n); }
-  if (filtro === 'todos' || filtro === 'cosechados') return base;
-  if (filtro === 'plantinera') return base.filter((l) => l.fase_actual === 'plantin');
-  if (filtro === 'fase_1') return base.filter((l) => l.fase_actual === 'fase_1');
-  if (filtro === 'fase_2') return base.filter((l) => l.fase_actual === 'fase_2');
-  if (filtro === 'lechuga') return base.filter((l) => codigoCultivo(l.variedad) === 'L');
-  if (filtro === 'rucula') return base.filter((l) => codigoCultivo(l.variedad) === 'R');
-  if (filtro === 'albahaca') return base.filter((l) => codigoCultivo(l.variedad) === 'A');
-  return base;
+  return aplicarFiltros3(lotes, 'todos', 'todas', nave);
 }
 
 export interface ConteosFiltros { todos: number; lechuga: number; rucula: number; albahaca: number; plantinera: number; fase_1: number; fase_2: number; cosechados: number; }

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import { aplicarFiltros, contarPorFiltro, type FiltroCultivos, type FiltroNave } from '@/lib/lotes';
+import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad } from '@/lib/types';
 import Header from '@/components/Header';
 import FiltrosLotes from '@/components/FiltrosLotes';
@@ -14,12 +14,13 @@ export const dynamic = 'force-dynamic';
 export default async function CultivosPage({
   searchParams,
 }: {
-  searchParams: { filtro?: string; nave?: string; q?: string };
+  searchParams: { cultivo?: string; fase?: string; nave?: string; q?: string };
 }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
 
-  const filtro = (searchParams.filtro || 'todos') as FiltroCultivos;
+  const cultivo = (searchParams.cultivo || 'todos') as FiltroCultivo;
+  const fase = (searchParams.fase || 'todas') as FiltroFase;
   const nave = (searchParams.nave || 'todas') as FiltroNave;
   const query = (searchParams.q || '').trim().toLowerCase();
 
@@ -48,7 +49,7 @@ export default async function CultivosPage({
       String(l.id_lote || '').toLowerCase().includes(query)
     );
   } else {
-    lotesFiltrados = aplicarFiltros(lotes, filtro, nave);
+    lotesFiltrados = aplicarFiltros3(lotes, cultivo, fase, nave);
   }
 
   return (
@@ -68,7 +69,7 @@ export default async function CultivosPage({
 
         {/* Filtros — se ocultan cuando hay búsqueda activa */}
         {!query && (
-          <FiltrosLotes filtroActivo={filtro} naveActiva={nave} conteos={conteos} baseUrl="/cultivos" />
+          <FiltrosLotes cultivoActivo={cultivo} faseActiva={fase} naveActiva={nave} conteos={conteos} baseUrl="/cultivos" />
         )}
 
         {/* Resultados */}
