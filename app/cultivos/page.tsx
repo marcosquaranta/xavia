@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
+import { cicloRealPorVariedad } from '@/lib/estadisticas';
 import type { Lote, Movimiento, Ubicacion, Variedad } from '@/lib/types';
 import Header from '@/components/Header';
 import FiltrosLotes from '@/components/FiltrosLotes';
@@ -14,7 +15,7 @@ export const dynamic = 'force-dynamic';
 export default async function CultivosPage({
   searchParams,
 }: {
-  searchParams: { cultivo?: string; fase?: string; nave?: string; q?: string };
+  searchParams: { cultivo?: string; fase?: string; nave?: string; q?: string; orden?: string };
 }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
@@ -23,6 +24,7 @@ export default async function CultivosPage({
   const fase = (searchParams.fase || 'todas') as FiltroFase;
   const nave = (searchParams.nave || 'todas') as FiltroNave;
   const query = (searchParams.q || '').trim().toLowerCase();
+  const orden = searchParams.orden === 'desc' ? 'desc' : 'asc';
 
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [], variedades: Variedad[] = [];
   let err: string | null = null;
@@ -43,6 +45,9 @@ export default async function CultivosPage({
   const conteos = contarPorFiltro(lotes, nave);
 
   // Si hay búsqueda por ID, buscar en todos los lotes (activos y cosechados)
+  // Ciclo real basado en cosechados recientes
+  const ciclosReales = cicloRealPorVariedad(lotes, movimientos, 5);
+
   let lotesFiltrados: Lote[];
   if (query) {
     lotesFiltrados = lotes.filter((l) =>
@@ -51,6 +56,13 @@ export default async function CultivosPage({
   } else {
     lotesFiltrados = aplicarFiltros3(lotes, cultivo, fase, nave);
   }
+
+  // Ordenar por fecha de siembra
+  lotesFiltrados = [...lotesFiltrados].sort((a, b) => {
+    const fa = String(a.fecha_siembra || '');
+    const fb = String(b.fecha_siembra || '');
+    return orden === 'asc' ? fa.localeCompare(fb) : fb.localeCompare(fa);
+  });
 
   return (
     <>
@@ -61,7 +73,16 @@ export default async function CultivosPage({
             <h1 className="page-title">Mis cultivos</h1>
             <p className="page-subtitle" style={{ marginBottom: 0 }}>{conteos.todos} lotes activos</p>
           </div>
-          <Link href="/cultivos/nuevo" className="btn">+ Nuevo lote</Link>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <Link
+              href={`/cultivos?${new URLSearchParams({ ...(cultivo !== 'todos' ? { cultivo } : {}), ...(fase !== 'todas' ? { fase } : {}), ...(nave !== 'todas' ? { nave } : {}), orden: orden === 'asc' ? 'desc' : 'asc' }).toString()}`}
+              className="btn secondary"
+              style={{ fontSize: '12px' }}
+            >
+              {orden === 'asc' ? '↑ Más viejos primero' : '↓ Más nuevos primero'}
+            </Link>
+            <Link href="/cultivos/nuevo" className="btn">+ Nuevo lote</Link>
+          </div>
         </div>
 
         {/* Buscador */}
@@ -94,7 +115,7 @@ export default async function CultivosPage({
           </div>
         ) : (
           lotesFiltrados.map((lote) => (
-            <LoteCard key={lote.id_lote} lote={lote} movimientos={movimientos} ubicaciones={ubicaciones} variedades={variedades} />
+            <LoteCard key={lote.id_lote} lote={lote} movimientos={movimientos} ubicaciones={ubicaciones} variedades={variedades} ciclosReales={ciclosReales} />
           ))
         )}
       </div>

@@ -16,13 +16,14 @@ function fmt(f: string): string {
   if (!f) return '-';
   try { const [, m, d] = String(f).split('-'); return d + '/' + m; } catch { return f; }
 }
-export default function LoteCard({ lote, movimientos, ubicaciones, variedades }: { lote: Lote; movimientos: Movimiento[]; ubicaciones: Ubicacion[]; variedades: Variedad[] }) {
+export default function LoteCard({ lote, movimientos, ubicaciones, variedades, ciclosReales }: { lote: Lote; movimientos: Movimiento[]; ubicaciones: Ubicacion[]; variedades: Variedad[]; ciclosReales?: Map<string, number> }) {
   let dias: any;
   try { dias = calcularDiasPorFase(lote, movimientos); }
   catch { dias = { plantinera: 0, fase_1: null, fase_2: 0, total: 0, fechas: { siembra: '', fase_1_inicio: null, fase_2_inicio: null, cosecha: null } }; }
   const plantas = estimarPlantasActuales(lote, ubicaciones);
   const nave = naveDeLote(lote.id_lote);
   const varDef = variedades.find((v) => v.variedad === lote.variedad);
+  const diasEstimados = ciclosReales?.get(lote.variedad) || Number(varDef?.dias_estimados_cosecha) || 35;
   const t = tipo(lote.variedad); const col = COL[t];
   const ubic = String(lote.ubicacion_actual || '');
   const mesada = ubic.replace(/^Nave \d+ - /, '');
@@ -49,7 +50,7 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades }:
           <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#6b7280' }}>
             {plantas > 0 ? '~' + plantas + ' plantas' : (lote.plantines_iniciales || 0) + ' plantines'}
             {' · '}<strong>{dias.total}d</strong> desde siembra
-            {varDef && <span style={{ color: '#9ca3af' }}> · ciclo est. {varDef.dias_estimados_cosecha}d</span>}
+            {varDef && <span style={{ color: '#9ca3af' }}> · ciclo est. {diasEstimados}d</span>}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
@@ -59,7 +60,7 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades }:
       </div>
       {/* Barra de progreso del ciclo — solo lotes activos */}
       {varDef && lote.estado === 'activo' && (() => {
-        const diasEst = Number(varDef.dias_estimados_cosecha) || 35;
+        const diasEst = Number(diasEstimados) || 35;
         const pct = Math.min(Math.round((dias.total / diasEst) * 100), 100);
         const colorBarra = pct >= 100 ? '#dc2626' : pct >= 80 ? '#d97706' : '#16a34a';
         return (
