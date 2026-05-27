@@ -15,7 +15,8 @@ export interface Lote {
   id_lote: string; variedad: string; fecha_siembra: string;
   plantines_iniciales: number; fase_actual: Fase; ubicacion_actual: string;
   tubos_ocupados_actual: number | ''; plantas_estimadas_actual: number | '';
-  fecha_ult_movimiento: string; fecha_cosecha: string;
+  fecha_ult_movimiento: string; fecha_f1: string; fecha_f2: string; fecha_cosecha: string;
+  dias_plantinera: number | ''; dias_f1: number | ''; dias_f2: number | ''; dias_total: number | '';
   unidades_cosechadas: number | ''; plantas_por_unidad_real: number | '';
   descarte_reportado: number | ''; peso_muestra_kg: number | '';
   peso_total_estimado_kg: number | ''; usuario_creador: string;

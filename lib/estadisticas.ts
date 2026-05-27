@@ -270,7 +270,8 @@ export interface ResumenCosechaCultivo {
 
 export function resumenCosechaPorCultivo(
   lotes: Lote[],
-  variedades: import('./types').Variedad[]
+  variedades: import('./types').Variedad[],
+  movimentos: import('./types').Movimiento[] = []
 ): ResumenCosechaCultivo[] {
   const hoy = new Date();
   const diaHoy = hoy.getDate();
@@ -332,17 +333,18 @@ export function resumenCosechaPorCultivo(
       ? Math.round(((cosechadoMes - cosechadoMesAntProporcional) / cosechadoMesAntProporcional) * 100)
       : null;
 
-    // Proyectado: solo lotes en F2 cuya fecha estimada de cosecha cae en el resto del mes
-    // Usa fecha_f2 + días restantes de F2 para ser más preciso
+    // Proyectado: lotes en F1 o F2 cuya fecha estimada de cosecha cae en el resto del mes
+    // Usa ciclo real calculado de los últimos cosechados de cada variedad
+    const ciclosRealesMap = cicloRealPorVariedad(lotes, [], 5);
+    
     const proyectadoRestoMes = lotes
       .filter((l) => {
         if (l.estado !== 'activo') return false;
-        if (l.fase_actual !== 'fase_2') return false;
+        if (l.fase_actual !== 'fase_1' && l.fase_actual !== 'fase_2') return false;
         if (!matchCultivo(l.variedad, cultivo)) return false;
-        // Intentar usar fecha_f2 si existe
+        // Usar ciclo real si existe, sino el de la variedad, sino 70 días
         const varDef = variedades.find((v) => v.variedad === l.variedad);
-        const diasCiclo = Number(varDef?.dias_estimados_cosecha) || 35;
-        // Calcular fecha estimada de cosecha desde siembra
+        const diasCiclo = ciclosRealesMap.get(l.variedad) || Number(varDef?.dias_estimados_cosecha) || 70;
         const siembra = safeParseDate(l.fecha_siembra);
         if (!siembra) return false;
         const est = new Date(siembra);
@@ -359,24 +361,22 @@ export function resumenCosechaPorCultivo(
 // Calcula el promedio de días de ciclo de los últimos N lotes cosechados de una variedad
 export function cicloRealPorVariedad(
   lotes: Lote[],
-  movimientos: import('./types').Movimiento[],
+  _movimientos: any[] = [],
   ultimos: number = 5
 ): Map<string, number> {
   const resultado = new Map<string, number>();
-  const variedades = Array.from(new Set(lotes.filter(l => l.estado === 'cosechado').map(l => l.variedad)));
+  const variedadesUnicas = Array.from(new Set(lotes.filter(l => l.estado === 'cosechado').map(l => l.variedad)));
   
-  for (const variedad of variedades) {
+  for (const variedad of variedadesUnicas) {
     const cosechados = lotes
-      .filter(l => l.estado === 'cosechado' && l.variedad === variedad)
+      .filter(l => l.estado === 'cosechado' && l.variedad === variedad && Number(l.dias_total) > 0)
       .sort((a, b) => String(b.fecha_cosecha || '').localeCompare(String(a.fecha_cosecha || '')))
       .slice(0, ultimos);
     
     if (cosechados.length === 0) continue;
     
     const dias = cosechados
-      .map(l => {
-        try { return calcularDiasPorFase(l, movimientos).total; } catch { return 0; }
-      })
+      .map(l => Number(l.dias_total) || 0)
       .filter(d => d > 0);
     
     if (dias.length > 0) {
