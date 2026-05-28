@@ -1,9 +1,9 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import { ocupacionPorNave, proyectarEntregas, ocupacionPlantineras, tubosPorMesada } from '@/lib/ocupacion';
-import { diasPromedioPorVariedad, mapaDiasPromedio } from '@/lib/estadisticas';
-import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
+import { tubosPorMesada } from '@/lib/ocupacion';
+import { calcularCapacidadMensual } from '@/lib/capacidad';
+import type { Lote, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
 export const dynamic = 'force-dynamic';
 
@@ -11,129 +11,115 @@ export default async function OcupacionPage() {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
 
-  let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [];
+  let lotes: Lote[] = [], ubicaciones: Ubicacion[] = [];
   try {
-    [lotes, movimientos, ubicaciones] = await Promise.all([
-      readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'), readSheet<Ubicacion>('Ubicaciones'),
+    [lotes, ubicaciones] = await Promise.all([
+      readSheet<Lote>('Lotes'),
+      readSheet<Ubicacion>('Ubicaciones'),
     ]);
   } catch {}
 
-  let naves: any[] = [], tiempos: any[] = [], entregas: any[] = [], plantineras: any[] = [], tubosPorNave: any[] = [];
-  try {
-    naves = ocupacionPorNave(ubicaciones, lotes);
-    plantineras = ocupacionPlantineras(ubicaciones, lotes);
-    tiempos = diasPromedioPorVariedad(lotes, movimientos, 60);
-    const diasMap = mapaDiasPromedio(lotes, movimientos);
-    entregas = proyectarEntregas(lotes, diasMap, 2);
-    tubosPorNave = tubosPorMesada(ubicaciones, lotes);
-  } catch {}
+  const tubosPorNave = tubosPorMesada(ubicaciones, lotes);
+  const capacidad = calcularCapacidadMensual(ubicaciones, lotes);
 
   const tubosTotalGlobal = tubosPorNave.reduce((a: number, n: any) => a + n.tubos_totales, 0);
   const tubosOcupGlobal = tubosPorNave.reduce((a: number, n: any) => a + n.tubos_ocupados, 0);
-  const tubosLibresGlobal = tubosTotalGlobal - tubosOcupGlobal;
-  const ocTubosGlobal = tubosTotalGlobal > 0 ? Math.round((tubosOcupGlobal / tubosTotalGlobal) * 100) : 0;
+  const ocPct = tubosTotalGlobal > 0 ? Math.round((tubosOcupGlobal / tubosTotalGlobal) * 100) : 0;
 
   function colorOc(pct: number) {
-    return pct >= 80 ? '#059669' : pct >= 50 ? '#d97706' : '#dc2626';
+    return pct >= 75 ? '#059669' : pct >= 40 ? '#d97706' : '#9ca3af';
   }
 
-  function labelFase(f: string) {
-    return f === 'fase_1' ? 'F1' : f === 'fase_2' ? 'F2' : f;
-  }
-
-  function labelVariedad(v: string) {
-    if (v === 'lechuga') return 'Lechuga';
-    if (v === 'rucula') return 'Rúcula';
-    return v;
-  }
+  const totalLechugaMes = capacidad.reduce((a, n) => a + n.subtotal_lechuga.plantas_por_mes, 0);
+  const totalRuculaMes = capacidad.reduce((a, n) => a + n.subtotal_rucula.plantas_por_mes, 0);
 
   return (
     <>
       <Header user={user} current="ocupacion" />
       <div className="container">
-        <h1 className="page-title">Ocupación e indicadores</h1>
-        <p className="page-subtitle">Tubos ocupados vs disponibles · Por mesada y nave · F1 y F2</p>
+        <h1 className="page-title">Ocupación y capacidad</h1>
+        <p className="page-subtitle">Tubos ocupados vs disponibles · Capacidad productiva mensual</p>
+
+        {/* ===== SECCIÓN 1: OCUPACIÓN ACTUAL ===== */}
+        <h2 style={{ fontSize: '15px', fontWeight: 600, margin: '0 0 12px', color: '#374151' }}>
+          Ocupación actual
+        </h2>
 
         {/* Stats globales */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginBottom: '16px' }}>
           {[
-            ['Ocupación global (tubos)', ocTubosGlobal + '%', tubosOcupGlobal.toLocaleString('es-AR') + ' de ' + tubosTotalGlobal.toLocaleString('es-AR')],
-            ['Tubos ocupados', tubosOcupGlobal.toLocaleString('es-AR'), 'en mesadas F1 y F2'],
-            ['Tubos libres', tubosLibresGlobal.toLocaleString('es-AR'), 'disponibles ahora'],
+            ['Ocupación global', ocPct + '%', `${tubosOcupGlobal.toLocaleString('es-AR')} / ${tubosTotalGlobal.toLocaleString('es-AR')} tubos`],
+            ['Tubos ocupados', tubosOcupGlobal.toLocaleString('es-AR'), 'en F1 y F2'],
+            ['Tubos libres', (tubosTotalGlobal - tubosOcupGlobal).toLocaleString('es-AR'), 'disponibles'],
           ].map(([label, value, sub]: any) => (
-            <div key={label} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px' }}>
-              <p style={{ margin: 0, fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{label}</p>
-              <p style={{ margin: '6px 0 0', fontSize: '22px', fontWeight: 600 }}>{value}</p>
-              <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#6b7280' }}>{sub}</p>
+            <div key={label} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '14px' }}>
+              <p style={{ margin: 0, fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{label}</p>
+              <p style={{ margin: '4px 0 0', fontSize: '20px', fontWeight: 600 }}>{value}</p>
+              <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#9ca3af' }}>{sub}</p>
             </div>
           ))}
         </div>
 
-        {/* Tubos por nave y mesada */}
+        {/* Tabla de tubos por nave */}
         {tubosPorNave.map((nave: any) => (
-          <div key={nave.nave} className="card" style={{ marginBottom: '16px' }}>
-            {/* Header nave */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+          <div key={nave.nave} className="card" style={{ marginBottom: '14px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ background: nave.nave === 1 ? '#1e40af' : '#7c3aed', color: 'white', padding: '3px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 700 }}>
+                <span style={{ background: nave.nave === 1 ? '#1e40af' : '#7c3aed', color: 'white', padding: '2px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 700 }}>
                   NAVE {nave.nave}
                 </span>
-                <span style={{ fontSize: '13px', color: '#6b7280' }}>
-                  {nave.tubos_ocupados.toLocaleString('es-AR')} / {nave.tubos_totales.toLocaleString('es-AR')} tubos
+                <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                  {nave.tubos_ocupados.toLocaleString('es-AR')} / {nave.tubos_totales.toLocaleString('es-AR')} tubos · {nave.ocupacion_pct}%
                 </span>
               </div>
-              <span style={{ fontSize: '16px', fontWeight: 700, color: colorOc(nave.ocupacion_pct) }}>
-                {nave.ocupacion_pct}%
-              </span>
+              <div style={{ width: '100px', height: '5px', background: '#f3f4f6', borderRadius: '3px', overflow: 'hidden' }}>
+                <div style={{ width: Math.min(100, nave.ocupacion_pct) + '%', height: '100%', background: nave.nave === 1 ? '#1e40af' : '#7c3aed' }} />
+              </div>
             </div>
 
-            {/* Barra global de la nave */}
-            <div style={{ height: '6px', background: '#f3f4f6', borderRadius: '4px', overflow: 'hidden', marginBottom: '16px' }}>
-              <div style={{ width: Math.min(100, nave.ocupacion_pct) + '%', height: '100%', background: nave.nave === 1 ? '#1e40af' : '#7c3aed', borderRadius: '4px' }} />
-            </div>
-
-            {/* Tabla de mesadas */}
             <table>
               <thead>
                 <tr>
                   <th>Mesada</th>
-                  <th>Fase</th>
-                  <th>Variedad</th>
+                  <th style={{ textAlign: 'center' }}>Fase</th>
                   <th style={{ textAlign: 'right' }}>Tubos totales</th>
                   <th style={{ textAlign: 'right' }}>Ocupados</th>
                   <th style={{ textAlign: 'right' }}>Libres</th>
-                  <th style={{ textAlign: 'right' }}>Ocupación</th>
+                  <th style={{ textAlign: 'right' }}>Uso</th>
                   <th style={{ textAlign: 'right' }}>Lotes</th>
                 </tr>
               </thead>
               <tbody>
                 {nave.mesadas.map((m: any) => (
                   <tr key={m.id_ubicacion}>
-                    <td style={{ fontWeight: 500 }}>{m.nombre.replace(/^Nave \d+ - /, '')}</td>
-                    <td>
-                      <span className={`pill ${m.sector_fase === 'fase_1' ? 'fase1' : 'fase2'}`} style={{ fontSize: '10px' }}>
-                        {labelFase(m.sector_fase)}
+                    <td style={{ fontWeight: 500, fontSize: '13px' }}>
+                      {m.nombre.replace(/^Nave \d+ - /, '')}
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <span style={{
+                        background: m.sector_fase === 'fase_1' ? '#dbeafe' : '#dcfce7',
+                        color: m.sector_fase === 'fase_1' ? '#1e40af' : '#166534',
+                        padding: '1px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600,
+                      }}>
+                        {m.sector_fase === 'fase_1' ? 'F1' : 'F2'}
                       </span>
                     </td>
-                    <td style={{ color: m.variedad_asignada === 'lechuga' ? '#4d7c0f' : '#166534', fontWeight: 500, fontSize: '12px' }}>
-                      {labelVariedad(m.variedad_asignada)}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>{m.tubos_totales}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 500 }}>{m.tubos_ocupados}</td>
+                    <td style={{ textAlign: 'right' }}>{m.tubos_totales.toLocaleString('es-AR')}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{m.tubos_ocupados.toLocaleString('es-AR')}</td>
                     <td style={{ textAlign: 'right', color: m.tubos_libres > 0 ? '#059669' : '#9ca3af', fontWeight: 500 }}>
-                      {m.tubos_libres}
+                      {m.tubos_libres.toLocaleString('es-AR')}
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'flex-end' }}>
-                        <div style={{ width: '60px', height: '5px', background: '#f3f4f6', borderRadius: '3px', overflow: 'hidden' }}>
-                          <div style={{ width: Math.min(100, m.ocupacion_pct) + '%', height: '100%', background: colorOc(m.ocupacion_pct), borderRadius: '3px' }} />
+                        <div style={{ width: '50px', height: '4px', background: '#f3f4f6', borderRadius: '2px', overflow: 'hidden' }}>
+                          <div style={{ width: Math.min(100, m.ocupacion_pct) + '%', height: '100%', background: colorOc(m.ocupacion_pct) }} />
                         </div>
-                        <span style={{ fontSize: '12px', fontWeight: 600, color: colorOc(m.ocupacion_pct), minWidth: '32px', textAlign: 'right' }}>
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: colorOc(m.ocupacion_pct), minWidth: '30px', textAlign: 'right' }}>
                           {m.ocupacion_pct}%
                         </span>
                       </div>
                     </td>
-                    <td style={{ textAlign: 'right', color: '#6b7280', fontSize: '12px' }}>{m.lotes_count}</td>
+                    <td style={{ textAlign: 'right', color: '#9ca3af', fontSize: '12px' }}>{m.lotes_count}</td>
                   </tr>
                 ))}
               </tbody>
@@ -141,89 +127,100 @@ export default async function OcupacionPage() {
           </div>
         ))}
 
-        {/* Plantineras */}
-        {plantineras.length > 0 && (
-          <div className="card">
-            <p className="card-title">Plantineras</p>
-            <p className="card-sub">Capacidad de bandejas · No incluida en ocupación de mesadas</p>
-            {plantineras.map((p: any) => {
-              const color = p.ocupacion_pct >= 85 ? '#d97706' : p.ocupacion_pct >= 50 ? '#059669' : '#9ca3af';
-              return (
-                <div key={p.nombre} style={{ marginBottom: '14px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
-                    <span style={{ fontWeight: 500 }}>{p.nombre}</span>
-                    <span style={{ color: '#6b7280' }}>
-                      <strong style={{ color: '#1f2937' }}>{p.plantines.toLocaleString('es-AR')}</strong>
-                      {' / '}{p.capacidad.toLocaleString('es-AR')} plantines
-                      {' · '}<span style={{ color }}>{p.ocupacion_pct}%</span>
-                      {p.libres > 0 && <span style={{ color: '#059669' }}> · {p.libres.toLocaleString('es-AR')} libres</span>}
-                    </span>
-                  </div>
-                  <div style={{ height: '7px', background: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
-                    <div style={{ width: Math.min(100, p.ocupacion_pct) + '%', height: '100%', background: color, borderRadius: '4px' }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        {/* ===== SECCIÓN 2: CAPACIDAD MENSUAL ===== */}
+        <h2 style={{ fontSize: '15px', fontWeight: 600, margin: '24px 0 12px', color: '#374151' }}>
+          Capacidad productiva mensual
+        </h2>
+        <p style={{ fontSize: '12px', color: '#6b7280', margin: '-8px 0 14px' }}>
+          Días de ciclo calculados desde los últimos lotes cosechados de cada mesada · F1 lechuga = buffer, no cosecha directo
+        </p>
 
-        {/* Proyección entregas */}
-        {entregas.length > 0 && (
-          <div className="card">
-            <p className="card-title">Proyección de entregas</p>
-            <p className="card-sub">Basado en ciclos estimados de lotes activos.</p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '10px' }}>
-              {entregas.map((e: any, i: number) => (
-                <div key={i} style={{ background: i < 2 ? '#dbeafe' : '#f9fafb', borderRadius: '8px', padding: '12px 14px' }}>
-                  <p style={{ margin: '0 0 4px', fontSize: '10px', color: i < 2 ? '#1e40af' : '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>
-                    {e.diaSemana.charAt(0).toUpperCase() + e.diaSemana.slice(1)} · {e.fecha}
-                  </p>
-                  <p style={{ margin: '0 0 6px', fontSize: i < 2 ? '18px' : '16px', fontWeight: 600, color: i < 2 ? '#1e40af' : '#374151' }}>
-                    {e.total_plantas.toLocaleString('es-AR')} plantas
-                  </p>
-                  <div style={{ fontSize: '11px', color: i < 2 ? '#1e40af' : '#6b7280', lineHeight: 1.6 }}>
-                    {e.lechuga_crespa > 0 && <div>L. Crespa: {e.lechuga_crespa}</div>}
-                    {e.lechuga_roble > 0 && <div>H. Roble: {e.lechuga_roble}</div>}
-                    {e.rucula_plantas > 0 && <div>Rúcula: {e.rucula_plantas} (~{e.rucula_paquetes_aprox} paq)</div>}
-                    {e.albahaca_plantas > 0 && <div>Albahaca: {e.albahaca_plantas} (~{e.albahaca_paquetes_aprox} paq)</div>}
-                  </div>
-                </div>
-              ))}
+        {capacidad.map((nave) => (
+          <div key={nave.nave} className="card" style={{ marginBottom: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+              <span style={{ background: nave.nave === 1 ? '#1e40af' : '#7c3aed', color: 'white', padding: '2px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 700 }}>
+                NAVE {nave.nave}
+              </span>
+              <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                {nave.total_plantas_por_mes.toLocaleString('es-AR')} plantas estimadas/mes
+              </span>
             </div>
-          </div>
-        )}
 
-        {/* Tiempos promedio */}
-        {tiempos.length > 0 && (
-          <div className="card">
-            <p className="card-title">Tiempos promedio por fase (últimos 60 días)</p>
             <table>
               <thead>
                 <tr>
-                  <th>Variedad</th>
-                  <th style={{ textAlign: 'right' }}>Plantinera</th>
-                  <th style={{ textAlign: 'right' }}>F1</th>
-                  <th style={{ textAlign: 'right' }}>F2</th>
-                  <th style={{ textAlign: 'right' }}>Total</th>
-                  <th style={{ textAlign: 'right' }}>Lotes</th>
+                  <th>Configuración</th>
+                  <th style={{ textAlign: 'right' }}>Perfiles</th>
+                  <th style={{ textAlign: 'right' }}>Orif/perf</th>
+                  <th style={{ textAlign: 'right' }}>Posiciones</th>
+                  <th style={{ textAlign: 'right' }}>Días ciclo</th>
+                  <th style={{ textAlign: 'right' }}>Ciclos/mes</th>
+                  <th style={{ textAlign: 'right' }}>Plantas/mes</th>
                 </tr>
               </thead>
               <tbody>
-                {tiempos.map((t: any) => (
-                  <tr key={t.variedad}>
-                    <td>{t.variedad}</td>
-                    <td style={{ textAlign: 'right' }}>{t.plantinera}d</td>
-                    <td style={{ textAlign: 'right', color: t.fase_1 === null ? '#9ca3af' : 'inherit' }}>{t.fase_1 === null ? '—' : t.fase_1 + 'd'}</td>
-                    <td style={{ textAlign: 'right' }}>{t.fase_2}d</td>
-                    <td style={{ textAlign: 'right', fontWeight: 500 }}>{t.total}d</td>
-                    <td style={{ textAlign: 'right', color: '#6b7280' }}>{t.lotes_count}</td>
+                {nave.filas.map((f) => (
+                  <tr key={f.id_ubicacion} style={{ opacity: f.es_f1 ? 0.5 : 1 }}>
+                    <td style={{ fontWeight: 500 }}>
+                      {f.nombre_corto}
+                      {f.es_f1 && <span style={{ fontSize: '10px', color: '#9ca3af', marginLeft: '6px' }}>(buffer)</span>}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>{f.perfiles}</td>
+                    <td style={{ textAlign: 'right' }}>{f.orif_por_perfil}</td>
+                    <td style={{ textAlign: 'right' }}>{f.posiciones.toLocaleString('es-AR')}</td>
+                    <td style={{ textAlign: 'right', color: f.es_f1 ? '#9ca3af' : '#374151' }}>
+                      {f.es_f1 ? '—' : f.dias_ciclo + 'd'}
+                    </td>
+                    <td style={{ textAlign: 'right', color: f.es_f1 ? '#9ca3af' : '#374151' }}>
+                      {f.es_f1 ? '—' : f.ciclos_por_mes.toFixed(2)}
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: f.es_f1 ? 400 : 600, color: f.es_f1 ? '#9ca3af' : '#1f2937' }}>
+                      {f.es_f1 ? '—' : f.plantas_por_mes.toLocaleString('es-AR')}
+                    </td>
                   </tr>
                 ))}
+
+                {/* Subtotal Lechuga */}
+                <tr style={{ background: '#f0fdf4', fontWeight: 600 }}>
+                  <td colSpan={3} style={{ color: '#166534', fontSize: '12px' }}>N{nave.nave} — Subtotal LECHUGA (F2)</td>
+                  <td style={{ textAlign: 'right', color: '#166534' }}>{nave.subtotal_lechuga.posiciones.toLocaleString('es-AR')}</td>
+                  <td colSpan={2} />
+                  <td style={{ textAlign: 'right', color: '#166534' }}>{nave.subtotal_lechuga.plantas_por_mes.toLocaleString('es-AR')}</td>
+                </tr>
+
+                {/* Subtotal Rúcula */}
+                <tr style={{ background: '#f0fdf4', fontWeight: 600 }}>
+                  <td colSpan={3} style={{ color: '#047857', fontSize: '12px' }}>N{nave.nave} — Subtotal RÚCULA</td>
+                  <td style={{ textAlign: 'right', color: '#047857' }}>{nave.subtotal_rucula.posiciones.toLocaleString('es-AR')}</td>
+                  <td colSpan={2} />
+                  <td style={{ textAlign: 'right', color: '#047857' }}>{nave.subtotal_rucula.plantas_por_mes.toLocaleString('es-AR')}</td>
+                </tr>
+
+                {/* Total nave */}
+                <tr style={{ background: '#dcfce7', fontWeight: 700 }}>
+                  <td colSpan={6} style={{ color: '#14532d', fontSize: '13px' }}>TOTAL NAVE {nave.nave} (plantas/mes)</td>
+                  <td style={{ textAlign: 'right', color: '#14532d', fontSize: '14px' }}>{nave.total_plantas_por_mes.toLocaleString('es-AR')}</td>
+                </tr>
               </tbody>
             </table>
           </div>
-        )}
+        ))}
+
+        {/* Totales globales */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', marginTop: '4px' }}>
+          {[
+            ['TOTAL LECHUGA (ambas naves)', totalLechugaMes.toLocaleString('es-AR'), 'plantas/mes', '#4d7c0f'],
+            ['TOTAL RÚCULA (ambas naves)', totalRuculaMes.toLocaleString('es-AR'), 'plantas/mes', '#166534'],
+            ['TOTAL GENERAL', (totalLechugaMes + totalRuculaMes).toLocaleString('es-AR'), 'plantas/mes', '#1e40af'],
+          ].map(([label, value, sub, color]: any) => (
+            <div key={label} style={{ background: 'white', border: `2px solid ${color}20`, borderRadius: '10px', padding: '14px' }}>
+              <p style={{ margin: 0, fontSize: '10px', color, textTransform: 'uppercase', letterSpacing: '0.3px', fontWeight: 600 }}>{label}</p>
+              <p style={{ margin: '4px 0 0', fontSize: '24px', fontWeight: 700, color }}>{value}</p>
+              <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#9ca3af' }}>{sub}</p>
+            </div>
+          ))}
+        </div>
+
       </div>
     </>
   );
