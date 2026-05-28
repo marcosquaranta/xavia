@@ -169,16 +169,23 @@ export function tubosPorMesada(ubicaciones: Ubicacion[], lotes: Lote[]): Resumen
     .sort((a, b) => Number(a.orden_visual) - Number(b.orden_visual))
     .map((u) => {
       const tubosTotal = Number(u.perfiles_por_modulo) || 0;
-      // Matching flexible: normaliza tildes y sufijos entre paréntesis
+      // Matching flexible: normaliza tildes pero preserva F1/F2
+      // "Mesada Rucula 1" == "Mesada Rúcula 1" pero "Mesada Lechuga 1 (F1)" != "Mesada Lechuga 1 (F2)"
       function norm(s: string) {
         return s.trim()
-          .replace(/\s*\([^)]+\)\s*$/, '')
           .toLowerCase()
           .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
       }
+      // También intenta sin el sufijo descriptivo entre paréntesis (ej: "(22 orif/tubo)")
+      // pero NUNCA quita "(F1)" o "(F2)"
+      function normBase(s: string) {
+        return norm(s.replace(/\s*\([^F][^)]*\)\s*$/, '').replace(/\s*\(\d[^)]*\)\s*$/, ''));
+      }
       const nombreNorm = norm(u.nombre);
+      const nombreBaseNorm = normBase(u.nombre);
       const lotesAqui = activos.filter((l) => {
-        return norm(String(l.ubicacion_actual || '')) === nombreNorm;
+        const ubic = String(l.ubicacion_actual || '');
+        return norm(ubic) === nombreNorm || normBase(ubic) === nombreBaseNorm;
       });
       const tubosOcup = lotesAqui.reduce((acc, l) => acc + (Number(l.tubos_ocupados_actual) || 0), 0);
       const pct = tubosTotal > 0 ? Math.round((tubosOcup / tubosTotal) * 100) : 0;

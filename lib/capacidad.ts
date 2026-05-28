@@ -45,15 +45,15 @@ function cicloRealEnMesada(
         ? v.includes('rucula') || v.includes('rúcula')
         : !v.includes('rucula') && !v.includes('rúcula') && !v.includes('albahaca');
       if (!matchVar) return false;
-      // Matching flexible: normaliza tildes y sufijos entre paréntesis
+      // Matching flexible: normaliza tildes pero preserva distinción F1/F2
       function normStr(s: string) {
-        return s.trim()
-          .replace(/\s*\([^)]+\)\s*$/, '')
-          .toLowerCase()
-          .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        return s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
       }
-      const ubic = String(l.ubicacion_actual || '').trim();
-      return normStr(ubic) === normStr(nombreUbicacion);
+      function normBaseStr(s: string) {
+        return normStr(s.replace(/\s*\([^F][^)]*\)\s*$/, '').replace(/\s*\(\d[^)]*\)\s*$/, ''));
+      }
+      const ubic = String(l.ubicacion_actual || '');
+      return normStr(ubic) === normStr(nombreUbicacion) || normBaseStr(ubic) === normBaseStr(nombreUbicacion);
     })
     .sort((a, b) => String(b.fecha_cosecha || '').localeCompare(String(a.fecha_cosecha || '')))
     .slice(0, ultimos);
