@@ -169,7 +169,17 @@ export function tubosPorMesada(ubicaciones: Ubicacion[], lotes: Lote[]): Resumen
     .sort((a, b) => Number(a.orden_visual) - Number(b.orden_visual))
     .map((u) => {
       const tubosTotal = Number(u.perfiles_por_modulo) || 0;
-      const lotesAqui = activos.filter((l) => l.ubicacion_actual === u.nombre);
+      // Matching flexible: normaliza tildes y sufijos entre paréntesis
+      function norm(s: string) {
+        return s.trim()
+          .replace(/\s*\([^)]+\)\s*$/, '')
+          .toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      }
+      const nombreNorm = norm(u.nombre);
+      const lotesAqui = activos.filter((l) => {
+        return norm(String(l.ubicacion_actual || '')) === nombreNorm;
+      });
       const tubosOcup = lotesAqui.reduce((acc, l) => acc + (Number(l.tubos_ocupados_actual) || 0), 0);
       const pct = tubosTotal > 0 ? Math.round((tubosOcup / tubosTotal) * 100) : 0;
       return {

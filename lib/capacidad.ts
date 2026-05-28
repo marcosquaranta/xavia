@@ -45,9 +45,15 @@ function cicloRealEnMesada(
         ? v.includes('rucula') || v.includes('rúcula')
         : !v.includes('rucula') && !v.includes('rúcula') && !v.includes('albahaca');
       if (!matchVar) return false;
-      // Buscar por ubicacion_actual o por mesada equivalente (F2 para lechuga)
-      const ubic = String(l.ubicacion_actual || '');
-      return ubic === nombreUbicacion || ubic.includes(nombreUbicacion.replace(/ \(F[12]\)/, ''));
+      // Matching flexible: normaliza tildes y sufijos entre paréntesis
+      function normStr(s: string) {
+        return s.trim()
+          .replace(/\s*\([^)]+\)\s*$/, '')
+          .toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      }
+      const ubic = String(l.ubicacion_actual || '').trim();
+      return normStr(ubic) === normStr(nombreUbicacion);
     })
     .sort((a, b) => String(b.fecha_cosecha || '').localeCompare(String(a.fecha_cosecha || '')))
     .slice(0, ultimos);
