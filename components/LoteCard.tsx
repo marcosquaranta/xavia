@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { calcularDiasPorFase, claseVariedad, estimarPlantasActuales, naveDeLote } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad } from '@/lib/types';
+import { getCicloReal } from '@/lib/estadisticas';
 const COL: Record<string, { bg: string; text: string; label: string }> = {
   lechuga: { bg: '#4d7c0f', text: 'white', label: 'LECHUGA' },
   rucula: { bg: '#166534', text: 'white', label: 'RÚCULA' },
@@ -23,7 +24,7 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades, c
   const plantas = estimarPlantasActuales(lote, ubicaciones);
   const nave = naveDeLote(lote.id_lote);
   const varDef = variedades.find((v) => v.variedad === lote.variedad);
-  const diasEstimados = ciclosReales?.get(lote.variedad) || Number(varDef?.dias_estimados_cosecha) || 35;
+  const diasEstimados = (ciclosReales ? getCicloReal(ciclosReales, lote.variedad) : undefined) || Number(varDef?.dias_estimados_cosecha) || 35;
   const t = tipo(lote.variedad); const col = COL[t];
   const ubic = String(lote.ubicacion_actual || '');
   const mesada = ubic.replace(/^Nave \d+ - /, '');

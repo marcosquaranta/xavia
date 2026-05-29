@@ -41,6 +41,8 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
   let ciclosLechuga = { barras: [] as any[], semanasCosecha: 5 };
   let ciclosRucula  = { barras: [] as any[], semanasCosecha: 3 };
   let resumenCosecha: any[] = [];
+  let tiemposCiclo: any[] = [];
+  let tiemposCicloAnt: any[] = [];
 
   try {
     const mes = cosechadoEsteMes(lotes);
@@ -121,7 +123,9 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
                   <div style={{ textAlign: 'center', padding: '10px 8px', background: '#f9fafb', borderRadius: '6px' }}>
                     <p style={{ margin: '0 0 2px', fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Cosechado mes actual</p>
                     <p style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#111827' }}>{r.cosechadoMes.toLocaleString('es-AR')}</p>
-                    <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#9ca3af' }}>{r.cultivo === 'rucula' ? 'paq.' : 'plantas'}</p>
+                    <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#9ca3af' }}>
+                      {r.cultivo === 'rucula' ? `paq. (~${(r.cosechadoMes * r.plantasPorPaquete).toLocaleString('es-AR')} plantas)` : 'plantas'}
+                    </p>
                   </div>
                   {/* vs mes anterior */}
                   <div style={{ textAlign: 'center', padding: '10px 8px', background: '#f9fafb', borderRadius: '6px' }}>
@@ -141,6 +145,9 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
                     <p style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: r.proyectadoEstaSemana > 0 ? '#854d0e' : '#9ca3af' }}>
                       {r.proyectadoEstaSemana > 0 ? r.proyectadoEstaSemana.toLocaleString('es-AR') : '—'}
                     </p>
+                    {r.cultivo === 'rucula' && r.proyectadoEstaSemana > 0 && (
+                      <p style={{ margin: '1px 0 0', fontSize: '9px', color: '#9ca3af' }}>~{r.proyectadoEstaSemanaPlantas.toLocaleString('es-AR')} plantas</p>
+                    )}
                   </div>
                   <div style={{ textAlign: 'center', padding: '8px 6px', background: r.proyectadoRestoMes > 0 ? '#f0fdf4' : '#f9fafb', borderRadius: '6px', border: r.proyectadoRestoMes > 0 ? '1px solid #86efac' : '1px solid #f3f4f6' }}>
                     <p style={{ margin: '0 0 2px', fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Resto del mes</p>
@@ -200,6 +207,78 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
             <Link href="/estadisticas" className="btn secondary">Estadísticas</Link>
           </div>
         </div>
+
+        {/* Cuadro de ciclos por cultivo */}
+        {tiemposCiclo.length > 0 && (() => {
+          const lechuga = tiemposCiclo.filter((t: any) => !String(t.variedad).toLowerCase().includes('rucula'));
+          const rucula  = tiemposCiclo.filter((t: any) => String(t.variedad).toLowerCase().includes('rucula'));
+          const lAnt    = tiemposCicloAnt.filter((t: any) => !String(t.variedad).toLowerCase().includes('rucula'));
+          const rAnt    = tiemposCicloAnt.filter((t: any) => String(t.variedad).toLowerCase().includes('rucula'));
+
+          function promedioTotal(arr: any[]) { if (!arr.length) return 0; return Math.round(arr.reduce((a:any, t:any) => a + t.total, 0) / arr.length); }
+          function promedioF1(arr: any[]) { const v = arr.filter((t:any) => t.fase_1 !== null); if (!v.length) return 0; return Math.round(v.reduce((a:any, t:any) => a + t.fase_1, 0) / v.length); }
+          function promedioF2(arr: any[]) { if (!arr.length) return 0; return Math.round(arr.reduce((a:any, t:any) => a + t.fase_2, 0) / arr.length); }
+
+          const lTotal = promedioTotal(lechuga); const lAntTotal = promedioTotal(lAnt);
+          const rTotal = promedioTotal(rucula);  const rAntTotal = promedioTotal(rAnt);
+          const lF1 = promedioF1(lechuga); const lF2 = promedioF2(lechuga);
+          const rF2 = promedioF2(rucula);
+          const maxDias = Math.max(lTotal, rTotal, 1);
+
+          function varPct(actual: number, ant: number) { if (!ant) return null; return Math.round(((actual - ant) / ant) * 100); }
+
+          return (
+            <div className="card" style={{ marginBottom: '16px' }}>
+              <p className="card-title">Ciclos promedio en mesadas (últimos 60 días)</p>
+              <p className="card-sub">Sin tiempo de plantinera · Lechuga: F1 + F2 · Rúcula: solo F2</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '12px' }}>
+
+                {/* Lechuga */}
+                {lTotal > 0 && (
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '13px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ background: '#4d7c0f', color: 'white', padding: '1px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>LECHUGA</span>
+                        <span style={{ fontWeight: 600 }}>{lTotal}d total en mesada</span>
+                        {lF1 > 0 && <span style={{ color: '#9ca3af', fontSize: '12px' }}>F1: {lF1}d · F2: {lF2}d</span>}
+                      </div>
+                      {varPct(lTotal, lAntTotal) !== null && (
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: varPct(lTotal, lAntTotal)! <= 0 ? '#059669' : '#dc2626' }}>
+                          {varPct(lTotal, lAntTotal)! <= 0 ? '↓' : '↑'} {Math.abs(varPct(lTotal, lAntTotal)!)}% vs mes ant.
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ height: '20px', background: '#f3f4f6', borderRadius: '6px', overflow: 'hidden', display: 'flex' }}>
+                      {lF1 > 0 && <div style={{ width: (lF1 / maxDias * 100) + '%', background: '#86efac', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 600, color: '#14532d' }}>F1 {lF1}d</div>}
+                      {lF2 > 0 && <div style={{ width: (lF2 / maxDias * 100) + '%', background: '#4d7c0f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 600, color: 'white' }}>F2 {lF2}d</div>}
+                    </div>
+                  </div>
+                )}
+
+                {/* Rúcula */}
+                {rTotal > 0 && (
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '13px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ background: '#166534', color: 'white', padding: '1px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>RÚCULA</span>
+                        <span style={{ fontWeight: 600 }}>{rTotal}d en mesada</span>
+                      </div>
+                      {varPct(rTotal, rAntTotal) !== null && (
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: varPct(rTotal, rAntTotal)! <= 0 ? '#059669' : '#dc2626' }}>
+                          {varPct(rTotal, rAntTotal)! <= 0 ? '↓' : '↑'} {Math.abs(varPct(rTotal, rAntTotal)!)}% vs mes ant.
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ height: '20px', background: '#f3f4f6', borderRadius: '6px', overflow: 'hidden', display: 'flex' }}>
+                      {rF2 > 0 && <div style={{ width: (rF2 / maxDias * 100) + '%', background: '#166534', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 600, color: 'white' }}>F2 {rF2}d</div>}
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Lotes con filtros */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>

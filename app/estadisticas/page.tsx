@@ -36,10 +36,11 @@ export default async function EstadisticasPage() {
   const varActivas = variedades.filter((v) => v.activo === 'SI');
 
   let statsActual: any[] = [], statsPasado: any[] = [];
+  let errStats: string | null = null;
   try {
     statsActual = estadisticasDelMes(lotes, movimientos, hoy);
     statsPasado = estadisticasDelMes(lotes, movimientos, mesPasado);
-  } catch {}
+  } catch (e: any) { errStats = e?.message || 'Error en estadísticas'; }
 
   // Construir curvas para todas las variedades activas
   const curvas: { variedad: string; datosActual: [number, number][]; datosAnterior: [number, number][] }[] = [];
@@ -48,14 +49,14 @@ export default async function EstadisticasPage() {
     const cAnt = ciclosPorMesYAnio(lotes, movimientos, anioAnterior);
     for (const v of varActivas) {
       const datosActual = Array.from((cA.get(v.variedad) || new Map()).entries())
-        .filter(([k]) => k < 12) as [number, number][];
+        .filter(([k]: any) => k < 12) as [number, number][];
       const datosAnterior = Array.from((cAnt.get(v.variedad) || new Map()).entries())
-        .filter(([k]) => k < 12) as [number, number][];
+        .filter(([k]: any) => k < 12) as [number, number][];
       if (datosActual.length > 0 || datosAnterior.length > 0) {
         curvas.push({ variedad: v.variedad, datosActual, datosAnterior });
       }
     }
-  } catch {}
+  } catch (e: any) { errStats = (errStats || '') + ' | ' + (e?.message || 'Error en curvas'); }
 
   return (
     <>

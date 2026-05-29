@@ -280,9 +280,11 @@ export interface ResumenCosechaCultivo {
   cosechadoMes: number;
   cosechadoMesAntProporcional: number;
   variacionPct: number | null;
-  proyectadoEstaSemana: number;  // próximos 7 días
-  proyectadoRestoMes: number;    // después de esta semana hasta fin de mes
-  proyectadoMesTotal: number;    // esta semana + resto
+  proyectadoEstaSemana: number;      // próximos 7 días (en plantas para lechuga, paquetes para rúcula)
+  proyectadoEstaSemanaPlantas: number; // siempre en plantas
+  proyectadoRestoMes: number;
+  proyectadoMesTotal: number;
+  plantasPorPaquete: number;          // factor de conversión rúcula (default 3)
 }
 
 export function resumenCosechaPorCultivo(
@@ -373,18 +375,26 @@ export function resumenCosechaPorCultivo(
       matchCultivo(l.variedad, cultivo)
     );
 
-    let proyectadoEstaSemana = 0;
-    let proyectadoRestoMes = 0;
+    const PLANTAS_POR_PAQUETE = 3; // rúcula: default 3 plantas por paquete
+    let proyectadoPlantas7d = 0;
+    let proyectadoPlantasResto = 0;
     for (const l of lotesActivos) {
       const est = estCosecha(l);
       if (!est) continue;
       const plantas = Number(l.plantas_estimadas_actual) || 0;
-      if (est >= hoy && est <= enSemana) proyectadoEstaSemana += plantas;
-      else if (est > enSemana && est <= finMesActual) proyectadoRestoMes += plantas;
+      if (est >= hoy && est <= enSemana) proyectadoPlantas7d += plantas;
+      else if (est > enSemana && est <= finMesActual) proyectadoPlantasResto += plantas;
     }
+
+    // Convertir a unidades finales: rúcula en paquetes, lechuga en plantas
+    const convFactor = (cultivo === 'rucula') ? PLANTAS_POR_PAQUETE : 1;
+    const proyectadoEstaSemana = Math.round(proyectadoPlantas7d / convFactor);
+    const proyectadoRestoMes = Math.round(proyectadoPlantasResto / convFactor);
     const proyectadoMesTotal = proyectadoEstaSemana + proyectadoRestoMes;
 
-    return { cultivo, label, cosechadoMes, cosechadoMesAntProporcional, variacionPct, proyectadoEstaSemana, proyectadoRestoMes, proyectadoMesTotal };
+    return { cultivo, label, cosechadoMes, cosechadoMesAntProporcional, variacionPct,
+      proyectadoEstaSemana, proyectadoEstaSemanaPlantas: proyectadoPlantas7d,
+      proyectadoRestoMes, proyectadoMesTotal, plantasPorPaquete: PLANTAS_POR_PAQUETE };
   });
 }
 
@@ -396,23 +406,40 @@ export function cicloRealPorVariedad(
   ultimos: number = 5
 ): Map<string, number> {
   const resultado = new Map<string, number>();
-  const variedadesUnicas = Array.from(new Set(lotes.filter(l => l.estado === 'cosechado').map(l => l.variedad)));
-  
-  for (const variedad of variedadesUnicas) {
-    const cosechados = lotes
-      .filter(l => l.estado === 'cosechado' && l.variedad === variedad && Number(l.dias_total) > 0)
+
+  // Normalizar nombre de variedad para matching sin tildes
+  function normVar(s: string) {
+    return s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+
+  // Agrupar cosechados por variedad normalizada
+  const cosechadosTodos = lotes.filter(l => l.estado === 'cosechado' && Number(l.dias_total) >= 20);
+  const varNorms = Array.from(new Set(cosechadosTodos.map(l => normVar(l.variedad))));
+
+  for (const varNorm of varNorms) {
+    const cosechados = cosechadosTodos
+      .filter(l => normVar(l.variedad) === varNorm)
       .sort((a, b) => String(b.fecha_cosecha || '').localeCompare(String(a.fecha_cosecha || '')))
       .slice(0, ultimos);
+
+    const dias = cosechados.map(l => Number(l.dias_total)).filter(d => d >= 20);
+    if (dias.length === 0) continue;
+
+    const promedio = Math.round(dias.reduce((a, b) => a + b, 0) / dias.length);
     
-    if (cosechados.length === 0) continue;
-    
-    const dias = cosechados
-      .map(l => Number(l.dias_total) || 0)
-      .filter(d => d > 0);
-    
-    if (dias.length > 0) {
-      resultado.set(variedad, Math.round(dias.reduce((a, b) => a + b, 0) / dias.length));
+    // Guardar con el nombre original Y con la variedad normalizada
+    // para que el lookup funcione independientemente de tildes
+    for (const l of cosechados) {
+      resultado.set(l.variedad, promedio);
     }
+    // También guardar por nombre normalizado para lookup desde lotes activos
+    resultado.set(varNorm, promedio);
   }
   return resultado;
+}
+
+// Lookup con normalización de tildes
+export function getCicloReal(ciclosReales: Map<string, number>, variedad: string): number | undefined {
+  const norm = (s: string) => s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return ciclosReales.get(variedad) ?? ciclosReales.get(norm(variedad));
 }
