@@ -148,7 +148,7 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
           </h2>
         </div>
         <BuscadorLote baseUrl="/panel" />
-        {!query && <FiltrosLotes cultivoActivo={cultivo} faseActiva={fase} naveActiva={nave} conteos={conteos} baseUrl="/panel" />}
+        {!query && <FiltrosLotes cultivoActivo={cultivo} faseActiva={fase} naveActiva={nave} mesadaActiva={"todas"} conteos={conteos} ubicaciones={ubicaciones || []} baseUrl="/panel" />}
         {query && <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '10px' }}>{lotesFiltrados.length === 0 ? 'Sin resultados para "' + searchParams.q + '"' : lotesFiltrados.length + ' resultado' + (lotesFiltrados.length > 1 ? 's' : '') + ' para "' + searchParams.q + '"'}</p>}
         {lotesFiltrados.length === 0 ? (
           <div className="card" style={{ textAlign: 'center', padding: '40px' }}>

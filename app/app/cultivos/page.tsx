@@ -69,7 +69,7 @@ export default async function CultivosPage({
 
         {/* Filtros — se ocultan cuando hay búsqueda activa */}
         {!query && (
-          <FiltrosLotes cultivoActivo={cultivo} faseActiva={fase} naveActiva={nave} conteos={conteos} baseUrl="/cultivos" />
+          <FiltrosLotes cultivoActivo={cultivo} faseActiva={fase} naveActiva={nave} mesadaActiva={"todas"} conteos={conteos} ubicaciones={ubicaciones || []} baseUrl="/cultivos" />
         )}
 
         {/* Resultados */}

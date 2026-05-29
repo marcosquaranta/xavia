@@ -49,6 +49,7 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades, c
           </div>
           <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#6b7280' }}>
             {plantas > 0 ? '~' + plantas + ' plantas' : (lote.plantines_iniciales || 0) + ' plantines'}
+            {Number(lote.tubos_ocupados_actual) > 0 && <span style={{ color: '#9ca3af' }}> · {Number(lote.tubos_ocupados_actual)} tubos</span>}
             {' · '}<strong>{dias.total}d</strong> desde siembra
             {varDef && <span style={{ color: '#9ca3af' }}> · ciclo est. {diasEstimados}d</span>}
           </p>

@@ -97,10 +97,11 @@ export async function proximoIdMovimiento(): Promise<number> {
 export type FiltroCultivo = 'todos' | 'lechuga' | 'rucula' | 'albahaca';
 export type FiltroFase = 'todas' | 'plantinera' | 'fase_1' | 'fase_2' | 'cosechados';
 export type FiltroNave = 'todas' | '1' | '2';
+export type FiltroMesada = string; // nombre de mesada o 'todas'
 // Alias para compatibilidad
 export type FiltroCultivos = FiltroCultivo;
 
-export function aplicarFiltros3(lotes: Lote[], cultivo: FiltroCultivo, fase: FiltroFase, nave: FiltroNave): Lote[] {
+export function aplicarFiltros3(lotes: Lote[], cultivo: FiltroCultivo, fase: FiltroFase, nave: FiltroNave, mesada: FiltroMesada = 'todas'): Lote[] {
   let base = fase === 'cosechados'
     ? lotes.filter((l) => l.estado === 'cosechado')
     : lotes.filter((l) => l.estado === 'activo');
@@ -112,6 +113,14 @@ export function aplicarFiltros3(lotes: Lote[], cultivo: FiltroCultivo, fase: Fil
   if (fase === 'plantinera') base = base.filter((l) => l.fase_actual === 'plantin');
   else if (fase === 'fase_1') base = base.filter((l) => l.fase_actual === 'fase_1');
   else if (fase === 'fase_2') base = base.filter((l) => l.fase_actual === 'fase_2');
+  // Filtro de mesada: normaliza tildes para comparación
+  if (mesada && mesada !== 'todas') {
+    function normM(s: string) {
+      return s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    }
+    const mesadaNorm = normM(mesada);
+    base = base.filter((l) => normM(String(l.ubicacion_actual || '')) === mesadaNorm);
+  }
   return base;
 }
 

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
+import { aplicarFiltros3,  contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
 import { cicloRealPorVariedad } from '@/lib/estadisticas';
 import type { Lote, Movimiento, Ubicacion, Variedad } from '@/lib/types';
 import Header from '@/components/Header';
@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
 export default async function CultivosPage({
   searchParams,
 }: {
-  searchParams: { cultivo?: string; fase?: string; nave?: string; q?: string; orden?: string };
+  searchParams: { cultivo?: string; fase?: string; nave?: string; mesada?: string; q?: string; orden?: string };
 }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
@@ -23,6 +23,7 @@ export default async function CultivosPage({
   const cultivo = (searchParams.cultivo || 'todos') as FiltroCultivo;
   const fase = (searchParams.fase || 'todas') as FiltroFase;
   const nave = (searchParams.nave || 'todas') as FiltroNave;
+  const mesada = searchParams.mesada || 'todas';
   const query = (searchParams.q || '').trim().toLowerCase();
   const orden = searchParams.orden === 'desc' ? 'desc' : 'asc';
 
@@ -54,7 +55,7 @@ export default async function CultivosPage({
       String(l.id_lote || '').toLowerCase().includes(query)
     );
   } else {
-    lotesFiltrados = aplicarFiltros3(lotes, cultivo, fase, nave);
+    lotesFiltrados = aplicarFiltros3(lotes, cultivo, fase, nave, mesada);
   }
 
   // Ordenar por fecha de siembra
@@ -90,7 +91,7 @@ export default async function CultivosPage({
 
         {/* Filtros — se ocultan cuando hay búsqueda activa */}
         {!query && (
-          <FiltrosLotes cultivoActivo={cultivo} faseActiva={fase} naveActiva={nave} conteos={conteos} baseUrl="/cultivos" />
+          <FiltrosLotes cultivoActivo={cultivo} faseActiva={fase} naveActiva={nave} mesadaActiva={mesada} conteos={conteos} ubicaciones={ubicaciones} baseUrl="/cultivos" />
         )}
 
         {/* Resultados */}

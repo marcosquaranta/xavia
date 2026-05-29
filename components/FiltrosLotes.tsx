@@ -1,20 +1,24 @@
 import Link from 'next/link';
 import type { FiltroCultivo, FiltroFase, FiltroNave, ConteosFiltros } from '@/lib/lotes';
+import type { Ubicacion } from '@/lib/types';
 
 interface Props {
   cultivoActivo: FiltroCultivo;
   faseActiva: FiltroFase;
   naveActiva: FiltroNave;
+  mesadaActiva: string;
   conteos: ConteosFiltros;
+  ubicaciones: Ubicacion[];
   baseUrl: string;
 }
 
-export default function FiltrosLotes({ cultivoActivo, faseActiva, naveActiva, conteos, baseUrl }: Props) {
-  function url(c: string, f: string, n: string) {
+export default function FiltrosLotes({ cultivoActivo, faseActiva, naveActiva, mesadaActiva, conteos, ubicaciones, baseUrl }: Props) {
+  function url(c: string, f: string, n: string, m: string) {
     const p = new URLSearchParams();
     if (c !== 'todos') p.set('cultivo', c);
     if (f !== 'todas') p.set('fase', f);
     if (n !== 'todas') p.set('nave', n);
+    if (m && m !== 'todas') p.set('mesada', m);
     const s = p.toString();
     return `${baseUrl}${s ? '?' + s : ''}`;
   }
@@ -23,23 +27,32 @@ export default function FiltrosLotes({ cultivoActivo, faseActiva, naveActiva, co
     return { background: active ? bg : bgOff, color: active ? 'white' : cOff, border: '1px solid ' + (active ? bg : '#e5e7eb'), cursor: 'pointer' };
   }
 
+  // Mesadas activas filtradas por nave seleccionada
+  const mesadas = ubicaciones
+    .filter((u) => {
+      if (u.tipo !== 'mesada' || u.activo !== 'SI') return false;
+      if (naveActiva !== 'todas' && String(u.nave) !== naveActiva) return false;
+      return true;
+    })
+    .sort((a, b) => Number(a.orden_visual) - Number(b.orden_visual));
+
   return (
     <div style={{ marginBottom: '14px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
 
       {/* Fila 1: Cultivo */}
       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{ fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.3px', minWidth: '52px' }}>Cultivo</span>
-        <Link href={url('todos', faseActiva, naveActiva)} style={{ textDecoration: 'none' }}>
+        <Link href={url('todos', faseActiva, naveActiva, mesadaActiva)} style={{ textDecoration: 'none' }}>
           <span className="pill" style={pill(cultivoActivo === 'todos', '#059669')}>Todos ({conteos.todos})</span>
         </Link>
-        <Link href={url('lechuga', faseActiva, naveActiva)} style={{ textDecoration: 'none' }}>
+        <Link href={url('lechuga', faseActiva, naveActiva, mesadaActiva)} style={{ textDecoration: 'none' }}>
           <span className="pill" style={pill(cultivoActivo === 'lechuga', '#4d7c0f', '#f7fee7', '#4d7c0f')}>Lechuga ({conteos.lechuga})</span>
         </Link>
-        <Link href={url('rucula', faseActiva, naveActiva)} style={{ textDecoration: 'none' }}>
+        <Link href={url('rucula', faseActiva, naveActiva, mesadaActiva)} style={{ textDecoration: 'none' }}>
           <span className="pill" style={pill(cultivoActivo === 'rucula', '#166534', '#dcfce7', '#166534')}>Rúcula ({conteos.rucula})</span>
         </Link>
         {conteos.albahaca > 0 && (
-          <Link href={url('albahaca', faseActiva, naveActiva)} style={{ textDecoration: 'none' }}>
+          <Link href={url('albahaca', faseActiva, naveActiva, mesadaActiva)} style={{ textDecoration: 'none' }}>
             <span className="pill" style={pill(cultivoActivo === 'albahaca', '#047857', '#d1fae5', '#047857')}>Albahaca ({conteos.albahaca})</span>
           </Link>
         )}
@@ -55,7 +68,7 @@ export default function FiltrosLotes({ cultivoActivo, faseActiva, naveActiva, co
           { key: 'fase_2', label: `F2 (${conteos.fase_2})` },
           { key: 'cosechados', label: `Cosechados (${conteos.cosechados})` },
         ].map((f) => (
-          <Link key={f.key} href={url(cultivoActivo, f.key, naveActiva)} style={{ textDecoration: 'none' }}>
+          <Link key={f.key} href={url(cultivoActivo, f.key, naveActiva, mesadaActiva)} style={{ textDecoration: 'none' }}>
             <span className="pill" style={pill(faseActiva === f.key, '#4b5563', 'white', '#4b5563')}>{f.label}</span>
           </Link>
         ))}
@@ -64,16 +77,36 @@ export default function FiltrosLotes({ cultivoActivo, faseActiva, naveActiva, co
       {/* Fila 3: Nave */}
       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{ fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.3px', minWidth: '52px' }}>Nave</span>
-        <Link href={url(cultivoActivo, faseActiva, 'todas')} style={{ textDecoration: 'none' }}>
-          <span className="pill" style={pill(naveActiva === 'todas', '#111827', '#f9fafb')}>Ambas</span>
-        </Link>
-        <Link href={url(cultivoActivo, faseActiva, '1')} style={{ textDecoration: 'none' }}>
-          <span className="pill" style={pill(naveActiva === '1', '#1e40af', '#eff6ff', '#1e40af')}>Nave 1</span>
-        </Link>
-        <Link href={url(cultivoActivo, faseActiva, '2')} style={{ textDecoration: 'none' }}>
-          <span className="pill" style={pill(naveActiva === '2', '#7c3aed', '#f5f3ff', '#7c3aed')}>Nave 2</span>
-        </Link>
+        {[
+          { key: 'todas', label: 'Ambas', bg: '#111827', bgI: '#f9fafb', c: '#374151' },
+          { key: '1', label: 'Nave 1', bg: '#1e40af', bgI: '#eff6ff', c: '#1e40af' },
+          { key: '2', label: 'Nave 2', bg: '#7c3aed', bgI: '#f5f3ff', c: '#7c3aed' },
+        ].map((n) => (
+          <Link key={n.key} href={url(cultivoActivo, faseActiva, n.key, n.key !== naveActiva ? 'todas' : mesadaActiva)} style={{ textDecoration: 'none' }}>
+            <span className="pill" style={pill(naveActiva === n.key, n.bg, n.bgI, n.c)}>{n.label}</span>
+          </Link>
+        ))}
       </div>
+
+      {/* Fila 4: Mesada */}
+      {mesadas.length > 0 && (
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.3px', minWidth: '52px' }}>Mesada</span>
+          <Link href={url(cultivoActivo, faseActiva, naveActiva, 'todas')} style={{ textDecoration: 'none' }}>
+            <span className="pill" style={pill(!mesadaActiva || mesadaActiva === 'todas', '#374151', '#f3f4f6', '#374151')}>Todas</span>
+          </Link>
+          {mesadas.map((m) => {
+            const label = m.nombre.replace(/^Nave \d+ - /, '');
+            return (
+              <Link key={m.id_ubicacion} href={url(cultivoActivo, faseActiva, naveActiva, m.nombre)} style={{ textDecoration: 'none' }}>
+                <span className="pill" style={pill(mesadaActiva === m.nombre, '#374151', '#f3f4f6', '#374151')} title={m.nombre}>
+                  {label}
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      )}
 
     </div>
   );

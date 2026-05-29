@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
@@ -93,7 +94,13 @@ export default async function OcupacionPage() {
                 {nave.mesadas.map((m: any) => (
                   <tr key={m.id_ubicacion}>
                     <td style={{ fontWeight: 500, fontSize: '13px' }}>
-                      {m.nombre.replace(/^Nave \d+ - /, '')}
+                      <Link
+                        href={`/cultivos?mesada=${encodeURIComponent(m.nombre)}`}
+                        style={{ color: 'inherit', textDecoration: 'none', borderBottom: '1px dashed #d1d5db' }}
+                        title={`Ver lotes activos en ${m.nombre}`}
+                      >
+                        {m.nombre.replace(/^Nave \d+ - /, '')}
+                      </Link>
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <span style={{

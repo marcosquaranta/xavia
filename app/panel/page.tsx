@@ -4,7 +4,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave } from '@/lib/ocupacion';
 import { cosechadoEsteMes, plantasPorCultivo, variacionVsMesAnterior, distribucionPorSemana, resumenCosechaPorCultivo } from '@/lib/estadisticas';
-import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
+import { aplicarFiltros3,  contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad } from '@/lib/types';
 import Header from '@/components/Header';
 import FiltrosLotes from '@/components/FiltrosLotes';
@@ -14,12 +14,13 @@ import BuscadorLote from '@/components/BuscadorLote';
 
 export const dynamic = 'force-dynamic';
 
-export default async function PanelPage({ searchParams }: { searchParams: { cultivo?: string; fase?: string; nave?: string; q?: string } }) {
+export default async function PanelPage({ searchParams }: { searchParams: { cultivo?: string; fase?: string; nave?: string; mesada?: string; q?: string } }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
   const cultivo = (searchParams.cultivo || 'todos') as FiltroCultivo;
   const fase = (searchParams.fase || 'todas') as FiltroFase;
   const nave = (searchParams.nave || 'todas') as FiltroNave;
+  const mesada = searchParams.mesada || 'todas';
   const query = (searchParams.q || '').trim().toLowerCase();
 
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [], variedades: Variedad[] = [];
@@ -63,7 +64,7 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
   const conteos = contarPorFiltro(lotes, nave);
   const lotesFiltrados = query
     ? lotes.filter((l) => String(l.id_lote || '').toLowerCase().includes(query))
-    : aplicarFiltros3(lotes, cultivo, fase, nave);
+    : aplicarFiltros3(lotes, cultivo, fase, nave, mesada);
   const hoy = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
 
   return (
@@ -195,7 +196,7 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
           </h2>
         </div>
         <BuscadorLote baseUrl="/panel" />
-        {!query && <FiltrosLotes cultivoActivo={cultivo} faseActiva={fase} naveActiva={nave} conteos={conteos} baseUrl="/panel" />}
+        {!query && <FiltrosLotes cultivoActivo={cultivo} faseActiva={fase} naveActiva={nave} mesadaActiva={mesada} conteos={conteos} ubicaciones={ubicaciones} baseUrl="/panel" />}
         {query && <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '10px' }}>{lotesFiltrados.length === 0 ? 'Sin resultados para "' + searchParams.q + '"' : lotesFiltrados.length + ' resultado' + (lotesFiltrados.length > 1 ? 's' : '') + ' para "' + searchParams.q + '"'}</p>}
         {lotesFiltrados.length === 0 ? (
           <div className="card" style={{ textAlign: 'center', padding: '40px' }}>
