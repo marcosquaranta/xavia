@@ -20,43 +20,39 @@ export function ocupacionPorMesada(ubicaciones: Ubicacion[], lotes: Lote[]): Ocu
 }
 
 export function ocupacionPorNave(ubicaciones: Ubicacion[], lotes: Lote[]): OcupacionNave[] {
-  // Solo lotes en mesadas (F1 y F2) — excluir plantineras del cálculo de ocupación
   const enMesadas = lotes.filter((l) =>
     l.estado === 'activo' && (l.fase_actual === 'fase_1' || l.fase_actual === 'fase_2')
   );
+
+  function normNombre(s: string) {
+    return s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+
   return [1, 2].map((nave) => {
-    // Solo mesadas (no plantineras) para capacidad
     const mesadas = ubicaciones.filter((u) => Number(u.nave) === nave && u.activo === 'SI' && u.tipo === 'mesada');
-    const cap = mesadas.reduce((acc, u) => acc + (Number(u.capacidad_calculada) || 0), 0);
 
-    // Calcular tubos totales y ocupados
-    // orificios_por_perfil × perfiles_por_modulo × modulos = capacidad
-    // tubos = perfiles_por_modulo × modulos (un "tubo" = un perfil)
-    const tubosTotales = mesadas.reduce((acc, u) => {
-      const perfiles = Number(u.perfiles_por_modulo) || 0;
-      const modulos = Number(u.modulos) || 0;
-      return acc + perfiles * modulos;
-    }, 0);
+    // Usar perfiles_por_modulo directamente (no capacidad_calculada que puede tener fórmulas)
+    const tubosTotales = mesadas.reduce((acc, u) => acc + (Number(u.perfiles_por_modulo) || 0), 0);
 
-    // Plantas vivas en mesadas de esta nave
+    // Matching flexible con normalización de tildes
     const lotesNave = enMesadas.filter((l) => {
-      const u = ubicaciones.find((ub) => ub.nombre === l.ubicacion_actual);
-      return u && Number(u.nave) === nave && u.tipo === 'mesada';
+      const ubicNorm = normNombre(String(l.ubicacion_actual || ''));
+      return mesadas.some((m) => normNombre(m.nombre) === ubicNorm);
     });
-    const plantas = lotesNave.reduce((acc, l) => acc + (Number(l.plantas_estimadas_actual) || 0), 0);
 
-    // Tubos ocupados = suma de tubos_ocupados_actual de lotes en mesadas
+    const plantas = lotesNave.reduce((acc, l) => acc + (Number(l.plantas_estimadas_actual) || 0), 0);
     const tubosOcupados = lotesNave.reduce((acc, l) => acc + (Number(l.tubos_ocupados_actual) || 0), 0);
     const tubosLibres = Math.max(0, tubosTotales - tubosOcupados);
+    const m2 = Number(mesadas[0]?.metros_cuadrados) || (nave === 1 ? 500 : 1100);
+    const pct = tubosTotales > 0 ? (tubosOcupados / tubosTotales) * 100 : 0;
 
-    const m2 = mesadas.reduce((acc, u) => acc + (Number(u.metros_cuadrados) || 0), 0) || Number(mesadas[0]?.metros_cuadrados) || 0;
-    const pct = cap > 0 ? (plantas / cap) * 100 : 0;
     return {
-      nave, metros_cuadrados: m2, capacidad_total: cap,
+      nave, metros_cuadrados: m2,
+      capacidad_total: tubosTotales,
       tubos_totales: tubosTotales, tubos_ocupados: tubosOcupados, tubos_libres: tubosLibres,
       plantas_vivas: plantas,
       densidad_actual: m2 > 0 ? Math.round((plantas / m2) * 10) / 10 : 0,
-      densidad_maxima: m2 > 0 ? Math.round((cap / m2) * 10) / 10 : 0,
+      densidad_maxima: 0,
       ocupacion_pct: Math.round(pct * 10) / 10,
     };
   });

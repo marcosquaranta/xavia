@@ -32,8 +32,9 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades, c
   let accionLabel = 'Trasplantar'; let accionHref = '/cultivos/' + encodeURIComponent(lote.id_lote) + '/trasplantar';
   if (lote.fase_actual === 'fase_2') { accionLabel = 'Cosechar'; accionHref = '/cultivos/' + encodeURIComponent(lote.id_lote) + '/cosechar'; }
   else if (lote.fase_actual === 'fase_1') accionLabel = 'Pasar a F2';
+  const esCosechado = lote.estado === 'cosechado';
   return (
-    <div className={'lote-row ' + claseVariedad(lote)}>
+    <div className={'lote-row ' + claseVariedad(lote)} style={esCosechado ? { background: '#f3f4f6', borderColor: '#e5e7eb', opacity: 0.8 } : {}}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '6px' }}>

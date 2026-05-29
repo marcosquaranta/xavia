@@ -116,15 +116,14 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
                   <span style={{ fontSize: '11px', color: '#6b7280' }}>Este mes</span>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
                   {/* Cosechado este mes */}
                   <div style={{ textAlign: 'center', padding: '10px 8px', background: '#f9fafb', borderRadius: '6px' }}>
-                    <p style={{ margin: '0 0 2px', fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Cosechado</p>
+                    <p style={{ margin: '0 0 2px', fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Cosechado mes actual</p>
                     <p style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#111827' }}>{r.cosechadoMes.toLocaleString('es-AR')}</p>
                     <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#9ca3af' }}>{r.cultivo === 'rucula' ? 'paq.' : 'plantas'}</p>
                   </div>
-
-                  {/* vs mes anterior proporcional */}
+                  {/* vs mes anterior */}
                   <div style={{ textAlign: 'center', padding: '10px 8px', background: '#f9fafb', borderRadius: '6px' }}>
                     <p style={{ margin: '0 0 2px', fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Mes ant. (al día {new Date().getDate()})</p>
                     <p style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#111827' }}>{r.cosechadoMesAntProporcional.toLocaleString('es-AR')}</p>
@@ -134,14 +133,26 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
                       </p>
                     )}
                   </div>
-
-                  {/* Proyectado resto del mes */}
-                  <div style={{ textAlign: 'center', padding: '10px 8px', background: r.proyectadoRestoMes > 0 ? '#f0fdf4' : '#f9fafb', borderRadius: '6px' }}>
-                    <p style={{ margin: '0 0 2px', fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Proyectado</p>
-                    <p style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: r.proyectadoRestoMes > 0 ? '#059669' : '#9ca3af' }}>
+                </div>
+                {/* Proyectado desglosado */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
+                  <div style={{ textAlign: 'center', padding: '8px 6px', background: r.proyectadoEstaSemana > 0 ? '#fefce8' : '#f9fafb', borderRadius: '6px', border: r.proyectadoEstaSemana > 0 ? '1px solid #fde047' : '1px solid #f3f4f6' }}>
+                    <p style={{ margin: '0 0 2px', fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Esta semana</p>
+                    <p style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: r.proyectadoEstaSemana > 0 ? '#854d0e' : '#9ca3af' }}>
+                      {r.proyectadoEstaSemana > 0 ? r.proyectadoEstaSemana.toLocaleString('es-AR') : '—'}
+                    </p>
+                  </div>
+                  <div style={{ textAlign: 'center', padding: '8px 6px', background: r.proyectadoRestoMes > 0 ? '#f0fdf4' : '#f9fafb', borderRadius: '6px', border: r.proyectadoRestoMes > 0 ? '1px solid #86efac' : '1px solid #f3f4f6' }}>
+                    <p style={{ margin: '0 0 2px', fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Resto del mes</p>
+                    <p style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: r.proyectadoRestoMes > 0 ? '#059669' : '#9ca3af' }}>
                       {r.proyectadoRestoMes > 0 ? r.proyectadoRestoMes.toLocaleString('es-AR') : '—'}
                     </p>
-                    <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#9ca3af' }}>resto del mes</p>
+                  </div>
+                  <div style={{ textAlign: 'center', padding: '8px 6px', background: r.proyectadoMesTotal > 0 ? '#eff6ff' : '#f9fafb', borderRadius: '6px', border: r.proyectadoMesTotal > 0 ? '1px solid #93c5fd' : '1px solid #f3f4f6' }}>
+                    <p style={{ margin: '0 0 2px', fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Total mes</p>
+                    <p style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: r.proyectadoMesTotal > 0 ? '#1d4ed8' : '#9ca3af' }}>
+                      {r.proyectadoMesTotal > 0 ? r.proyectadoMesTotal.toLocaleString('es-AR') : '—'}
+                    </p>
                   </div>
                 </div>
               </div>

@@ -235,10 +235,25 @@ export function distribucionPorSemana(
   }
 
   // Semana estimada de cosecha
+  // Usar ciclo real de cosechados en lugar del valor de la hoja Variedades
+  const ciclosMap = cicloRealPorVariedad(lotes, [], 5);
   const varsCultivo = variedades.filter((v) => v.activo === 'SI' && matchCultivo(v.variedad));
-  const diasProm = varsCultivo.length > 0
-    ? varsCultivo.reduce((acc, v) => acc + (Number(v.dias_estimados_cosecha) || 35), 0) / varsCultivo.length
-    : 35;
+  
+  // Promedio de ciclos reales de las variedades de este cultivo
+  let diasProm = 0;
+  let countVars = 0;
+  for (const v of varsCultivo) {
+    const real = ciclosMap.get(v.variedad);
+    if (real && real > 0) { diasProm += real; countVars++; }
+  }
+  if (countVars === 0) {
+    // Fallback: valor de Variedades, o 78d lechuga / 30d rúcula
+    diasProm = varsCultivo.length > 0
+      ? varsCultivo.reduce((acc, v) => acc + (Number(v.dias_estimados_cosecha) || (cultivo === 'rucula' ? 30 : 78)), 0) / varsCultivo.length
+      : (cultivo === 'rucula' ? 30 : 78);
+  } else {
+    diasProm = diasProm / countVars;
+  }
   const semanasCosecha = Math.ceil(diasProm / 7);
 
   const barras = Array.from(mapa.values()).sort((a, b) => a.semana - b.semana);
@@ -263,9 +278,11 @@ export interface ResumenCosechaCultivo {
   cultivo: 'lechuga' | 'rucula';
   label: string;
   cosechadoMes: number;
-  cosechadoMesAntProporcional: number; // solo hasta el mismo día del mes anterior
+  cosechadoMesAntProporcional: number;
   variacionPct: number | null;
-  proyectadoRestoMes: number; // plantas de lotes activos que cosecharían este mes
+  proyectadoEstaSemana: number;  // próximos 7 días
+  proyectadoRestoMes: number;    // después de esta semana hasta fin de mes
+  proyectadoMesTotal: number;    // esta semana + resto
 }
 
 export function resumenCosechaPorCultivo(
@@ -333,27 +350,41 @@ export function resumenCosechaPorCultivo(
       ? Math.round(((cosechadoMes - cosechadoMesAntProporcional) / cosechadoMesAntProporcional) * 100)
       : null;
 
-    // Proyectado: lotes en F1 o F2 cuya fecha estimada de cosecha cae en el resto del mes
-    // Usa ciclo real calculado de los últimos cosechados de cada variedad
+    // Proyectado: lotes en F1 o F2 con ciclo real
     const ciclosRealesMap = cicloRealPorVariedad(lotes, [], 5);
-    
-    const proyectadoRestoMes = lotes
-      .filter((l) => {
-        if (l.estado !== 'activo') return false;
-        if (l.fase_actual !== 'fase_1' && l.fase_actual !== 'fase_2') return false;
-        if (!matchCultivo(l.variedad, cultivo)) return false;
-        // Usar ciclo real si existe, sino el de la variedad, sino 70 días
-        const varDef = variedades.find((v) => v.variedad === l.variedad);
-        const diasCiclo = ciclosRealesMap.get(l.variedad) || Number(varDef?.dias_estimados_cosecha) || 70;
-        const siembra = safeParseDate(l.fecha_siembra);
-        if (!siembra) return false;
-        const est = new Date(siembra);
-        est.setDate(est.getDate() + diasCiclo);
-        return est >= hoy && est <= finMesActual;
-      })
-      .reduce((acc, l) => acc + (Number(l.plantas_estimadas_actual) || 0), 0);
+    const enSemana = new Date(hoy); enSemana.setDate(hoy.getDate() + 7);
 
-    return { cultivo, label, cosechadoMes, cosechadoMesAntProporcional, variacionPct, proyectadoRestoMes };
+    function estCosecha(l: Lote): Date | null {
+      const varDef = variedades.find((v) => v.variedad === l.variedad);
+      // Usar ciclo real, sino fallback conservador: 78d lechuga / 30d rúcula
+      const diasCiclo = ciclosRealesMap.get(l.variedad)
+        || Number(varDef?.dias_estimados_cosecha)
+        || (cultivo === 'rucula' ? 30 : 78);
+      const siembra = safeParseDate(l.fecha_siembra);
+      if (!siembra) return null;
+      const est = new Date(siembra);
+      est.setDate(est.getDate() + diasCiclo);
+      return est;
+    }
+
+    const lotesActivos = lotes.filter((l) =>
+      l.estado === 'activo' &&
+      (l.fase_actual === 'fase_1' || l.fase_actual === 'fase_2') &&
+      matchCultivo(l.variedad, cultivo)
+    );
+
+    let proyectadoEstaSemana = 0;
+    let proyectadoRestoMes = 0;
+    for (const l of lotesActivos) {
+      const est = estCosecha(l);
+      if (!est) continue;
+      const plantas = Number(l.plantas_estimadas_actual) || 0;
+      if (est >= hoy && est <= enSemana) proyectadoEstaSemana += plantas;
+      else if (est > enSemana && est <= finMesActual) proyectadoRestoMes += plantas;
+    }
+    const proyectadoMesTotal = proyectadoEstaSemana + proyectadoRestoMes;
+
+    return { cultivo, label, cosechadoMes, cosechadoMesAntProporcional, variacionPct, proyectadoEstaSemana, proyectadoRestoMes, proyectadoMesTotal };
   });
 }
 
