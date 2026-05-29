@@ -34,7 +34,7 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades, c
   else if (lote.fase_actual === 'fase_1') accionLabel = 'Pasar a F2';
   const esCosechado = lote.estado === 'cosechado';
   return (
-    <div className={'lote-row ' + claseVariedad(lote)} style={esCosechado ? { background: '#f3f4f6', borderColor: '#e5e7eb', opacity: 0.8 } : {}}>
+    <div className={'lote-row ' + claseVariedad(lote)} style={esCosechado ? { background: '#f8fafc', borderLeft: '4px solid #94a3b8', opacity: 0.75 } : {}}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '6px' }}>

@@ -57,8 +57,8 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
   const difPct = cosechadoMesPasado > 0
     ? Math.round(((cosechadoMes - cosechadoMesPasado) / cosechadoMesPasado) * 100) : 0;
   const ocGlobal = navesOcup.length > 0
-    ? navesOcup.reduce((a: number, n: any) => a + n.plantas_vivas, 0) /
-      Math.max(1, navesOcup.reduce((a: number, n: any) => a + n.capacidad_total, 0))
+    ? navesOcup.reduce((a: number, n: any) => a + n.tubos_ocupados, 0) /
+      Math.max(1, navesOcup.reduce((a: number, n: any) => a + n.tubos_totales, 0))
     : 0;
 
   const conteos = contarPorFiltro(lotes, nave);
@@ -137,7 +137,7 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
                 {/* Proyectado desglosado */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
                   <div style={{ textAlign: 'center', padding: '8px 6px', background: r.proyectadoEstaSemana > 0 ? '#fefce8' : '#f9fafb', borderRadius: '6px', border: r.proyectadoEstaSemana > 0 ? '1px solid #fde047' : '1px solid #f3f4f6' }}>
-                    <p style={{ margin: '0 0 2px', fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Esta semana</p>
+                    <p style={{ margin: '0 0 2px', fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Próximos 7 días</p>
                     <p style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: r.proyectadoEstaSemana > 0 ? '#854d0e' : '#9ca3af' }}>
                       {r.proyectadoEstaSemana > 0 ? r.proyectadoEstaSemana.toLocaleString('es-AR') : '—'}
                     </p>
@@ -186,6 +186,7 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
               barras={ciclosRucula.barras}
               semanasCosecha={ciclosRucula.semanasCosecha}
               semanaActual={0}
+              sinF1
             />
           </div>
         </div>

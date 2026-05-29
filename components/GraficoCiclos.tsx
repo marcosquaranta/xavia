@@ -15,10 +15,11 @@ interface Props {
   colorF2: string;
   barras: BarraSemana[];
   semanasCosecha: number;
-  semanaActual: number;
+  semanaActual?: number;
+  sinF1?: boolean; // rúcula no tiene F1
 }
 
-export default function GraficoCiclos({ titulo, color, colorF1, colorF2, barras, semanasCosecha }: Props) {
+export default function GraficoCiclos({ titulo, color, colorF1, colorF2, barras, semanasCosecha, sinF1 }: Props) {
   const todasLasBarras = barras.filter(b =>
     (b.plantas_f1 + b.plantas_f2 + (b.plantas_cosechadas || 0)) > 0
   );
@@ -55,9 +56,9 @@ export default function GraficoCiclos({ titulo, color, colorF1, colorF2, barras,
           {titulo.toUpperCase()}
         </span>
         <div style={{ display: 'flex', gap: '12px', fontSize: '11px', color: '#6b7280' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          {!sinF1 && <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <span style={{ width: 10, height: 10, borderRadius: 2, background: colorF1, display: 'inline-block' }} />F1
-          </span>
+          </span>}
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <span style={{ width: 10, height: 10, borderRadius: 2, background: colorF2, display: 'inline-block' }} />F2
           </span>
@@ -104,8 +105,8 @@ export default function GraficoCiclos({ titulo, color, colorF1, colorF2, barras,
               {f2 > 0 && (
                 <rect x={x} y={baseY - hCos - hF2} width={barW} height={hF2} fill={colorF2} rx={2} />
               )}
-              {/* F1 (encima de F2) */}
-              {f1 > 0 && (
+              {/* F1 (encima de F2) — solo si no es sinF1 */}
+              {!sinF1 && f1 > 0 && (
                 <rect x={x} y={baseY - hCos - hF2 - hF1} width={barW} height={hF1} fill={colorF1} rx={2} />
               )}
               {/* Total */}
