@@ -3,7 +3,8 @@ import { calcularDiasPorFase, codigoCultivo } from './lotes';
 
 function safeParseDate(s: any): Date | null {
   if (!s) return null;
-  const str = String(s).trim(); if (!str) return null;
+  // Truncar al primer espacio o 'T' para eliminar la hora si viene incluida
+  const str = String(s).trim().split(/[\sT]/)[0]; if (!str) return null;
   let yyyy = '', mm = '', dd = '';
   if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(str)) { [yyyy, mm, dd] = str.split('-'); }
   else if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(str)) { [yyyy, mm, dd] = str.split('/'); }
@@ -262,7 +263,7 @@ export function distribucionPorSemana(
 
 function safeParseDate2(s: any): Date | null {
   if (!s) return null;
-  const str = String(s).trim();
+  const str = String(s).trim().split(/[\sT]/)[0];
   if (!str) return null;
   let yyyy = '', mm = '', dd = '';
   if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(str)) { [yyyy, mm, dd] = str.split('-'); }
@@ -442,4 +443,81 @@ export function cicloRealPorVariedad(
 export function getCicloReal(ciclosReales: Map<string, number>, variedad: string): number | undefined {
   const norm = (s: string) => s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   return ciclosReales.get(variedad) ?? ciclosReales.get(norm(variedad));
+}
+
+// === CICLOS POR SEMANA (últimas 8 semanas) ===
+export interface CicloSemana {
+  semana: string;
+  lechugaF1: number;
+  lechugaF2: number;
+  rucula: number;
+  cosechasLechuga: number;
+  cosechasRucula: number;
+}
+
+export function ciclosPorSemana(lotes: Lote[], movimientos: import('./types').Movimiento[]): CicloSemana[] {
+  const hoy = new Date();
+  const semanas: CicloSemana[] = [];
+
+  for (let i = 7; i >= 0; i--) {
+    const finSemana = new Date(hoy);
+    finSemana.setDate(hoy.getDate() - i * 7);
+    const inicioSemana = new Date(finSemana);
+    inicioSemana.setDate(finSemana.getDate() - 7);
+
+    const label = i === 0 ? 'Esta sem.' : `S-${i}`;
+
+    const cosechadosSemana = lotes.filter((l) => {
+      if (l.estado !== 'cosechado') return false;
+      const f = safeParseDate(l.fecha_cosecha);
+      return f && f > inicioSemana && f <= finSemana;
+    });
+
+    // Promedios de dias F1, F2, total para lechuga y rúcula
+    const lechuga = cosechadosSemana.filter((l) => {
+      const v = String(l.variedad || '').toLowerCase();
+      return !v.includes('rucula') && !v.includes('rúcula');
+    });
+    const ruculaLotes = cosechadosSemana.filter((l) => {
+      const v = String(l.variedad || '').toLowerCase();
+      return v.includes('rucula') || v.includes('rúcula');
+    });
+
+    function promF1(arr: Lote[]) {
+      const vals = arr.map((l) => { try { return calcularDiasPorFaseSafe(l, movimientos).fase_1; } catch { return null; } }).filter((d): d is number => d !== null && d > 0);
+      return vals.length > 0 ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+    }
+    function promF2(arr: Lote[]) {
+      const vals = arr.map((l) => { try { return calcularDiasPorFaseSafe(l, movimientos).fase_2; } catch { return 0; } }).filter(d => d > 0);
+      return vals.length > 0 ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+    }
+
+    semanas.push({
+      semana: label,
+      lechugaF1: promF1(lechuga),
+      lechugaF2: promF2(lechuga),
+      rucula: promF2(ruculaLotes),
+      cosechasLechuga: lechuga.length,
+      cosechasRucula: ruculaLotes.length,
+    });
+  }
+  return semanas;
+}
+
+function calcularDiasPorFaseSafe(lote: Lote, movimientos: import('./types').Movimiento[]) {
+  try {
+    const ml = movimientos.filter((m) => m && String(m.id_lote) === String(lote.id_lote));
+    const siembra = ml.find((m) => m.tipo === 'siembra');
+    const af1 = ml.find((m) => m.tipo === 'trasplante' && m.fase_destino === 'fase_1');
+    const af2 = ml.find((m) => m.tipo === 'trasplante' && m.fase_destino === 'fase_2');
+    const cosecha = ml.find((m) => m.tipo === 'cosecha');
+    const fs = String(siembra?.fecha || lote.fecha_siembra || '').split(/[\sT]/)[0];
+    const ff1 = af1 ? String(af1.fecha || '').split(/[\sT]/)[0] : null;
+    const ff2 = af2 ? String(af2.fecha || '').split(/[\sT]/)[0] : null;
+    const fc = String(cosecha?.fecha || lote.fecha_cosecha || '').split(/[\sT]/)[0];
+    function diff(a: string, b: string) { try { return Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000)); } catch { return 0; } }
+    const fase_1 = ff1 ? diff(ff1, ff2 || fc) : null;
+    const fase_2 = ff2 ? diff(ff2, fc) : 0;
+    return { fase_1, fase_2 };
+  } catch { return { fase_1: null, fase_2: 0 }; }
 }

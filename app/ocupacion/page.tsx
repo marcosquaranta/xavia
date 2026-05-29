@@ -66,7 +66,7 @@ export default async function OcupacionPage() {
           <div key={nave.nave} className="card" style={{ marginBottom: '14px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ background: nave.nave === 1 ? '#1e40af' : '#7c3aed', color: 'white', padding: '2px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 700 }}>
+                <span style={{ background: nave.nave === 1 ? '#881337' : '#7c3aed', color: 'white', padding: '2px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 700 }}>
                   NAVE {nave.nave}
                 </span>
                 <span style={{ fontSize: '12px', color: '#6b7280' }}>
@@ -74,7 +74,7 @@ export default async function OcupacionPage() {
                 </span>
               </div>
               <div style={{ width: '100px', height: '5px', background: '#f3f4f6', borderRadius: '3px', overflow: 'hidden' }}>
-                <div style={{ width: Math.min(100, nave.ocupacion_pct) + '%', height: '100%', background: nave.nave === 1 ? '#1e40af' : '#7c3aed' }} />
+                <div style={{ width: Math.min(100, nave.ocupacion_pct) + '%', height: '100%', background: nave.nave === 1 ? '#881337' : '#7c3aed' }} />
               </div>
             </div>
 
@@ -105,7 +105,7 @@ export default async function OcupacionPage() {
                     <td style={{ textAlign: 'center' }}>
                       <span style={{
                         background: m.sector_fase === 'fase_1' ? '#dbeafe' : '#dcfce7',
-                        color: m.sector_fase === 'fase_1' ? '#1e40af' : '#166534',
+                        color: m.sector_fase === 'fase_1' ? '#881337' : '#166534',
                         padding: '1px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600,
                       }}>
                         {m.sector_fase === 'fase_1' ? 'F1' : 'F2'}
@@ -145,7 +145,7 @@ export default async function OcupacionPage() {
         {capacidad.map((nave) => (
           <div key={nave.nave} className="card" style={{ marginBottom: '14px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
-              <span style={{ background: nave.nave === 1 ? '#1e40af' : '#7c3aed', color: 'white', padding: '2px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 700 }}>
+              <span style={{ background: nave.nave === 1 ? '#881337' : '#7c3aed', color: 'white', padding: '2px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 700 }}>
                 NAVE {nave.nave}
               </span>
               <span style={{ fontSize: '12px', color: '#6b7280' }}>
@@ -218,7 +218,7 @@ export default async function OcupacionPage() {
           {[
             ['TOTAL LECHUGA (ambas naves)', totalLechugaMes.toLocaleString('es-AR'), 'plantas/mes', '#4d7c0f'],
             ['TOTAL RÚCULA (ambas naves)', totalRuculaMes.toLocaleString('es-AR'), 'plantas/mes', '#166534'],
-            ['TOTAL GENERAL', (totalLechugaMes + totalRuculaMes).toLocaleString('es-AR'), 'plantas/mes', '#1e40af'],
+            ['TOTAL GENERAL', (totalLechugaMes + totalRuculaMes).toLocaleString('es-AR'), 'plantas/mes', '#881337'],
           ].map(([label, value, sub, color]: any) => (
             <div key={label} style={{ background: 'white', border: `2px solid ${color}20`, borderRadius: '10px', padding: '14px' }}>
               <p style={{ margin: 0, fontSize: '10px', color, textTransform: 'uppercase', letterSpacing: '0.3px', fontWeight: 600 }}>{label}</p>

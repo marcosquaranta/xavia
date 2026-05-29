@@ -3,13 +3,14 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave } from '@/lib/ocupacion';
-import { cosechadoEsteMes, plantasPorCultivo, variacionVsMesAnterior, distribucionPorSemana, resumenCosechaPorCultivo, diasPromedioPorVariedad } from '@/lib/estadisticas';
+import { cosechadoEsteMes, plantasPorCultivo, variacionVsMesAnterior, distribucionPorSemana, resumenCosechaPorCultivo, diasPromedioPorVariedad, ciclosPorSemana } from '@/lib/estadisticas';
 import { aplicarFiltros3,  contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad } from '@/lib/types';
 import Header from '@/components/Header';
 import FiltrosLotes from '@/components/FiltrosLotes';
 import LoteCard from '@/components/LoteCard';
 import GraficoCiclos from '@/components/GraficoCiclos';
+import GraficoCiclosSemanas from '@/components/GraficoCiclosSemanas';
 import BuscadorLote from '@/components/BuscadorLote';
 
 export const dynamic = 'force-dynamic';
@@ -43,6 +44,7 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
   let resumenCosecha: any[] = [];
   let tiemposCiclo: any[] = [];
   let tiemposCicloAnt: any[] = [];
+  let ciclosSemanas: any[] = [];
 
   try {
     const mes = cosechadoEsteMes(lotes);
@@ -65,6 +67,7 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
       return null;
     }).filter(Boolean) as typeof lotes;
     tiemposCicloAnt = diasPromedioPorVariedad(lotesAnteriores, movimientos, 90);
+    ciclosSemanas = ciclosPorSemana(lotes, movimientos);
   } catch {}
 
   const difPct = cosechadoMesPasado > 0
@@ -241,53 +244,9 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
 
           return (
             <div className="card" style={{ marginBottom: '16px' }}>
-              <p className="card-title">Ciclos promedio en mesadas (últimos 60 días)</p>
-              <p className="card-sub">Sin tiempo de plantinera · Lechuga: F1 + F2 · Rúcula: solo F2</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '12px' }}>
-
-                {/* Lechuga */}
-                {lTotal > 0 && (
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '13px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ background: '#4d7c0f', color: 'white', padding: '1px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>LECHUGA</span>
-                        <span style={{ fontWeight: 600 }}>{lTotal}d total en mesada</span>
-                        {lF1 > 0 && <span style={{ color: '#9ca3af', fontSize: '12px' }}>F1: {lF1}d · F2: {lF2}d</span>}
-                      </div>
-                      {varPct(lTotal, lAntTotal) !== null && (
-                        <span style={{ fontSize: '12px', fontWeight: 600, color: varPct(lTotal, lAntTotal)! <= 0 ? '#059669' : '#dc2626' }}>
-                          {varPct(lTotal, lAntTotal)! <= 0 ? '↓' : '↑'} {Math.abs(varPct(lTotal, lAntTotal)!)}% vs mes ant.
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ height: '20px', background: '#f3f4f6', borderRadius: '6px', overflow: 'hidden', display: 'flex' }}>
-                      {lF1 > 0 && <div style={{ width: (lF1 / maxDias * 100) + '%', background: '#86efac', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 600, color: '#14532d' }}>F1 {lF1}d</div>}
-                      {lF2 > 0 && <div style={{ width: (lF2 / maxDias * 100) + '%', background: '#4d7c0f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 600, color: 'white' }}>F2 {lF2}d</div>}
-                    </div>
-                  </div>
-                )}
-
-                {/* Rúcula */}
-                {rTotal > 0 && (
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '13px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ background: '#166534', color: 'white', padding: '1px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>RÚCULA</span>
-                        <span style={{ fontWeight: 600 }}>{rTotal}d en mesada</span>
-                      </div>
-                      {varPct(rTotal, rAntTotal) !== null && (
-                        <span style={{ fontSize: '12px', fontWeight: 600, color: varPct(rTotal, rAntTotal)! <= 0 ? '#059669' : '#dc2626' }}>
-                          {varPct(rTotal, rAntTotal)! <= 0 ? '↓' : '↑'} {Math.abs(varPct(rTotal, rAntTotal)!)}% vs mes ant.
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ height: '20px', background: '#f3f4f6', borderRadius: '6px', overflow: 'hidden', display: 'flex' }}>
-                      {rF2 > 0 && <div style={{ width: (rF2 / maxDias * 100) + '%', background: '#166534', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 600, color: 'white' }}>F2 {rF2}d</div>}
-                    </div>
-                  </div>
-                )}
-
-              </div>
+              <p className="card-title">Ciclos en mesadas — últimas 8 semanas</p>
+              <p className="card-sub">Días promedio por fase · sin tiempo de plantinera · barras por semana de cosecha</p>
+              <GraficoCiclosSemanas datos={ciclosSemanas} />
             </div>
           );
         })()}

@@ -79,7 +79,7 @@ export default function FiltrosLotes({ cultivoActivo, faseActiva, naveActiva, me
         <span style={{ fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.3px', minWidth: '52px' }}>Nave</span>
         {[
           { key: 'todas', label: 'Ambas', bg: '#111827', bgI: '#f9fafb', c: '#374151' },
-          { key: '1', label: 'Nave 1', bg: '#1e40af', bgI: '#eff6ff', c: '#1e40af' },
+          { key: '1', label: 'Nave 1', bg: '#881337', bgI: '#fff1f2', c: '#881337' },
           { key: '2', label: 'Nave 2', bg: '#7c3aed', bgI: '#f5f3ff', c: '#7c3aed' },
         ].map((n) => (
           <Link key={n.key} href={url(cultivoActivo, faseActiva, n.key, n.key !== naveActiva ? 'todas' : mesadaActiva)} style={{ textDecoration: 'none' }}>

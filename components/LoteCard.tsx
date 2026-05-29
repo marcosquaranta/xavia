@@ -50,7 +50,7 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades, c
             <span style={{ background: col.bg, color: col.text, padding: '3px 10px', borderRadius: '4px', fontSize: '12px', fontWeight: 800, letterSpacing: '0.8px' }}>{col.label}</span>
             {lote.variedad.toLowerCase().includes('crespa') && <span style={{ fontSize: '11px', color: '#6b7280' }}>Crespa</span>}
             {lote.variedad.toLowerCase().includes('roble') && <span style={{ fontSize: '11px', color: '#6b7280' }}>Hoja de Roble</span>}
-            {nave && <span style={{ background: nave === 1 ? '#1e40af' : '#7c3aed', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>Nave {nave}</span>}
+            {nave && <span style={{ background: nave === 1 ? '#881337' : '#7c3aed', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>Nave {nave}</span>}
             {mesada && mesada !== 'Plantinera' && <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151', background: '#f3f4f6', padding: '2px 8px', borderRadius: '4px', border: '1px solid #e5e7eb' }}>{mesada}</span>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
