@@ -34,8 +34,16 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades, c
   if (lote.fase_actual === 'fase_2') { accionLabel = 'Cosechar'; accionHref = '/cultivos/' + encodeURIComponent(lote.id_lote) + '/cosechar'; }
   else if (lote.fase_actual === 'fase_1') accionLabel = 'Pasar a F2';
   const esCosechado = lote.estado === 'cosechado';
+  const colorFase = esCosechado ? '#94a3b8'
+    : lote.fase_actual === 'plantin' ? '#ca8a04'
+    : lote.fase_actual === 'fase_1' ? '#3b82f6'
+    : '#16a34a';
+
   return (
-    <div className={'lote-row ' + claseVariedad(lote)} style={esCosechado ? { background: '#f8fafc', borderLeft: '4px solid #94a3b8', opacity: 0.75 } : {}}>
+    <div className={'lote-row ' + claseVariedad(lote)} style={{
+      borderLeft: `5px solid ${colorFase}`,
+      ...(esCosechado ? { background: '#f8fafc', opacity: 0.75 } : {}),
+    }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '6px' }}>

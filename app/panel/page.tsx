@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave } from '@/lib/ocupacion';
-import { cosechadoEsteMes, plantasPorCultivo, variacionVsMesAnterior, distribucionPorSemana, resumenCosechaPorCultivo } from '@/lib/estadisticas';
+import { cosechadoEsteMes, plantasPorCultivo, variacionVsMesAnterior, distribucionPorSemana, resumenCosechaPorCultivo, diasPromedioPorVariedad } from '@/lib/estadisticas';
 import { aplicarFiltros3,  contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad } from '@/lib/types';
 import Header from '@/components/Header';
@@ -54,6 +54,17 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
     ciclosLechuga = distribucionPorSemana(lotes, variedades, 'lechuga');
     ciclosRucula  = distribucionPorSemana(lotes, variedades, 'rucula');
     resumenCosecha = resumenCosechaPorCultivo(lotes, variedades);
+    tiemposCiclo = diasPromedioPorVariedad(lotes, movimientos, 60);
+    // Mes anterior: cosechados entre hace 30-90 días
+    const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30);
+    const hace90 = new Date(); hace90.setDate(hace90.getDate() - 90);
+    const lotesAnteriores = lotes.map((l) => {
+      if (l.estado !== 'cosechado') return null;
+      const f = l.fecha_cosecha ? new Date(String(l.fecha_cosecha)) : null;
+      if (f && f < hace30 && f >= hace90) return l;
+      return null;
+    }).filter(Boolean) as typeof lotes;
+    tiemposCicloAnt = diasPromedioPorVariedad(lotesAnteriores, movimientos, 90);
   } catch {}
 
   const difPct = cosechadoMesPasado > 0
@@ -155,11 +166,12 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
                       {r.proyectadoRestoMes > 0 ? r.proyectadoRestoMes.toLocaleString('es-AR') : '—'}
                     </p>
                   </div>
-                  <div style={{ textAlign: 'center', padding: '8px 6px', background: r.proyectadoMesTotal > 0 ? '#eff6ff' : '#f9fafb', borderRadius: '6px', border: r.proyectadoMesTotal > 0 ? '1px solid #93c5fd' : '1px solid #f3f4f6' }}>
-                    <p style={{ margin: '0 0 2px', fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Total mes</p>
-                    <p style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: r.proyectadoMesTotal > 0 ? '#1d4ed8' : '#9ca3af' }}>
-                      {r.proyectadoMesTotal > 0 ? r.proyectadoMesTotal.toLocaleString('es-AR') : '—'}
+                  <div style={{ textAlign: 'center', padding: '8px 6px', background: '#eff6ff', borderRadius: '6px', border: '1px solid #93c5fd' }}>
+                    <p style={{ margin: '0 0 2px', fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Total mes est.</p>
+                    <p style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#1d4ed8' }}>
+                      {(r.cosechadoMes + r.proyectadoMesTotal).toLocaleString('es-AR')}
                     </p>
+                    <p style={{ margin: '1px 0 0', fontSize: '9px', color: '#9ca3af' }}>cosech. + proy.</p>
                   </div>
                 </div>
               </div>
