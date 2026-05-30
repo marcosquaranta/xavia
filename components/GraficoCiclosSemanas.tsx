@@ -17,7 +17,7 @@ export default function GraficoCiclosSemanas({ datos }: Props) {
   );
 
   const maxDias = Math.max(...datos.flatMap(d => [d.lechugaF1 + d.lechugaF2, d.rucula]), 1);
-  const W = 560, H = 200, PL = 36, PR = 12, PT = 16, PB = 28;
+  const W = 560, H = 260, PL = 36, PR = 12, PT = 16, PB = 28;
   const chartW = W - PL - PR, chartH = H - PT - PB;
   const slotW = chartW / datos.length;
   const barW = Math.min(32, slotW * 0.38);
