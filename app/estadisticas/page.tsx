@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
+import { estadisticasDelMes, ciclosPorMesYAnio } from '@/lib/estadisticas';
 import type { Lote, Movimiento, Variedad } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
@@ -31,30 +32,31 @@ export default async function EstadisticasPage() {
   const nombreMes = hoy.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
   const varActivas = variedades.filter((v) => v.activo === 'SI');
 
-  // Calcular curvas de forma segura
-  let statsActual: any[] = [];
-  let statsPasado: any[] = [];
-  let curvas: any[] = [];
-  let errDetalle: string | null = null;
+  let statsActual: any[] = [], statsPasado: any[] = [], curvas: any[] = [];
 
+  // Estadísticas del mes — todo en try/catch individual
+  try { statsActual = estadisticasDelMes(lotes, movimientos, hoy); } catch {}
   try {
-    // Importar funciones dinámicamente para capturar errores de módulo
-    const { estadisticasDelMes, ciclosPorMesYAnio } = await import('@/lib/estadisticas');
     const mesPasado = new Date(hoy); mesPasado.setMonth(mesPasado.getMonth() - 1);
+    statsPasado = estadisticasDelMes(lotes, movimientos, mesPasado);
+  } catch {}
 
-    try { statsActual = estadisticasDelMes(lotes, movimientos, hoy); } catch (e: any) { errDetalle = 'estadísticas: ' + e?.message; }
-    try { statsPasado = estadisticasDelMes(lotes, movimientos, mesPasado); } catch {}
-
-    try {
-      const cA = ciclosPorMesYAnio(lotes, movimientos, anioActual);
-      const cAnt = ciclosPorMesYAnio(lotes, movimientos, anioAnterior);
-      for (const v of varActivas) {
-        const datosActual = Array.from((cA.get(v.variedad) || new Map<number,number>()).entries()).filter(([k]) => k < 12) as [number,number][];
-        const datosAnterior = Array.from((cAnt.get(v.variedad) || new Map<number,number>()).entries()).filter(([k]) => k < 12) as [number,number][];
-        if (datosActual.length > 0 || datosAnterior.length > 0) curvas.push({ variedad: v.variedad, datosActual, datosAnterior });
-      }
-    } catch (e: any) { errDetalle = (errDetalle || '') + ' | curvas: ' + e?.message; }
-  } catch (e: any) { errDetalle = 'importación: ' + e?.message; }
+  // Curvas de evolución
+  try {
+    const cA = ciclosPorMesYAnio(lotes, movimientos, anioActual);
+    const cAnt = ciclosPorMesYAnio(lotes, movimientos, anioAnterior);
+    for (const v of varActivas) {
+      try {
+        const datosActual = Array.from((cA.get(v.variedad) || new Map<number,number>()).entries())
+          .filter(([k]) => typeof k === 'number' && k >= 0 && k < 12) as [number,number][];
+        const datosAnterior = Array.from((cAnt.get(v.variedad) || new Map<number,number>()).entries())
+          .filter(([k]) => typeof k === 'number' && k >= 0 && k < 12) as [number,number][];
+        if (datosActual.length > 0 || datosAnterior.length > 0) {
+          curvas.push({ variedad: v.variedad, datosActual, datosAnterior });
+        }
+      } catch {}
+    }
+  } catch {}
 
   return (
     <>
@@ -63,20 +65,12 @@ export default async function EstadisticasPage() {
         <h1 className="page-title">Estadísticas</h1>
         <p className="page-subtitle">{nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1)}</p>
 
-        {errDetalle && (
-          <div className="alert-box error" style={{ marginBottom: '16px', fontSize: '12px' }}>
-            Error interno: {errDetalle}
-          </div>
-        )}
-
-        {/* Gráfico evolución */}
         <div className="card">
           <p className="card-title">Evolución de ciclos · {anioActual} vs {anioAnterior}</p>
           <p className="card-sub">Días promedio de ciclo total por mes · todas las variedades. Punteado = año anterior.</p>
           <GraficoEvolucion curvas={curvas} anioActual={anioActual} anioAnterior={anioAnterior} />
         </div>
 
-        {/* Tabla resumen */}
         <div className="card">
           <p className="card-title">Ciclo y producción por variedad — mes actual vs anterior</p>
           {statsActual.length === 0
@@ -100,9 +94,9 @@ export default async function EstadisticasPage() {
                     return (
                       <tr key={s.variedad}>
                         <td>{s.variedad}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 500 }}>{s.unidades.toLocaleString('es-AR')} {s.tipo_unidad}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 500 }}>{s.unidades?.toLocaleString?.('es-AR') ?? s.unidades} {s.tipo_unidad}</td>
                         <td style={{ textAlign: 'right', color: diffUnid === null ? '#9ca3af' : diffUnid >= 0 ? '#059669' : '#dc2626' }}>
-                          {diffUnid === null ? '—' : (diffUnid >= 0 ? '+' : '') + diffUnid.toLocaleString('es-AR')}
+                          {diffUnid === null ? '—' : (diffUnid >= 0 ? '+' : '') + diffUnid}
                         </td>
                         <td style={{ textAlign: 'right' }}>{s.ciclo_prom > 0 ? s.ciclo_prom + 'd' : '—'}</td>
                         <td style={{ textAlign: 'right', color: diffCiclo === null ? '#9ca3af' : diffCiclo <= 0 ? '#059669' : '#dc2626' }}>

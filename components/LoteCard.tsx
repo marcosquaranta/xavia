@@ -55,7 +55,7 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades, c
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             <span className={'pill ' + claseFase}>{labelFase}</span>
-            <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#9ca3af' }}>Nro Lote: {lote.id_lote}</span>
+            <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#374151', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.3px' }}>Nro Lote: {lote.id_lote}</span>
           </div>
           <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#6b7280' }}>
             {plantas > 0 ? '~' + plantas + ' plantas' : (lote.plantines_iniciales || 0) + ' plantines'}

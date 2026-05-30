@@ -243,10 +243,33 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
           function varPct(actual: number, ant: number) { if (!ant) return null; return Math.round(((actual - ant) / ant) * 100); }
 
           return (
-            <div className="card" style={{ marginBottom: '16px' }}>
-              <p className="card-title">Ciclos en mesadas — últimas 8 semanas</p>
-              <p className="card-sub">Días promedio por fase · sin tiempo de plantinera · barras por semana de cosecha</p>
-              <GraficoCiclosSemanas datos={ciclosSemanas} />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+              <div className="card" style={{ margin: 0 }}>
+                <p className="card-title">Ciclos en mesadas — 8 semanas</p>
+                <p className="card-sub">Días por fase · sin plantinera</p>
+                <GraficoCiclosSemanas datos={ciclosSemanas} />
+              </div>
+              <div className="card" style={{ margin: 0 }}>
+                <p className="card-title">Últimas cosechas</p>
+                <p className="card-sub">Días de ciclo por lote cosechado</p>
+                <table style={{ fontSize: '12px' }}>
+                  <thead><tr><th>Lote</th><th>Variedad</th><th style={{ textAlign:'right' }}>F1</th><th style={{ textAlign:'right' }}>F2</th><th style={{ textAlign:'right' }}>Total</th></tr></thead>
+                  <tbody>
+                    {lotes.filter((l: any) => l.estado === 'cosechado' && l.dias_total)
+                      .sort((a: any, b: any) => String(b.fecha_cosecha||'').localeCompare(String(a.fecha_cosecha||'')))
+                      .slice(0, 8)
+                      .map((l: any) => (
+                        <tr key={l.id_lote}>
+                          <td style={{ fontFamily: 'monospace', fontSize: '11px' }}>{l.id_lote}</td>
+                          <td style={{ color: '#6b7280', fontSize: '11px' }}>{String(l.variedad||'').split(' ')[0]}</td>
+                          <td style={{ textAlign:'right', color: '#9ca3af' }}>{l.dias_f1 ? l.dias_f1+'d' : '—'}</td>
+                          <td style={{ textAlign:'right', color: '#9ca3af' }}>{l.dias_f2 ? l.dias_f2+'d' : '—'}</td>
+                          <td style={{ textAlign:'right', fontWeight: 600 }}>{l.dias_total}d</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           );
         })()}
