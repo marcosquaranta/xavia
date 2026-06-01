@@ -105,7 +105,15 @@ export function aplicarFiltros3(lotes: Lote[], cultivo: FiltroCultivo, fase: Fil
   let base = fase === 'cosechados'
     ? lotes.filter((l) => l.estado === 'cosechado')
     : lotes.filter((l) => l.estado === 'activo');
-  if (nave !== 'todas') { const n = Number(nave); base = base.filter((l) => naveDeLote(l.id_lote) === n); }
+  if (nave !== 'todas') {
+    const n = Number(nave);
+    base = base.filter((l) => {
+      const ubic = String(l.ubicacion_actual || '');
+      if (ubic.toLowerCase().includes('nave 1')) return n === 1;
+      if (ubic.toLowerCase().includes('nave 2')) return n === 2;
+      return naveDeLote(l.id_lote) === n;
+    });
+  }
   if (cultivo !== 'todos') {
     const cod = cultivo === 'lechuga' ? 'L' : cultivo === 'rucula' ? 'R' : 'A';
     base = base.filter((l) => codigoCultivo(l.variedad) === cod);

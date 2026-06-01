@@ -32,7 +32,7 @@ export function ocupacionPorNave(ubicaciones: Ubicacion[], lotes: Lote[]): Ocupa
     const mesadas = ubicaciones.filter((u) => Number(u.nave) === nave && u.activo === 'SI' && u.tipo === 'mesada');
 
     // Usar perfiles_por_modulo directamente (no capacidad_calculada que puede tener fórmulas)
-    const tubosTotales = mesadas.reduce((acc, u) => acc + (Number(u.perfiles_por_modulo) || 0), 0);
+    const tubosTotales = mesadas.reduce((acc, u) => acc + ((Number(u.modulos) || 1) * (Number(u.perfiles_por_modulo) || 0)), 0);
 
     // Matching flexible con normalización de tildes
     const lotesNave = enMesadas.filter((l) => {
@@ -164,7 +164,11 @@ export function tubosPorMesada(ubicaciones: Ubicacion[], lotes: Lote[]): Resumen
     .filter((u) => u.activo === 'SI' && u.tipo === 'mesada')
     .sort((a, b) => Number(a.orden_visual) - Number(b.orden_visual))
     .map((u) => {
-      const tubosTotal = Number(u.perfiles_por_modulo) || 0;
+            // tubos totales = modulos × perfiles_por_modulo (cuando modulos > 1)
+      // Si perfiles_por_modulo ya es el total (modulos=1), da el mismo resultado
+      const modulos = Number(u.modulos) || 1;
+      const perfilesPorMod = Number(u.perfiles_por_modulo) || 0;
+      const tubosTotal = modulos * perfilesPorMod;
       // Matching flexible: normaliza tildes pero preserva F1/F2
       // "Mesada Rucula 1" == "Mesada Rúcula 1" pero "Mesada Lechuga 1 (F1)" != "Mesada Lechuga 1 (F2)"
       function norm(s: string) {

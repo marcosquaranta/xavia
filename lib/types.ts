@@ -64,3 +64,28 @@ export interface Cliente {
   telefono: string; direccion: string; notas: string;
   activo: 'SI' | 'NO'; fecha_alta: string;
 }
+
+export interface Articulo {
+  id_articulo: string;
+  categoria: string;
+  articulo: string;
+  unidad_medida: string;
+  activo: string;
+}
+
+export interface StockMes {
+  id_stock: string;
+  id_articulo: string;
+  categoria: string;
+  articulo: string;
+  unidad_medida: string;
+  anio: number | string;
+  mes: number | string;
+  stock_inicial: number | string;
+  compras: number | string;
+  stock_final: number | string;
+  uso_calculado: number | string;
+  notas: string;
+  usuario: string;
+  fecha_carga: string;
+}

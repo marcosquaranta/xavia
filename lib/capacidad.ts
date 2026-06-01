@@ -98,7 +98,9 @@ export function calcularCapacidadMensual(
     const filas: FilaCapacidad[] = [];
 
     for (const u of mesadasNave) {
-      const perfiles = Number(u.perfiles_por_modulo) || 0;
+      // Para mesadas con múltiples módulos (ej: N2 F1 tiene 4 módulos × 22 perfiles = 88)
+    const modulos = Number(u.modulos) || 1;
+    const perfiles = modulos * (Number(u.perfiles_por_modulo) || 0);
       const orifPerf = Number(u.orificios_por_perfil) || 0;
       const posiciones = perfiles * orifPerf;
       const esF1 = u.sector_fase === 'fase_1';
