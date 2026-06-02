@@ -521,3 +521,37 @@ function calcularDiasPorFaseSafe(lote: Lote, movimientos: import('./types').Movi
     return { fase_1, fase_2 };
   } catch { return { fase_1: null, fase_2: 0 }; }
 }
+
+// Ciclos por mes y año — desglosado en F1 y F2
+export interface CicloMesDetalle { total: number; f1: number | null; f2: number; }
+
+export function ciclosPorMesYAnioDetalle(
+  lotes: Lote[], movimientos: Movimiento[], anio: number
+): Map<string, Map<number, CicloMesDetalle>> {
+  const result = new Map<string, Map<number, CicloMesDetalle>>();
+  try {
+    for (const l of lotes.filter((l) => {
+      if (l.estado !== 'cosechado') return false;
+      const f = safeParseDate(l.fecha_cosecha); return f && f.getFullYear() === anio;
+    })) {
+      try {
+        const f = safeParseDate(l.fecha_cosecha); if (!f) continue;
+        const mes = f.getMonth();
+        const dias = calcularDiasPorFase(l, movimientos);
+        if (!result.has(l.variedad)) result.set(l.variedad, new Map());
+        const mp = result.get(l.variedad)!;
+        const prev = mp.get(mes);
+        if (prev) {
+          mp.set(mes, {
+            total: Math.round((prev.total + dias.total) / 2),
+            f1: prev.f1 !== null && dias.fase_1 !== null ? Math.round((prev.f1 + dias.fase_1) / 2) : prev.f1 ?? dias.fase_1 ?? null,
+            f2: Math.round((prev.f2 + dias.fase_2) / 2),
+          });
+        } else {
+          mp.set(mes, { total: dias.total, f1: dias.fase_1 ?? null, f2: dias.fase_2 });
+        }
+      } catch {}
+    }
+  } catch {}
+  return result;
+}

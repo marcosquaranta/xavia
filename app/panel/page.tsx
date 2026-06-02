@@ -248,6 +248,34 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
                 <p className="card-title">Ciclos en mesadas — 8 semanas</p>
                 <p className="card-sub">Días por fase · sin plantinera</p>
                 <GraficoCiclosSemanas datos={ciclosSemanas} />
+
+                {/* KPIs F2 actuales */}
+                {(() => {
+                  const ult = ciclosSemanas.filter((s: any) => s.lechugaF2 > 0 || s.rucula > 0).slice(-1)[0];
+                  const ant = ciclosSemanas.filter((s: any) => s.lechugaF2 > 0 || s.rucula > 0).slice(-2, -1)[0];
+                  if (!ult) return null;
+                  function varPct(a: number, b: number) { if (!b) return null; return Math.round(((a - b) / b) * 100); }
+                  const vL = ant ? varPct(ult.lechugaF2, ant.lechugaF2) : null;
+                  const vR = ant ? varPct(ult.rucula, ant.rucula) : null;
+                  return (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f3f4f6' }}>
+                      {ult.lechugaF2 > 0 && (
+                        <div style={{ textAlign: 'center', padding: '10px', background: '#f7fee7', borderRadius: '8px' }}>
+                          <p style={{ margin: '0 0 2px', fontSize: '10px', color: '#4d7c0f', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.3px' }}>Lechuga · F2 actual</p>
+                          <p style={{ margin: '0 0 2px', fontSize: '28px', fontWeight: 800, color: '#14532d' }}>{ult.lechugaF2}d</p>
+                          {vL !== null && <p style={{ margin: 0, fontSize: '11px', fontWeight: 600, color: vL <= 0 ? '#059669' : '#dc2626' }}>{vL <= 0 ? '↓' : '↑'} {Math.abs(vL)}% vs sem. ant.</p>}
+                        </div>
+                      )}
+                      {ult.rucula > 0 && (
+                        <div style={{ textAlign: 'center', padding: '10px', background: '#f0fdf4', borderRadius: '8px' }}>
+                          <p style={{ margin: '0 0 2px', fontSize: '10px', color: '#166534', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.3px' }}>Rúcula · F2 actual</p>
+                          <p style={{ margin: '0 0 2px', fontSize: '28px', fontWeight: 800, color: '#14532d' }}>{ult.rucula}d</p>
+                          {vR !== null && <p style={{ margin: 0, fontSize: '11px', fontWeight: 600, color: vR <= 0 ? '#059669' : '#dc2626' }}>{vR <= 0 ? '↓' : '↑'} {Math.abs(vR)}% vs sem. ant.</p>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
               <div className="card" style={{ margin: 0 }}>
                 <p className="card-title">Últimas cosechas</p>

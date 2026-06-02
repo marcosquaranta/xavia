@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import { estadisticasDelMes, ciclosPorMesYAnio } from '@/lib/estadisticas';
+import { estadisticasDelMes, ciclosPorMesYAnioDetalle } from '@/lib/estadisticas';
 import type { Lote, Movimiento, Variedad } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
@@ -43,14 +43,15 @@ export default async function EstadisticasPage() {
 
   // Curvas de evolución
   try {
-    const cA = ciclosPorMesYAnio(lotes, movimientos, anioActual);
-    const cAnt = ciclosPorMesYAnio(lotes, movimientos, anioAnterior);
+    const cA = ciclosPorMesYAnioDetalle(lotes, movimientos, anioActual);
+    // Para el año anterior usamos totales simples
+    const { ciclosPorMesYAnio: ciclosPorMesYAnioSimple } = await import('@/lib/estadisticas').catch(() => ({ ciclosPorMesYAnio: () => new Map() }));
     for (const v of varActivas) {
       try {
-        const datosActual = Array.from((cA.get(v.variedad) || new Map<number,number>()).entries())
-          .filter(([k]) => typeof k === 'number' && k >= 0 && k < 12) as [number,number][];
-        const datosAnterior = Array.from((cAnt.get(v.variedad) || new Map<number,number>()).entries())
-          .filter(([k]) => typeof k === 'number' && k >= 0 && k < 12) as [number,number][];
+        const datosActual = Array.from((cA.get(v.variedad) || new Map()).entries())
+          .filter(([k]) => typeof k === 'number' && k >= 0 && k < 12) as [number, any][];
+        // Año anterior: solo total
+        const datosAnterior: [number, number][] = [];
         if (datosActual.length > 0 || datosAnterior.length > 0) {
           curvas.push({ variedad: v.variedad, datosActual, datosAnterior });
         }
