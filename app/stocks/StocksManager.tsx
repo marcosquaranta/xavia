@@ -27,10 +27,19 @@ export default function StocksManager({ articulos, stocks, lotes, usuario }: Pro
     function parseF(s: any) { if (!s) return null; try { return new Date(String(s).split(/[\sT]/)[0]); } catch { return null; } }
     const sembrados = lotes.filter((l) => { const f = parseF(l.fecha_siembra); return f && f >= inicioMes && f <= finMes; });
     const cosechados = lotes.filter((l) => { if (l.estado !== 'cosechado') return false; const f = parseF(l.fecha_cosecha); return f && f >= inicioMes && f <= finMes; });
-    const planchas = Math.round(sembrados.reduce((a, l) => a + (Number(l.plantines_iniciales) || 0), 0) / 345);
-    const paqRucula = cosechados.filter((l) => String(l.variedad||'').toLowerCase().includes('rucula')).reduce((a, l) => a + (Number(l.unidades_cosechadas)||0), 0);
-    const plantasLech = cosechados.filter((l) => !String(l.variedad||'').toLowerCase().includes('rucula')).reduce((a, l) => a + (Number(l.unidades_cosechadas)||0), 0);
-    return { planchas, paqRucula, plantasLech, sembrados: sembrados.length, cosechados: cosechados.length };
+    const esRucula = (l: any) => String(l.variedad||'').toLowerCase().includes('rucula') || String(l.variedad||'').toLowerCase().includes('rúcula');
+    const sembLechuga = sembrados.filter((l) => !esRucula(l));
+    const sembRucula  = sembrados.filter((l) => esRucula(l));
+    const CUBOS_POR_PLANCHA = 345;
+    const GR_SEMILLA_RUCULA = 13;   // gramos por plancha
+    const GR_SEMILLA_LECHUGA = 16;  // gramos por plancha
+    const planchasLechuga = Math.round(sembLechuga.reduce((a, l) => a + (Number(l.plantines_iniciales) || 0), 0) / CUBOS_POR_PLANCHA);
+    const planchasRucula  = Math.round(sembRucula.reduce((a, l) => a + (Number(l.plantines_iniciales) || 0), 0) / CUBOS_POR_PLANCHA);
+    const semillaLechugaGr = planchasLechuga * GR_SEMILLA_LECHUGA;
+    const semillaRuculaGr  = planchasRucula  * GR_SEMILLA_RUCULA;
+    const paqRucula   = cosechados.filter((l) => esRucula(l)).reduce((a, l) => a + (Number(l.unidades_cosechadas)||0), 0);
+    const plantasLech = cosechados.filter((l) => !esRucula(l)).reduce((a, l) => a + (Number(l.unidades_cosechadas)||0), 0);
+    return { planchasLechuga, planchasRucula, semillaLechugaGr, semillaRuculaGr, paqRucula, plantasLech, sembrados: sembrados.length, cosechados: cosechados.length };
   }, [lotes, anio, mes]);
 
   // Stock del mes seleccionado
@@ -129,12 +138,19 @@ export default function StocksManager({ articulos, stocks, lotes, usuario }: Pro
               Usos del sistema — {MESES[mes - 1]} {anio}
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '8px' }}>
+              {/* Leyenda de fórmulas */}
+              <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#6b7280', background: '#f8fafc', padding: '6px 10px', borderRadius: '6px', borderLeft: '3px solid #e2e8f0' }}>
+                1 plancha = 345 cubos · Semilla lechuga: 16 gr/plancha · Semilla rúcula: 13 gr/plancha
+              </p>
               {[
-                ['Planchas sembradas', usosDelMes.planchas, 'cubos est.'],
-                ['Paquetes rúcula', usosDelMes.paqRucula, 'bolsas'],
-                ['Plantas lechuga', usosDelMes.plantasLech.toLocaleString('es-AR'), 'bolsas'],
-                ['Lotes sembrados', usosDelMes.sembrados, 'nuevos'],
-                ['Lotes cosechados', usosDelMes.cosechados, 'cerrados'],
+                ['Planchas lechuga', usosDelMes.planchasLechuga, `${usosDelMes.planchasLechuga * 345} cubos Oasis`],
+                ['Planchas rúcula', usosDelMes.planchasRucula, `${usosDelMes.planchasRucula * 345} cubos Green Up`],
+                ['Semilla lechuga', `${usosDelMes.semillaLechugaGr} gr`, `${usosDelMes.planchasLechuga} pl × 16 gr`],
+                ['Semilla rúcula', `${usosDelMes.semillaRuculaGr} gr`, `${usosDelMes.planchasRucula} pl × 13 gr`],
+                ['Paquetes rúcula', usosDelMes.paqRucula, 'bolsas rúcula cosech.'],
+                ['Plantas lechuga', usosDelMes.plantasLech.toLocaleString('es-AR'), 'bolsas lechuga cosech.'],
+                ['Lotes sembrados', usosDelMes.sembrados, 'nuevos este mes'],
+                ['Lotes cosechados', usosDelMes.cosechados, 'cerrados este mes'],
               ].map(([label, value, sub]: any) => (
                 <div key={label} style={{ background: '#f9fafb', borderRadius: '6px', padding: '10px 12px' }}>
                   <p style={{ margin: '0 0 2px', fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{label}</p>
