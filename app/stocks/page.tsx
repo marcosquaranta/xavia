@@ -62,30 +62,10 @@ export default async function StocksPage() {
         <h1 className="page-title">Stocks</h1>
         <p className="page-subtitle">Control de insumos · carga mensual · informe comparativo</p>
 
-        {/* Usos automáticos del sistema */}
-        <div className="card" style={{ marginBottom: '16px' }}>
-          <p className="card-title">Usos del sistema — {new Date().toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}</p>
-          <p className="card-sub">Calculado automáticamente desde los registros de la app</p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', marginTop: '10px' }}>
-            {[
-              ['Planchas sembradas', planchasSembradas, 'cubos estimados'],
-              ['Paquetes rúcula', paquetesRucula, 'bolsas rúcula'],
-              ['Plantas lechuga', plantasLechuga.toLocaleString('es-AR'), 'bolsas lechuga'],
-              ['Lotes sembrados', lotesEsteMes.length, 'lotes nuevos'],
-              ['Lotes cosechados', cosechasEsteMes.length, 'lotes cerrados'],
-            ].map(([label, value, sub]: any) => (
-              <div key={label} style={{ background: '#f9fafb', borderRadius: '8px', padding: '12px 14px' }}>
-                <p style={{ margin: '0 0 2px', fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{label}</p>
-                <p style={{ margin: '0 0 2px', fontSize: '20px', fontWeight: 700, color: '#111827' }}>{value}</p>
-                <p style={{ margin: 0, fontSize: '10px', color: '#9ca3af' }}>{sub}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
         <StocksManager
           articulos={articulos.filter((a) => a.activo === 'SI')}
           stocks={stocks}
+          lotes={lotes}
           usuario={user.email}
         />
       </div>

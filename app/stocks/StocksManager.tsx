@@ -1,16 +1,16 @@
 'use client';
 import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Articulo, StockMes } from '@/lib/types';
+import type { Articulo, StockMes, Lote } from '@/lib/types';
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const HOY = new Date();
 
-interface Props { articulos: Articulo[]; stocks: StockMes[]; usuario: string; }
+interface Props { articulos: Articulo[]; stocks: StockMes[]; lotes: Lote[]; usuario: string; }
 
 function num(v: any) { const n = Number(v); return isNaN(n) ? 0 : n; }
 
-export default function StocksManager({ articulos, stocks, usuario }: Props) {
+export default function StocksManager({ articulos, stocks, lotes, usuario }: Props) {
   const router = useRouter();
   const [anio, setAnio] = useState(HOY.getFullYear());
   const [mes, setMes] = useState(HOY.getMonth() + 1);
@@ -19,6 +19,19 @@ export default function StocksManager({ articulos, stocks, usuario }: Props) {
   const [editValues, setEditValues] = useState<Record<string, { ini: string; comp: string; fin: string; notas: string }>>({});
 
   const categorias = useMemo(() => Array.from(new Set(articulos.map((a) => a.categoria))).sort(), [articulos]);
+
+  // Usos del sistema para el mes seleccionado
+  const usosDelMes = useMemo(() => {
+    const inicioMes = new Date(anio, mes - 1, 1);
+    const finMes = new Date(anio, mes, 0, 23, 59, 59);
+    function parseF(s: any) { if (!s) return null; try { return new Date(String(s).split(/[\sT]/)[0]); } catch { return null; } }
+    const sembrados = lotes.filter((l) => { const f = parseF(l.fecha_siembra); return f && f >= inicioMes && f <= finMes; });
+    const cosechados = lotes.filter((l) => { if (l.estado !== 'cosechado') return false; const f = parseF(l.fecha_cosecha); return f && f >= inicioMes && f <= finMes; });
+    const planchas = Math.round(sembrados.reduce((a, l) => a + (Number(l.plantines_iniciales) || 0), 0) / 345);
+    const paqRucula = cosechados.filter((l) => String(l.variedad||'').toLowerCase().includes('rucula')).reduce((a, l) => a + (Number(l.unidades_cosechadas)||0), 0);
+    const plantasLech = cosechados.filter((l) => !String(l.variedad||'').toLowerCase().includes('rucula')).reduce((a, l) => a + (Number(l.unidades_cosechadas)||0), 0);
+    return { planchas, paqRucula, plantasLech, sembrados: sembrados.length, cosechados: cosechados.length };
+  }, [lotes, anio, mes]);
 
   // Stock del mes seleccionado
   const stockMes = useMemo(() =>
@@ -32,12 +45,14 @@ export default function StocksManager({ articulos, stocks, usuario }: Props) {
 
   function getEdit(id: string) {
     const s = getStock(id);
-    return editValues[id] || {
-      ini: s ? String(num(s.stock_inicial)) : '',
-      comp: s ? String(num(s.compras)) : '',
-      fin: s ? String(num(s.stock_final)) : '',
-      notas: s?.notas || '',
-    };
+    if (editValues[id]) return editValues[id];
+    if (s) return { ini: String(num(s.stock_inicial)), comp: String(num(s.compras)), fin: String(num(s.stock_final)), notas: s.notas || '' };
+    // Sin registro: pre-completar stock inicial = stock final del mes anterior
+    let mesPrev = mes - 1, anioPrev = anio;
+    if (mesPrev === 0) { mesPrev = 12; anioPrev--; }
+    const sPrev = stocks.find((st) => st.id_articulo === id && String(st.anio) === String(anioPrev) && String(st.mes) === String(mesPrev));
+    const iniAuto = sPrev && num(sPrev.stock_final) > 0 ? String(num(sPrev.stock_final)) : '';
+    return { ini: iniAuto, comp: '', fin: '', notas: '' };
   }
 
   function setField(id: string, field: string, val: string) {
@@ -108,6 +123,28 @@ export default function StocksManager({ articulos, stocks, usuario }: Props) {
       {/* ===== VISTA: CARGA MENSUAL ===== */}
       {vista === 'carga' && (
         <div>
+          {/* Usos del sistema para el mes seleccionado */}
+          <div className="card" style={{ marginBottom: '12px' }}>
+            <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Usos del sistema — {MESES[mes - 1]} {anio}
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '8px' }}>
+              {[
+                ['Planchas sembradas', usosDelMes.planchas, 'cubos est.'],
+                ['Paquetes rúcula', usosDelMes.paqRucula, 'bolsas'],
+                ['Plantas lechuga', usosDelMes.plantasLech.toLocaleString('es-AR'), 'bolsas'],
+                ['Lotes sembrados', usosDelMes.sembrados, 'nuevos'],
+                ['Lotes cosechados', usosDelMes.cosechados, 'cerrados'],
+              ].map(([label, value, sub]: any) => (
+                <div key={label} style={{ background: '#f9fafb', borderRadius: '6px', padding: '10px 12px' }}>
+                  <p style={{ margin: '0 0 2px', fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{label}</p>
+                  <p style={{ margin: '0 0 2px', fontSize: '18px', fontWeight: 700, color: '#111827' }}>{value}</p>
+                  <p style={{ margin: 0, fontSize: '10px', color: '#9ca3af' }}>{sub}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {categorias.map((cat) => {
             const artscat = artActivos.filter((a) => a.categoria === cat);
             return (
