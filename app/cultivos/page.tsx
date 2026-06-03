@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
 export default async function CultivosPage({
   searchParams,
 }: {
-  searchParams: { cultivo?: string; fase?: string; nave?: string; mesada?: string; q?: string; orden?: string };
+  searchParams: { cultivo?: string; fase?: string; nave?: string; mesada?: string; tiempo?: string; q?: string; orden?: string };
 }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
@@ -24,6 +24,7 @@ export default async function CultivosPage({
   const fase = (searchParams.fase || 'todas') as FiltroFase;
   const nave = (searchParams.nave || 'todas') as FiltroNave;
   const mesada = searchParams.mesada || 'todas';
+  const tiempo = (searchParams.tiempo || 'todos') as any;
   const query = (searchParams.q || '').trim().toLowerCase();
   const orden = searchParams.orden === 'desc' ? 'desc' : 'asc';
 
@@ -55,7 +56,7 @@ export default async function CultivosPage({
       String(l.id_lote || '').toLowerCase().includes(query)
     );
   } else {
-    lotesFiltrados = aplicarFiltros3(lotes, cultivo, fase, nave, mesada);
+    lotesFiltrados = aplicarFiltros3(lotes, cultivo, fase, nave, mesada, tiempo);
   }
 
   // Ordenar por fecha de siembra
@@ -91,7 +92,7 @@ export default async function CultivosPage({
 
         {/* Filtros — se ocultan cuando hay búsqueda activa */}
         {!query && (
-          <FiltrosLotes cultivoActivo={cultivo} faseActiva={fase} naveActiva={nave} mesadaActiva={mesada} conteos={conteos} ubicaciones={ubicaciones} baseUrl="/cultivos" />
+          <FiltrosLotes cultivoActivo={cultivo} faseActiva={fase} naveActiva={nave} mesadaActiva={mesada} tiempoActivo={tiempo} conteos={conteos} ubicaciones={ubicaciones} baseUrl="/cultivos" />
         )}
 
         {/* Resultados */}

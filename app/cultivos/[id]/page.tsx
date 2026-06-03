@@ -67,7 +67,7 @@ export default async function DetalleLotePage({ params }: { params: { id: string
           <p className="card-title">Historial de movimientos</p>
           {movsLote.length === 0 ? <p style={{ color: '#9ca3af', fontSize: '13px', textAlign: 'center' }}>Sin movimientos</p> : (
             <table>
-              <thead><tr><th>Fecha</th><th>Tipo</th><th>Origen</th><th>Destino</th><th style={{ textAlign: 'right' }}>Cant.</th></tr></thead>
+              <thead><tr><th>Fecha</th><th>Tipo</th><th>Origen</th><th>Destino</th><th style={{ textAlign: 'right' }}>Cant.</th><th>Usuario</th></tr></thead>
               <tbody>
                 {movsLote.map((m) => (
                   <tr key={m.id_movimiento}>
@@ -75,6 +75,7 @@ export default async function DetalleLotePage({ params }: { params: { id: string
                     <td style={{ color: '#6b7280' }}>{lFase(String(m.fase_origen || ''))}</td>
                     <td style={{ color: '#6b7280' }}>{lFase(String(m.fase_destino || ''))}</td>
                     <td style={{ textAlign: 'right' }}>{m.tipo === 'cosecha' ? (m.unidades_cosechadas || 0) + ' u' : m.plantas_estimadas || '-'}</td>
+                    <td style={{ color: '#9ca3af', fontSize: '11px' }}>{String(m.usuario || '—').split('@')[0]}</td>
                   </tr>
                 ))}
               </tbody>

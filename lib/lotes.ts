@@ -98,10 +98,11 @@ export type FiltroCultivo = 'todos' | 'lechuga' | 'rucula' | 'albahaca';
 export type FiltroFase = 'todas' | 'plantinera' | 'fase_1' | 'fase_2' | 'cosechados';
 export type FiltroNave = 'todas' | '1' | '2';
 export type FiltroMesada = string; // nombre de mesada o 'todas'
+export type FiltroTiempo = 'todos' | '7d' | '30d' | '90d'; // para cosechados
 // Alias para compatibilidad
 export type FiltroCultivos = FiltroCultivo;
 
-export function aplicarFiltros3(lotes: Lote[], cultivo: FiltroCultivo, fase: FiltroFase, nave: FiltroNave, mesada: FiltroMesada = 'todas'): Lote[] {
+export function aplicarFiltros3(lotes: Lote[], cultivo: FiltroCultivo, fase: FiltroFase, nave: FiltroNave, mesada: FiltroMesada = 'todas', tiempo: FiltroTiempo = 'todos'): Lote[] {
   let base = fase === 'cosechados'
     ? lotes.filter((l) => l.estado === 'cosechado')
     : lotes.filter((l) => l.estado === 'activo');
@@ -128,6 +129,17 @@ export function aplicarFiltros3(lotes: Lote[], cultivo: FiltroCultivo, fase: Fil
     }
     const mesadaNorm = normM(mesada);
     base = base.filter((l) => normM(String(l.ubicacion_actual || '')) === mesadaNorm);
+  }
+  // Filtro de tiempo — solo aplica a cosechados
+  if (tiempo !== 'todos' && fase === 'cosechados') {
+    const hoy = new Date();
+    const dias = tiempo === '7d' ? 7 : tiempo === '30d' ? 30 : 90;
+    const limite = new Date(hoy); limite.setDate(hoy.getDate() - dias);
+    base = base.filter((l) => {
+      const f = l.fecha_ult_movimiento || l.fecha_cosecha;
+      if (!f) return false;
+      try { return new Date(String(f).split(/[\sT]/)[0]) >= limite; } catch { return false; }
+    });
   }
   return base;
 }

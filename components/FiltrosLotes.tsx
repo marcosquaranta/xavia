@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { FiltroCultivo, FiltroFase, FiltroNave, ConteosFiltros } from '@/lib/lotes';
+import type { FiltroCultivo, FiltroFase, FiltroNave, FiltroTiempo, ConteosFiltros } from '@/lib/lotes';
 import type { Ubicacion } from '@/lib/types';
 
 interface Props {
@@ -7,18 +7,20 @@ interface Props {
   faseActiva: FiltroFase;
   naveActiva: FiltroNave;
   mesadaActiva: string;
+  tiempoActivo?: FiltroTiempo;
   conteos: ConteosFiltros;
   ubicaciones: Ubicacion[];
   baseUrl: string;
 }
 
-export default function FiltrosLotes({ cultivoActivo, faseActiva, naveActiva, mesadaActiva, conteos, ubicaciones, baseUrl }: Props) {
-  function url(c: string, f: string, n: string, m: string) {
+export default function FiltrosLotes({ cultivoActivo, faseActiva, naveActiva, mesadaActiva, tiempoActivo = 'todos', conteos, ubicaciones, baseUrl }: Props) {
+  function url(c: string, f: string, n: string, m: string, t = 'todos') {
     const p = new URLSearchParams();
     if (c !== 'todos') p.set('cultivo', c);
     if (f !== 'todas') p.set('fase', f);
     if (n !== 'todas') p.set('nave', n);
     if (m && m !== 'todas') p.set('mesada', m);
+    if (t && t !== 'todos') p.set('tiempo', t);
     const s = p.toString();
     return `${baseUrl}${s ? '?' + s : ''}`;
   }
@@ -105,6 +107,23 @@ export default function FiltrosLotes({ cultivoActivo, faseActiva, naveActiva, me
               </Link>
             );
           })}
+        </div>
+      )}
+
+      {/* Fila 5: Tiempo — solo para cosechados */}
+      {faseActiva === 'cosechados' && (
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.3px', minWidth: '52px' }}>Período</span>
+          {[
+            { key: 'todos', label: 'Todos' },
+            { key: '7d', label: 'Últimos 7 días' },
+            { key: '30d', label: 'Último mes' },
+            { key: '90d', label: 'Últimos 3 meses' },
+          ].map((t) => (
+            <Link key={t.key} href={url(cultivoActivo, faseActiva, naveActiva, mesadaActiva, t.key)} style={{ textDecoration: 'none' }}>
+              <span className="pill" style={pill(tiempoActivo === t.key, '#374151', 'white', '#374151')}>{t.label}</span>
+            </Link>
+          ))}
         </div>
       )}
 

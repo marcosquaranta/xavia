@@ -87,11 +87,27 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades, c
         );
       })()}
 
-      <div style={{ display: 'flex', gap: '12px', fontSize: '11px', paddingTop: '8px', borderTop: '1px solid rgba(0,0,0,0.06)', marginTop: '8px', flexWrap: 'wrap' }}>
-        <span><span style={{ color: '#6b7280' }}>Sembrado:</span> {fmt(dias.fechas.siembra)}</span>
-        <span><span style={{ color: '#6b7280' }}>Plantinera:</span> <strong>{dias.plantinera}d</strong></span>
-        {dias.fase_1 !== null && <span><span style={{ color: '#6b7280' }}>F1:</span> <strong>{dias.fase_1}d</strong></span>}
-        {dias.fase_2 > 0 && <span><span style={{ color: '#6b7280' }}>F2:</span> <strong>{dias.fase_2}d</strong></span>}
+      {/* Último movimiento — prominente */}
+      {lote.fecha_ult_movimiento && (() => {
+        const fechaMov = fmt(String(lote.fecha_ult_movimiento));
+        const tipoMov = lote.estado === 'cosechado' ? 'Cosechado' : lote.fase_actual === 'plantin' ? 'Sembrado' : lote.fase_actual === 'fase_1' ? 'Trasplante a F1' : 'Trasplante a F2';
+        const colorMov = lote.estado === 'cosechado' ? '#6b7280' : lote.fase_actual === 'fase_2' ? '#16a34a' : lote.fase_actual === 'fase_1' ? '#2563eb' : '#ca8a04';
+        return (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '8px', borderTop: '1px solid rgba(0,0,0,0.06)', marginTop: '8px' }}>
+            <span style={{ fontSize: '11px', color: '#9ca3af' }}>Último mov.</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '11px', color: colorMov, fontWeight: 600 }}>{tipoMov}</span>
+              <strong style={{ fontSize: '14px', color: '#111827', fontWeight: 800 }}>{fechaMov}</strong>
+            </span>
+          </div>
+        );
+      })()}
+
+      <div style={{ display: 'flex', gap: '12px', fontSize: '11px', paddingTop: '6px', flexWrap: 'wrap', color: '#9ca3af' }}>
+        <span>Sembrado: <strong style={{ color: '#374151' }}>{fmt(dias.fechas.siembra)}</strong></span>
+        <span>Plantinera: <strong style={{ color: '#374151' }}>{dias.plantinera}d</strong></span>
+        {dias.fase_1 !== null && <span>F1: <strong style={{ color: '#374151' }}>{dias.fase_1}d</strong></span>}
+        {dias.fase_2 > 0 && <span>F2: <strong style={{ color: '#374151' }}>{dias.fase_2}d</strong></span>}
       </div>
     </div>
   );
