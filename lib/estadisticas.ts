@@ -99,19 +99,25 @@ export function cosechaSemanaActual(lotes: Lote[]): CosechaSemana {
   return stats;
 }
 
-export function cosechadoEsteMes(lotes: Lote[]): { actual: number; pasado: number } {
+export function cosechadoEsteMes(lotes: Lote[]): { actual: number; pasado: number; diaCorte: number } {
   let actual = 0; let pasado = 0;
   try {
-    const hoy = new Date(); const iA = som(hoy);
-    const mp = new Date(hoy); mp.setMonth(mp.getMonth() - 1); const iP = som(mp); const fP = eom(mp);
+    const hoy = new Date();
+    const diaCorte = hoy.getDate();
+    const iA = som(hoy);
+    const mp = new Date(hoy); mp.setMonth(mp.getMonth() - 1);
+    const iP = som(mp);
+    const fP = new Date(mp.getFullYear(), mp.getMonth(), diaCorte, 23, 59, 59); // mismo día del mes anterior
     for (const l of lotes) {
       if (l.estado !== 'cosechado') continue;
-      const f = safeParseDate(l.fecha_cosecha); if (!f) continue;
+      const f = safeParseDate(l.fecha_cosecha || l.fecha_ult_movimiento); if (!f) continue;
       const u = Number(l.unidades_cosechadas) || 0;
-      if (f >= iA) actual += u; else if (f >= iP && f <= fP) pasado += u;
+      if (f >= iA && f <= hoy) actual += u;
+      else if (f >= iP && f <= fP) pasado += u;
     }
+    return { actual, pasado, diaCorte };
   } catch { }
-  return { actual, pasado };
+  return { actual, pasado, diaCorte: new Date().getDate() };
 }
 
 export interface PlantasPorFase { plantinera: number; fase_1: number; fase_2: number; total: number; }
@@ -138,8 +144,13 @@ export function plantasPorCultivo(lotes: Lote[]): ResumenCultivos {
 
 export function variacionVsMesAnterior(lotes: Lote[], clave: keyof ResumenCultivos): number | null {
   try {
-    const hoy = new Date(); const iA = som(hoy);
-    const mp = new Date(hoy); mp.setMonth(mp.getMonth() - 1); const iP = som(mp); const fP = eom(mp);
+    const hoy = new Date();
+    const diaHoy = hoy.getDate();
+    const iA = som(hoy); // inicio mes actual
+    // Proporcional: mismo período del mes anterior (días 1 al diaHoy)
+    const mp = new Date(hoy); mp.setMonth(mp.getMonth() - 1);
+    const iP = som(mp); // inicio mes anterior
+    const fP = new Date(mp.getFullYear(), mp.getMonth(), diaHoy, 23, 59, 59); // hasta el mismo día
     function match(v: string): boolean {
       const vl = v.toLowerCase();
       if (clave === 'rucula') return vl.includes('rucula') || vl.includes('rúcula');
@@ -148,9 +159,10 @@ export function variacionVsMesAnterior(lotes: Lote[], clave: keyof ResumenCultiv
     }
     let actual = 0; let pasado = 0;
     for (const l of lotes.filter((l) => l.estado === 'cosechado' && match(l.variedad))) {
-      const f = safeParseDate(l.fecha_cosecha); if (!f) continue;
+      const f = safeParseDate(l.fecha_cosecha || l.fecha_ult_movimiento); if (!f) continue;
       const u = Number(l.unidades_cosechadas) || 0;
-      if (f >= iA) actual += u; else if (f >= iP && f <= fP) pasado += u;
+      if (f >= iA && f <= hoy) actual += u;
+      else if (f >= iP && f <= fP) pasado += u;
     }
     if (pasado === 0) return null;
     return Math.round(((actual - pasado) / pasado) * 100);

@@ -33,7 +33,7 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
     ]);
   } catch {}
 
-  let cosechadoMes = 0, cosechadoMesPasado = 0, navesOcup: any[] = [];
+  let cosechadoMes = 0, cosechadoMesPasado = 0, diaCorte = new Date().getDate(), navesOcup: any[] = [];
   let resumen = {
     lechuga:  { plantinera: 0, fase_1: 0, fase_2: 0, total: 0 },
     rucula:   { plantinera: 0, fase_1: 0, fase_2: 0, total: 0 },
@@ -49,7 +49,7 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
 
   try {
     const mes = cosechadoEsteMes(lotes);
-    cosechadoMes = mes.actual; cosechadoMesPasado = mes.pasado;
+    cosechadoMes = mes.actual; cosechadoMesPasado = mes.pasado; diaCorte = mes.diaCorte;
     navesOcup = ocupacionPorNave(ubicaciones, lotes);
     resumen = plantasPorCultivo(lotes);
     varL = variacionVsMesAnterior(lotes, 'lechuga');
@@ -94,7 +94,7 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
         {/* Cards Lechuga + Rúcula + Stats globales */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px', marginBottom: '16px' }}>
           <CultivoCard titulo="Lechuga" color="#4d7c0f" colorBg="#f7fee7" datos={resumen.lechuga} variacion={varL} tieneFase1 />
-          <CultivoCard titulo="Rúcula"  color="#166534" colorBg="#dcfce7" datos={resumen.rucula}  variacion={varR} tieneFase1={false} />
+          <CultivoCard titulo="Rúcula"  color="#166534" colorBg="#dcfce7" datos={resumen.rucula}  variacion={varR} tieneFase1={false} esRucula />
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px', flex: 1 }}>
               <p style={{ margin: '0 0 8px', fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Ocupación global</p>
@@ -111,11 +111,16 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
             </div>
             <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px', flex: 1 }}>
               <p style={{ margin: '0 0 4px', fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Cosechado este mes</p>
-              <p style={{ margin: '0 0 4px', fontSize: '26px', fontWeight: 700 }}>{cosechadoMes.toLocaleString('es-AR')}</p>
-              {cosechadoMesPasado > 0 && (
-                <p style={{ margin: 0, fontSize: '12px', color: difPct >= 0 ? '#059669' : '#dc2626', fontWeight: 500 }}>
-                  {difPct >= 0 ? '↑' : '↓'} {Math.abs(difPct)}% vs mes anterior
-                </p>
+              <p style={{ margin: '0 0 6px', fontSize: '26px', fontWeight: 700 }}>{cosechadoMes.toLocaleString('es-AR')}</p>
+              {cosechadoMesPasado > 0 ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '18px', fontWeight: 800, color: difPct >= 0 ? '#059669' : '#dc2626' }}>
+                    {difPct >= 0 ? '↑' : '↓'} {Math.abs(difPct)}%
+                  </span>
+                  <span style={{ fontSize: '11px', color: '#9ca3af' }}>vs días 1-{diaCorte} mes ant. ({cosechadoMesPasado.toLocaleString('es-AR')} u)</span>
+                </div>
+              ) : (
+                <p style={{ margin: 0, fontSize: '11px', color: '#9ca3af' }}>Sin cosechas en período comparable</p>
               )}
             </div>
           </div>
@@ -343,33 +348,52 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
   );
 }
 
-function CultivoCard({ titulo, color, colorBg, datos, variacion, tieneFase1 }: {
+function CultivoCard({ titulo, color, colorBg, datos, variacion, tieneFase1, esRucula }: {
   titulo: string; color: string; colorBg: string;
   datos: { plantinera: number; fase_1: number; fase_2: number; total: number };
-  variacion: number | null; tieneFase1: boolean;
+  variacion: number | null; tieneFase1: boolean; esRucula?: boolean;
 }) {
+  const PLANTAS_POR_PAQ = 3;
   const varColor = variacion === null ? '#9ca3af' : variacion > 0 ? '#059669' : '#dc2626';
+  // Para rúcula: mostrar paquetes estimados en F2 y total
+  const f2Paq = esRucula ? Math.round(datos.fase_2 / PLANTAS_POR_PAQ) : datos.fase_2;
+  const totalPaq = esRucula ? Math.round(datos.total / PLANTAS_POR_PAQ) : datos.total;
+  const hoy = new Date();
   return (
     <div style={{ background: 'white', border: '1px solid #e5e7eb', borderTop: '3px solid ' + color, borderRadius: '10px', padding: '16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
         <span style={{ background: color, color: 'white', padding: '2px 10px', borderRadius: '4px', fontSize: '12px', fontWeight: 800, letterSpacing: '0.5px' }}>{titulo.toUpperCase()}</span>
         <span style={{ fontSize: '22px', fontWeight: 700, color: '#111827' }}>
-          {datos.total.toLocaleString('es-AR')}
-          <span style={{ fontSize: '11px', fontWeight: 400, color: '#6b7280', marginLeft: '4px' }}>plantas</span>
+          {esRucula ? (
+            <>
+              {totalPaq.toLocaleString('es-AR')}
+              <span style={{ fontSize: '11px', fontWeight: 400, color: '#6b7280', marginLeft: '4px' }}>paq. est.</span>
+              <span style={{ fontSize: '11px', fontWeight: 400, color: '#9ca3af', marginLeft: '6px' }}>({datos.total.toLocaleString('es-AR')} pl)</span>
+            </>
+          ) : (
+            <>{datos.total.toLocaleString('es-AR')}<span style={{ fontSize: '11px', fontWeight: 400, color: '#6b7280', marginLeft: '4px' }}>plantas</span></>
+          )}
         </span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: tieneFase1 ? '1fr 1fr 1fr' : '1fr 1fr', gap: '6px', marginBottom: '10px' }}>
-        {([['Plantinera', datos.plantinera], ...(tieneFase1 ? [['Fase 1', datos.fase_1]] : []), ['Fase 2', datos.fase_2]] as [string, number][]).map(([label, val]) => (
-          <div key={label} style={{ background: val > 0 ? colorBg : '#f9fafb', borderRadius: '6px', padding: '8px 10px', textAlign: 'center' }}>
-            <p style={{ margin: '0 0 2px', fontSize: '10px', color: val > 0 ? color : '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.3px', fontWeight: 600 }}>{label}</p>
-            <p style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: val > 0 ? '#111827' : '#d1d5db' }}>{val.toLocaleString('es-AR')}</p>
+        {([
+          ['Plantinera', datos.plantinera, datos.plantinera],
+          ...(tieneFase1 ? [['Fase 1', datos.fase_1, datos.fase_1] as [string,number,number]] : []),
+          ['Fase 2', esRucula ? f2Paq : datos.fase_2, datos.fase_2],
+        ] as [string, number, number][]).map(([label, val, valPl]) => (
+          <div key={label} style={{ background: valPl > 0 ? colorBg : '#f9fafb', borderRadius: '6px', padding: '8px 10px', textAlign: 'center' }}>
+            <p style={{ margin: '0 0 2px', fontSize: '10px', color: valPl > 0 ? color : '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.3px', fontWeight: 600 }}>{label}</p>
+            <p style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: valPl > 0 ? '#111827' : '#d1d5db' }}>{val.toLocaleString('es-AR')}</p>
+            {esRucula && label === 'Fase 2' && valPl > 0 && (
+              <p style={{ margin: '1px 0 0', fontSize: '10px', color: '#9ca3af' }}>{valPl.toLocaleString('es-AR')} pl</p>
+            )}
           </div>
         ))}
       </div>
       <div style={{ paddingTop: '10px', borderTop: '1px solid #f3f4f6', fontSize: '12px', color: varColor, fontWeight: 500 }}>
         {variacion === null
-          ? <span style={{ color: '#9ca3af', fontWeight: 400 }}>Sin datos del mes anterior</span>
-          : <>{variacion >= 0 ? '↑' : '↓'} {Math.abs(variacion)}% vs cosechas mes anterior</>}
+          ? <span style={{ color: '#9ca3af', fontWeight: 400 }}>Sin cosechas en período comparable</span>
+          : <>{variacion >= 0 ? '↑' : '↓'} {Math.abs(variacion)}% vs cosechas — día 1 al {hoy.getDate()} del mes ant.</>}
       </div>
     </div>
   );
