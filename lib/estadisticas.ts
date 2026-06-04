@@ -400,17 +400,20 @@ export function resumenCosechaPorCultivo(
       })
       .reduce((acc, l) => acc + (Number(l.unidades_cosechadas)||0), 0);
 
-    // Mes anterior PROPORCIONAL (solo hasta el mismo día del mes)
+    // Mes anterior COMPLETO para comparar con proyectado total
+    const finMesPrevio = new Date(anioActual, mesActual - 1, 0, 23, 59, 59); // último día del mes anterior
     const cosechadoMesAntProporcional = lotes
       .filter(l => {
         if (l.estado !== 'cosechado' || !matchCultivo(l.variedad, cultivo)) return false;
         const f = safeParseDate(l.fecha_cosecha || l.fecha_ult_movimiento);
-        return f && f >= mesPrevio && f <= finPropMesPrevio;
+        return f && f >= mesPrevio && f <= finMesPrevio;
       })
       .reduce((acc, l) => acc + (Number(l.unidades_cosechadas)||0), 0);
 
+    // Comparar proyectado total del mes (cosechado + proyectado) vs total mes anterior
+    const proyTotalPreliminar = cosechadoMes; // lo calculamos después, por ahora solo mes ant
     const variacionPct = cosechadoMesAntProporcional > 0
-      ? Math.round(((cosechadoMes - cosechadoMesAntProporcional) / cosechadoMesAntProporcional) * 100)
+      ? null // se calcula después con proyectadoMesTotal
       : null;
 
     // Proyectado: lotes activos en F1 o F2 con fecha estimada en el mes
@@ -434,8 +437,13 @@ export function resumenCosechaPorCultivo(
     const proyectadoRestoMes = Math.round(proyectadoPlantasResto / convFactor);
     const proyectadoMesTotal = proyectadoEstaSemana + proyectadoRestoMes;
 
+    // Variación: proyectado total del mes vs total mes anterior
+    const variacionFinal = cosechadoMesAntProporcional > 0
+      ? Math.round(((cosechadoMes + proyectadoMesTotal - cosechadoMesAntProporcional) / cosechadoMesAntProporcional) * 100)
+      : null;
+
     return {
-      cultivo, label, cosechadoMes, cosechadoMesAntProporcional, variacionPct,
+      cultivo, label, cosechadoMes, cosechadoMesAntProporcional, variacionPct: variacionFinal,
       proyectadoEstaSemana, proyectadoEstaSemanaPlantas: proyectadoPlantas7d,
       proyectadoRestoMes, proyectadoMesTotal, plantasPorPaquete: PLANTAS_POR_PAQUETE,
     };

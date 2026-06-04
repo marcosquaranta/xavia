@@ -118,10 +118,10 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
                   <span style={{ fontSize: '18px', fontWeight: 800, color: difPct >= 0 ? '#059669' : '#dc2626' }}>
                     {difPct >= 0 ? '↑' : '↓'} {Math.abs(difPct)}%
                   </span>
-                  <span style={{ fontSize: '11px', color: '#9ca3af' }}>vs días 1-{diaCorte} mes ant. ({cosechadoMesPasado.toLocaleString('es-AR')} u)</span>
+                  <span style={{ fontSize: '11px', color: '#9ca3af' }}>vs mes ant. ({cosechadoMesPasado.toLocaleString('es-AR')} u)</span>
                 </div>
               ) : (
-                <p style={{ margin: 0, fontSize: '11px', color: '#9ca3af' }}>Sin cosechas en período comparable</p>
+                <p style={{ margin: 0, fontSize: '11px', color: '#9ca3af' }}>Sin cosechas mes anterior</p>
               )}
             </div>
           </div>
@@ -154,7 +154,7 @@ export default async function PanelPage({ searchParams }: { searchParams: { cult
                     <p style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#111827' }}>{r.cosechadoMesAntProporcional.toLocaleString('es-AR')}</p>
                     {r.variacionPct !== null && (
                       <p style={{ margin: '2px 0 0', fontSize: '11px', fontWeight: 600, color: r.variacionPct >= 0 ? '#059669' : '#dc2626' }}>
-                        {r.variacionPct >= 0 ? '↑' : '↓'} {Math.abs(r.variacionPct)}%
+                        {r.variacionPct >= 0 ? '↑' : '↓'} {Math.abs(r.variacionPct)}% proy. mes
                       </p>
                     )}
                   </div>
