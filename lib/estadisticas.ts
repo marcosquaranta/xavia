@@ -291,22 +291,22 @@ export interface ResumenCosechaCultivo {
 export function resumenCosechaPorCultivo(
   lotes: Lote[],
   variedades: import('./types').Variedad[],
-  movimentos: import('./types').Movimiento[] = []
+  movimientos: import('./types').Movimiento[] = []
 ): ResumenCosechaCultivo[] {
   const hoy = new Date();
   const diaHoy = hoy.getDate();
   const mesActual = hoy.getMonth();
   const anioActual = hoy.getFullYear();
 
-  // Inicio del mes actual
   const inicioMesActual = new Date(anioActual, mesActual, 1);
-
-  // Mes anterior — mismo día
-  const mesPasado = new Date(anioActual, mesActual - 1, 1);
-  const finProporcionalMesPasado = new Date(anioActual, mesActual - 1, diaHoy, 23, 59, 59);
-
-  // Fin del mes actual (para proyección)
   const finMesActual = new Date(anioActual, mesActual + 1, 0, 23, 59, 59);
+
+  // Mes anterior proporcional: solo hasta el mismo día del mes anterior
+  const mesPrevio = new Date(anioActual, mesActual - 1, 1);
+  const finPropMesPrevio = new Date(anioActual, mesActual - 1, diaHoy, 23, 59, 59);
+
+  // Próximos 7 días y fin de semana para "esta semana"
+  const enSemana = new Date(hoy); enSemana.setDate(hoy.getDate() + 7);
 
   function matchCultivo(variedad: string, cultivo: 'lechuga' | 'rucula'): boolean {
     const v = String(variedad || '').toLowerCase();
@@ -314,93 +314,123 @@ export function resumenCosechaPorCultivo(
     return !v.includes('rucula') && !v.includes('rúcula') && !v.includes('albahaca');
   }
 
-  function calcularFechaCosechaEstimada(lote: Lote): Date | null {
+  // Calcular promedios reales de F2 y ciclo total por variedad (de cosechados)
+  const promedioF2: Map<string, number> = new Map();
+  const promedioCicloTotal: Map<string, number> = new Map();
+
+  function normV(s: string) { return s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+
+  const cosechadosTodos = lotes.filter(l => l.estado === 'cosechado');
+  const varNorms = Array.from(new Set(cosechadosTodos.map(l => normV(l.variedad))));
+
+  for (const vn of varNorms) {
+    const grupo = cosechadosTodos
+      .filter(l => normV(l.variedad) === vn)
+      .sort((a, b) => String(b.fecha_cosecha||'').localeCompare(String(a.fecha_cosecha||'')))
+      .slice(0, 5);
+
+    const f2vals = grupo.map(l => Number(l.dias_f2)||0).filter(d => d >= 5);
+    const totvals = grupo.map(l => Number(l.dias_total)||0).filter(d => d >= 20);
+
+    if (f2vals.length > 0) {
+      const prom = Math.round(f2vals.reduce((a,b)=>a+b,0)/f2vals.length);
+      for (const l of grupo) { promedioF2.set(l.variedad, prom); }
+      promedioF2.set(vn, prom);
+    }
+    if (totvals.length > 0) {
+      const prom = Math.round(totvals.reduce((a,b)=>a+b,0)/totvals.length);
+      for (const l of grupo) { promedioCicloTotal.set(l.variedad, prom); }
+      promedioCicloTotal.set(vn, prom);
+    }
+  }
+
+  function getF2dias(variedad: string): number {
+    const vn = normV(variedad);
+    return promedioF2.get(variedad) ?? promedioF2.get(vn) ?? 30;
+  }
+  function getCicloDias(variedad: string): number {
+    const vn = normV(variedad);
+    const varDef = variedades.find(v => normV(v.variedad) === vn);
+    return promedioCicloTotal.get(variedad) ?? promedioCicloTotal.get(vn) ?? (Number(varDef?.dias_estimados_cosecha) || 70);
+  }
+
+  function estFechaCosecha(l: Lote): Date | null {
     try {
-      const siembra = safeParseDate(lote.fecha_siembra);
-      if (!siembra) return null;
-      const varDef = variedades.find((v) => v.variedad === lote.variedad);
-      const diasCiclo = Number(varDef?.dias_estimados_cosecha) || 35;
-      const est = new Date(siembra);
-      est.setDate(est.getDate() + diasCiclo);
+      if (l.fase_actual === 'fase_2') {
+        // F2: usa fecha_f2 + promedio días F2
+        const ff2 = safeParseDate(l.fecha_f2);
+        if (ff2) {
+          const est = new Date(ff2);
+          est.setDate(est.getDate() + getF2dias(l.variedad));
+          return est;
+        }
+      }
+      // F1 o sin fecha_f2: siembra + ciclo total
+      const fs = safeParseDate(l.fecha_siembra);
+      if (!fs) return null;
+      const est = new Date(fs);
+      est.setDate(est.getDate() + getCicloDias(l.variedad));
       return est;
     } catch { return null; }
   }
 
+  const PLANTAS_POR_PAQUETE = 3;
+
   return (['lechuga', 'rucula'] as const).map((cultivo) => {
     const label = cultivo === 'lechuga' ? 'Lechuga' : 'Rúcula';
 
-    // Cosechados este mes
+    // Cosechado mes actual (hasta hoy)
     const cosechadoMes = lotes
-      .filter((l) => {
-        if (l.estado !== 'cosechado') return false;
-        if (!matchCultivo(l.variedad, cultivo)) return false;
-        const f = safeParseDate(l.fecha_cosecha);
+      .filter(l => {
+        if (l.estado !== 'cosechado' || !matchCultivo(l.variedad, cultivo)) return false;
+        const f = safeParseDate(l.fecha_cosecha || l.fecha_ult_movimiento);
         return f && f >= inicioMesActual && f <= hoy;
       })
-      .reduce((acc, l) => acc + (Number(l.unidades_cosechadas) || 0), 0);
+      .reduce((acc, l) => acc + (Number(l.unidades_cosechadas)||0), 0);
 
-    // Cosechados mes anterior (solo hasta el mismo día)
+    // Mes anterior PROPORCIONAL (solo hasta el mismo día del mes)
     const cosechadoMesAntProporcional = lotes
-      .filter((l) => {
-        if (l.estado !== 'cosechado') return false;
-        if (!matchCultivo(l.variedad, cultivo)) return false;
-        const f = safeParseDate(l.fecha_cosecha);
-        return f && f >= mesPasado && f <= finProporcionalMesPasado;
+      .filter(l => {
+        if (l.estado !== 'cosechado' || !matchCultivo(l.variedad, cultivo)) return false;
+        const f = safeParseDate(l.fecha_cosecha || l.fecha_ult_movimiento);
+        return f && f >= mesPrevio && f <= finPropMesPrevio;
       })
-      .reduce((acc, l) => acc + (Number(l.unidades_cosechadas) || 0), 0);
+      .reduce((acc, l) => acc + (Number(l.unidades_cosechadas)||0), 0);
 
     const variacionPct = cosechadoMesAntProporcional > 0
       ? Math.round(((cosechadoMes - cosechadoMesAntProporcional) / cosechadoMesAntProporcional) * 100)
       : null;
 
-    // Proyectado: lotes en F1 o F2 con ciclo real
-    const ciclosRealesMap = cicloRealPorVariedad(lotes, [], 5);
-    const enSemana = new Date(hoy); enSemana.setDate(hoy.getDate() + 7);
-
-    function estCosecha(l: Lote): Date | null {
-      const varDef = variedades.find((v) => v.variedad === l.variedad);
-      // Usar ciclo real, sino fallback conservador: 78d lechuga / 30d rúcula
-      const diasCiclo = ciclosRealesMap.get(l.variedad)
-        || Number(varDef?.dias_estimados_cosecha)
-        || (cultivo === 'rucula' ? 30 : 78);
-      const siembra = safeParseDate(l.fecha_siembra);
-      if (!siembra) return null;
-      const est = new Date(siembra);
-      est.setDate(est.getDate() + diasCiclo);
-      return est;
-    }
-
-    const lotesActivos = lotes.filter((l) =>
+    // Proyectado: lotes activos en F1 o F2 con fecha estimada en el mes
+    const lotesActivos = lotes.filter(l =>
       l.estado === 'activo' &&
       (l.fase_actual === 'fase_1' || l.fase_actual === 'fase_2') &&
       matchCultivo(l.variedad, cultivo)
     );
 
-    const PLANTAS_POR_PAQUETE = 3; // rúcula: default 3 plantas por paquete
-    let proyectadoPlantas7d = 0;
-    let proyectadoPlantasResto = 0;
+    let proyectadoPlantas7d = 0, proyectadoPlantasResto = 0;
     for (const l of lotesActivos) {
-      const est = estCosecha(l);
+      const est = estFechaCosecha(l);
       if (!est) continue;
       const plantas = Number(l.plantas_estimadas_actual) || 0;
       if (est >= hoy && est <= enSemana) proyectadoPlantas7d += plantas;
       else if (est > enSemana && est <= finMesActual) proyectadoPlantasResto += plantas;
     }
 
-    // Convertir a unidades finales: rúcula en paquetes, lechuga en plantas
-    const convFactor = (cultivo === 'rucula') ? PLANTAS_POR_PAQUETE : 1;
+    const convFactor = cultivo === 'rucula' ? PLANTAS_POR_PAQUETE : 1;
     const proyectadoEstaSemana = Math.round(proyectadoPlantas7d / convFactor);
     const proyectadoRestoMes = Math.round(proyectadoPlantasResto / convFactor);
     const proyectadoMesTotal = proyectadoEstaSemana + proyectadoRestoMes;
 
-    return { cultivo, label, cosechadoMes, cosechadoMesAntProporcional, variacionPct,
+    return {
+      cultivo, label, cosechadoMes, cosechadoMesAntProporcional, variacionPct,
       proyectadoEstaSemana, proyectadoEstaSemanaPlantas: proyectadoPlantas7d,
-      proyectadoRestoMes, proyectadoMesTotal, plantasPorPaquete: PLANTAS_POR_PAQUETE };
+      proyectadoRestoMes, proyectadoMesTotal, plantasPorPaquete: PLANTAS_POR_PAQUETE,
+    };
   });
 }
 
-// === CICLO REAL POR VARIEDAD ===
-// Calcula el promedio de días de ciclo de los últimos N lotes cosechados de una variedad
+
 export function cicloRealPorVariedad(
   lotes: Lote[],
   _movimientos: any[] = [],
