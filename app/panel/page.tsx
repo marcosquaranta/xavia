@@ -13,6 +13,7 @@ import GraficoCiclos from '@/components/GraficoCiclos';
 import GraficoCiclosSemanas from '@/components/GraficoCiclosSemanas';
 import BuscadorLote from '@/components/BuscadorLote';
 
+// v71
 export const dynamic = 'force-dynamic';
 
 export default async function PanelPage({ searchParams }: { searchParams: { cultivo?: string; fase?: string; nave?: string; mesada?: string; tiempo?: string; q?: string } }) {
