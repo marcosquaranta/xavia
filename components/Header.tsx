@@ -8,6 +8,8 @@ export default function Header({ user, current }: { user: UsuarioPublico; curren
     { href: '/ocupacion', label: 'Ocupación', key: 'ocupacion' },
     { href: '/estadisticas', label: 'Estadísticas', key: 'estadisticas' },
   ];
+  items.push({ href: '/ventas', label: 'Ventas', key: 'ventas' });
+  items.push({ href: '/movimientos', label: 'Actividad', key: 'movimientos' });
   items.push({ href: '/stocks', label: 'Stocks', key: 'stocks' });
   if (isAdmin) { items.push({ href: '/alertas', label: 'Alertas', key: 'alertas' }); items.push({ href: '/admin', label: 'Admin', key: 'admin' }); }
   return (

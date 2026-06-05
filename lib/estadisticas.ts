@@ -401,7 +401,7 @@ export function resumenCosechaPorCultivo(
       .reduce((acc, l) => acc + (Number(l.unidades_cosechadas)||0), 0);
 
     // Mes anterior COMPLETO para comparar con proyectado total
-    const finMesPrevio = new Date(anioActual, mesActual - 1, 0, 23, 59, 59); // último día del mes anterior
+    const finMesPrevio = new Date(anioActual, mesActual, 0, 23, 59, 59); // día 0 del mes actual = último día del mes anterior
     const cosechadoMesAntProporcional = lotes
       .filter(l => {
         if (l.estado !== 'cosechado' || !matchCultivo(l.variedad, cultivo)) return false;

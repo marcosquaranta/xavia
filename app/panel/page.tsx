@@ -102,20 +102,22 @@ export default async function PanelPage({ searchParams }: {
                 <span style={{ fontSize: '11px', color: '#6b7280' }}>Proyección junio</span>
               </div>
               {/* Número grande: total mes estimado */}
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '4px' }}>
                 <span style={{ fontSize: '36px', fontWeight: 800, color: '#14532d', lineHeight: 1 }}>
                   {(rL.cosechadoMes + rL.proyectadoMesTotal).toLocaleString('es-AR')}
                 </span>
                 <span style={{ fontSize: '13px', color: '#6b7280' }}>plantas est. mes</span>
-                {rL.variacionPct !== null && (
-                  <span style={{ fontSize: '16px', fontWeight: 800, color: rL.variacionPct >= 0 ? '#059669' : '#dc2626' }}>
-                    {rL.variacionPct >= 0 ? '↑' : '↓'}{Math.abs(rL.variacionPct)}%
+              </div>
+              {rL.variacionPct !== null ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '22px', fontWeight: 900, color: rL.variacionPct >= 0 ? '#059669' : '#dc2626', background: rL.variacionPct >= 0 ? '#f0fdf4' : '#fef2f2', borderRadius: '6px', padding: '2px 10px' }}>
+                    {rL.variacionPct >= 0 ? '↑' : '↓'} {Math.abs(rL.variacionPct)}%
                   </span>
-                )}
-              </div>
-              <div style={{ fontSize: '11px', color: '#9ca3af', marginBottom: '12px' }}>
-                vs {rL.cosechadoMesAntProporcional.toLocaleString('es-AR')} plantas mayo completo
-              </div>
+                  <span style={{ fontSize: '11px', color: '#9ca3af' }}>vs {rL.cosechadoMesAntProporcional.toLocaleString('es-AR')} pl mayo</span>
+                </div>
+              ) : (
+                <p style={{ fontSize: '11px', color: '#9ca3af', marginBottom: '8px' }}>vs — plantas mayo</p>
+              )}
               {/* Desglose */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
                 {[
@@ -146,20 +148,25 @@ export default async function PanelPage({ searchParams }: {
                 <span style={{ fontSize: '11px', color: '#6b7280' }}>Proyección junio</span>
               </div>
               {/* Número grande en paquetes */}
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '2px' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '4px' }}>
                 <span style={{ fontSize: '36px', fontWeight: 800, color: '#14532d', lineHeight: 1 }}>
                   {(rR.cosechadoMes + rR.proyectadoMesTotal).toLocaleString('es-AR')}
                 </span>
                 <span style={{ fontSize: '13px', color: '#6b7280' }}>paq. est. mes</span>
-                {rR.variacionPct !== null && (
-                  <span style={{ fontSize: '16px', fontWeight: 800, color: rR.variacionPct >= 0 ? '#059669' : '#dc2626' }}>
-                    {rR.variacionPct >= 0 ? '↑' : '↓'}{Math.abs(rR.variacionPct)}%
+              </div>
+              {rR.variacionPct !== null ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <span style={{ fontSize: '22px', fontWeight: 900, color: rR.variacionPct >= 0 ? '#059669' : '#dc2626', background: rR.variacionPct >= 0 ? '#f0fdf4' : '#fef2f2', borderRadius: '6px', padding: '2px 10px' }}>
+                    {rR.variacionPct >= 0 ? '↑' : '↓'} {Math.abs(rR.variacionPct)}%
                   </span>
-                )}
-              </div>
-              <div style={{ fontSize: '11px', color: '#9ca3af', marginBottom: '12px' }}>
-                ~{((rR.cosechadoMes + rR.proyectadoMesTotal) * rR.plantasPorPaquete).toLocaleString('es-AR')} plantas · vs {rR.cosechadoMesAntProporcional} paq. mayo
-              </div>
+                  <span style={{ fontSize: '11px', color: '#9ca3af' }}>vs {rR.cosechadoMesAntProporcional} paq. mayo</span>
+                </div>
+              ) : (
+                <p style={{ fontSize: '11px', color: '#9ca3af', marginBottom: '4px' }}>vs — paq. mayo</p>
+              )}
+              <p style={{ fontSize: '11px', color: '#9ca3af', marginBottom: '8px' }}>
+                ~{((rR.cosechadoMes + rR.proyectadoMesTotal) * rR.plantasPorPaquete).toLocaleString('es-AR')} plantas estimadas
+              </p>
               {/* Desglose */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
                 {[

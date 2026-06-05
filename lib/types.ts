@@ -89,3 +89,46 @@ export interface StockMes {
   usuario: string;
   fecha_carga: string;
 }
+
+export interface ClienteVenta {
+  id_control: string;
+  nombre_xubio: string;
+  nombre_display: string;
+  alias: string;
+  tipo_factura: string;
+  punto_venta: string;
+  sucursales: string;  // separadas por |
+  activo: string;
+}
+
+export interface PrecioVenta {
+  id_control: string;
+  nombre_cliente: string;
+  sucursal_obs: string;  // sucursal o nombre cliente si sin sucursales
+  rucula: string;
+  lechuga_crespa: string;
+  hoja_roble: string;
+  bandeja_rucula: string;
+  albahaca: string;
+}
+
+export interface VentaDia {
+  id_venta: string;
+  fecha: string;
+  id_control: string;
+  nombre_cliente: string;
+  sucursal: string;
+  rucula: string;
+  lechuga_crespa: string;
+  hoja_roble: string;
+  bandeja_rucula: string;
+  albahaca: string;
+  exportado: string;
+  usuario: string;
+  fecha_carga: string;
+}
+
+export interface ConfigItem {
+  clave: string;
+  valor: string | number;
+}
