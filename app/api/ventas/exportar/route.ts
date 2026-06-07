@@ -3,7 +3,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { readSheet, updateRow } from '@/lib/sheets';
 import type { ClienteVenta, PrecioVenta, VentaDia, ConfigItem, Lote } from '@/lib/types';
 import * as XLSX from 'xlsx';
-import nodemailer from 'nodemailer';
+// Email via Resend API (sin dependencias extra)
 
 const COLS = ['NUMERODECONTROL','CLIENTE','TIPO','NUMERO','FECHA','VENCIMIENTODELCOBRO',
   'COMPROBANTEASOCIADO','MONEDA','COTIZACION','OBSERVACIONES','PRODUCTOSERVICIO',
@@ -166,32 +166,40 @@ export async function POST(req: NextRequest) {
       await updateRow('Ventas', 'id_venta', v.id_venta, { exportado: 'SI', fecha_carga: new Date().toISOString().split('T')[0] });
     }
 
-    // Enviar email solo si se pide
+    // Enviar email via Resend (sin SMTP, sin dependencias)
     let emailOk = false;
     let emailError = '';
-    if (enviarEmail && process.env.SMTP_USER) {
+    if (enviarEmail && process.env.RESEND_API_KEY) {
       try {
-        const transporter = nodemailer.createTransport({
-          host: process.env.SMTP_HOST || 'smtp.gmail.com',
-          port: Number(process.env.SMTP_PORT || 587),
-          secure: false,
-          requireTLS: true,
-          auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-          tls: { rejectUnauthorized: false },
-        });
         const nombreArchivo = `xavia_xubio_${fecha}.xlsx`;
-        await transporter.sendMail({
-          from: `"Xavia App" <${process.env.SMTP_USER}>`,
-          to: 'administracion@xavia.com.ar',
-          subject: `Ventas Xavia — ${fecha} (${controlesUsados.length} facturas)`,
-          html: `<p>Se adjunta archivo de ventas del <strong>${fecha}</strong>.<br>Facturas: <strong>${controlesUsados.length}</strong> · A hasta <strong>${lastA}</strong> · B hasta <strong>${lastB}</strong></p>`,
-          attachments: [{ filename: nombreArchivo, content: xlsxBuf }],
+        const res = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from: 'Xavia App <ventas@xavia.com.ar>',
+            to: ['administracion@xavia.com.ar'],
+            subject: `Ventas Xavia — ${fecha} (${controlesUsados.length} facturas)`,
+            html: `<p>Se adjunta archivo de ventas del <strong>${fecha}</strong>.<br>Facturas: <strong>${controlesUsados.length}</strong> · A hasta <strong>${lastA}</strong> · B hasta <strong>${lastB}</strong></p>`,
+            attachments: [{
+              filename: nombreArchivo,
+              content: Buffer.from(xlsxBuf).toString('base64'),
+            }],
+          }),
         });
-        emailOk = true;
+        if (res.ok) {
+          emailOk = true;
+        } else {
+          const errBody = await res.json().catch(() => ({}));
+          emailError = (errBody as any).message || `HTTP ${res.status}`;
+        }
       } catch (emailErr: any) {
         emailError = emailErr.message || 'Error desconocido';
-        console.warn('Email no enviado:', emailError);
       }
+    } else if (enviarEmail && !process.env.RESEND_API_KEY) {
+      emailError = 'RESEND_API_KEY no configurada en Vercel';
     }
 
     return NextResponse.json({

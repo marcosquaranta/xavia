@@ -52,6 +52,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats}:{clie
   const [enviarEmail,setEnviarEmail]=useState(true);
   const [historial,setHistorial]=useState<any[]>([]);
   const [loadHist,setLoadHist]=useState(false);
+  const [limpiando,setLimpiando]=useState(false);
   const tmrs=useRef<Record<string,ReturnType<typeof setTimeout>>>({});
 
   const prods = extras ? ALL : PP;
@@ -71,6 +72,18 @@ export default function VentasManager({clientes,precios,frecuencias,stats}:{clie
       if(j.lastB) setCorrelaB(String(j.lastB+1));
     }).catch(()=>{});
   },[]);
+
+  async function limpiarDia(todo=false){
+    const msg2 = todo ? '¿Limpiar TODAS las ventas de la hoja? Esto no se puede deshacer.' : `¿Limpiar todas las ventas del ${fecha}?`;
+    if(!confirm(msg2)) return;
+    setLimpiando(true);
+    try{
+      await fetch('/api/ventas/limpiar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,limpiarTodo:todo})});
+      setCtds({}); setEsts({});
+      setMsg({t:'ok',s:todo?'Hoja limpiada':'Día limpiado'});
+    }catch(e:any){setMsg({t:'err',s:e.message});}
+    setLimpiando(false);
+  }
 
   function cargarHistorial(){
     setLoadHist(true);
@@ -175,6 +188,10 @@ export default function VentasManager({clientes,precios,frecuencias,stats}:{clie
         <label style={{display:'flex',alignItems:'center',gap:'5px',fontSize:'11px',color:'#6b7280',cursor:'pointer',userSelect:'none',marginBottom:'2px'}}>
           <input type="checkbox" checked={extras} onChange={ev=>setExtras(ev.target.checked)}/> Bandeja + Albahaca
         </label>
+        <button onClick={()=>limpiarDia(false)} disabled={limpiando}
+          style={{background:'none',border:'1px solid #fca5a5',borderRadius:'8px',padding:'8px 12px',fontWeight:600,fontSize:'12px',cursor:'pointer',color:'#dc2626',marginTop:'14px'}}>
+          🗑 Limpiar día
+        </button>
         <button onClick={()=>{ if(hayV) setShowPreExport(true); }} disabled={!hayV}
           style={{background:hayV?'#1d4ed8':'#e5e7eb',color:hayV?'white':'#9ca3af',border:'none',borderRadius:'8px',padding:'8px 18px',fontWeight:700,fontSize:'13px',cursor:hayV?'pointer':'not-allowed',marginLeft:'auto',display:'flex',alignItems:'center',gap:'5px'}}>
           <span>📤</span>Exportar Xubio
@@ -293,6 +310,13 @@ export default function VentasManager({clientes,precios,frecuencias,stats}:{clie
           style={{background:'none',border:'1px solid #e5e7eb',borderRadius:'6px',padding:'4px 12px',fontSize:'11px',cursor:'pointer',color:'#6b7280'}}>
           {showHistorial?'▲ Ocultar historial':'▼ Ver historial de ventas guardadas'}
         </button>
+        {showHistorial && (
+          <div style={{marginBottom:'8px',textAlign:'right'}}>
+            <button onClick={()=>limpiarDia(true)} disabled={limpiando} style={{background:'none',border:'1px solid #fca5a5',borderRadius:'6px',padding:'3px 10px',fontSize:'11px',cursor:'pointer',color:'#dc2626'}}>
+              🗑 Limpiar toda la hoja
+            </button>
+          </div>
+        )}
         {showHistorial && (
           <div style={{marginTop:'10px'}}>
             {loadHist ? <p style={{color:'#9ca3af',fontSize:'12px'}}>Cargando…</p> : historial.length === 0 ? <p style={{color:'#9ca3af',fontSize:'12px'}}>Sin datos.</p> : (
