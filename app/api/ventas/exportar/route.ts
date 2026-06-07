@@ -31,8 +31,8 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
 
   try {
-    const { fecha, fechaFactura, fechasCliente = {} } = await req.json();
-    const fechaBase = fechaFactura || fecha; // fecha general de factura
+    const { fecha, fechaFactura, fechasCliente = {}, correlaA, correlaB, enviarEmail = true } = await req.json();
+    const fechaBase = fechaFactura || fecha;
     const [clientes, precios, ventas, config, lotes] = await Promise.all([
       readSheet<ClienteVenta>('Clientes'),
       readSheet<PrecioVenta>('Precios'),
@@ -44,9 +44,9 @@ export async function POST(req: NextRequest) {
     const ventasFecha = ventas.filter(v => v.fecha === fecha);
     if (!ventasFecha.length) return NextResponse.json({ error: 'Sin ventas para esa fecha' }, { status: 400 });
 
-    // Leer correlativo
-    let lastA = Number(config.find(c => c.clave === 'last_factura_a')?.valor || 665);
-    let lastB = Number(config.find(c => c.clave === 'last_factura_b')?.valor || 575);
+    // Usar correlativo manual si se provee, sino leer de Config
+    let lastA = correlaA !== undefined ? Number(correlaA) - 1 : Number(config.find(c => c.clave === 'last_factura_a')?.valor || 665);
+    let lastB = correlaB !== undefined ? Number(correlaB) - 1 : Number(config.find(c => c.clave === 'last_factura_b')?.valor || 575);
 
     const fechaDate = new Date(fecha + 'T12:00:00');
     const wb = XLSX.utils.book_new();
@@ -166,30 +166,36 @@ export async function POST(req: NextRequest) {
       await updateRow('Ventas', 'id_venta', v.id_venta, { exportado: 'SI', fecha_carga: new Date().toISOString().split('T')[0] });
     }
 
-    // Enviar email
+    // Enviar email solo si se pide
     let emailOk = false;
-    try {
-      const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST || 'smtp.gmail.com',
-        port: Number(process.env.SMTP_PORT || 587),
-        secure: false,
-        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      });
-      const nombreArchivo = `xavia_xubio_${fecha}.xlsx`;
-      await transporter.sendMail({
-        from: `"Xavia App" <${process.env.SMTP_USER}>`,
-        to: 'administracion@xavia.com.ar',
-        subject: `Ventas Xavia — ${fecha} (${controlesUsados.length} facturas)`,
-        html: `<p>Hola,</p><p>Se adjunta el archivo de ventas del <strong>${fecha}</strong> listo para importar en Xubio.</p><p>Facturas generadas: <strong>${controlesUsados.length}</strong><br>Correlativo A hasta: <strong>${lastA}</strong><br>Correlativo B hasta: <strong>${lastB}</strong></p><p>— Xavia App</p>`,
-        attachments: [{ filename: nombreArchivo, content: xlsxBuf }],
-      });
-      emailOk = true;
-    } catch (emailErr: any) {
-      console.warn('Email no enviado:', emailErr.message);
+    let emailError = '';
+    if (enviarEmail && process.env.SMTP_USER) {
+      try {
+        const transporter = nodemailer.createTransport({
+          host: process.env.SMTP_HOST || 'smtp.gmail.com',
+          port: Number(process.env.SMTP_PORT || 587),
+          secure: false,
+          requireTLS: true,
+          auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+          tls: { rejectUnauthorized: false },
+        });
+        const nombreArchivo = `xavia_xubio_${fecha}.xlsx`;
+        await transporter.sendMail({
+          from: `"Xavia App" <${process.env.SMTP_USER}>`,
+          to: 'administracion@xavia.com.ar',
+          subject: `Ventas Xavia — ${fecha} (${controlesUsados.length} facturas)`,
+          html: `<p>Se adjunta archivo de ventas del <strong>${fecha}</strong>.<br>Facturas: <strong>${controlesUsados.length}</strong> · A hasta <strong>${lastA}</strong> · B hasta <strong>${lastB}</strong></p>`,
+          attachments: [{ filename: nombreArchivo, content: xlsxBuf }],
+        });
+        emailOk = true;
+      } catch (emailErr: any) {
+        emailError = emailErr.message || 'Error desconocido';
+        console.warn('Email no enviado:', emailError);
+      }
     }
 
     return NextResponse.json({
-      ok: true, emailOk,
+      ok: true, emailOk, emailError,
       facturas: controlesUsados.length,
       lastA, lastB,
       filename: `xavia_xubio_${fecha}.xlsx`,

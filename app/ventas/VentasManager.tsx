@@ -45,6 +45,13 @@ export default function VentasManager({clientes,precios,frecuencias,stats}:{clie
   const [exp,setExp]=useState(false);
   const [msg,setMsg]=useState<{t:'ok'|'err';s:string}|null>(null);
   const [showP,setShowP]=useState(false);
+  const [showHistorial,setShowHistorial]=useState(false);
+  const [showPreExport,setShowPreExport]=useState(false);
+  const [correlaA,setCorrelaA]=useState<string>('');
+  const [correlaB,setCorrelaB]=useState<string>('');
+  const [enviarEmail,setEnviarEmail]=useState(true);
+  const [historial,setHistorial]=useState<any[]>([]);
+  const [loadHist,setLoadHist]=useState(false);
   const tmrs=useRef<Record<string,ReturnType<typeof setTimeout>>>({});
 
   const prods = extras ? ALL : PP;
@@ -55,6 +62,23 @@ export default function VentasManager({clientes,precios,frecuencias,stats}:{clie
   function e(id:string,suc:string,k:PK){return ests[`${id}__${suc}`]?.[k]||'idle';}
   function se(id:string,suc:string,k:PK,v:'idle'|'saving'|'saved'|'error'){
     setEsts(p=>({...p,[`${id}__${suc}`]:{...(p[`${id}__${suc}`]||{}),[k]:v}as any}));
+  }
+
+  // Cargar correlativo actual al iniciar
+  useEffect(()=>{
+    fetch('/api/ventas/historial').then(r=>r.json()).then(j=>{
+      if(j.lastA) setCorrelaA(String(j.lastA+1));
+      if(j.lastB) setCorrelaB(String(j.lastB+1));
+    }).catch(()=>{});
+  },[]);
+
+  function cargarHistorial(){
+    setLoadHist(true);
+    fetch('/api/ventas/historial').then(r=>r.json()).then(j=>{
+      setHistorial(j.fechas||[]);
+      if(j.lastA) setCorrelaA(String(j.lastA+1));
+      if(j.lastB) setCorrelaB(String(j.lastB+1));
+    }).catch(()=>{}).finally(()=>setLoadHist(false));
   }
 
   useEffect(()=>{
@@ -83,12 +107,15 @@ export default function VentasManager({clientes,precios,frecuencias,stats}:{clie
   async function exportar(){
     setExp(true);setMsg(null);
     try{
-      const r=await fetch('/api/ventas/exportar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,fechaFactura:ff,fechasCliente:fc})});
+      setShowPreExport(false);
+      const r=await fetch('/api/ventas/exportar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,fechaFactura:ff,fechasCliente:fc,correlaA:Number(correlaA)-1,correlaB:Number(correlaB)-1,enviarEmail})});
       const j=await r.json();if(!r.ok)throw new Error(j.error);
       const bytes=Uint8Array.from(atob(j.file),c=>c.charCodeAt(0));
       const url=URL.createObjectURL(new Blob([bytes]));
       const a=document.createElement('a');a.href=url;a.download=j.filename;a.click();URL.revokeObjectURL(url);
-      setMsg({t:'ok',s:`${j.facturas} facturas · A→${j.lastA} · B→${j.lastB}${j.emailOk?' · Email ✓':''}`});
+      const emailTxt = j.emailOk ? ' · Email ✓' : enviarEmail ? ` · Email falló: ${j.emailError||'error'}` : '';
+      setMsg({t:'ok',s:`${j.facturas} facturas · A→${j.lastA} · B→${j.lastB}${emailTxt}`});
+      setCorrelaA(String(j.lastA+1)); setCorrelaB(String(j.lastB+1));
       setCtds({});setEsts({});setFc({});
     }catch(err:any){setMsg({t:'err',s:err.message});}
     setExp(false);
@@ -148,9 +175,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats}:{clie
         <label style={{display:'flex',alignItems:'center',gap:'5px',fontSize:'11px',color:'#6b7280',cursor:'pointer',userSelect:'none',marginBottom:'2px'}}>
           <input type="checkbox" checked={extras} onChange={ev=>setExtras(ev.target.checked)}/> Bandeja + Albahaca
         </label>
-        <button onClick={exportar} disabled={exp||!hayV}
-          style={{background:hayV?'#1d4ed8':'#e5e7eb',color:hayV?'white':'#9ca3af',border:'none',borderRadius:'8px',padding:'8px 18px',fontWeight:700,fontSize:'13px',cursor:hayV&&!exp?'pointer':'not-allowed',marginLeft:'auto',display:'flex',alignItems:'center',gap:'5px'}}>
-          <span>📤</span>{exp?'Generando…':'Exportar Xubio'}
+        <button onClick={()=>{ if(hayV) setShowPreExport(true); }} disabled={!hayV}
+          style={{background:hayV?'#1d4ed8':'#e5e7eb',color:hayV?'white':'#9ca3af',border:'none',borderRadius:'8px',padding:'8px 18px',fontWeight:700,fontSize:'13px',cursor:hayV?'pointer':'not-allowed',marginLeft:'auto',display:'flex',alignItems:'center',gap:'5px'}}>
+          <span>📤</span>Exportar Xubio
         </button>
       </div>
 
@@ -160,6 +187,39 @@ export default function VentasManager({clientes,precios,frecuencias,stats}:{clie
         <input type="date" value={ff} onChange={ev=>setFf(ev.target.value)} style={{fontSize:'12px',fontWeight:600,border:'1px solid #fde047',borderRadius:'5px',padding:'3px 8px',color:'#713f12'}}/>
         <span style={{fontSize:'10px',color:'#92400e'}}>Cambiable por cliente ↓</span>
       </div>
+
+      {/* Panel pre-exportación */}
+      {showPreExport && (
+        <div style={{background:'#eff6ff',border:'2px solid #3b82f6',borderRadius:'10px',padding:'16px',marginBottom:'12px'}}>
+          <p style={{margin:'0 0 12px',fontSize:'13px',fontWeight:700,color:'#1d4ed8'}}>📋 Confirmar exportación — {fecha}</p>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'12px'}}>
+            <div>
+              <label style={{fontSize:'11px',color:'#6b7280',display:'block',marginBottom:'3px'}}>PRÓXIMA FACTURA A</label>
+              <input type="number" value={correlaA} onChange={ev=>setCorrelaA(ev.target.value)}
+                style={{width:'100%',fontSize:'16px',fontWeight:700,border:'2px solid #93c5fd',borderRadius:'7px',padding:'7px 10px',color:'#1e40af'}}/>
+            </div>
+            <div>
+              <label style={{fontSize:'11px',color:'#6b7280',display:'block',marginBottom:'3px'}}>PRÓXIMA FACTURA B</label>
+              <input type="number" value={correlaB} onChange={ev=>setCorrelaB(ev.target.value)}
+                style={{width:'100%',fontSize:'16px',fontWeight:700,border:'2px solid #93c5fd',borderRadius:'7px',padding:'7px 10px',color:'#1e40af'}}/>
+            </div>
+          </div>
+          <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'12px',cursor:'pointer',marginBottom:'14px',color:'#374151'}}>
+            <input type="checkbox" checked={enviarEmail} onChange={ev=>setEnviarEmail(ev.target.checked)} style={{width:'16px',height:'16px'}}/>
+            Enviar por email a administracion@xavia.com.ar
+          </label>
+          <div style={{display:'flex',gap:'8px'}}>
+            <button onClick={exportar} disabled={exp}
+              style={{background:'#1d4ed8',color:'white',border:'none',borderRadius:'8px',padding:'9px 20px',fontWeight:700,fontSize:'13px',cursor:'pointer',flex:1}}>
+              {exp?'Generando…':'✓ Generar Excel'}
+            </button>
+            <button onClick={()=>setShowPreExport(false)}
+              style={{background:'white',color:'#6b7280',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'9px 16px',fontSize:'13px',cursor:'pointer'}}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
 
       {msg&&<div style={{padding:'9px 14px',borderRadius:'7px',marginBottom:'10px',fontSize:'12px',background:msg.t==='ok'?'#f0fdf4':'#fef2f2',border:`1px solid ${msg.t==='ok'?'#86efac':'#fca5a5'}`,color:msg.t==='ok'?'#166534':'#dc2626'}}>{msg.s}</div>}
 
@@ -227,8 +287,52 @@ export default function VentasManager({clientes,precios,frecuencias,stats}:{clie
         </div>
       )}
 
+      {/* Historial de exportaciones */}
+      <div style={{marginTop:'14px',borderTop:'1px solid #f3f4f6',paddingTop:'10px'}}>
+        <button onClick={()=>{ if(!showHistorial){cargarHistorial();} setShowHistorial(!showHistorial); }}
+          style={{background:'none',border:'1px solid #e5e7eb',borderRadius:'6px',padding:'4px 12px',fontSize:'11px',cursor:'pointer',color:'#6b7280'}}>
+          {showHistorial?'▲ Ocultar historial':'▼ Ver historial de ventas guardadas'}
+        </button>
+        {showHistorial && (
+          <div style={{marginTop:'10px'}}>
+            {loadHist ? <p style={{color:'#9ca3af',fontSize:'12px'}}>Cargando…</p> : historial.length === 0 ? <p style={{color:'#9ca3af',fontSize:'12px'}}>Sin datos.</p> : (
+              <table style={{fontSize:'12px',width:'100%'}}>
+                <thead><tr style={{background:'#f8fafc',borderBottom:'1px solid #e5e7eb'}}>
+                  <th style={{textAlign:'left',padding:'6px 10px'}}>Fecha</th>
+                  <th style={{textAlign:'right',padding:'6px 8px'}}>Clientes</th>
+                  <th style={{textAlign:'right',padding:'6px 8px'}}>Rúcula</th>
+                  <th style={{textAlign:'right',padding:'6px 8px'}}>Lechuga</th>
+                  <th style={{textAlign:'center',padding:'6px 8px'}}>Estado</th>
+                  <th style={{padding:'6px 8px'}}></th>
+                </tr></thead>
+                <tbody>
+                  {historial.map((h:any)=>(
+                    <tr key={h.fecha} style={{borderBottom:'1px solid #f3f4f6',background:h.fecha===fecha?'#eff6ff':'white'}}>
+                      <td style={{padding:'6px 10px',fontWeight:600}}>{h.fecha}</td>
+                      <td style={{textAlign:'right',padding:'6px 8px',color:'#6b7280'}}>{h.clientes}</td>
+                      <td style={{textAlign:'right',padding:'6px 8px',color:'#166534'}}>{h.rucula>0?h.rucula:'—'}</td>
+                      <td style={{textAlign:'right',padding:'6px 8px',color:'#4d7c0f'}}>{h.lechuga>0?h.lechuga:'—'}</td>
+                      <td style={{textAlign:'center',padding:'6px 8px'}}>
+                        <span style={{fontSize:'10px',background:h.exportado?'#dcfce7':'#fef9c3',color:h.exportado?'#166534':'#92400e',padding:'1px 6px',borderRadius:'4px',fontWeight:600}}>
+                          {h.exportado?'Exportado':'Pendiente'}
+                        </span>
+                      </td>
+                      <td style={{padding:'6px 8px'}}>
+                        <button onClick={()=>setFecha(h.fecha)} style={{background:'none',border:'1px solid #e5e7eb',borderRadius:'5px',padding:'2px 8px',fontSize:'11px',cursor:'pointer',color:'#374151'}}>
+                          Ir a esta fecha
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Precios */}
-      <div style={{marginTop:'16px',borderTop:'1px solid #f3f4f6',paddingTop:'10px'}}>
+      <div style={{marginTop:'14px',borderTop:'1px solid #f3f4f6',paddingTop:'10px'}}>
         <button onClick={()=>setShowP(!showP)} style={{background:'none',border:'1px solid #e5e7eb',borderRadius:'6px',padding:'4px 12px',fontSize:'11px',cursor:'pointer',color:'#6b7280'}}>
           {showP?'▲ Ocultar precios':'▼ Ver precios vigentes'}
         </button>
