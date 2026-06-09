@@ -132,9 +132,10 @@ export default async function MovimientosPage({
                     const varNorm = String(lote?.variedad || '').toLowerCase();
                     const esRucula = varNorm.includes('rucula') || varNorm.includes('rúcula');
                     const colorVar = esRucula ? '#166534' : '#4d7c0f';
-                    const unidades = m.tipo === 'cosecha'
-                      ? `${Number(m.plantas_estimadas || 0).toLocaleString('es-AR')} ${esRucula ? 'paq.' : 'pl.'}`
-                      : `${Number(m.plantas_estimadas || 0).toLocaleString('es-AR')} pl.`;
+                    const cantNum = Number(m.plantas_estimadas || 0);
+                    const unidades = m.tipo === 'cosecha' && esRucula && cantNum > 0
+                      ? `${Math.round(cantNum/3)} paq. (${cantNum.toLocaleString('es-AR')} pl)`
+                      : cantNum > 0 ? `${cantNum.toLocaleString('es-AR')} pl` : '';
                     const usuario = String(m.usuario || '').split('@')[0] || '—';
 
                     return (
@@ -147,7 +148,7 @@ export default async function MovimientosPage({
                         {/* Lote + variedad */}
                         <div style={{ flex: 1, minWidth: '120px' }}>
                           <Link href={`/cultivos/${encodeURIComponent(String(m.id_lote || ''))}`} style={{ textDecoration: 'none' }}>
-                            <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '13px', color: '#111827' }}>{m.id_lote}</span>
+                            <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '13px', color: '#1d4ed8', textDecoration: 'underline', textDecorationStyle: 'dotted' }}>{m.id_lote}</span>
                           </Link>
                           {lote?.variedad && (
                             <span style={{ marginLeft: '8px', fontSize: '12px', color: colorVar, fontWeight: 500 }}>
