@@ -32,8 +32,9 @@ export default function GraficoCiclos({ titulo, color, colorF1, colorF2, barras,
     );
   }
 
-  // Rango visible: desde primera semana con datos hasta semanasCosecha + 1
-  const minSemana = Math.min(...todasLasBarras.map(b => b.semana));
+  // Rango visible: desde primera semana con plantas activas (no solo cosechados)
+  const barrasActivas = barras.filter(b => b.plantas_f1 + b.plantas_f2 > 0);
+  const minSemana = barrasActivas.length > 0 ? Math.min(...barrasActivas.map(b => b.semana)) : 1;
   const maxSemana = Math.max(semanasCosecha + 1, ...todasLasBarras.map(b => b.semana));
   const semanas = Array.from({ length: maxSemana - minSemana + 1 }, (_, i) => i + minSemana);
   const maxPlantas = Math.max(...barras.map(b => b.plantas_f1 + b.plantas_f2 + (b.plantas_cosechadas || 0)), 1);
@@ -52,13 +53,6 @@ export default function GraficoCiclos({ titulo, color, colorF1, colorF2, barras,
   const yRef = [0, Math.round(maxPlantas * 0.5), maxPlantas];
   const xCosecha = xBar(semanasCosecha);
 
-  // La barra de cosecha estimada es la más alta en esa semana (para posicionar el label)
-  const barraCosecha = barras.find(b => b.semana === semanasCosecha);
-  const alturaCosecha = barraCosecha
-    ? yH(barraCosecha.plantas_f1 + barraCosecha.plantas_f2 + (barraCosecha.plantas_cosechadas || 0))
-    : 0;
-  // Label de cosecha: siempre encima del área del gráfico, no sobre la barra
-  const labelCosechaY = PAD_T - 8;
 
   return (
     <div>
@@ -130,9 +124,8 @@ export default function GraficoCiclos({ titulo, color, colorF1, colorF2, barras,
           );
         })}
 
-        {/* Línea de cosecha estimada */}
+        {/* Línea de cosecha estimada — label solo en el tick del eje X */}
         <line x1={xCosecha} x2={xCosecha} y1={PAD_T} y2={PAD_T + chartH} stroke="#ef4444" strokeWidth={1.5} strokeDasharray="4 3" />
-        <text x={xCosecha} y={labelCosechaY} textAnchor="middle" fontSize={9} fill="#ef4444" fontWeight={600}>cosecha est.</text>
 
         {/* Eje X */}
         <line x1={PAD_L} x2={W - PAD_R} y1={PAD_T + chartH} y2={PAD_T + chartH} stroke="#e5e7eb" strokeWidth={1} />
