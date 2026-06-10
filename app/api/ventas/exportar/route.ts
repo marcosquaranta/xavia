@@ -124,8 +124,8 @@ export async function POST(req: NextRequest) {
       const headerRow = [
         Number(idControl), cliente.nombre_xubio, 1, numFmt,
         fmtFecha(fechaEsteCliente), fmtFecha(addDays(fechaEsteCliente, 5)),
-        '', 'Pesos Argentinos', '', lotesParaCliente(idControl, (fechasCliente as Record<string,string>)[idControl] || fechaBase),
-        '', '', '', '', '', '', '', ''
+        undefined, 'Pesos Argentinos', undefined, lotesParaCliente(idControl, (fechasCliente as Record<string,string>)[idControl] || fechaBase),
+        undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined
       ];
       headerRows.push(rows.length);
       rows.push(headerRow);
@@ -139,8 +139,9 @@ export async function POST(req: NextRequest) {
           const importe = qty * precio;
           const iva = esA ? Math.round(importe * 0.105 * 100) / 100 : 0;
           rows.push([
-            '', '', '', '', '', '', '', '', '', '',
-            prod.xubio, '', linea.sucursal || cliente.nombre_xubio,
+            Number(idControl), undefined, undefined, undefined, undefined, undefined,
+            undefined, undefined, undefined, undefined,
+            prod.xubio, undefined, linea.sucursal || cliente.nombre_xubio,
             qty, precio, 0, importe, iva
           ]);
         }
@@ -153,7 +154,7 @@ export async function POST(req: NextRequest) {
     // Estilo amarillo en header rows (xlsx básico, sin estilos ricos en xlsxjs sin pro)
     // Escribimos las posiciones para referencia manual si se abre en Excel
     XLSX.utils.book_append_sheet(wb, ws, 'Facturacion');
-    const xlsxBuf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const xlsxBuf = XLSX.write(wb, { type: 'buffer', bookType: 'biff8' }); // formato .xls nativo
 
     // Guardar correlativo actualizado
     const cfgA = config.find(c => c.clave === 'last_factura_a');
@@ -171,7 +172,7 @@ export async function POST(req: NextRequest) {
     let emailError = '';
     if (enviarEmail && process.env.RESEND_API_KEY) {
       try {
-        const nombreArchivo = `xavia_xubio_${fecha}.xlsx`;
+        const nombreArchivo = `xavia_xubio_${fecha.replace(/-/g, '')}.xls`;
         const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: {
@@ -202,11 +203,12 @@ export async function POST(req: NextRequest) {
       emailError = 'RESEND_API_KEY no configurada en Vercel';
     }
 
+    const fechaLimpia = fecha.replace(/-/g, '');
     return NextResponse.json({
       ok: true, emailOk, emailError,
       facturas: controlesUsados.length,
       lastA, lastB,
-      filename: `xavia_xubio_${fecha}.xlsx`,
+      filename: `xavia_xubio_${fechaLimpia}.xls`,
       file: Buffer.from(xlsxBuf).toString('base64'),
     });
   } catch (err: any) {

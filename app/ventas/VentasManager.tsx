@@ -32,7 +32,7 @@ function mkFilas(cs: ClienteVenta[], freq: Record<string,number>): Fila[] {
 }
 function pct(a:number,b:number){if(!b)return null;return Math.round(((a-b)/b)*100);}
 
-export default function VentasManager({clientes,precios,frecuencias,stats}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats}) {
+export default function VentasManager({clientes,precios,frecuencias,stats,ventas7}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;ventas7:VentaDia[]}) {
   const hoy = new Date().toISOString().split('T')[0];
   const [fecha,setFecha]=useState(hoy);
   const [ff,setFf]=useState(hoy);
@@ -45,6 +45,10 @@ export default function VentasManager({clientes,precios,frecuencias,stats}:{clie
   const [exp,setExp]=useState(false);
   const [msg,setMsg]=useState<{t:'ok'|'err';s:string}|null>(null);
   const [showP,setShowP]=useState(false);
+  const [corrEditA,setCorrEditA]=useState('');
+  const [corrEditB,setCorrEditB]=useState('');
+  const [savingCorr,setSavingCorr]=useState(false);
+  const [msgCorr,setMsgCorr]=useState('');
   const [showHistorial,setShowHistorial]=useState(false);
   const [showPreExport,setShowPreExport]=useState(false);
   const [correlaA,setCorrelaA]=useState<string>('');
@@ -68,8 +72,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats}:{clie
   // Cargar correlativo actual al iniciar
   useEffect(()=>{
     fetch('/api/ventas/historial').then(r=>r.json()).then(j=>{
-      if(j.lastA) setCorrelaA(String(j.lastA+1));
-      if(j.lastB) setCorrelaB(String(j.lastB+1));
+      if(j.lastA){ setCorrelaA(String(j.lastA+1)); setCorrEditA(String(j.lastA)); }
+      if(j.lastB){ setCorrelaB(String(j.lastB+1)); setCorrEditB(String(j.lastB)); }
     }).catch(()=>{});
   },[]);
 
@@ -83,6 +87,19 @@ export default function VentasManager({clientes,precios,frecuencias,stats}:{clie
       setMsg({t:'ok',s:todo?'Hoja limpiada':'Día limpiado'});
     }catch(e:any){setMsg({t:'err',s:e.message});}
     setLimpiando(false);
+  }
+
+  async function guardarCorrelativo(){
+    setSavingCorr(true); setMsgCorr('');
+    try{
+      const r = await fetch('/api/ventas/correlativo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lastA:Number(corrEditA),lastB:Number(corrEditB)})});
+      if(!r.ok) throw new Error('Error');
+      setCorrelaA(String(Number(corrEditA)+1));
+      setCorrelaB(String(Number(corrEditB)+1));
+      setMsgCorr('✓ Guardado');
+      setTimeout(()=>setMsgCorr(''),3000);
+    }catch{ setMsgCorr('Error al guardar'); }
+    setSavingCorr(false);
   }
 
   function cargarHistorial(){
@@ -138,31 +155,73 @@ export default function VentasManager({clientes,precios,frecuencias,stats}:{clie
   for(const f of filas)for(const p of ALL)tots[p.key]+=Number(q(f.id_control,f.sucursal,p.key))||0;
   const hayV=Object.values(tots).some(v=>v>0);
 
+  // Total por cliente hace 7 días (para comparación)
+  function total7d(id_control:string, sucursal:string): number {
+    const v = ventas7.find(v=>String(v.id_control)===String(id_control)&&v.sucursal===sucursal);
+    if(!v) return 0;
+    return (['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca'] as PK[])
+      .reduce((acc,k)=>acc+Number((v as any)[k]||0),0);
+  }
+  function totalHoy(id_control:string, sucursal:string): number {
+    return (prods as any[]).reduce((acc:number,p:any)=>acc+Number(q(id_control,sucursal,p.key))||0, 0);
+  }
+  const totalHoyGlobal = filas.reduce((acc,f)=>acc+totalHoy(f.id_control,f.sucursal),0);
+  const total7dGlobal = ventas7.reduce((acc,v)=>acc+(['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca'] as PK[]).reduce((a,k)=>a+Number((v as any)[k]||0),0),0);
+
   return (
     <div>
       {/* Stats */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'8px',marginBottom:'14px'}}>
         {PP.map(p=>{
-          const k=p.key as keyof SV;const sa=stats.semanaActual[k];const sant=stats.semanaAnterior[k];const ma=stats.mesActual[k];const mant=stats.mesAnterior[k];
-          const ps=pct(sa,sant);const pm=pct(ma,mant);const u=p.key==='rucula'?'paq':'pl';
+          const k=p.key as keyof SV; const sa=stats.semanaActual[k]; const sant=stats.semanaAnterior[k];
+          const ma=stats.mesActual[k]; const mant=stats.mesAnterior[k];
+          const ps=pct(sa,sant); const pm=pct(ma,mant);
+          const u=p.key==='rucula'?'paq':'und';
           return(
             <div key={p.key} style={{background:'white',border:'1px solid #e5e7eb',borderTop:`3px solid ${p.color}`,borderRadius:'8px',padding:'10px 12px'}}>
-              <p style={{margin:'0 0 7px',fontSize:'11px',fontWeight:700,color:p.color,textTransform:'uppercase'}}>{p.label}</p>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px'}}>
-                <div>
-                  <p style={{margin:'0 0 1px',fontSize:'9px',color:'#9ca3af'}}>SEMANA</p>
-                  <p style={{margin:'0 0 1px',fontSize:'15px',fontWeight:700,color:'#111827'}}>{sa.toLocaleString('es-AR')} <span style={{fontSize:'9px',color:'#9ca3af'}}>{u}</span></p>
-                  {ps!==null&&<p style={{margin:0,fontSize:'10px',fontWeight:600,color:ps>=0?'#059669':'#dc2626'}}>{ps>=0?'↑':'↓'}{Math.abs(ps)}%</p>}
+              <p style={{margin:'0 0 8px',fontSize:'11px',fontWeight:700,color:p.color,textTransform:'uppercase'}}>{p.label}</p>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px'}}>
+                <div style={{background:'#f9fafb',borderRadius:'6px',padding:'7px 8px'}}>
+                  <p style={{margin:'0 0 1px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase'}}>Semana</p>
+                  <p style={{margin:'0 0 2px',fontSize:'18px',fontWeight:800,color:'#111827',lineHeight:1}}>{sa.toLocaleString('es-AR')}</p>
+                  <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af'}}>{u} · ant: {sant.toLocaleString('es-AR')}</p>
+                  {ps!==null
+                    ? <p style={{margin:0,fontSize:'12px',fontWeight:800,color:ps>=0?'#059669':'#dc2626'}}>{ps>=0?'↑':'↓'} {Math.abs(ps)}%</p>
+                    : <p style={{margin:0,fontSize:'10px',color:'#9ca3af'}}>sin datos</p>}
                 </div>
-                <div>
-                  <p style={{margin:'0 0 1px',fontSize:'9px',color:'#9ca3af'}}>MES</p>
-                  <p style={{margin:'0 0 1px',fontSize:'15px',fontWeight:700,color:'#111827'}}>{ma.toLocaleString('es-AR')} <span style={{fontSize:'9px',color:'#9ca3af'}}>{u}</span></p>
-                  {pm!==null&&<p style={{margin:0,fontSize:'10px',fontWeight:600,color:pm>=0?'#059669':'#dc2626'}}>{pm>=0?'↑':'↓'}{Math.abs(pm)}%</p>}
+                <div style={{background:'#f9fafb',borderRadius:'6px',padding:'7px 8px'}}>
+                  <p style={{margin:'0 0 1px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase'}}>Mes</p>
+                  <p style={{margin:'0 0 2px',fontSize:'18px',fontWeight:800,color:'#111827',lineHeight:1}}>{ma.toLocaleString('es-AR')}</p>
+                  <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af'}}>{u} · ant: {mant.toLocaleString('es-AR')}</p>
+                  {pm!==null
+                    ? <p style={{margin:0,fontSize:'12px',fontWeight:800,color:pm>=0?'#059669':'#dc2626'}}>{pm>=0?'↑':'↓'} {Math.abs(pm)}%</p>
+                    : <p style={{margin:0,fontSize:'10px',color:'#9ca3af'}}>sin datos</p>}
                 </div>
               </div>
             </div>
           );
         })}
+      </div>
+
+      {/* Correlativo editable siempre visible */}
+      <div style={{background:'#f8fafc',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'10px 14px',marginBottom:'12px',display:'flex',alignItems:'center',gap:'14px',flexWrap:'wrap'}}>
+        <span style={{fontSize:'12px',fontWeight:600,color:'#374151'}}>📋 Correlativo</span>
+        <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+          <label style={{fontSize:'11px',color:'#6b7280'}}>Últ. A:</label>
+          <input type="number" value={corrEditA} onChange={ev=>setCorrEditA(ev.target.value)}
+            style={{width:'70px',textAlign:'center',fontSize:'14px',fontWeight:700,border:'1px solid #d1d5db',borderRadius:'5px',padding:'3px 6px',color:'#1e40af'}}/>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+          <label style={{fontSize:'11px',color:'#6b7280'}}>Últ. B:</label>
+          <input type="number" value={corrEditB} onChange={ev=>setCorrEditB(ev.target.value)}
+            style={{width:'70px',textAlign:'center',fontSize:'14px',fontWeight:700,border:'1px solid #d1d5db',borderRadius:'5px',padding:'3px 6px',color:'#92400e'}}/>
+        </div>
+        <button onClick={guardarCorrelativo} disabled={savingCorr}
+          style={{background:'#374151',color:'white',border:'none',borderRadius:'6px',padding:'5px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>
+          {savingCorr?'Guardando…':'Guardar'}
+        </button>
+        {msgCorr && <span style={{fontSize:'11px',color:'#059669',fontWeight:600}}>{msgCorr}</span>}
+        <span style={{fontSize:'10px',color:'#9ca3af',marginLeft:'auto'}}>Próxima A: <strong>{corrEditA ? Number(corrEditA)+1 : '—'}</strong> · Próxima B: <strong>{corrEditB ? Number(corrEditB)+1 : '—'}</strong></span>
       </div>
 
       {/* Disponibles */}
@@ -248,6 +307,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats}:{clie
               <tr style={{background:'#f8fafc',borderBottom:'2px solid #e5e7eb'}}>
                 <th style={{textAlign:'left',padding:'9px 12px',minWidth:'150px'}}>Cliente</th>
                 {(prods as any[]).map((p:any)=><th key={p.key} style={{textAlign:'center',padding:'9px 6px',color:p.color,fontWeight:700,minWidth:'82px'}}>{p.label}</th>)}
+                <th style={{textAlign:'right',padding:'9px 8px',color:'#374151',fontWeight:700,minWidth:'80px'}}>Total</th>
                 <th style={{textAlign:'center',padding:'9px 6px',color:'#9ca3af',minWidth:'92px',fontSize:'10px'}}>Fecha fact.</th>
               </tr>
             </thead>
@@ -272,6 +332,19 @@ export default function VentasManager({clientes,precios,frecuencias,stats}:{clie
                         </td>
                       );
                     })}
+                    {/* Total con comparación vs 7d */}
+                    {(() => {
+                      const hoyT = totalHoy(f.id_control, f.sucursal);
+                      const antT = total7d(f.id_control, f.sucursal);
+                      const delta = antT > 0 ? Math.round(((hoyT-antT)/antT)*100) : null;
+                      return (
+                        <td style={{padding:'4px 8px',textAlign:'right'}}>
+                          <p style={{margin:'0 0 1px',fontSize:'15px',fontWeight:800,color:hoyT>0?'#166534':'#d1d5db'}}>{hoyT>0?hoyT:'—'}</p>
+                          {delta!==null&&<p style={{margin:0,fontSize:'9px',fontWeight:700,color:delta>=0?'#059669':'#dc2626'}}>{delta>=0?'↑':'↓'}{Math.abs(delta)}%</p>}
+                          {antT>0&&delta===null&&<p style={{margin:0,fontSize:'9px',color:'#9ca3af'}}>ant:{antT}</p>}
+                        </td>
+                      );
+                    })()}
                     <td style={{padding:'3px 5px'}}>
                       <input type="date" value={fc[f.id_control]||ff} onChange={ev=>setFc(p=>({...p,[f.id_control]:ev.target.value}))}
                         style={{width:'100%',fontSize:'10px',border:`1px solid ${fc[f.id_control]&&fc[f.id_control]!==ff?'#fbbf24':'#e5e7eb'}`,borderRadius:'5px',padding:'4px 3px',background:fc[f.id_control]&&fc[f.id_control]!==ff?'#fffbeb':'white',color:fc[f.id_control]&&fc[f.id_control]!==ff?'#92400e':'#9ca3af'}}/>

@@ -44,6 +44,11 @@ export default async function VentasPage() {
   if (err) return (<><Header user={user} current="ventas" /><div className="container"><div className="alert-box error">{err}</div></div></>);
   const frecuencias: Record<string,number> = {};
   for (const v of ventas) frecuencias[v.id_control] = (frecuencias[v.id_control]||0) + 1;
+
+  // Ventas de hace 7 días para comparación
+  const hoyStr2 = new Date().toISOString().split('T')[0];
+  const hace7Str = (() => { const d = new Date(); d.setDate(d.getDate()-7); return d.toISOString().split('T')[0]; })();
+  const ventas7 = ventas.filter(v => v.fecha === hace7Str);
   return (
     <>
       <Header user={user} current="ventas" />
@@ -51,7 +56,7 @@ export default async function VentasPage() {
         <h1 className="page-title">Ventas</h1>
         <p className="page-subtitle">Carga diaria · Exportación Xubio</p>
         <div className="card">
-          <VentasManager clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} />
+          <VentasManager clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} ventas7={ventas7} />
         </div>
       </div>
     </>
