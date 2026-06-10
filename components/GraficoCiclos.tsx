@@ -32,23 +32,33 @@ export default function GraficoCiclos({ titulo, color, colorF1, colorF2, barras,
     );
   }
 
-  const minSemana = barras.length > 0 ? Math.min(...barras.map(b => b.semana)) : 1;
-  const maxSemana = Math.max(semanasCosecha + 2, ...barras.map(b => b.semana));
+  // Rango visible: desde primera semana con datos hasta semanasCosecha + 1
+  const minSemana = Math.min(...todasLasBarras.map(b => b.semana));
+  const maxSemana = Math.max(semanasCosecha + 1, ...todasLasBarras.map(b => b.semana));
   const semanas = Array.from({ length: maxSemana - minSemana + 1 }, (_, i) => i + minSemana);
   const maxPlantas = Math.max(...barras.map(b => b.plantas_f1 + b.plantas_f2 + (b.plantas_cosechadas || 0)), 1);
 
   const W = 560, H = 160;
-  const PAD_L = 44, PAD_R = 16, PAD_T = 16, PAD_B = 28;
+  const PAD_L = 44, PAD_R = 16, PAD_T = 24, PAD_B = 28;
   const chartW = W - PAD_L - PAD_R;
   const chartH = H - PAD_T - PAD_B;
   const barW = Math.min(36, chartW / semanas.length - 4);
   const gap = chartW / semanas.length;
 
-  function xBar(sem: number) { return PAD_L + (sem - 1) * gap + gap / 2; }
+  // xBar relativo al rango visible
+  function xBar(sem: number) { return PAD_L + (sem - minSemana) * gap + gap / 2; }
   function yH(plantas: number) { return (plantas / maxPlantas) * chartH; }
 
   const yRef = [0, Math.round(maxPlantas * 0.5), maxPlantas];
   const xCosecha = xBar(semanasCosecha);
+
+  // La barra de cosecha estimada es la más alta en esa semana (para posicionar el label)
+  const barraCosecha = barras.find(b => b.semana === semanasCosecha);
+  const alturaCosecha = barraCosecha
+    ? yH(barraCosecha.plantas_f1 + barraCosecha.plantas_f2 + (barraCosecha.plantas_cosechadas || 0))
+    : 0;
+  // Label de cosecha: siempre encima del área del gráfico, no sobre la barra
+  const labelCosechaY = PAD_T - 8;
 
   return (
     <div>
@@ -121,8 +131,8 @@ export default function GraficoCiclos({ titulo, color, colorF1, colorF2, barras,
         })}
 
         {/* Línea de cosecha estimada */}
-        <line x1={xCosecha} x2={xCosecha} y1={PAD_T - 4} y2={PAD_T + chartH} stroke="#ef4444" strokeWidth={1.5} strokeDasharray="4 3" />
-        <text x={xCosecha} y={PAD_T - 6} textAnchor="middle" fontSize={9} fill="#ef4444" fontWeight={600}>cosecha</text>
+        <line x1={xCosecha} x2={xCosecha} y1={PAD_T} y2={PAD_T + chartH} stroke="#ef4444" strokeWidth={1.5} strokeDasharray="4 3" />
+        <text x={xCosecha} y={labelCosechaY} textAnchor="middle" fontSize={9} fill="#ef4444" fontWeight={600}>cosecha est.</text>
 
         {/* Eje X */}
         <line x1={PAD_L} x2={W - PAD_R} y1={PAD_T + chartH} y2={PAD_T + chartH} stroke="#e5e7eb" strokeWidth={1} />
