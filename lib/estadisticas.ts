@@ -269,7 +269,18 @@ export function distribucionPorSemana(
   }
   const semanasCosecha = Math.ceil(diasProm / 7);
 
-  const barras = Array.from(mapa.values()).sort((a, b) => a.semana - b.semana);
+  // Añadir semanas futuras hasta semanasCosecha + 2 para mostrar proyección
+  const maxSemanaActiva = mapa.size > 0 ? Math.max(...Array.from(mapa.keys())) : 0;
+  const maxSemana = Math.max(maxSemanaActiva, semanasCosecha + 2);
+  for (let s = 1; s <= maxSemana; s++) {
+    if (!mapa.has(s)) mapa.set(s, { semana: s, plantas_f1: 0, plantas_f2: 0, plantas_cosechadas: 0, lotes: [] });
+  }
+
+  // Recortar semanas vacías al inicio
+  const barrasSorted = Array.from(mapa.values()).sort((a, b) => a.semana - b.semana);
+  const primerConDatos = barrasSorted.findIndex(b => b.plantas_f1 + b.plantas_f2 + (b.plantas_cosechadas || 0) > 0);
+  const barras = primerConDatos <= 0 ? barrasSorted : barrasSorted.slice(Math.max(0, primerConDatos - 1));
+
   return { barras, semanasCosecha };
 }
 

@@ -89,7 +89,7 @@ export default async function PanelPage({ searchParams }: {
 
   // ── ALERTAS ──
   const hoy = new Date();
-  const alertas: { tipo: 'error'|'warn'|'info'; msg: string; lote?: string }[] = [];
+  const alertas: { tipo: 'error'|'warn'|'info'; msg: string; lote?: string; prioridad?: number }[] = [];
 
   // Promedio F1 por variedad (para detectar lotes lentos en F1)
   const promedioF1Map = new Map<string,number>();
@@ -122,8 +122,8 @@ export default async function PanelPage({ searchParams }: {
       }
     }
 
-    // 🔴 Lote pasado en F2 (> ciclo * 110%)
-    if (diasSiembra > cicloEst * 1.1 && l.fase_actual === 'fase_2') {
+    // 🔴 Lote pasado en F2 (> ciclo * 130%)
+    if (diasSiembra > cicloEst * 1.3 && l.fase_actual === 'fase_2') {
       alertas.push({ tipo:'error', msg:`Lote ${l.id_lote} lleva ${diasSiembra}d de ${cicloEst}d est. — vencido`, lote: l.id_lote });
     }
 
@@ -174,17 +174,21 @@ export default async function PanelPage({ searchParams }: {
     }
   }
 
-  // 🔵 Mesadas vacías
+  // 🔵 Mesadas vacías (prioridad 0 — van primero)
   for (const nave of tubosMesadas) {
     for (const m of nave.mesadas || []) {
       if (m.tubos_totales > 10 && m.tubos_ocupados === 0) {
-        alertas.push({ tipo:'info', msg:`${m.nombre.replace(/^Nave \d+ - /,'')} — vacía` });
+        alertas.push({ tipo:'info', msg:`${m.nombre.replace(/^Nave \d+ - /,'')} — vacía`, prioridad: 0 });
       }
     }
   }
 
-  // Ordenar: errores primero
-  alertas.sort((a,b) => { const o: any={error:0,warn:1,info:2}; return o[a.tipo]-o[b.tipo]; });
+  // Ordenar: vacías primero, luego errores, warn, info
+  alertas.sort((a,b) => {
+    const pa = a.prioridad ?? ({ error:1, warn:2, info:3 } as any)[a.tipo];
+    const pb = b.prioridad ?? ({ error:1, warn:2, info:3 } as any)[b.tipo];
+    return pa - pb;
+  });
 
   // ── ÚLTIMOS MOVIMIENTOS (últimos 8) ──
   const lotesMap = new Map(lotes.map(l => [l.id_lote, l]));

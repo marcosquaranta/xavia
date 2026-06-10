@@ -32,8 +32,9 @@ export default function GraficoCiclos({ titulo, color, colorF1, colorF2, barras,
     );
   }
 
-  const maxSemana = Math.max(semanasCosecha + 1, ...barras.map(b => b.semana));
-  const semanas = Array.from({ length: maxSemana }, (_, i) => i + 1);
+  const minSemana = barras.length > 0 ? Math.min(...barras.map(b => b.semana)) : 1;
+  const maxSemana = Math.max(semanasCosecha + 2, ...barras.map(b => b.semana));
+  const semanas = Array.from({ length: maxSemana - minSemana + 1 }, (_, i) => i + minSemana);
   const maxPlantas = Math.max(...barras.map(b => b.plantas_f1 + b.plantas_f2 + (b.plantas_cosechadas || 0)), 1);
 
   const W = 560, H = 160;
