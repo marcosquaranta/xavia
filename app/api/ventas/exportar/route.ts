@@ -162,9 +162,13 @@ export async function POST(req: NextRequest) {
     if (cfgA) await updateRow('Config', 'clave', 'last_factura_a', { valor: lastA });
     if (cfgB) await updateRow('Config', 'clave', 'last_factura_b', { valor: lastB });
 
-    // Marcar ventas como exportadas
+    // Marcar ventas como exportadas y resetear cantidades a 0
     for (const v of ventasFecha) {
-      await updateRow('Ventas', 'id_venta', v.id_venta, { exportado: 'SI', fecha_carga: new Date().toISOString().split('T')[0] });
+      await updateRow('Ventas', 'id_venta', v.id_venta, {
+        exportado: 'SI',
+        fecha_carga: new Date().toISOString().split('T')[0],
+        rucula: 0, lechuga_crespa: 0, hoja_roble: 0, bandeja_rucula: 0, albahaca: 0,
+      });
     }
 
     // Enviar email via Resend (sin SMTP, sin dependencias)
