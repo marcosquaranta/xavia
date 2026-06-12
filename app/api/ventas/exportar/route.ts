@@ -45,8 +45,8 @@ export async function POST(req: NextRequest) {
     if (!ventasFecha.length) return NextResponse.json({ error: 'Sin ventas para esa fecha' }, { status: 400 });
 
     // Usar correlativo manual si se provee, sino leer de Config
-    let lastA = correlaA !== undefined ? Number(correlaA) - 1 : Number(config.find(c => c.clave === 'last_factura_a')?.valor || 665);
-    let lastB = correlaB !== undefined ? Number(correlaB) - 1 : Number(config.find(c => c.clave === 'last_factura_b')?.valor || 575);
+    let lastA = correlaA !== undefined ? Number(correlaA) : Number(config.find(c => c.clave === 'last_factura_a')?.valor || 665);
+    let lastB = correlaB !== undefined ? Number(correlaB) : Number(config.find(c => c.clave === 'last_factura_b')?.valor || 575);
 
     const fechaDate = new Date(fecha + 'T12:00:00');
     const wb = XLSX.utils.book_new();
