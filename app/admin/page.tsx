@@ -11,8 +11,7 @@ export default async function AdminPage() {
     { href: '/admin/naves', titulo: 'Naves y mesadas', desc: 'Configurar capacidades y ubicaciones' },
     { href: '/admin/semillas', titulo: 'Semillas', desc: 'Stock de semillas y batches' },
     { href: '/admin/usuarios', titulo: 'Usuarios', desc: 'Gestionar accesos y roles' },
-    { href: '/admin/clientes', titulo: 'Clientes', desc: 'Base de datos de clientes' },
-    { href: '/admin/clientes-venta', titulo: 'Clientes de ventas', desc: 'Facturación, precios y Xubio' },
+    { href: '/admin/clientes-venta', titulo: 'Clientes', desc: 'Facturación, precios y Xubio' },
   ];
   return (
     <>
