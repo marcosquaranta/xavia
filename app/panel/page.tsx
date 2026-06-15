@@ -297,16 +297,23 @@ export default async function PanelPage({ searchParams }: {
               <div style={{ marginTop:'7px', fontSize:'10px', color:'#6b7280' }}>
                 F1: <strong>{resumen.lechuga.fase_1.toLocaleString('es-AR')}</strong> · F2: <strong style={{ color:'#4d7c0f' }}>{resumen.lechuga.fase_2.toLocaleString('es-AR')}</strong>
               </div>
-              {camaraLechuga.stockActual > 0 && (
-                <div style={{ marginTop:'8px', paddingTop:'7px', borderTop:'1px solid #f3f4f6', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                  <span style={{ fontSize:'10px', color:'#6b7280' }}>Stock cámara: <strong>{camaraLechuga.stockActual.toLocaleString('es-AR')} paq.</strong></span>
-                  <span style={{ fontSize:'11px', fontWeight:700, padding:'1px 7px', borderRadius:'4px',
-                    background: camaraLechuga.diasPromedio > 7 ? '#fef2f2' : camaraLechuga.diasPromedio > 4 ? '#fffbeb' : '#f0fdf4',
-                    color:      camaraLechuga.diasPromedio > 7 ? '#dc2626' : camaraLechuga.diasPromedio > 4 ? '#d97706' : '#059669' }}>
-                    {camaraLechuga.diasPromedio}d {camaraLechuga.diasPromedio > 7 ? '🔴' : camaraLechuga.diasPromedio > 4 ? '🟡' : '🟢'}
-                  </span>
-                </div>
-              )}
+              {camaraLechuga.stockActual > 0 && (() => {
+                const dc = camaraLechuga.diasPromedio;
+                const cc = dc > 7 ? '#dc2626' : dc > 4 ? '#d97706' : '#059669';
+                const bc = dc > 7 ? '#fef2f2' : dc > 4 ? '#fffbeb' : '#f0fdf4';
+                return (
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4px', marginTop:'7px', paddingTop:'7px', borderTop:'1px solid #f3f4f6' }}>
+                    <div style={{ background:'#f0fdf4', borderRadius:'5px', padding:'5px', textAlign:'center' }}>
+                      <p style={{ margin:'0 0 1px', fontSize:'8px', color:'#4d7c0f', fontWeight:700, textTransform:'uppercase' }}>Stock cámara</p>
+                      <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:'#111827' }}>{camaraLechuga.stockActual.toLocaleString('es-AR')} paq.</p>
+                    </div>
+                    <div style={{ background:bc, borderRadius:'5px', padding:'5px', textAlign:'center' }}>
+                      <p style={{ margin:'0 0 1px', fontSize:'8px', color:cc, fontWeight:700, textTransform:'uppercase' }}>Días en cámara</p>
+                      <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:cc }}>{dc}d {dc > 7 ? '🔴' : dc > 4 ? '🟡' : '🟢'}</p>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -341,16 +348,23 @@ export default async function PanelPage({ searchParams }: {
               <div style={{ marginTop:'7px', fontSize:'10px', color:'#6b7280' }}>
                 Plant.: <strong>{resumen.rucula.plantinera.toLocaleString('es-AR')}</strong> · F2: <strong style={{ color:'#166534' }}>{Math.round(resumen.rucula.fase_2/3).toLocaleString('es-AR')} paq.</strong>
               </div>
-              {camaraRucula.stockActual > 0 && (
-                <div style={{ marginTop:'8px', paddingTop:'7px', borderTop:'1px solid #f3f4f6', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                  <span style={{ fontSize:'10px', color:'#6b7280' }}>Stock cámara: <strong>{camaraRucula.stockActual.toLocaleString('es-AR')} paq.</strong></span>
-                  <span style={{ fontSize:'11px', fontWeight:700, padding:'1px 7px', borderRadius:'4px',
-                    background: camaraRucula.diasPromedio > 7 ? '#fef2f2' : camaraRucula.diasPromedio > 4 ? '#fffbeb' : '#f0fdf4',
-                    color:      camaraRucula.diasPromedio > 7 ? '#dc2626' : camaraRucula.diasPromedio > 4 ? '#d97706' : '#059669' }}>
-                    {camaraRucula.diasPromedio}d {camaraRucula.diasPromedio > 7 ? '🔴' : camaraRucula.diasPromedio > 4 ? '🟡' : '🟢'}
-                  </span>
-                </div>
-              )}
+              {camaraRucula.stockActual > 0 && (() => {
+                const dc = camaraRucula.diasPromedio;
+                const cc = dc > 7 ? '#dc2626' : dc > 4 ? '#d97706' : '#059669';
+                const bc = dc > 7 ? '#fef2f2' : dc > 4 ? '#fffbeb' : '#f0fdf4';
+                return (
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4px', marginTop:'7px', paddingTop:'7px', borderTop:'1px solid #f3f4f6' }}>
+                    <div style={{ background:'#dcfce7', borderRadius:'5px', padding:'5px', textAlign:'center' }}>
+                      <p style={{ margin:'0 0 1px', fontSize:'8px', color:'#166534', fontWeight:700, textTransform:'uppercase' }}>Stock cámara</p>
+                      <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:'#111827' }}>{camaraRucula.stockActual.toLocaleString('es-AR')} paq.</p>
+                    </div>
+                    <div style={{ background:bc, borderRadius:'5px', padding:'5px', textAlign:'center' }}>
+                      <p style={{ margin:'0 0 1px', fontSize:'8px', color:cc, fontWeight:700, textTransform:'uppercase' }}>Días en cámara</p>
+                      <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:cc }}>{dc}d {dc > 7 ? '🔴' : dc > 4 ? '🟡' : '🟢'}</p>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
