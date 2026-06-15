@@ -267,96 +267,63 @@ export default async function PanelPage({ searchParams }: {
             </div>
           </div>
 
-          {/* Lechuga proyección */}
-          {rL && (
-            <div style={{ background:'white', border:'1px solid #e5e7eb', borderTop:'4px solid #4d7c0f', borderRadius:'10px', padding:'14px' }}>
+          {/* ── helper para card de proyección ── */}
+          {[
+            { r: rL, label: 'LECHUGA', colorTop: '#4d7c0f', colorF2: '#4d7c0f', bgStock: '#f0fdf4',
+              subtitulo: null, unidad: 'pl est.',
+              boxes: rL ? [['Cosechado',rL.cosechadoMes,'#4d7c0f','#f7fee7'],['Prox 7d',rL.proyectadoEstaSemana,'#854d0e','#fefce8'],['Resto mes',rL.proyectadoRestoMes,'#059669','#f0fdf4']] : [],
+              totalProyectado: rL ? rL.cosechadoMes+rL.proyectadoMesTotal : 0,
+              varPct: rL?.variacionPct ?? null,
+              infoLine: rL ? `F1: ${resumen.lechuga.fase_1.toLocaleString('es-AR')} · F2: ${resumen.lechuga.fase_2.toLocaleString('es-AR')}` : '',
+              camara: camaraLechuga,
+            },
+            { r: rR, label: 'RÚCULA', colorTop: '#166534', colorF2: '#166534', bgStock: '#dcfce7',
+              subtitulo: rR ? `~${((rR.cosechadoMes+rR.proyectadoMesTotal)*rR.plantasPorPaquete).toLocaleString('es-AR')} plantas` : null,
+              unidad: 'paq. est.',
+              boxes: rR ? [['Cosechado',rR.cosechadoMes,'#166534','#dcfce7'],['Prox 7d',rR.proyectadoEstaSemana,'#854d0e','#fefce8'],['Resto mes',rR.proyectadoRestoMes,'#059669','#f0fdf4']] : [],
+              totalProyectado: rR ? rR.cosechadoMes+rR.proyectadoMesTotal : 0,
+              varPct: rR?.variacionPct ?? null,
+              infoLine: rR ? `Plant.: ${resumen.rucula.plantinera.toLocaleString('es-AR')} · F2: ${Math.round(resumen.rucula.fase_2/3).toLocaleString('es-AR')} paq.` : '',
+              camara: camaraRucula,
+            },
+          ].map(({ r, label, colorTop, bgStock, subtitulo, unidad, boxes, totalProyectado, varPct, infoLine, camara }) => r && (
+            <div key={label} style={{ background:'white', border:'1px solid #e5e7eb', borderTop:`4px solid ${colorTop}`, borderRadius:'10px', padding:'14px', display:'flex', flexDirection:'column' }}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
-                <span style={{ background:'#4d7c0f', color:'white', padding:'1px 8px', borderRadius:'4px', fontSize:'11px', fontWeight:800 }}>LECHUGA</span>
-                <span style={{ fontSize:'10px', color:'#9ca3af' }}>Proyección mes</span>
-              </div>
-              <div style={{ display:'flex', alignItems:'baseline', gap:'6px', marginBottom:'3px' }}>
-                <span style={{ fontSize:'28px', fontWeight:800, color:'#14532d', lineHeight:1 }}>{(rL.cosechadoMes+rL.proyectadoMesTotal).toLocaleString('es-AR')}</span>
-                <span style={{ fontSize:'11px', color:'#6b7280' }}>pl est.</span>
-              </div>
-              {rL.variacionPct !== null ? (
-                <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'8px' }}>
-                  <span style={{ fontSize:'16px', fontWeight:800, color:rL.variacionPct>=0?'#059669':'#dc2626', background:rL.variacionPct>=0?'#f0fdf4':'#fef2f2', borderRadius:'5px', padding:'1px 7px' }}>
-                    {rL.variacionPct>=0?'↑':'↓'} {Math.abs(rL.variacionPct)}%
-                  </span>
-                  <span style={{ fontSize:'10px', color:'#9ca3af' }}>vs mayo</span>
-                </div>
-              ) : <p style={{ fontSize:'10px', color:'#9ca3af', marginBottom:'8px' }}>Sin datos mayo</p>}
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'4px' }}>
-                {[['Cosechado',rL.cosechadoMes,'#4d7c0f','#f7fee7'],['Prox 7d',rL.proyectadoEstaSemana,'#854d0e','#fefce8'],['Resto mes',rL.proyectadoRestoMes,'#059669','#f0fdf4']].map(([l,v,c,b]:any)=>(
-                  <div key={l} style={{ background:v>0?b:'#f9fafb', borderRadius:'5px', padding:'5px', textAlign:'center' }}>
-                    <p style={{ margin:'0 0 1px', fontSize:'8px', color:v>0?c:'#9ca3af', fontWeight:700, textTransform:'uppercase' }}>{l}</p>
-                    <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:v>0?'#111827':'#d1d5db' }}>{v>0?v.toLocaleString('es-AR'):'—'}</p>
-                  </div>
-                ))}
-              </div>
-              <div style={{ marginTop:'7px', fontSize:'10px', color:'#6b7280' }}>
-                F1: <strong>{resumen.lechuga.fase_1.toLocaleString('es-AR')}</strong> · F2: <strong style={{ color:'#4d7c0f' }}>{resumen.lechuga.fase_2.toLocaleString('es-AR')}</strong>
-              </div>
-              {camaraLechuga.stockActual > 0 && (() => {
-                const dc = camaraLechuga.diasPromedio;
-                const cc = dc > 7 ? '#dc2626' : dc > 4 ? '#d97706' : '#059669';
-                const bc = dc > 7 ? '#fef2f2' : dc > 4 ? '#fffbeb' : '#f0fdf4';
-                return (
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4px', marginTop:'7px', paddingTop:'7px', borderTop:'1px solid #f3f4f6' }}>
-                    <div style={{ background:'#f0fdf4', borderRadius:'5px', padding:'5px', textAlign:'center' }}>
-                      <p style={{ margin:'0 0 1px', fontSize:'8px', color:'#4d7c0f', fontWeight:700, textTransform:'uppercase' }}>Stock cámara</p>
-                      <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:'#111827' }}>{camaraLechuga.stockActual.toLocaleString('es-AR')} paq.</p>
-                    </div>
-                    <div style={{ background:bc, borderRadius:'5px', padding:'5px', textAlign:'center' }}>
-                      <p style={{ margin:'0 0 1px', fontSize:'8px', color:cc, fontWeight:700, textTransform:'uppercase' }}>Días en cámara</p>
-                      <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:cc }}>{dc}d {dc > 7 ? '🔴' : dc > 4 ? '🟡' : '🟢'}</p>
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-          )}
-
-          {/* Rúcula proyección */}
-          {rR && (
-            <div style={{ background:'white', border:'1px solid #e5e7eb', borderTop:'4px solid #166534', borderRadius:'10px', padding:'14px' }}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
-                <span style={{ background:'#166534', color:'white', padding:'1px 8px', borderRadius:'4px', fontSize:'11px', fontWeight:800 }}>RÚCULA</span>
+                <span style={{ background:colorTop, color:'white', padding:'1px 8px', borderRadius:'4px', fontSize:'11px', fontWeight:800 }}>{label}</span>
                 <span style={{ fontSize:'10px', color:'#9ca3af' }}>Proyección mes</span>
               </div>
               <div style={{ display:'flex', alignItems:'baseline', gap:'6px', marginBottom:'2px' }}>
-                <span style={{ fontSize:'28px', fontWeight:800, color:'#14532d', lineHeight:1 }}>{(rR.cosechadoMes+rR.proyectadoMesTotal).toLocaleString('es-AR')}</span>
-                <span style={{ fontSize:'11px', color:'#6b7280' }}>paq. est.</span>
+                <span style={{ fontSize:'28px', fontWeight:800, color:'#14532d', lineHeight:1 }}>{totalProyectado.toLocaleString('es-AR')}</span>
+                <span style={{ fontSize:'11px', color:'#6b7280' }}>{unidad}</span>
               </div>
-              <p style={{ fontSize:'10px', color:'#9ca3af', marginBottom:'3px' }}>~{((rR.cosechadoMes+rR.proyectadoMesTotal)*rR.plantasPorPaquete).toLocaleString('es-AR')} plantas</p>
-              {rR.variacionPct !== null ? (
+              {/* Subtítulo: plantas para rúcula, espacio fijo para lechuga */}
+              <p style={{ margin:'0 0 3px', fontSize:'10px', color:'#9ca3af', minHeight:'14px' }}>{subtitulo || ''}</p>
+              {varPct !== null ? (
                 <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'8px' }}>
-                  <span style={{ fontSize:'16px', fontWeight:800, color:rR.variacionPct>=0?'#059669':'#dc2626', background:rR.variacionPct>=0?'#f0fdf4':'#fef2f2', borderRadius:'5px', padding:'1px 7px' }}>
-                    {rR.variacionPct>=0?'↑':'↓'} {Math.abs(rR.variacionPct)}%
+                  <span style={{ fontSize:'16px', fontWeight:800, color:varPct>=0?'#059669':'#dc2626', background:varPct>=0?'#f0fdf4':'#fef2f2', borderRadius:'5px', padding:'1px 7px' }}>
+                    {varPct>=0?'↑':'↓'} {Math.abs(varPct)}%
                   </span>
                   <span style={{ fontSize:'10px', color:'#9ca3af' }}>vs mayo</span>
                 </div>
               ) : <p style={{ fontSize:'10px', color:'#9ca3af', marginBottom:'8px' }}>Sin datos mayo</p>}
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'4px' }}>
-                {[['Cosechado',rR.cosechadoMes,'#166534','#dcfce7'],['Prox 7d',rR.proyectadoEstaSemana,'#854d0e','#fefce8'],['Resto mes',rR.proyectadoRestoMes,'#059669','#f0fdf4']].map(([l,v,c,b]:any)=>(
+                {(boxes as any[]).map(([l,v,c,b]:any) => (
                   <div key={l} style={{ background:v>0?b:'#f9fafb', borderRadius:'5px', padding:'5px', textAlign:'center' }}>
                     <p style={{ margin:'0 0 1px', fontSize:'8px', color:v>0?c:'#9ca3af', fontWeight:700, textTransform:'uppercase' }}>{l}</p>
                     <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:v>0?'#111827':'#d1d5db' }}>{v>0?v.toLocaleString('es-AR'):'—'}</p>
                   </div>
                 ))}
               </div>
-              <div style={{ marginTop:'7px', fontSize:'10px', color:'#6b7280' }}>
-                Plant.: <strong>{resumen.rucula.plantinera.toLocaleString('es-AR')}</strong> · F2: <strong style={{ color:'#166534' }}>{Math.round(resumen.rucula.fase_2/3).toLocaleString('es-AR')} paq.</strong>
-              </div>
-              {camaraRucula.stockActual > 0 && (() => {
-                const dc = camaraRucula.diasPromedio;
+              <div style={{ marginTop:'7px', fontSize:'10px', color:'#6b7280' }}>{infoLine}</div>
+              {camara.stockActual > 0 && (() => {
+                const dc = camara.diasPromedio;
                 const cc = dc > 7 ? '#dc2626' : dc > 4 ? '#d97706' : '#059669';
                 const bc = dc > 7 ? '#fef2f2' : dc > 4 ? '#fffbeb' : '#f0fdf4';
                 return (
                   <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4px', marginTop:'7px', paddingTop:'7px', borderTop:'1px solid #f3f4f6' }}>
-                    <div style={{ background:'#dcfce7', borderRadius:'5px', padding:'5px', textAlign:'center' }}>
-                      <p style={{ margin:'0 0 1px', fontSize:'8px', color:'#166534', fontWeight:700, textTransform:'uppercase' }}>Stock cámara</p>
-                      <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:'#111827' }}>{camaraRucula.stockActual.toLocaleString('es-AR')} paq.</p>
+                    <div style={{ background:bgStock, borderRadius:'5px', padding:'5px', textAlign:'center' }}>
+                      <p style={{ margin:'0 0 1px', fontSize:'8px', color:colorTop, fontWeight:700, textTransform:'uppercase' }}>Stock cámara</p>
+                      <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:'#111827' }}>{camara.stockActual.toLocaleString('es-AR')} paq.</p>
                     </div>
                     <div style={{ background:bc, borderRadius:'5px', padding:'5px', textAlign:'center' }}>
                       <p style={{ margin:'0 0 1px', fontSize:'8px', color:cc, fontWeight:700, textTransform:'uppercase' }}>Días en cámara</p>
@@ -366,7 +333,7 @@ export default async function PanelPage({ searchParams }: {
                 );
               })()}
             </div>
-          )}
+          ))}
         </div>
 
         {/* ══ FILA 2: CICLOS + ÚLTIMOS MOVIMIENTOS ══ */}
