@@ -138,7 +138,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
     setExp(true);setMsg(null);
     try{
       setShowPreExport(false);
-      const r=await fetch('/api/ventas/exportar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,fechaFactura:ff,fechasCliente:fc,correlaA:Number(correlaA)-1,correlaB:Number(correlaB)-1,enviarEmail})});
+      const r=await fetch('/api/ventas/exportar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,fechaFactura:ff,fechasCliente:fc,correlaA:Number(correlaA),correlaB:Number(correlaB),enviarEmail})});
       const j=await r.json();if(!r.ok)throw new Error(j.error);
       const bytes=Uint8Array.from(atob(j.file),c=>c.charCodeAt(0));
       const url=URL.createObjectURL(new Blob([bytes]));
