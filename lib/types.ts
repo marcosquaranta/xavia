@@ -132,3 +132,14 @@ export interface ConfigItem {
   clave: string;
   valor: string | number;
 }
+
+export interface StockCamara {
+  id_registro: string;
+  cultivo: 'rucula' | 'lechuga';
+  fecha: string;
+  tipo: 'inicial' | 'ajuste';
+  cantidad_paq: number | string;
+  notas: string;
+  usuario: string;
+  fecha_carga: string;
+}

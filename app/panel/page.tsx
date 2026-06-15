@@ -5,7 +5,8 @@ import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
 import { cosechadoEsteMes, plantasPorCultivo, distribucionPorSemana, resumenCosechaPorCultivo, ciclosPorSemana, cicloRealPorVariedad } from '@/lib/estadisticas';
 import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
-import type { Lote, Movimiento, Ubicacion, Variedad } from '@/lib/types';
+import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, StockCamara } from '@/lib/types';
+import { calcularCamara } from '@/lib/camara';
 import Header from '@/components/Header';
 import FiltrosLotes from '@/components/FiltrosLotes';
 import LoteCard from '@/components/LoteCard';
@@ -51,10 +52,13 @@ export default async function PanelPage({ searchParams }: {
   const pagina  = Math.max(1, parseInt(searchParams.p || '1'));
 
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [], variedades: Variedad[] = [];
+  let ventasPanel: VentaDia[] = [], registrosCamara: StockCamara[] = [];
   try {
-    [lotes, movimientos, ubicaciones, variedades] = await Promise.all([
+    [lotes, movimientos, ubicaciones, variedades, ventasPanel, registrosCamara] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<Ubicacion>('Ubicaciones'), readSheet<Variedad>('Variedades'),
+      readSheet<VentaDia>('Ventas'),
+      readSheet<StockCamara>('StockCamara').catch(() => []),
     ]);
   } catch {}
 
@@ -67,6 +71,9 @@ export default async function PanelPage({ searchParams }: {
   let resumenCosecha: any[] = [];
   let ciclosSemanas: any[] = [];
   let ciclosRealesMap = new Map<string,number>();
+
+  const camaraRucula  = calcularCamara('rucula',  registrosCamara, lotes, ventasPanel);
+  const camaraLechuga = calcularCamara('lechuga', registrosCamara, lotes, ventasPanel);
 
   try {
     const mes = cosechadoEsteMes(lotes);
@@ -290,6 +297,16 @@ export default async function PanelPage({ searchParams }: {
               <div style={{ marginTop:'7px', fontSize:'10px', color:'#6b7280' }}>
                 F1: <strong>{resumen.lechuga.fase_1.toLocaleString('es-AR')}</strong> · F2: <strong style={{ color:'#4d7c0f' }}>{resumen.lechuga.fase_2.toLocaleString('es-AR')}</strong>
               </div>
+              {camaraLechuga.stockActual > 0 && (
+                <div style={{ marginTop:'8px', paddingTop:'7px', borderTop:'1px solid #f3f4f6', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                  <span style={{ fontSize:'10px', color:'#6b7280' }}>Stock cámara: <strong>{camaraLechuga.stockActual.toLocaleString('es-AR')} paq.</strong></span>
+                  <span style={{ fontSize:'11px', fontWeight:700, padding:'1px 7px', borderRadius:'4px',
+                    background: camaraLechuga.diasPromedio > 7 ? '#fef2f2' : camaraLechuga.diasPromedio > 4 ? '#fffbeb' : '#f0fdf4',
+                    color:      camaraLechuga.diasPromedio > 7 ? '#dc2626' : camaraLechuga.diasPromedio > 4 ? '#d97706' : '#059669' }}>
+                    {camaraLechuga.diasPromedio}d {camaraLechuga.diasPromedio > 7 ? '🔴' : camaraLechuga.diasPromedio > 4 ? '🟡' : '🟢'}
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
@@ -324,6 +341,16 @@ export default async function PanelPage({ searchParams }: {
               <div style={{ marginTop:'7px', fontSize:'10px', color:'#6b7280' }}>
                 Plant.: <strong>{resumen.rucula.plantinera.toLocaleString('es-AR')}</strong> · F2: <strong style={{ color:'#166534' }}>{Math.round(resumen.rucula.fase_2/3).toLocaleString('es-AR')} paq.</strong>
               </div>
+              {camaraRucula.stockActual > 0 && (
+                <div style={{ marginTop:'8px', paddingTop:'7px', borderTop:'1px solid #f3f4f6', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                  <span style={{ fontSize:'10px', color:'#6b7280' }}>Stock cámara: <strong>{camaraRucula.stockActual.toLocaleString('es-AR')} paq.</strong></span>
+                  <span style={{ fontSize:'11px', fontWeight:700, padding:'1px 7px', borderRadius:'4px',
+                    background: camaraRucula.diasPromedio > 7 ? '#fef2f2' : camaraRucula.diasPromedio > 4 ? '#fffbeb' : '#f0fdf4',
+                    color:      camaraRucula.diasPromedio > 7 ? '#dc2626' : camaraRucula.diasPromedio > 4 ? '#d97706' : '#059669' }}>
+                    {camaraRucula.diasPromedio}d {camaraRucula.diasPromedio > 7 ? '🔴' : camaraRucula.diasPromedio > 4 ? '🟡' : '🟢'}
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>
