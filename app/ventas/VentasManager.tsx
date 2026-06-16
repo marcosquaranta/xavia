@@ -57,6 +57,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
   const [historial,setHistorial]=useState<any[]>([]);
   const [loadHist,setLoadHist]=useState(false);
   const [limpiando,setLimpiando]=useState(false);
+  const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number};lechuga:{stockActual:number}}|null>(null);
+  const [cosechaEst,setCosechaEst]=useState({rucula:'',lechuga:''});
   const tmrs=useRef<Record<string,ReturnType<typeof setTimeout>>>({});
 
   const prods = extras ? ALL : PP;
@@ -68,6 +70,11 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
   function se(id:string,suc:string,k:PK,v:'idle'|'saving'|'saved'|'error'){
     setEsts(p=>({...p,[`${id}__${suc}`]:{...(p[`${id}__${suc}`]||{}),[k]:v}as any}));
   }
+
+  // Cargar stock en cámara
+  useEffect(()=>{
+    fetch('/api/stocks/camara').then(r=>r.json()).then(j=>{ if(j.rucula&&j.lechuga) setStockCamara(j); }).catch(()=>{});
+  },[]);
 
   // Cargar correlativo actual al iniciar
   useEffect(()=>{
@@ -224,9 +231,46 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
         <span style={{fontSize:'10px',color:'#9ca3af',marginLeft:'auto'}}>Próxima A: <strong>{corrEditA ? Number(corrEditA)+1 : '—'}</strong> · Próxima B: <strong>{corrEditB ? Number(corrEditB)+1 : '—'}</strong></span>
       </div>
 
-      {/* Disponibles */}
+      {/* Stock disponible por cultivo */}
+      <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'8px',padding:'10px 14px',marginBottom:'12px'}}>
+        <p style={{margin:'0 0 8px',fontSize:'12px',fontWeight:700,color:'#166534'}}>🥬 Stock disponible por cultivo</p>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}}>
+          {(['rucula','lechuga'] as const).map(cultivo=>{
+            const sc=stockCamara?.[cultivo]?.stockActual??null;
+            const est=Number(cosechaEst[cultivo])||0;
+            const total=sc!==null?sc+est:est;
+            const yaPedido=cultivo==='rucula'?tots.rucula:(tots.lechuga_crespa+tots.hoja_roble);
+            const balance=total-yaPedido;
+            const label=cultivo==='rucula'?'Rúcula':'Lechuga';
+            const color=cultivo==='rucula'?'#b45309':'#166534';
+            const bg=cultivo==='rucula'?'#fffbeb':'#f0fdf4';
+            const border=cultivo==='rucula'?'#fde68a':'#bbf7d0';
+            return (
+              <div key={cultivo} style={{background:bg,border:`1px solid ${border}`,borderRadius:'7px',padding:'8px 10px'}}>
+                <p style={{margin:'0 0 6px',fontSize:'11px',fontWeight:700,color}}>{label}</p>
+                <div style={{display:'grid',gridTemplateColumns:'auto 1fr',gap:'2px 8px',alignItems:'center',fontSize:'11px'}}>
+                  <span style={{color:'#6b7280'}}>Cámara</span>
+                  <span style={{fontWeight:700,color:sc!==null?'#111827':'#9ca3af'}}>{sc!==null?`${sc} paq`:'—'}</span>
+                  <span style={{color:'#6b7280'}}>+ Cosecha est.</span>
+                  <input type="number" min={0} placeholder="0" value={cosechaEst[cultivo]}
+                    onChange={ev=>setCosechaEst(prev=>({...prev,[cultivo]:ev.target.value}))}
+                    style={{width:'60px',fontSize:'13px',fontWeight:700,border:'1px solid #d1d5db',borderRadius:'5px',padding:'2px 5px',background:'white',color:'#111827'}}/>
+                  <span style={{color:'#6b7280'}}>Total</span>
+                  <span style={{fontWeight:800,color:'#111827'}}>{total} paq</span>
+                  <span style={{color:'#6b7280'}}>Ya pedido</span>
+                  <span style={{fontWeight:700,color:yaPedido>0?'#1d4ed8':'#9ca3af'}}>{yaPedido>0?`${yaPedido} paq`:'—'}</span>
+                  <span style={{color:'#6b7280'}}>Balance</span>
+                  <span style={{fontWeight:800,fontSize:'14px',color:balance<0?'#dc2626':balance===0?'#6b7280':'#059669'}}>{balance<0?balance:balance>0?`+${balance}`:0} paq</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Disponibles hoy (por producto, para el cálculo de Restantes) */}
       <div style={{background:'#f8fafc',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'10px 14px',marginBottom:'12px'}}>
-        <p style={{margin:'0 0 8px',fontSize:'12px',fontWeight:700,color:'#374151'}}>📦 Disponibles hoy</p>
+        <p style={{margin:'0 0 8px',fontSize:'12px',fontWeight:700,color:'#374151'}}>📦 Disponibles hoy (por producto)</p>
         <div style={{display:'flex',gap:'14px',flexWrap:'wrap',alignItems:'center'}}>
           {(prods as any[]).map((p:any)=>(
             <div key={p.key} style={{display:'flex',alignItems:'center',gap:'5px'}}>
