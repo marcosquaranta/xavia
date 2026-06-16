@@ -174,10 +174,12 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
     setExp(false);
   }
 
+  const filasNormales = filas.filter(f=>f.unidad!=='kg');
+  const filasKg = filas.filter(f=>f.unidad==='kg');
   const tots:Record<PK,number>={rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0};
-  for(const f of filas)for(const p of ALL)tots[p.key]+=Number(q(f.id_control,f.sucursal,p.key))||0;
+  for(const f of filasNormales)for(const p of ALL)tots[p.key]+=Number(q(f.id_control,f.sucursal,p.key))||0;
   const totsKg={rucula_kg:0,lechuga_kg:0};
-  for(const f of filas.filter(f=>f.unidad==='kg')){totsKg.rucula_kg+=Number(qKg(f.id_control,f.sucursal,'rucula_kg'))||0;totsKg.lechuga_kg+=Number(qKg(f.id_control,f.sucursal,'lechuga_kg'))||0;}
+  for(const f of filasKg){totsKg.rucula_kg+=Number(qKg(f.id_control,f.sucursal,'rucula_kg'))||0;totsKg.lechuga_kg+=Number(qKg(f.id_control,f.sucursal,'lechuga_kg'))||0;}
   const hayV=Object.values(tots).some(v=>v>0)||totsKg.rucula_kg>0||totsKg.lechuga_kg>0;
 
   // Total por cliente hace 7 días (para comparación)
@@ -363,7 +365,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
 
       {/* Tabla */}
       {loading?<div style={{textAlign:'center',padding:'24px',color:'#9ca3af'}}>Cargando…</div>:(
-        <div style={{overflowX:'auto'}}>
+        <div style={{overflowX:'auto',marginBottom:'4px'}}>
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
             <thead>
               <tr style={{background:'#f8fafc',borderBottom:'2px solid #e5e7eb'}}>
@@ -374,40 +376,15 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
               </tr>
             </thead>
             <tbody>
-              {filas.map((f,i)=>{
-                const esKg=f.unidad==='kg';
-                const act=esKg
-                  ?(Number(qKg(f.id_control,f.sucursal,'rucula_kg'))>0||Number(qKg(f.id_control,f.sucursal,'lechuga_kg'))>0)
-                  :(prods as any[]).some((p:any)=>Number(q(f.id_control,f.sucursal,p.key))>0);
+              {filasNormales.map((f,i)=>{
+                const act=(prods as any[]).some((p:any)=>Number(q(f.id_control,f.sucursal,p.key))>0);
                 return(
-                  <tr key={`${f.id_control}__${f.sucursal}`} style={{background:act?'#fffbeb':(i%2===0?'white':'#fafafa'),borderBottom:'1px solid #f3f4f6'}}>
+                  <tr key={`${f.id_control}__${f.sucursal}`} style={{background:act?'#f0fdf4':(i%2===0?'white':'#fafafa'),borderBottom:'1px solid #f3f4f6'}}>
                     <td style={{padding:'6px 12px'}}>
                       <span style={{fontWeight:act?600:400}}>{f.nombre_display}</span>
                       <span style={{marginLeft:'4px',fontSize:'10px',background:f.tipo==='A'?'#dbeafe':'#fef9c3',color:f.tipo==='A'?'#1e40af':'#92400e',padding:'1px 4px',borderRadius:'3px',fontWeight:600}}>F{f.tipo}</span>
-                      {esKg&&<span style={{marginLeft:'4px',fontSize:'10px',background:'#fde68a',color:'#92400e',padding:'1px 5px',borderRadius:'3px',fontWeight:700}}>KG</span>}
                     </td>
-                    {esKg ? (
-                      <td colSpan={(prods as any[]).length} style={{padding:'4px 8px'}}>
-                        <div style={{display:'flex',gap:'10px',alignItems:'center'}}>
-                          {(['rucula_kg','lechuga_kg'] as const).map(k=>{
-                            const val=qKg(f.id_control,f.sucursal,k);
-                            return(
-                              <div key={k} style={{display:'flex',alignItems:'center',gap:'5px'}}>
-                                <label style={{fontSize:'11px',fontWeight:600,color:k==='rucula_kg'?'#166534':'#4d7c0f',whiteSpace:'nowrap'}}>{k==='rucula_kg'?'Rúcula KG':'Lechuga KG'}</label>
-                                <input type="number" min={0} step={0.1} value={val} placeholder="0"
-                                  onChange={ev=>onChangeKg(f,k,ev.target.value)}
-                                  onBlur={()=>saveKg(f)}
-                                  style={{width:'75px',textAlign:'center',fontSize:'15px',fontWeight:700,
-                                    border:`2px solid ${Number(val)>0?'#fbbf24':'#e5e7eb'}`,
-                                    borderRadius:'6px',padding:'5px 4px',background:Number(val)>0?'#fffbeb':'white',
-                                    color:Number(val)>0?'#92400e':'#9ca3af',outline:'none'}}/>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </td>
-                    ) : (
-                    (prods as any[]).map((p:any)=>{
+                    {(prods as any[]).map((p:any)=>{
                       const est=e(f.id_control,f.sucursal,p.key);const val=q(f.id_control,f.sucursal,p.key);
                       return(
                         <td key={p.key} style={{padding:'3px 4px'}}>
@@ -418,24 +395,12 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
                               borderRadius:'6px',padding:'5px 4px',background:Number(val)>0?'#f0fdf4':'white',color:Number(val)>0?'#166534':'#9ca3af',outline:'none'}}/>
                         </td>
                       );
-                    }))}
-                    {/* Total con comparación vs 7d */}
-                    {(() => {
-                      if(esKg){
-                        const rkg=Number(qKg(f.id_control,f.sucursal,'rucula_kg'))||0;
-                        const lkg=Number(qKg(f.id_control,f.sucursal,'lechuga_kg'))||0;
-                        const tot=rkg+lkg;
-                        return(
-                          <td style={{padding:'4px 8px',textAlign:'right'}}>
-                            <p style={{margin:'0 0 1px',fontSize:'13px',fontWeight:800,color:tot>0?'#92400e':'#d1d5db'}}>{tot>0?`${tot.toFixed(1)} kg`:'—'}</p>
-                            {rkg>0&&<p style={{margin:0,fontSize:'9px',color:'#6b7280'}}>R:{rkg}kg L:{lkg}kg</p>}
-                          </td>
-                        );
-                      }
-                      const hoyT = totalHoy(f.id_control, f.sucursal);
-                      const antT = total7d(f.id_control, f.sucursal);
-                      const delta = antT > 0 ? Math.round(((hoyT-antT)/antT)*100) : null;
-                      return (
+                    })}
+                    {(()=>{
+                      const hoyT=totalHoy(f.id_control,f.sucursal);
+                      const antT=total7d(f.id_control,f.sucursal);
+                      const delta=antT>0?Math.round(((hoyT-antT)/antT)*100):null;
+                      return(
                         <td style={{padding:'4px 8px',textAlign:'right'}}>
                           <p style={{margin:'0 0 1px',fontSize:'15px',fontWeight:800,color:hoyT>0?'#166534':'#d1d5db'}}>{hoyT>0?hoyT:'—'}</p>
                           {delta!==null&&<p style={{margin:0,fontSize:'9px',fontWeight:700,color:delta>=0?'#059669':'#dc2626'}}>{delta>=0?'↑':'↓'}{Math.abs(delta)}%</p>}
@@ -450,9 +415,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
                   </tr>
                 );
               })}
-              {/* Total vendido */}
+              {/* Total paquetes */}
               <tr style={{background:'#f0fdf4',borderTop:'2px solid #86efac'}}>
-                <td style={{padding:'8px 12px',fontSize:'12px',fontWeight:700,color:'#166534'}}>Total vendido</td>
+                <td style={{padding:'8px 12px',fontSize:'12px',fontWeight:700,color:'#166534'}}>Total paquetes</td>
                 {(prods as any[]).map((p:any)=>(
                   <td key={p.key} style={{textAlign:'center',padding:'8px 4px',fontSize:'15px',fontWeight:800,color:tots[p.key as PK]>0?'#166534':'#d1d5db'}}>
                     {tots[p.key as PK]>0?tots[p.key as PK].toLocaleString('es-AR'):'—'}
@@ -474,6 +439,104 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
           </table>
         </div>
       )}
+
+      {/* ── Sección KG ── */}
+        {filasKg.length>0&&(
+          <div style={{marginTop:'16px',border:'1px solid #fde68a',borderRadius:'8px',overflow:'hidden'}}>
+            <div style={{background:'#fffbeb',padding:'8px 14px',borderBottom:'1px solid #fde68a',display:'flex',alignItems:'center',gap:'8px'}}>
+              <span style={{fontSize:'13px',fontWeight:700,color:'#92400e'}}>📫 Venta por KG</span>
+              <span style={{fontSize:'11px',color:'#b45309'}}>Cajones · no descuenta paquetes</span>
+            </div>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
+              <thead>
+                <tr style={{background:'#fef3c7',borderBottom:'1px solid #fde68a'}}>
+                  <th style={{textAlign:'left',padding:'8px 12px',minWidth:'150px'}}>Cliente</th>
+                  <th style={{textAlign:'center',padding:'8px 10px',color:'#166534',fontWeight:700,minWidth:'110px'}}>Rúcula KG</th>
+                  <th style={{textAlign:'center',padding:'8px 10px',color:'#4d7c0f',fontWeight:700,minWidth:'110px'}}>Lechuga KG</th>
+                  <th style={{textAlign:'right',padding:'8px 10px',color:'#92400e',fontWeight:700,minWidth:'90px'}}>Total KG</th>
+                  <th style={{textAlign:'center',padding:'8px 6px',color:'#9ca3af',minWidth:'92px',fontSize:'10px'}}>Fecha fact.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filasKg.map((f,i)=>{
+                  const rkg=Number(qKg(f.id_control,f.sucursal,'rucula_kg'))||0;
+                  const lkg=Number(qKg(f.id_control,f.sucursal,'lechuga_kg'))||0;
+                  const act=rkg>0||lkg>0;
+                  return(
+                    <tr key={`${f.id_control}__${f.sucursal}`} style={{background:act?'#fffbeb':(i%2===0?'white':'#fafafa'),borderBottom:'1px solid #fef3c7'}}>
+                      <td style={{padding:'6px 12px'}}>
+                        <span style={{fontWeight:act?600:400}}>{f.nombre_display}</span>
+                        <span style={{marginLeft:'4px',fontSize:'10px',background:f.tipo==='A'?'#dbeafe':'#fef9c3',color:f.tipo==='A'?'#1e40af':'#92400e',padding:'1px 4px',borderRadius:'3px',fontWeight:600}}>F{f.tipo}</span>
+                      </td>
+                      {(['rucula_kg','lechuga_kg'] as const).map(k=>{
+                        const val=qKg(f.id_control,f.sucursal,k);
+                        return(
+                          <td key={k} style={{padding:'3px 8px',textAlign:'center'}}>
+                            <input type="number" min={0} step={0.1} value={val} placeholder="0"
+                              onChange={ev=>onChangeKg(f,k,ev.target.value)} onBlur={()=>saveKg(f)}
+                              style={{width:'90px',textAlign:'center',fontSize:'15px',fontWeight:700,
+                                border:`2px solid ${Number(val)>0?'#fbbf24':'#e5e7eb'}`,
+                                borderRadius:'6px',padding:'5px 4px',
+                                background:Number(val)>0?'#fffbeb':'white',
+                                color:Number(val)>0?'#92400e':'#9ca3af',outline:'none'}}/>
+                          </td>
+                        );
+                      })}
+                      <td style={{padding:'4px 10px',textAlign:'right'}}>
+                        <p style={{margin:0,fontSize:'15px',fontWeight:800,color:act?'#92400e':'#d1d5db'}}>
+                          {act?(rkg+lkg).toFixed(1)+' kg':'—'}
+                        </p>
+                      </td>
+                      <td style={{padding:'3px 5px'}}>
+                        <input type="date" value={fc[f.id_control]||ff} onChange={ev=>setFc(p=>({...p,[f.id_control]:ev.target.value}))}
+                          style={{width:'100%',fontSize:'10px',border:`1px solid ${fc[f.id_control]&&fc[f.id_control]!==ff?'#fbbf24':'#e5e7eb'}`,borderRadius:'5px',padding:'4px 3px',background:fc[f.id_control]&&fc[f.id_control]!==ff?'#fffbeb':'white',color:fc[f.id_control]&&fc[f.id_control]!==ff?'#92400e':'#9ca3af'}}/>
+                      </td>
+                    </tr>
+                  );
+                })}
+                <tr style={{background:'#fef3c7',borderTop:'2px solid #fbbf24'}}>
+                  <td style={{padding:'8px 12px',fontSize:'12px',fontWeight:700,color:'#92400e'}}>Total KG</td>
+                  <td style={{textAlign:'center',padding:'8px',fontSize:'15px',fontWeight:800,color:totsKg.rucula_kg>0?'#166534':'#d1d5db'}}>{totsKg.rucula_kg>0?totsKg.rucula_kg.toFixed(1)+' kg':'—'}</td>
+                  <td style={{textAlign:'center',padding:'8px',fontSize:'15px',fontWeight:800,color:totsKg.lechuga_kg>0?'#4d7c0f':'#d1d5db'}}>{totsKg.lechuga_kg>0?totsKg.lechuga_kg.toFixed(1)+' kg':'—'}</td>
+                  <td style={{textAlign:'right',padding:'8px 10px',fontSize:'16px',fontWeight:800,color:'#92400e'}}>{(totsKg.rucula_kg+totsKg.lechuga_kg).toFixed(1)} kg</td>
+                  <td/>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* ── Resumen del día ── */}
+        {hayV&&(
+          <div style={{marginTop:'12px',background:'#f8fafc',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'10px 14px'}}>
+            <p style={{margin:'0 0 8px',fontSize:'12px',fontWeight:700,color:'#374151'}}>📊 Resumen del día</p>
+            <div style={{display:'flex',gap:'16px',flexWrap:'wrap'}}>
+              <div style={{textAlign:'center'}}>
+                <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af',textTransform:'uppercase'}}>Rúcula paq</p>
+                <p style={{margin:0,fontSize:'18px',fontWeight:800,color:'#166534'}}>{tots.rucula||'—'}</p>
+              </div>
+              <div style={{textAlign:'center'}}>
+                <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af',textTransform:'uppercase'}}>Lechuga paq</p>
+                <p style={{margin:0,fontSize:'18px',fontWeight:800,color:'#4d7c0f'}}>{(tots.lechuga_crespa+tots.hoja_roble)||'—'}</p>
+              </div>
+              {(totsKg.rucula_kg>0||totsKg.lechuga_kg>0)&&<>
+                <div style={{width:'1px',background:'#e5e7eb',alignSelf:'stretch'}}/>
+                <div style={{textAlign:'center'}}>
+                  <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af',textTransform:'uppercase'}}>Rúcula KG</p>
+                  <p style={{margin:0,fontSize:'18px',fontWeight:800,color:'#92400e'}}>{totsKg.rucula_kg>0?totsKg.rucula_kg.toFixed(1):'—'}</p>
+                </div>
+                <div style={{textAlign:'center'}}>
+                  <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af',textTransform:'uppercase'}}>Lechuga KG</p>
+                  <p style={{margin:0,fontSize:'18px',fontWeight:800,color:'#92400e'}}>{totsKg.lechuga_kg>0?totsKg.lechuga_kg.toFixed(1):'—'}</p>
+                </div>
+                <div style={{textAlign:'center'}}>
+                  <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af',textTransform:'uppercase'}}>Total KG</p>
+                  <p style={{margin:0,fontSize:'18px',fontWeight:800,color:'#92400e'}}>{(totsKg.rucula_kg+totsKg.lechuga_kg).toFixed(1)}</p>
+                </div>
+              </>}
+            </div>
+          </div>
+        )}
 
       {/* Historial de exportaciones */}
       <div style={{marginTop:'14px',borderTop:'1px solid #f3f4f6',paddingTop:'10px'}}>
