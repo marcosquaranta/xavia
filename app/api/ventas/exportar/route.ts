@@ -17,6 +17,11 @@ const PRODS = [
   { key: 'albahaca',       xubio: 'Albahaca Hidropónica' },
 ] as const;
 
+const PRODS_KG = [
+  { key: 'rucula_kg',   xubio: 'Rucula Hidropónica KG' },
+  { key: 'lechuga_kg',  xubio: 'Lechuga Hidropónica KG' },
+] as const;
+
 function getPrecio(precios: PrecioVenta[], id_control: string, sucursal: string, key: string): number {
   const row = precios.find(p => String(p.id_control) === String(id_control) && p.sucursal_obs === sucursal);
   if (!row) return 0;
@@ -107,9 +112,9 @@ export async function POST(req: NextRequest) {
       const cliente = clientes.find(c => c.id_control === idControl);
       if (!cliente) continue;
 
-      // Verificar si hay alguna cantidad > 0
+      // Verificar si hay alguna cantidad > 0 (paquetes o KG)
       const tieneVentas = lineas.some(l =>
-        ['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca']
+        ['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca','rucula_kg','lechuga_kg']
           .some(k => Number((l as any)[k]) > 0)
       );
       if (!tieneVentas) continue;
@@ -130,9 +135,23 @@ export async function POST(req: NextRequest) {
       headerRows.push(rows.length);
       rows.push(headerRow);
 
-      // Filas de productos
+      // Filas de productos (paquetes)
       for (const linea of lineas) {
         for (const prod of PRODS) {
+          const qty = Number((linea as any)[prod.key] || 0);
+          if (qty <= 0) continue;
+          const precio = getPrecio(precios, idControl, linea.sucursal || cliente.nombre_xubio, prod.key);
+          const importe = qty * precio;
+          const iva = esA ? Math.round(importe * 0.105 * 100) / 100 : 0;
+          rows.push([
+            Number(idControl), undefined, undefined, undefined, undefined, undefined,
+            undefined, undefined, undefined, undefined,
+            prod.xubio, undefined, linea.sucursal || cliente.nombre_xubio,
+            qty, precio, 0, importe, iva
+          ]);
+        }
+        // Filas de productos KG (SELECT FOOD y similares)
+        for (const prod of PRODS_KG) {
           const qty = Number((linea as any)[prod.key] || 0);
           if (qty <= 0) continue;
           const precio = getPrecio(precios, idControl, linea.sucursal || cliente.nombre_xubio, prod.key);
@@ -168,6 +187,7 @@ export async function POST(req: NextRequest) {
         exportado: 'SI',
         fecha_carga: new Date().toISOString().split('T')[0],
         rucula: 0, lechuga_crespa: 0, hoja_roble: 0, bandeja_rucula: 0, albahaca: 0,
+        rucula_kg: 0, lechuga_kg: 0,
       });
     }
 

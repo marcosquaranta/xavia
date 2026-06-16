@@ -113,6 +113,8 @@ export interface PrecioVenta {
   hoja_roble: string;
   bandeja_rucula: string;
   albahaca: string;
+  rucula_kg: string;   // precio por KG de rúcula (para clientes unidad=kg)
+  lechuga_kg: string;  // precio por KG de lechuga
 }
 
 export interface VentaDia {
