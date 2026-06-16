@@ -60,7 +60,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
   const [historial,setHistorial]=useState<any[]>([]);
   const [loadHist,setLoadHist]=useState(false);
   const [limpiando,setLimpiando]=useState(false);
-  const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number};lechuga:{stockActual:number}}|null>(null);
+  const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number};lechuga:{stockActual:number};factorGrPaq:{rucula:number;lechuga:number}}|null>(null);
   const [cosechaEst,setCosechaEst]=useState({rucula:'',lechuga:''});
   const [ctdsKg,setCtdsKg]=useState<CKG>({});
   const tmrs=useRef<Record<string,ReturnType<typeof setTimeout>>>({});
@@ -289,54 +289,83 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
         <span style={{fontSize:'10px',color:'#9ca3af',marginLeft:'auto'}}>Próxima A: <strong>{corrEditA ? Number(corrEditA)+1 : '—'}</strong> · Próxima B: <strong>{corrEditB ? Number(corrEditB)+1 : '—'}</strong></span>
       </div>
 
-      {/* Stock disponible por cultivo */}
+      {/* Stock disponible unificado paq + KG */}
       <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'8px',padding:'10px 14px',marginBottom:'12px'}}>
-        <p style={{margin:'0 0 8px',fontSize:'12px',fontWeight:700,color:'#166534'}}>🥬 Stock disponible por cultivo</p>
+        <p style={{margin:'0 0 10px',fontSize:'12px',fontWeight:700,color:'#166534'}}>🥬 Disponible para vender hoy</p>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}}>
           {(['rucula','lechuga'] as const).map(cultivo=>{
-            const sc=stockCamara?.[cultivo]?.stockActual??null;
-            const est=Number(cosechaEst[cultivo])||0;
-            const total=sc!==null?sc+est:est;
-            const yaPedido=cultivo==='rucula'?tots.rucula:(tots.lechuga_crespa+tots.hoja_roble);
-            const balance=total-yaPedido;
-            const label=cultivo==='rucula'?'Rúcula':'Lechuga';
-            const color=cultivo==='rucula'?'#b45309':'#166534';
-            const bg=cultivo==='rucula'?'#fffbeb':'#f0fdf4';
-            const border=cultivo==='rucula'?'#fde68a':'#bbf7d0';
+            const sc      = stockCamara?.[cultivo]?.stockActual ?? null;
+            const factor  = stockCamara?.factorGrPaq?.[cultivo] ?? (cultivo==='rucula'?210:330);
+            const estPaq  = Number(cosechaEst[cultivo])||0;
+            const totalPaq= sc!==null ? sc+estPaq : estPaq;
+            const totalKg = totalPaq * factor / 1000;
+
+            // Consumo en paquetes
+            const paqVendidos = cultivo==='rucula' ? tots.rucula : (tots.lechuga_crespa+tots.hoja_roble);
+            // Consumo en KG → convertir a paquetes equivalentes
+            const kgVendidos  = cultivo==='rucula' ? totsKg.rucula_kg : totsKg.lechuga_kg;
+            const kgEnPaq     = factor>0 ? kgVendidos*1000/factor : 0;
+            const totalConsumidoPaq = paqVendidos + kgEnPaq;
+            const totalConsumidoKg  = totalConsumidoPaq * factor / 1000;
+
+            const restaPaq = totalPaq - totalConsumidoPaq;
+            const restaKg  = restaPaq * factor / 1000;
+            const colorR   = restaPaq<0?'#dc2626':restaPaq===0?'#6b7280':'#059669';
+
+            const label  = cultivo==='rucula'?'Rúcula':'Lechuga';
+            const color  = cultivo==='rucula'?'#b45309':'#166534';
+            const bg     = cultivo==='rucula'?'#fffbeb':'#f0fdf4';
+            const border = cultivo==='rucula'?'#fde68a':'#bbf7d0';
+
             return (
-              <div key={cultivo} style={{background:bg,border:`1px solid ${border}`,borderRadius:'7px',padding:'8px 10px'}}>
-                <p style={{margin:'0 0 6px',fontSize:'11px',fontWeight:700,color}}>{label}</p>
-                <div style={{display:'grid',gridTemplateColumns:'auto 1fr',gap:'2px 8px',alignItems:'center',fontSize:'11px'}}>
-                  <span style={{color:'#6b7280'}}>Cámara</span>
-                  <span style={{fontWeight:700,color:sc!==null?'#111827':'#9ca3af'}}>{sc!==null?`${sc} paq`:'—'}</span>
-                  <span style={{color:'#6b7280'}}>+ Cosecha est.</span>
-                  <input type="number" min={0} placeholder="0" value={cosechaEst[cultivo]}
-                    onChange={ev=>setCosechaEst(prev=>({...prev,[cultivo]:ev.target.value}))}
-                    style={{width:'60px',fontSize:'13px',fontWeight:700,border:'1px solid #d1d5db',borderRadius:'5px',padding:'2px 5px',background:'white',color:'#111827'}}/>
-                  <span style={{color:'#6b7280'}}>Total</span>
-                  <span style={{fontWeight:800,color:'#111827'}}>{total} paq</span>
-                  <span style={{color:'#6b7280'}}>Ya pedido</span>
-                  <span style={{fontWeight:700,color:yaPedido>0?'#1d4ed8':'#9ca3af'}}>{yaPedido>0?`${yaPedido} paq`:'—'}</span>
-                  <span style={{color:'#6b7280'}}>Balance</span>
-                  <span style={{fontWeight:800,fontSize:'14px',color:balance<0?'#dc2626':balance===0?'#6b7280':'#059669'}}>{balance<0?balance:balance>0?`+${balance}`:0} paq</span>
+              <div key={cultivo} style={{background:bg,border:`1px solid ${border}`,borderRadius:'8px',padding:'10px 12px'}}>
+                {/* Header */}
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'8px'}}>
+                  <span style={{fontSize:'12px',fontWeight:700,color}}>{label}</span>
+                  <span style={{fontSize:'10px',color:'#9ca3af'}}>{factor}g/paq</span>
+                </div>
+
+                {/* Disponible */}
+                <div style={{background:'white',borderRadius:'6px',padding:'6px 8px',marginBottom:'6px'}}>
+                  <p style={{margin:'0 0 3px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase',fontWeight:600}}>Disponible</p>
+                  {sc!==null
+                    ? <p style={{margin:'0 0 1px',fontSize:'13px',fontWeight:700,color:'#111827'}}>{sc} paq cámara{estPaq>0?` + ${estPaq} est.`:''}</p>
+                    : <p style={{margin:'0 0 1px',fontSize:'12px',color:'#9ca3af'}}>Sin stock cámara</p>}
+                  <div style={{display:'flex',gap:'6px',alignItems:'center'}}>
+                    <span style={{fontSize:'11px',color:'#6b7280'}}>+ Cosecha est.</span>
+                    <input type="number" min={0} placeholder="0" value={cosechaEst[cultivo]}
+                      onChange={ev=>setCosechaEst(prev=>({...prev,[cultivo]:ev.target.value}))}
+                      style={{width:'55px',fontSize:'12px',fontWeight:700,border:'1px solid #d1d5db',borderRadius:'5px',padding:'2px 5px',background:'white',color:'#111827',textAlign:'center'}}/>
+                    <span style={{fontSize:'10px',color:'#9ca3af'}}>paq</span>
+                  </div>
+                  <p style={{margin:'4px 0 0',fontSize:'12px',fontWeight:800,color}}>
+                    {totalPaq} paq <span style={{fontWeight:400,color:'#9ca3af'}}>= {totalKg.toFixed(1)} kg</span>
+                  </p>
+                </div>
+
+                {/* Consumido */}
+                {(paqVendidos>0||kgVendidos>0)&&(
+                  <div style={{background:'#fff7ed',borderRadius:'6px',padding:'6px 8px',marginBottom:'6px',border:'1px solid #fed7aa'}}>
+                    <p style={{margin:'0 0 3px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase',fontWeight:600}}>Pedido</p>
+                    {paqVendidos>0&&<p style={{margin:'0 0 1px',fontSize:'11px',color:'#92400e'}}>{paqVendidos} paq <span style={{color:'#9ca3af'}}>= {(paqVendidos*factor/1000).toFixed(1)} kg</span></p>}
+                    {kgVendidos>0&&<p style={{margin:'0 0 1px',fontSize:'11px',color:'#92400e'}}>{kgVendidos.toFixed(1)} kg <span style={{color:'#9ca3af'}}>≈ {kgEnPaq.toFixed(1)} paq</span></p>}
+                    <p style={{margin:'3px 0 0',fontSize:'11px',fontWeight:700,color:'#92400e',borderTop:'1px solid #fed7aa',paddingTop:'3px'}}>
+                      Total: {totalConsumidoPaq.toFixed(1)} paq = {totalConsumidoKg.toFixed(1)} kg
+                    </p>
+                  </div>
+                )}
+
+                {/* Queda */}
+                <div style={{background:restaPaq<0?'#fef2f2':restaPaq===0?'#f9fafb':'#f0fdf4',borderRadius:'6px',padding:'6px 8px',border:`1px solid ${restaPaq<0?'#fca5a5':restaPaq===0?'#e5e7eb':'#86efac'}`}}>
+                  <p style={{margin:'0 0 2px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase',fontWeight:600}}>Queda</p>
+                  <p style={{margin:0,fontSize:'16px',fontWeight:800,color:colorR,lineHeight:1}}>
+                    {restaPaq<0?restaPaq.toFixed(1):restaPaq>0?`+${restaPaq.toFixed(1)}`:0} paq
+                  </p>
+                  <p style={{margin:'2px 0 0',fontSize:'11px',color:colorR}}>= {restaKg.toFixed(1)} kg</p>
                 </div>
               </div>
             );
           })}
-        </div>
-      </div>
-
-      {/* Disponibles hoy (por producto, para el cálculo de Restantes) */}
-      <div style={{background:'#f8fafc',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'10px 14px',marginBottom:'12px'}}>
-        <p style={{margin:'0 0 8px',fontSize:'12px',fontWeight:700,color:'#374151'}}>📦 Disponibles hoy (por producto)</p>
-        <div style={{display:'flex',gap:'14px',flexWrap:'wrap',alignItems:'center'}}>
-          {(prods as any[]).map((p:any)=>(
-            <div key={p.key} style={{display:'flex',alignItems:'center',gap:'5px'}}>
-              <label style={{fontSize:'11px',color:p.color,fontWeight:600}}>{p.label}</label>
-              <input type="number" min={0} value={disp[p.key as PK]} placeholder="—" onChange={ev=>setDisp(prev=>({...prev,[p.key]:ev.target.value}))}
-                style={{width:'65px',textAlign:'center',fontSize:'14px',fontWeight:600,border:'1px solid #d1d5db',borderRadius:'6px',padding:'4px 4px',background:'white'}}/>
-            </div>
-          ))}
         </div>
       </div>
 
