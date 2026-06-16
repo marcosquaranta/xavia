@@ -17,18 +17,22 @@ function calcStats(ventas: VentaDia[]) {
   const iniMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
   const iniMesAnt = new Date(hoy.getFullYear(), hoy.getMonth()-1, 1);
   const finMesAnt = new Date(hoy.getFullYear(), hoy.getMonth(), 0, 23, 59, 59);
-  const empty = () => ({ rucula: 0, lechuga_crespa: 0, hoja_roble: 0 });
-  const r = { semanaActual: empty(), semanaAnterior: empty(), mesActual: empty(), mesAnterior: empty() };
+  const emptyPaq = () => ({ rucula: 0, lechuga_crespa: 0, hoja_roble: 0 });
+  const emptyKg  = () => ({ rucula_kg: 0, lechuga_kg: 0 });
+  const r = { semanaActual: emptyPaq(), semanaAnterior: emptyPaq(), mesActual: emptyPaq(), mesAnterior: emptyPaq() };
+  const kg = { semanaActual: emptyKg(), semanaAnterior: emptyKg(), mesActual: emptyKg(), mesAnterior: emptyKg() };
   for (const v of ventas) {
     const f = safeD(v.fecha); if (!f) continue;
-    const keys = ['rucula','lechuga_crespa','hoja_roble'] as const;
-    const add = (t: typeof r.semanaActual) => { for (const k of keys) t[k] += Number((v as any)[k]||0); };
-    if (f >= ini7)                              add(r.semanaActual);
-    if (f >= ini14 && f < ini7)               add(r.semanaAnterior);
-    if (f >= iniMes)                           add(r.mesActual);
-    if (f >= iniMesAnt && f <= finMesAnt)     add(r.mesAnterior);
+    const keysPaq = ['rucula','lechuga_crespa','hoja_roble'] as const;
+    const keysKg  = ['rucula_kg','lechuga_kg'] as const;
+    const addPaq = (t: typeof r.semanaActual)  => { for (const k of keysPaq) t[k] += Number((v as any)[k]||0); };
+    const addKg  = (t: typeof kg.semanaActual) => { for (const k of keysKg)  t[k] += Number((v as any)[k]||0); };
+    if (f >= ini7)                          { addPaq(r.semanaActual);  addKg(kg.semanaActual); }
+    if (f >= ini14 && f < ini7)            { addPaq(r.semanaAnterior); addKg(kg.semanaAnterior); }
+    if (f >= iniMes)                        { addPaq(r.mesActual);     addKg(kg.mesActual); }
+    if (f >= iniMesAnt && f <= finMesAnt)  { addPaq(r.mesAnterior);   addKg(kg.mesAnterior); }
   }
-  return r;
+  return { ...r, kg };
 }
 
 export default async function VentasPage() {

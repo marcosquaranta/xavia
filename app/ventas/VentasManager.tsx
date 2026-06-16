@@ -14,7 +14,8 @@ const PE = [
 const ALL = [...PP,...PE];
 type PK = 'rucula'|'lechuga_crespa'|'hoja_roble'|'bandeja_rucula'|'albahaca';
 type SV = { rucula:number; lechuga_crespa:number; hoja_roble:number };
-type Stats = { semanaActual:SV; semanaAnterior:SV; mesActual:SV; mesAnterior:SV };
+type SKG = { rucula_kg:number; lechuga_kg:number };
+type Stats = { semanaActual:SV; semanaAnterior:SV; mesActual:SV; mesAnterior:SV; kg:{semanaActual:SKG;semanaAnterior:SKG;mesActual:SKG;mesAnterior:SKG} };
 interface Fila { id_control:string; nombre_cliente:string; sucursal:string; nombre_display:string; tipo:string; unidad:'paq'|'kg'|'' }
 type Ctds = Record<string, Record<PK,string>>;
 type CKG = Record<string, {rucula_kg:string; lechuga_kg:string}>;
@@ -197,8 +198,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
 
   return (
     <div>
-      {/* Stats */}
-      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'8px',marginBottom:'14px'}}>
+      {/* Stats — paquetes */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'8px',marginBottom:'8px'}}>
         {PP.map(p=>{
           const k=p.key as keyof SV; const sa=stats.semanaActual[k]; const sant=stats.semanaAnterior[k];
           const ma=stats.mesActual[k]; const mant=stats.mesAnterior[k];
@@ -229,6 +230,43 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
           );
         })}
       </div>
+
+      {/* Stats — KG (solo si hay datos) */}
+      {(stats.kg.mesActual.rucula_kg>0||stats.kg.mesActual.lechuga_kg>0||stats.kg.mesAnterior.rucula_kg>0||stats.kg.mesAnterior.lechuga_kg>0)&&(
+        <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'8px',marginBottom:'8px'}}>
+          {([
+            {key:'rucula_kg' as keyof SKG, label:'Rúcula KG', color:'#92400e', top:'#fbbf24'},
+            {key:'lechuga_kg' as keyof SKG, label:'Lechuga KG', color:'#166534', top:'#86efac'},
+          ]).map(p=>{
+            const sa=stats.kg.semanaActual[p.key]; const sant=stats.kg.semanaAnterior[p.key];
+            const ma=stats.kg.mesActual[p.key]; const mant=stats.kg.mesAnterior[p.key];
+            const ps=pct(Math.round(sa*10),Math.round(sant*10)); const pm=pct(Math.round(ma*10),Math.round(mant*10));
+            return(
+              <div key={p.key} style={{background:'white',border:'1px solid #fde68a',borderTop:`3px solid ${p.top}`,borderRadius:'8px',padding:'10px 12px'}}>
+                <p style={{margin:'0 0 8px',fontSize:'11px',fontWeight:700,color:p.color,textTransform:'uppercase'}}>📫 {p.label}</p>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px'}}>
+                  <div style={{background:'#fffbeb',borderRadius:'6px',padding:'7px 8px'}}>
+                    <p style={{margin:'0 0 1px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase'}}>Semana</p>
+                    <p style={{margin:'0 0 2px',fontSize:'18px',fontWeight:800,color:'#111827',lineHeight:1}}>{sa>0?sa.toFixed(1):0}</p>
+                    <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af'}}>kg · ant: {sant>0?sant.toFixed(1):0}</p>
+                    {ps!==null
+                      ? <p style={{margin:0,fontSize:'12px',fontWeight:800,color:ps>=0?'#059669':'#dc2626'}}>{ps>=0?'↑':'↓'} {Math.abs(ps)}%</p>
+                      : <p style={{margin:0,fontSize:'10px',color:'#9ca3af'}}>sin datos</p>}
+                  </div>
+                  <div style={{background:'#fffbeb',borderRadius:'6px',padding:'7px 8px'}}>
+                    <p style={{margin:'0 0 1px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase'}}>Mes</p>
+                    <p style={{margin:'0 0 2px',fontSize:'18px',fontWeight:800,color:'#111827',lineHeight:1}}>{ma>0?ma.toFixed(1):0}</p>
+                    <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af'}}>kg · ant: {mant>0?mant.toFixed(1):0}</p>
+                    {pm!==null
+                      ? <p style={{margin:0,fontSize:'12px',fontWeight:800,color:pm>=0?'#059669':'#dc2626'}}>{pm>=0?'↑':'↓'} {Math.abs(pm)}%</p>
+                      : <p style={{margin:0,fontSize:'10px',color:'#9ca3af'}}>sin datos</p>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Correlativo editable siempre visible */}
       <div style={{background:'#f8fafc',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'10px 14px',marginBottom:'12px',display:'flex',alignItems:'center',gap:'14px',flexWrap:'wrap'}}>
