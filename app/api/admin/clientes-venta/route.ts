@@ -1,14 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
-import { appendRow, readSheet } from '@/lib/sheets';
+import { appendRow, readSheet, updateRow } from '@/lib/sheets';
 import type { ClienteVenta } from '@/lib/types';
+
+export async function PATCH(req: NextRequest) {
+  if (!(await isAdmin())) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
+  try {
+    const { id_control, ...fields } = await req.json();
+    if (!id_control) return NextResponse.json({ error: 'id_control requerido' }, { status: 400 });
+    const updated = await updateRow('Clientes', 'id_control', String(id_control), fields);
+    if (!updated) return NextResponse.json({ error: 'cliente_no_encontrado' }, { status: 404 });
+    return NextResponse.json({ ok: true });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'server_error' }, { status: 500 });
+  }
+}
 
 export async function POST(req: NextRequest) {
   if (!(await isAdmin())) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
 
   try {
     const body = await req.json();
-    const { nombre_xubio, nombre_display, alias, tipo_factura, punto_venta, precios } = body;
+    const { nombre_xubio, nombre_display, alias, tipo_factura, punto_venta, sucursales, precios } = body;
 
     if (!nombre_xubio || !tipo_factura || !punto_venta) {
       return NextResponse.json({ error: 'datos_incompletos' }, { status: 400 });
@@ -18,16 +31,9 @@ export async function POST(req: NextRequest) {
     const maxId = clientes.reduce((acc, c) => Math.max(acc, Number(c.id_control) || 0), 0);
     const idControl = String(maxId + 1);
 
-    // Columnas hoja Clientes: id_control, nombre_xubio, nombre_display, alias, tipo_factura, punto_venta, sucursales, activo
     await appendRow('Clientes', [
-      idControl,
-      nombre_xubio,
-      nombre_display || nombre_xubio,
-      alias || '',
-      tipo_factura,
-      punto_venta,
-      '',
-      'SI',
+      idControl, nombre_xubio, nombre_display || nombre_xubio,
+      alias || '', tipo_factura, punto_venta, sucursales || '', 'SI',
     ]);
 
     // Agregar precios: id_control, nombre_cliente, sucursal_obs, rucula, lechuga_crespa, hoja_roble, bandeja_rucula, albahaca
