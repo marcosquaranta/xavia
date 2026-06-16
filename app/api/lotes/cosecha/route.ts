@@ -19,15 +19,17 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
-      id_lote, fecha, es_por_paquete,
+      id_lote, fecha, modo, es_por_paquete,
       plantas_cosechadas, descarte,
       peso_muestra_gr,
       paquetes_armados, plantas_por_paquete,
       peso_muestra_paquete_gr,
       bandejas_armadas, tubos_consumidos_bandejas,
       peso_muestra_bandeja_gr,
+      cajones_armados, kg_por_cajon, peso_total_kg_cajon,
       plantas_estimadas_lote, usuario,
     } = body;
+    const modoFinal: 'planta' | 'paquete' | 'cajon' = modo || (es_por_paquete ? 'paquete' : 'planta');
 
     const [lotes, movimientos] = await Promise.all([
       readSheet<Lote>('Lotes'),
@@ -40,11 +42,16 @@ export async function POST(req: NextRequest) {
     const plantasEst = Number(plantas_estimadas_lote) || Number(lote.plantas_estimadas_actual) || Number(lote.plantines_iniciales) || 0;
 
     let unidades: number, plantasUsadas: number, pesoKg: number, descarteEf: number;
-    if (!es_por_paquete) {
+    if (modoFinal === 'planta') {
       unidades = Number(plantas_cosechadas) || 0;
       descarteEf = Math.max(0, plantasEst - unidades);
       plantasUsadas = unidades + descarteEf;
       pesoKg = (Number(peso_muestra_gr) || 0) > 0 ? (unidades * Number(peso_muestra_gr)) / 1000 : 0;
+    } else if (modoFinal === 'cajon') {
+      unidades = Number(cajones_armados) || 0;
+      plantasUsadas = plantasEst;
+      descarteEf = 0;
+      pesoKg = Number(peso_total_kg_cajon) || (unidades * (Number(kg_por_cajon) || 0));
     } else {
       unidades = Number(paquetes_armados) || 0;
       plantasUsadas = plantasEst;
@@ -53,9 +60,11 @@ export async function POST(req: NextRequest) {
     }
 
     const { desvio, nivel } = calcularDesvioCosecha(plantasUsadas, plantasEst);
-    const pesoMuestra = es_por_paquete
+    const pesoMuestra = modoFinal === 'paquete'
       ? (Number(peso_muestra_paquete_gr) || 0) / 1000
-      : (Number(peso_muestra_gr) || 0) / 1000;
+      : modoFinal === 'cajon'
+        ? (Number(kg_por_cajon) || 0)
+        : (Number(peso_muestra_gr) || 0) / 1000;
 
     // Calcular días por fase para análisis
     const movsLote = movimientos
@@ -94,9 +103,13 @@ export async function POST(req: NextRequest) {
       descarte_reportado: descarteEf,
       peso_muestra_kg: pesoMuestra,
       peso_total_estimado_kg: pesoKg > 0 ? pesoKg.toFixed(3) : '',
-      destino_cosecha: es_por_paquete
-        ? (Number(bandejas_armadas) > 0 ? 'bandeja' : 'paquete')
-        : 'planta',
+      cajones_armados: modoFinal === 'cajon' ? (Number(cajones_armados) || 0) : '',
+      peso_muestra_paquete_gr: modoFinal === 'paquete' ? (Number(peso_muestra_paquete_gr) || '') : '',
+      destino_cosecha: modoFinal === 'cajon'
+        ? 'cajon'
+        : modoFinal === 'paquete'
+          ? (Number(bandejas_armadas) > 0 ? 'bandeja' : 'paquete')
+          : 'planta',
       estado: 'cosechado',
       fecha_ult_movimiento: fecha,
       // Columnas de análisis

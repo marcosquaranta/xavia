@@ -7,6 +7,7 @@ import type { Lote, Movimiento, Variedad, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
 import GraficoCiclosMesadas from './GraficoCiclosMesadas';
+import GraficoPesaje from './GraficoPesaje';
 export const dynamic = 'force-dynamic';
 
 export default async function EstadisticasPage({ searchParams }: { searchParams: { nave?: string } }) {
@@ -36,6 +37,17 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   const anioAnterior = anioActual - 1;
   const nombreMes = hoy.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
   const varActivas = variedades.filter(v => v.activo === 'SI');
+
+  // Puntos de pesaje testigo: lotes cosechados por paquete con peso_muestra_kg > 0
+  const puntosPesaje = lotes
+    .filter(l => l.estado === 'cosechado' && l.fecha_cosecha && Number(l.peso_muestra_kg) > 0 && (l.destino_cosecha === 'paquete' || l.destino_cosecha === 'bandeja'))
+    .map(l => ({
+      fecha: String(l.fecha_cosecha),
+      variedad: l.variedad,
+      peso_gr: Math.round(Number(l.peso_muestra_kg) * 1000),
+      paquetes: Number(l.unidades_cosechadas) || 0,
+    }))
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
 
   let statsActual: any[] = [], statsPasado: any[] = [], curvas: any[] = [];
   try { statsActual = estadisticasDelMes(lotes, movimientos, hoy); } catch {}
@@ -188,6 +200,13 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                 </tbody>
               </table>
             )}
+        </div>
+
+        {/* Pesaje testigo */}
+        <div className="card">
+          <p className="card-title">Evolución de pesaje testigo</p>
+          <p className="card-sub">Gramos por paquete en cada cosecha · base para conversión KG↔paquetes</p>
+          <GraficoPesaje puntos={puntosPesaje} />
         </div>
 
         {/* Ciclos por mesada */}

@@ -3,7 +3,7 @@ export type Fase = 'plantin' | 'fase_1' | 'fase_2';
 export type EstadoLote = 'activo' | 'cosechado' | 'descartado';
 export type TipoMovimiento = 'siembra' | 'trasplante' | 'cosecha' | 'descarte';
 export type NivelAlerta = '' | 'verde' | 'amarillo' | 'rojo';
-export type DestinoCosecha = 'planta' | 'paquete' | 'bandeja';
+export type DestinoCosecha = 'planta' | 'paquete' | 'bandeja' | 'cajon';
 
 export interface Usuario {
   email: string; password_hash: string; rol: Rol; nombre: string;
@@ -22,6 +22,8 @@ export interface Lote {
   peso_total_estimado_kg: number | ''; usuario_creador: string;
   foto_url: string; lote_origen: string; semilla_id: string;
   destino_cosecha: DestinoCosecha | ''; notas: string; estado: EstadoLote;
+  cajones_armados: number | '';
+  peso_muestra_paquete_gr: number | '';
 }
 
 export interface Movimiento {
@@ -99,6 +101,7 @@ export interface ClienteVenta {
   punto_venta: string;
   sucursales: string;  // separadas por |
   activo: string;
+  unidad: 'paq' | 'kg' | '';  // 'kg' para clientes que compran por KG (cajón)
 }
 
 export interface PrecioVenta {
@@ -123,6 +126,8 @@ export interface VentaDia {
   hoja_roble: string;
   bandeja_rucula: string;
   albahaca: string;
+  rucula_kg: string;
+  lechuga_kg: string;
   exportado: string;
   usuario: string;
   fecha_carga: string;

@@ -19,7 +19,9 @@ export async function POST(req: NextRequest) {
         await updateRow('Ventas', 'id_venta', existente.id_venta, {
           rucula: l.rucula || 0, lechuga_crespa: l.lechuga_crespa || 0,
           hoja_roble: l.hoja_roble || 0, bandeja_rucula: l.bandeja_rucula || 0,
-          albahaca: l.albahaca || 0, usuario: user.email, fecha_carga: fechaCarga,
+          albahaca: l.albahaca || 0,
+          rucula_kg: l.rucula_kg || 0, lechuga_kg: l.lechuga_kg || 0,
+          usuario: user.email, fecha_carga: fechaCarga,
         });
       } else {
         const maxId = ventas.map(v => parseInt(v.id_venta?.replace('V-','') || '0')).filter(n => !isNaN(n)).reduce((m,n) => Math.max(m,n), 0);
@@ -28,6 +30,7 @@ export async function POST(req: NextRequest) {
           l.id_control, l.nombre_cliente, l.sucursal,
           l.rucula || 0, l.lechuga_crespa || 0, l.hoja_roble || 0,
           l.bandeja_rucula || 0, l.albahaca || 0,
+          l.rucula_kg || 0, l.lechuga_kg || 0,
           '', user.email, fechaCarga,
         ]);
       }
