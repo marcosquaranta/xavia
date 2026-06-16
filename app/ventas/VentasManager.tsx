@@ -198,75 +198,64 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
 
   return (
     <div>
-      {/* Stats — paquetes */}
-      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'8px',marginBottom:'8px'}}>
-        {PP.map(p=>{
-          const k=p.key as keyof SV; const sa=stats.semanaActual[k]; const sant=stats.semanaAnterior[k];
-          const ma=stats.mesActual[k]; const mant=stats.mesAnterior[k];
-          const ps=pct(sa,sant); const pm=pct(ma,mant);
-          const u=p.key==='rucula'?'paq':'und';
-          return(
-            <div key={p.key} style={{background:'white',border:'1px solid #e5e7eb',borderTop:`3px solid ${p.color}`,borderRadius:'8px',padding:'10px 12px'}}>
-              <p style={{margin:'0 0 8px',fontSize:'11px',fontWeight:700,color:p.color,textTransform:'uppercase'}}>{p.label}</p>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px'}}>
-                <div style={{background:'#f9fafb',borderRadius:'6px',padding:'7px 8px'}}>
-                  <p style={{margin:'0 0 1px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase'}}>Semana</p>
-                  <p style={{margin:'0 0 2px',fontSize:'18px',fontWeight:800,color:'#111827',lineHeight:1}}>{sa.toLocaleString('es-AR')}</p>
-                  <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af'}}>{u} · ant: {sant.toLocaleString('es-AR')}</p>
-                  {ps!==null
-                    ? <p style={{margin:0,fontSize:'12px',fontWeight:800,color:ps>=0?'#059669':'#dc2626'}}>{ps>=0?'↑':'↓'} {Math.abs(ps)}%</p>
-                    : <p style={{margin:0,fontSize:'10px',color:'#9ca3af'}}>sin datos</p>}
-                </div>
-                <div style={{background:'#f9fafb',borderRadius:'6px',padding:'7px 8px'}}>
-                  <p style={{margin:'0 0 1px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase'}}>Mes</p>
-                  <p style={{margin:'0 0 2px',fontSize:'18px',fontWeight:800,color:'#111827',lineHeight:1}}>{ma.toLocaleString('es-AR')}</p>
-                  <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af'}}>{u} · ant: {mant.toLocaleString('es-AR')}</p>
-                  {pm!==null
-                    ? <p style={{margin:0,fontSize:'12px',fontWeight:800,color:pm>=0?'#059669':'#dc2626'}}>{pm>=0?'↑':'↓'} {Math.abs(pm)}%</p>
-                    : <p style={{margin:0,fontSize:'10px',color:'#9ca3af'}}>sin datos</p>}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Stats — KG (solo si hay datos) */}
-      {(stats.kg.mesActual.rucula_kg>0||stats.kg.mesActual.lechuga_kg>0||stats.kg.mesAnterior.rucula_kg>0||stats.kg.mesAnterior.lechuga_kg>0)&&(
-        <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'8px',marginBottom:'8px'}}>
-          {([
-            {key:'rucula_kg' as keyof SKG, label:'Rúcula KG', color:'#92400e', top:'#fbbf24'},
-            {key:'lechuga_kg' as keyof SKG, label:'Lechuga KG', color:'#166534', top:'#86efac'},
-          ]).map(p=>{
-            const sa=stats.kg.semanaActual[p.key]; const sant=stats.kg.semanaAnterior[p.key];
-            const ma=stats.kg.mesActual[p.key]; const mant=stats.kg.mesAnterior[p.key];
-            const ps=pct(Math.round(sa*10),Math.round(sant*10)); const pm=pct(Math.round(ma*10),Math.round(mant*10));
-            return(
-              <div key={p.key} style={{background:'white',border:'1px solid #fde68a',borderTop:`3px solid ${p.top}`,borderRadius:'8px',padding:'10px 12px'}}>
-                <p style={{margin:'0 0 8px',fontSize:'11px',fontWeight:700,color:p.color,textTransform:'uppercase'}}>📫 {p.label}</p>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px'}}>
-                  <div style={{background:'#fffbeb',borderRadius:'6px',padding:'7px 8px'}}>
-                    <p style={{margin:'0 0 1px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase'}}>Semana</p>
-                    <p style={{margin:'0 0 2px',fontSize:'18px',fontWeight:800,color:'#111827',lineHeight:1}}>{sa>0?sa.toFixed(1):0}</p>
-                    <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af'}}>kg · ant: {sant>0?sant.toFixed(1):0}</p>
-                    {ps!==null
-                      ? <p style={{margin:0,fontSize:'12px',fontWeight:800,color:ps>=0?'#059669':'#dc2626'}}>{ps>=0?'↑':'↓'} {Math.abs(ps)}%</p>
-                      : <p style={{margin:0,fontSize:'10px',color:'#9ca3af'}}>sin datos</p>}
-                  </div>
-                  <div style={{background:'#fffbeb',borderRadius:'6px',padding:'7px 8px'}}>
-                    <p style={{margin:'0 0 1px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase'}}>Mes</p>
-                    <p style={{margin:'0 0 2px',fontSize:'18px',fontWeight:800,color:'#111827',lineHeight:1}}>{ma>0?ma.toFixed(1):0}</p>
-                    <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af'}}>kg · ant: {mant>0?mant.toFixed(1):0}</p>
-                    {pm!==null
-                      ? <p style={{margin:0,fontSize:'12px',fontWeight:800,color:pm>=0?'#059669':'#dc2626'}}>{pm>=0?'↑':'↓'} {Math.abs(pm)}%</p>
-                      : <p style={{margin:0,fontSize:'10px',color:'#9ca3af'}}>sin datos</p>}
+      {/* Stats — consolidado por cultivo */}
+      {(()=>{
+        const fR = stockCamara?.factorGrPaq?.rucula  ?? 210;
+        const fL = stockCamara?.factorGrPaq?.lechuga ?? 330;
+        const CULTIVOS_ST = [
+          { cultivo:'rucula',  label:'Rúcula',  color:'#166534', top:'#166534',
+            paqA: stats.semanaActual.rucula,   paqAnt: stats.semanaAnterior.rucula,
+            paqM: stats.mesActual.rucula,       paqMAnt: stats.mesAnterior.rucula,
+            kgA:  stats.kg.semanaActual.rucula_kg,  kgAnt: stats.kg.semanaAnterior.rucula_kg,
+            kgM:  stats.kg.mesActual.rucula_kg,     kgMAnt: stats.kg.mesAnterior.rucula_kg,
+            factor: fR },
+          { cultivo:'lechuga', label:'Lechuga', color:'#4d7c0f', top:'#65a30d',
+            paqA: stats.semanaActual.lechuga_crespa+stats.semanaActual.hoja_roble,
+            paqAnt: stats.semanaAnterior.lechuga_crespa+stats.semanaAnterior.hoja_roble,
+            paqM: stats.mesActual.lechuga_crespa+stats.mesActual.hoja_roble,
+            paqMAnt: stats.mesAnterior.lechuga_crespa+stats.mesAnterior.hoja_roble,
+            kgA:  stats.kg.semanaActual.lechuga_kg,  kgAnt: stats.kg.semanaAnterior.lechuga_kg,
+            kgM:  stats.kg.mesActual.lechuga_kg,     kgMAnt: stats.kg.mesAnterior.lechuga_kg,
+            factor: fL },
+        ];
+        return (
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'8px'}}>
+            {CULTIVOS_ST.map(c=>{
+              // Total en kg = paq×factor/1000 + kg_vendidos
+              const totA   = c.paqA   * c.factor/1000 + c.kgA;
+              const totAnt = c.paqAnt * c.factor/1000 + c.kgAnt;
+              const totM   = c.paqM   * c.factor/1000 + c.kgM;
+              const totMAnt= c.paqMAnt* c.factor/1000 + c.kgMAnt;
+              const ps = pct(Math.round(totA*10), Math.round(totAnt*10));
+              const pm = pct(Math.round(totM*10), Math.round(totMAnt*10));
+              const hayKg  = c.kgA>0||c.kgAnt>0||c.kgM>0||c.kgMAnt>0;
+              return (
+                <div key={c.cultivo} style={{background:'white',border:'1px solid #e5e7eb',borderTop:`3px solid ${c.top}`,borderRadius:'8px',padding:'10px 12px'}}>
+                  <p style={{margin:'0 0 8px',fontSize:'11px',fontWeight:700,color:c.color,textTransform:'uppercase'}}>{c.label}</p>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px'}}>
+                    {([
+                      {lbl:'Semana', tot:totA, totAnt:totAnt, paq:c.paqA, paqAnt:c.paqAnt, kg:c.kgA, kgAnt:c.kgAnt, pct:ps},
+                      {lbl:'Mes',    tot:totM, totAnt:totMAnt,paq:c.paqM, paqAnt:c.paqMAnt,kg:c.kgM, kgAnt:c.kgMAnt, pct:pm},
+                    ]).map(box=>(
+                      <div key={box.lbl} style={{background:'#f9fafb',borderRadius:'6px',padding:'7px 8px'}}>
+                        <p style={{margin:'0 0 1px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase'}}>{box.lbl}</p>
+                        {/* Headline: total en kg */}
+                        <p style={{margin:'0 0 1px',fontSize:'18px',fontWeight:800,color:'#111827',lineHeight:1}}>{box.tot>0?box.tot.toFixed(1):'0'} kg</p>
+                        {/* Desglose paq + kg */}
+                        <p style={{margin:'0 0 1px',fontSize:'10px',color:'#6b7280'}}>{box.paq} paq{hayKg&&box.kg>0?` · ${box.kg.toFixed(1)} kg KG`:''}</p>
+                        <p style={{margin:'0 0 2px',fontSize:'9px',color:'#9ca3af'}}>ant: {box.totAnt>0?box.totAnt.toFixed(1):'0'} kg</p>
+                        {box.pct!==null
+                          ? <p style={{margin:0,fontSize:'12px',fontWeight:800,color:box.pct>=0?'#059669':'#dc2626'}}>{box.pct>=0?'↑':'↓'} {Math.abs(box.pct)}%</p>
+                          : <p style={{margin:0,fontSize:'10px',color:'#9ca3af'}}>sin datos</p>}
+                      </div>
+                    ))}
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* Correlativo editable siempre visible */}
       <div style={{background:'#f8fafc',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'10px 14px',marginBottom:'12px',display:'flex',alignItems:'center',gap:'14px',flexWrap:'wrap'}}>
@@ -574,36 +563,44 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
         )}
 
         {/* ── Resumen del día ── */}
-        {hayV&&(
+        {hayV&&(()=>{
+          const fR = stockCamara?.factorGrPaq?.rucula  ?? 210;
+          const fL = stockCamara?.factorGrPaq?.lechuga ?? 330;
+          const lecPaq = tots.lechuga_crespa+tots.hoja_roble;
+          const rTotKg = tots.rucula*fR/1000 + totsKg.rucula_kg;
+          const lTotKg = lecPaq*fL/1000       + totsKg.lechuga_kg;
+          const hayKg  = totsKg.rucula_kg>0||totsKg.lechuga_kg>0;
+          return(
           <div style={{marginTop:'12px',background:'#f8fafc',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'10px 14px'}}>
             <p style={{margin:'0 0 8px',fontSize:'12px',fontWeight:700,color:'#374151'}}>📊 Resumen del día</p>
-            <div style={{display:'flex',gap:'16px',flexWrap:'wrap'}}>
-              <div style={{textAlign:'center'}}>
-                <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af',textTransform:'uppercase'}}>Rúcula paq</p>
-                <p style={{margin:0,fontSize:'18px',fontWeight:800,color:'#166534'}}>{tots.rucula||'—'}</p>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr auto',gap:'8px',alignItems:'start'}}>
+              {/* Rúcula */}
+              <div style={{background:'white',border:'1px solid #e5e7eb',borderTop:'2px solid #166534',borderRadius:'7px',padding:'8px 10px'}}>
+                <p style={{margin:'0 0 4px',fontSize:'10px',fontWeight:700,color:'#166534',textTransform:'uppercase'}}>Rúcula</p>
+                {tots.rucula>0&&<p style={{margin:'0 0 1px',fontSize:'13px',color:'#374151'}}><strong>{tots.rucula}</strong> paq <span style={{color:'#9ca3af',fontSize:'11px'}}>= {(tots.rucula*fR/1000).toFixed(1)} kg</span></p>}
+                {totsKg.rucula_kg>0&&<p style={{margin:'0 0 1px',fontSize:'13px',color:'#374151'}}><strong>{totsKg.rucula_kg.toFixed(1)}</strong> kg <span style={{color:'#9ca3af',fontSize:'11px'}}>(cajón)</span></p>}
+                <p style={{margin:'4px 0 0',fontSize:'15px',fontWeight:800,color:'#166534',borderTop:'1px solid #e5e7eb',paddingTop:'4px'}}>{rTotKg.toFixed(1)} kg total</p>
               </div>
-              <div style={{textAlign:'center'}}>
-                <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af',textTransform:'uppercase'}}>Lechuga paq</p>
-                <p style={{margin:0,fontSize:'18px',fontWeight:800,color:'#4d7c0f'}}>{(tots.lechuga_crespa+tots.hoja_roble)||'—'}</p>
+              {/* Lechuga */}
+              <div style={{background:'white',border:'1px solid #e5e7eb',borderTop:'2px solid #4d7c0f',borderRadius:'7px',padding:'8px 10px'}}>
+                <p style={{margin:'0 0 4px',fontSize:'10px',fontWeight:700,color:'#4d7c0f',textTransform:'uppercase'}}>Lechuga</p>
+                {lecPaq>0&&<p style={{margin:'0 0 1px',fontSize:'13px',color:'#374151'}}><strong>{lecPaq}</strong> paq <span style={{color:'#9ca3af',fontSize:'11px'}}>= {(lecPaq*fL/1000).toFixed(1)} kg</span></p>}
+                {tots.lechuga_crespa>0&&tots.hoja_roble>0&&<p style={{margin:'0 0 1px',fontSize:'10px',color:'#9ca3af'}}>{tots.lechuga_crespa} crespa · {tots.hoja_roble} roble</p>}
+                {totsKg.lechuga_kg>0&&<p style={{margin:'0 0 1px',fontSize:'13px',color:'#374151'}}><strong>{totsKg.lechuga_kg.toFixed(1)}</strong> kg <span style={{color:'#9ca3af',fontSize:'11px'}}>(cajón)</span></p>}
+                <p style={{margin:'4px 0 0',fontSize:'15px',fontWeight:800,color:'#4d7c0f',borderTop:'1px solid #e5e7eb',paddingTop:'4px'}}>{lTotKg.toFixed(1)} kg total</p>
               </div>
-              {(totsKg.rucula_kg>0||totsKg.lechuga_kg>0)&&<>
-                <div style={{width:'1px',background:'#e5e7eb',alignSelf:'stretch'}}/>
-                <div style={{textAlign:'center'}}>
-                  <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af',textTransform:'uppercase'}}>Rúcula KG</p>
-                  <p style={{margin:0,fontSize:'18px',fontWeight:800,color:'#92400e'}}>{totsKg.rucula_kg>0?totsKg.rucula_kg.toFixed(1):'—'}</p>
-                </div>
-                <div style={{textAlign:'center'}}>
-                  <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af',textTransform:'uppercase'}}>Lechuga KG</p>
-                  <p style={{margin:0,fontSize:'18px',fontWeight:800,color:'#92400e'}}>{totsKg.lechuga_kg>0?totsKg.lechuga_kg.toFixed(1):'—'}</p>
-                </div>
-                <div style={{textAlign:'center'}}>
-                  <p style={{margin:'0 0 2px',fontSize:'10px',color:'#9ca3af',textTransform:'uppercase'}}>Total KG</p>
-                  <p style={{margin:0,fontSize:'18px',fontWeight:800,color:'#92400e'}}>{(totsKg.rucula_kg+totsKg.lechuga_kg).toFixed(1)}</p>
-                </div>
-              </>}
+              {/* Total consolidado */}
+              <div style={{background:'#111827',borderRadius:'7px',padding:'8px 12px',textAlign:'center',minWidth:'80px'}}>
+                <p style={{margin:'0 0 2px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase'}}>Total día</p>
+                <p style={{margin:0,fontSize:'20px',fontWeight:800,color:'white',lineHeight:1}}>{(rTotKg+lTotKg).toFixed(1)}</p>
+                <p style={{margin:'2px 0 0',fontSize:'10px',color:'#6b7280'}}>kg</p>
+              </div>
             </div>
           </div>
-        )}
+          );
+        })()}
+
+
 
       {/* Historial de exportaciones */}
       <div style={{marginTop:'14px',borderTop:'1px solid #f3f4f6',paddingTop:'10px'}}>
