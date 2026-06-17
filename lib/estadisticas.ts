@@ -304,11 +304,13 @@ export interface ResumenCosechaCultivo {
   proyectadoEstaSemanaPlantas: number; // siempre en plantas
   proyectadoRestoMes: number;
   proyectadoMesTotal: number;
-  proyectadoJueves: number;          // lotes listos para el próximo jueves de reparto
-  proyectadoLunes: number;           // lotes listos para el próximo lunes de reparto
-  fechaJueves: string;               // ISO date del próximo jueves
-  fechaLunes: string;                // ISO date del próximo lunes
-  plantasPorPaquete: number;          // factor de conversión rúcula (default 3)
+  proyectadoJueves: number;
+  proyectadoLunes: number;
+  fechaJueves: string;
+  fechaLunes: string;
+  plantasPorPaquete: number;
+  lotesJueves: { id: string; variedad: string; plantas: number; unidades: number; fechaEst: string }[];
+  lotesLunes:  { id: string; variedad: string; plantas: number; unidades: number; fechaEst: string }[];
 }
 
 export function resumenCosechaPorCultivo(
@@ -461,15 +463,23 @@ export function resumenCosechaPorCultivo(
 
     let proyectadoPlantas7d = 0, proyectadoPlantasResto = 0;
     let plantasJueves = 0, plantasLunes = 0;
+    const lotesJuevesArr: { id: string; variedad: string; plantas: number; unidades: number; fechaEst: string }[] = [];
+    const lotesLunesArr:  { id: string; variedad: string; plantas: number; unidades: number; fechaEst: string }[] = [];
     for (const l of lotesActivos) {
       const est = estFechaCosecha(l);
       if (!est) continue;
       const plantas = Number(l.plantas_estimadas_actual) || 0;
       if (est >= hoy && est <= enSemana) proyectadoPlantas7d += plantas;
       else if (est > enSemana && est <= finMesActual) proyectadoPlantasResto += plantas;
-      // Ventanas de reparto: jueves y lunes
-      if (est >= manana && est <= proxJueves) plantasJueves += plantas;
-      else if (est > proxJueves && est <= proxLunes) plantasLunes += plantas;
+      const unidades = Math.round(plantas / PLANTAS_POR_PAQUETE);
+      const fechaEstStr = est.toISOString().split('T')[0];
+      if (est >= manana && est <= proxJueves) {
+        plantasJueves += plantas;
+        lotesJuevesArr.push({ id: l.id_lote, variedad: l.variedad, plantas, unidades, fechaEst: fechaEstStr });
+      } else if (est > proxJueves && est <= proxLunes) {
+        plantasLunes += plantas;
+        lotesLunesArr.push({ id: l.id_lote, variedad: l.variedad, plantas, unidades, fechaEst: fechaEstStr });
+      }
     }
 
     const convFactor = PLANTAS_POR_PAQUETE;
@@ -491,6 +501,8 @@ export function resumenCosechaPorCultivo(
       proyectadoRestoMes, proyectadoMesTotal, plantasPorPaquete: PLANTAS_POR_PAQUETE,
       proyectadoJueves, proyectadoLunes,
       fechaJueves: fmtDate(proxJueves), fechaLunes: fmtDate(proxLunes),
+      lotesJueves: lotesJuevesArr.sort((a,b) => a.fechaEst.localeCompare(b.fechaEst)),
+      lotesLunes:  lotesLunesArr.sort((a,b)  => a.fechaEst.localeCompare(b.fechaEst)),
     };
   });
 }

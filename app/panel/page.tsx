@@ -275,23 +275,21 @@ export default async function PanelPage({ searchParams }: {
               { r: rL, label: 'LECHUGA', colorTop: '#4d7c0f', bgStock: '#f0fdf4',
                 subtitulo: null, unidad: 'pl est.',
                 boxes: rL ? [['Cosechado',rL.cosechadoMes,'#4d7c0f','#f7fee7'],['Prox 7d',rL.proyectadoEstaSemana,'#854d0e','#fefce8'],['Resto mes',rL.proyectadoRestoMes,'#059669','#f0fdf4']] : [],
-                reparto: rL ? { jue: rL.proyectadoJueves, lun: rL.proyectadoLunes, fechaJue: fmtDD(rL.fechaJueves), fechaLun: fmtDD(rL.fechaLunes) } : null,
+                reparto: rL ? { jue: rL.proyectadoJueves, lun: rL.proyectadoLunes, fechaJue: fmtDD(rL.fechaJueves), fechaLun: fmtDD(rL.fechaLunes), lotesJue: rL.lotesJueves, lotesLun: rL.lotesLunes } : null,
                 totalProyectado: rL ? rL.cosechadoMes+rL.proyectadoMesTotal : 0,
                 varPct: rL?.variacionPct ?? null,
-                infoLine: rL ? `F1: ${resumen.lechuga.fase_1.toLocaleString('es-AR')} · F2: ${resumen.lechuga.fase_2.toLocaleString('es-AR')}` : '',
                 camara: camaraLechuga,
               },
               { r: rR, label: 'RÚCULA', colorTop: '#166534', bgStock: '#dcfce7',
                 subtitulo: rR ? `~${((rR.cosechadoMes+rR.proyectadoMesTotal)*factorR).toLocaleString('es-AR')} plantas` : null,
                 unidad: 'paq. est.',
                 boxes: rR ? [['Cosechado',rR.cosechadoMes,'#166534','#dcfce7'],['Prox 7d',rR.proyectadoEstaSemana,'#854d0e','#fefce8'],['Resto mes',rR.proyectadoRestoMes,'#059669','#f0fdf4']] : [],
-                reparto: rR ? { jue: rR.proyectadoJueves, lun: rR.proyectadoLunes, fechaJue: fmtDD(rR.fechaJueves), fechaLun: fmtDD(rR.fechaLunes) } : null,
+                reparto: rR ? { jue: rR.proyectadoJueves, lun: rR.proyectadoLunes, fechaJue: fmtDD(rR.fechaJueves), fechaLun: fmtDD(rR.fechaLunes), lotesJue: rR.lotesJueves, lotesLun: rR.lotesLunes } : null,
                 totalProyectado: rR ? rR.cosechadoMes+rR.proyectadoMesTotal : 0,
                 varPct: rR?.variacionPct ?? null,
-                infoLine: rR ? `Plant.: ${resumen.rucula.plantinera.toLocaleString('es-AR')} · F2: ${Math.round(resumen.rucula.fase_2/factorR).toLocaleString('es-AR')} paq.` : '',
                 camara: camaraRucula,
               },
-            ].map(({ r, label, colorTop, bgStock, subtitulo, unidad, boxes, reparto, totalProyectado, varPct, infoLine, camara }) => r && (
+            ].map(({ r, label, colorTop, bgStock, subtitulo, unidad, boxes, reparto, totalProyectado, varPct, camara }) => r && (
             <div key={label} style={{ background:'white', border:'1px solid #e5e7eb', borderTop:`4px solid ${colorTop}`, borderRadius:'10px', padding:'14px', display:'flex', flexDirection:'column' }}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
                 <span style={{ background:colorTop, color:'white', padding:'1px 8px', borderRadius:'4px', fontSize:'11px', fontWeight:800 }}>{label}</span>
@@ -331,7 +329,33 @@ export default async function PanelPage({ searchParams }: {
                   </div>
                 </div>
               )}
-              <div style={{ marginTop:'7px', fontSize:'10px', color:'#6b7280' }}>{infoLine}</div>
+              {/* Lotes por día de reparto */}
+              {reparto && (() => {
+                const grupos = [
+                  { label: `🚚 Jue ${reparto.fechaJue}`, lotes: reparto.lotesJue, color: '#7c3aed', bg: '#faf5ff', border: '#e9d5ff' },
+                  { label: `🚚 Lun ${reparto.fechaLun}`, lotes: reparto.lotesLun, color: '#7c3aed', bg: '#faf5ff', border: '#e9d5ff' },
+                ];
+                return (
+                  <div style={{ marginTop:'8px', display:'flex', flexDirection:'column', gap:'5px' }}>
+                    {grupos.map(g => g.lotes.length > 0 && (
+                      <div key={g.label}>
+                        <p style={{ margin:'0 0 3px', fontSize:'9px', color:g.color, fontWeight:700, textTransform:'uppercase' }}>{g.label}</p>
+                        <div style={{ display:'flex', flexWrap:'wrap', gap:'4px' }}>
+                          {g.lotes.map((l: {id:string;variedad:string;plantas:number;unidades:number;fechaEst:string}) => (
+                            <Link key={l.id} href={`/cultivos/${encodeURIComponent(l.id)}`} style={{ textDecoration:'none' }}>
+                              <span style={{ display:'inline-flex', alignItems:'center', gap:'4px', background:g.bg, border:`1px solid ${g.border}`, borderRadius:'5px', padding:'2px 7px', fontSize:'10px', fontWeight:700, color:g.color, cursor:'pointer', whiteSpace:'nowrap' }}>
+                                <span style={{ fontFamily:'monospace' }}>{l.id}</span>
+                                <span style={{ fontWeight:400, color:'#9ca3af' }}>{l.variedad.split(' ')[0]}</span>
+                                <span style={{ color:g.color }}>{l.unidades > 0 ? l.unidades.toLocaleString('es-AR') : l.plantas.toLocaleString('es-AR')} {l.unidades > 0 ? 'paq' : 'pl'}</span>
+                              </span>
+                            </Link>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
               {camara.stockActual > 0 && (() => {
                 const dc = camara.diasPromedio;
                 const cc = dc > 7 ? '#dc2626' : dc > 4 ? '#d97706' : '#059669';
