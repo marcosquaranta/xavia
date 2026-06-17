@@ -138,7 +138,7 @@ export async function POST(req: NextRequest) {
       // Filas de productos (paquetes)
       for (const linea of lineas) {
         for (const prod of PRODS) {
-          const qty = Number((linea as any)[prod.key] || 0);
+          const qty = Number((linea as any)[prod.key]) || 0;
           if (qty <= 0) continue;
           const precio = getPrecio(precios, idControl, linea.sucursal || cliente.nombre_xubio, prod.key);
           const importe = qty * precio;
@@ -152,7 +152,7 @@ export async function POST(req: NextRequest) {
         }
         // Filas de productos KG (SELECT FOOD y similares)
         for (const prod of PRODS_KG) {
-          const qty = Number((linea as any)[prod.key] || 0);
+          const qty = Number((linea as any)[prod.key]) || 0;
           if (qty <= 0) continue;
           const precio = getPrecio(precios, idControl, linea.sucursal || cliente.nombre_xubio, prod.key);
           const importe = qty * precio;
