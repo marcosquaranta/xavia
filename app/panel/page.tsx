@@ -420,9 +420,9 @@ export default async function PanelPage({ searchParams }: {
           </div>
           <div style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'14px' }}>
             <p style={{ margin:'0 0 3px', fontSize:'11px', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.3px' }}>Distribución en mesadas</p>
-            <p style={{ margin:'0 0 10px', fontSize:'10px', color:'#9ca3af' }}>Semana de ciclo · F2</p>
+            <p style={{ margin:'0 0 10px', fontSize:'10px', color:'#9ca3af' }}>Semana de ciclo · F2 · en paquetes</p>
             <GraficoCiclos titulo="Rúcula" color="#166534" colorF1="#6ee7b7" colorF2="#047857"
-              barras={ciclosRucula.barras} semanasCosecha={ciclosRucula.semanasCosecha} semanaActual={0} sinF1 />
+              barras={ciclosRucula.barras} semanasCosecha={ciclosRucula.semanasCosecha} semanaActual={0} sinF1 paqFactor={3} />
           </div>
         </div>
 

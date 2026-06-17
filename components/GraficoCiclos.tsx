@@ -17,9 +17,11 @@ interface Props {
   semanasCosecha: number;
   semanaActual?: number;
   sinF1?: boolean; // rúcula no tiene F1
+  paqFactor?: number; // si > 1, convierte plantas → paquetes (eje Y en paq)
 }
 
-export default function GraficoCiclos({ titulo, color, colorF1, colorF2, barras, semanasCosecha, sinF1 }: Props) {
+export default function GraficoCiclos({ titulo, color, colorF1, colorF2, barras, semanasCosecha, sinF1, paqFactor = 1 }: Props) {
+  const conv = (plantas: number) => paqFactor > 1 ? plantas / paqFactor : plantas;
   const todasLasBarras = barras.filter(b =>
     (b.plantas_f1 + b.plantas_f2 + (b.plantas_cosechadas || 0)) > 0
   );
@@ -37,7 +39,7 @@ export default function GraficoCiclos({ titulo, color, colorF1, colorF2, barras,
   const minSemana = barrasActivas.length > 0 ? Math.min(...barrasActivas.map(b => b.semana)) : 1;
   const maxSemana = Math.max(semanasCosecha + 1, ...todasLasBarras.map(b => b.semana));
   const semanas = Array.from({ length: maxSemana - minSemana + 1 }, (_, i) => i + minSemana);
-  const maxPlantas = Math.max(...barras.map(b => b.plantas_f1 + b.plantas_f2 + (b.plantas_cosechadas || 0)), 1);
+  const maxPlantas = Math.max(...barras.map(b => conv(b.plantas_f1 + b.plantas_f2 + (b.plantas_cosechadas || 0))), 1);
 
   const W = 560, H = 160;
   const PAD_L = 44, PAD_R = 16, PAD_T = 24, PAD_B = 28;
@@ -57,9 +59,12 @@ export default function GraficoCiclos({ titulo, color, colorF1, colorF2, barras,
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-        <span style={{ background: color, color: 'white', padding: '2px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 800, letterSpacing: '0.5px' }}>
-          {titulo.toUpperCase()}
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ background: color, color: 'white', padding: '2px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 800, letterSpacing: '0.5px' }}>
+            {titulo.toUpperCase()}
+          </span>
+          {paqFactor > 1 && <span style={{ fontSize: '10px', color: '#9ca3af', fontWeight: 600 }}>en paquetes ({paqFactor} pl/paq)</span>}
+        </div>
         <div style={{ display: 'flex', gap: '12px', fontSize: '11px', color: '#6b7280' }}>
           {!sinF1 && <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <span style={{ width: 10, height: 10, borderRadius: 2, background: colorF1, display: 'inline-block' }} />F1
@@ -82,7 +87,7 @@ export default function GraficoCiclos({ titulo, color, colorF1, colorF2, barras,
           <g key={i}>
             <line x1={PAD_L} x2={W - PAD_R} y1={PAD_T + chartH - yH(v)} y2={PAD_T + chartH - yH(v)} stroke="#f0f0f0" strokeWidth={1} />
             <text x={PAD_L - 4} y={PAD_T + chartH - yH(v) + 4} textAnchor="end" fontSize={9} fill="#9ca3af">
-              {v > 999 ? Math.round(v / 1000) + 'k' : v}
+              {v > 999 ? Math.round(v / 100) / 10 + 'k' : Math.round(v)}
             </text>
           </g>
         ))}
@@ -90,9 +95,9 @@ export default function GraficoCiclos({ titulo, color, colorF1, colorF2, barras,
         {/* Barras por semana */}
         {semanas.map((sem) => {
           const barra = barras.find(b => b.semana === sem);
-          const f1 = barra?.plantas_f1 ?? 0;
-          const f2 = barra?.plantas_f2 ?? 0;
-          const cosechadas = barra?.plantas_cosechadas ?? 0;
+          const f1 = conv(barra?.plantas_f1 ?? 0);
+          const f2 = conv(barra?.plantas_f2 ?? 0);
+          const cosechadas = conv(barra?.plantas_cosechadas ?? 0);
           const total = f1 + f2 + cosechadas;
           const hF2 = yH(f2);
           const hF1 = yH(f1);
@@ -117,7 +122,7 @@ export default function GraficoCiclos({ titulo, color, colorF1, colorF2, barras,
               {/* Total */}
               {total > 0 && (
                 <text x={xBar(sem)} y={baseY - hCos - hF2 - hF1 - 3} textAnchor="middle" fontSize={9} fill="#4b5563" fontWeight={500}>
-                  {total > 999 ? Math.round(total / 100) / 10 + 'k' : total}
+                  {total > 999 ? Math.round(total / 100) / 10 + 'k' : Math.round(total)}
                 </text>
               )}
             </g>
