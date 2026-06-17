@@ -64,6 +64,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
   const [cosechaEst,setCosechaEst]=useState({rucula:'',lechuga:''});
   const [ctdsKg,setCtdsKg]=useState<CKG>({});
   const ctdsKgLive=useRef<CKG>({});
+  // Referencias directas a los inputs KG del DOM — fuente de verdad para saveKg
+  const kgInputRefs=useRef<Record<string,{rucula_kg:HTMLInputElement|null;lechuga_kg:HTMLInputElement|null}>>({});
   type EstKG = Record<string,{rucula_kg:'idle'|'saving'|'saved'|'error';lechuga_kg:'idle'|'saving'|'saved'|'error'}>;
   const [estsKg,setEstsKg]=useState<EstKG>({});
   const tmrs=useRef<Record<string,ReturnType<typeof setTimeout>>>({});
@@ -162,8 +164,10 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
     seKg(f.id_control,f.sucursal,k,'idle');
   }
   async function saveKg(f:Fila){
-    const rkg=Number(ctdsKgLive.current[`${f.id_control}__${f.sucursal}`]?.rucula_kg)||0;
-    const lkg=Number(ctdsKgLive.current[`${f.id_control}__${f.sucursal}`]?.lechuga_kg)||0;
+    const domRefs=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];
+    // Leer del DOM directamente — es la fuente más confiable (sin closures ni batching de React)
+    const rkg=Number(domRefs?.rucula_kg?.value)||0;
+    const lkg=Number(domRefs?.lechuga_kg?.value)||0;
     (['rucula_kg','lechuga_kg'] as const).forEach(k=>seKg(f.id_control,f.sucursal,k,'saving'));
     try{
       const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:rkg,lechuga_kg:lkg}]})});
@@ -182,7 +186,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
       Object.values(tmrs.current).forEach(t=>clearTimeout(t));
       const todasLineas = [
         ...filasNormales.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:Number(q(f.id_control,f.sucursal,'rucula'))||0,lechuga_crespa:Number(q(f.id_control,f.sucursal,'lechuga_crespa'))||0,hoja_roble:Number(q(f.id_control,f.sucursal,'hoja_roble'))||0,bandeja_rucula:Number(q(f.id_control,f.sucursal,'bandeja_rucula'))||0,albahaca:Number(q(f.id_control,f.sucursal,'albahaca'))||0,rucula_kg:0,lechuga_kg:0})),
-        ...filasKg.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:Number(ctdsKgLive.current[`${f.id_control}__${f.sucursal}`]?.rucula_kg)||0,lechuga_kg:Number(ctdsKgLive.current[`${f.id_control}__${f.sucursal}`]?.lechuga_kg)||0})),
+        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg:Number(dr?.lechuga_kg?.value)||0};}),
       ];
       const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,lineas:todasLineas})});
       if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar ventas');}
@@ -560,6 +564,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
                           <td key={k} style={{padding:'3px 8px',textAlign:'center'}}>
                             <div style={{position:'relative',display:'inline-block'}}>
                               <input type="number" min={0} step={0.1} value={val} placeholder="0"
+                                ref={el=>{if(!kgInputRefs.current[`${f.id_control}__${f.sucursal}`])kgInputRefs.current[`${f.id_control}__${f.sucursal}`]={rucula_kg:null,lechuga_kg:null};kgInputRefs.current[`${f.id_control}__${f.sucursal}`][k]=el;}}
                                 onChange={ev=>onChangeKg(f,k,ev.target.value)} onBlur={()=>saveKg(f)}
                                 style={{width:'90px',textAlign:'center',fontSize:'15px',fontWeight:700,
                                   border:`2px solid ${bdrCol}`,
