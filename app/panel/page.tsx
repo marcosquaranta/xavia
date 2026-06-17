@@ -66,8 +66,8 @@ export default async function PanelPage({ searchParams }: {
   let cosechadoMes = 0, cosechadoMesPasado = 0, diaCorte = new Date().getDate();
   let navesOcup: any[] = [], tubosMesadas: any[] = [];
   let resumen = { lechuga: { plantinera:0,fase_1:0,fase_2:0,total:0 }, rucula: { plantinera:0,fase_1:0,fase_2:0,total:0 }, albahaca: { plantinera:0,fase_1:0,fase_2:0,total:0 } };
-  let ciclosLechuga = { barras: [] as any[], semanasCosecha: 5, factorPaq: 1 };
-  let ciclosRucula  = { barras: [] as any[], semanasCosecha: 3, factorPaq: 3 };
+  let ciclosLechuga: { barras: any[]; semanasCosecha: number; factorPaq: number } = { barras: [], semanasCosecha: 5, factorPaq: 1 };
+  let ciclosRucula:  { barras: any[]; semanasCosecha: number; factorPaq: number } = { barras: [], semanasCosecha: 3, factorPaq: 3 };
   let resumenCosecha: any[] = [];
   let ciclosSemanas: any[] = [];
   let ciclosRealesMap = new Map<string,number>();
