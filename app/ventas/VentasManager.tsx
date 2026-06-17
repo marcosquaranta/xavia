@@ -63,6 +63,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
   const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number;diasPromedio:number};lechuga:{stockActual:number;diasPromedio:number};factorGrPaq:{rucula:number;lechuga:number}}|null>(null);
   const [cosechaEst,setCosechaEst]=useState({rucula:'',lechuga:''});
   const [ctdsKg,setCtdsKg]=useState<CKG>({});
+  const ctdsKgLive=useRef<CKG>({});
+  type EstKG = Record<string,{rucula_kg:'idle'|'saving'|'saved'|'error';lechuga_kg:'idle'|'saving'|'saved'|'error'}>;
+  const [estsKg,setEstsKg]=useState<EstKG>({});
   const tmrs=useRef<Record<string,ReturnType<typeof setTimeout>>>({});
 
   const prods = extras ? ALL : PP;
@@ -131,7 +134,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
         c[key]={rucula:String(v.rucula||''),lechuga_crespa:String(v.lechuga_crespa||''),hoja_roble:String(v.hoja_roble||''),bandeja_rucula:String(v.bandeja_rucula||''),albahaca:String(v.albahaca||'')};
         ckg[key]={rucula_kg:String(v.rucula_kg||''),lechuga_kg:String(v.lechuga_kg||'')};
       }
-      setCtds(c); setCtdsKg(ckg); setEsts({});
+      ctdsKgLive.current = ckg;
+      setCtds(c); setCtdsKg(ckg); setEsts({}); setEstsKg({});
     }).catch(()=>{}).finally(()=>setLoading(false));
   },[fecha]);
 
@@ -150,13 +154,25 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
     }catch{se(f.id_control,f.sucursal,k,'error');}
   }
   function qKg(id:string,suc:string,k:'rucula_kg'|'lechuga_kg'){return ctdsKg[`${id}__${suc}`]?.[k]||'';}
+  function seKg(id:string,suc:string,k:'rucula_kg'|'lechuga_kg',v:'idle'|'saving'|'saved'|'error'){
+    setEstsKg(p=>({...p,[`${id}__${suc}`]:{...(p[`${id}__${suc}`]||{rucula_kg:'idle',lechuga_kg:'idle'}),[k]:v}}));
+  }
   function onChangeKg(f:Fila,k:'rucula_kg'|'lechuga_kg',v:string){
-    setCtdsKg(p=>({...p,[`${f.id_control}__${f.sucursal}`]:{...(p[`${f.id_control}__${f.sucursal}`]||{rucula_kg:'',lechuga_kg:''}),[k]:v}}));
+    setCtdsKg(p=>{const next={...p,[`${f.id_control}__${f.sucursal}`]:{...(p[`${f.id_control}__${f.sucursal}`]||{rucula_kg:'',lechuga_kg:''}),[k]:v}};ctdsKgLive.current=next;return next;});
+    seKg(f.id_control,f.sucursal,k,'idle');
   }
   async function saveKg(f:Fila){
+    const rkg=Number(ctdsKgLive.current[`${f.id_control}__${f.sucursal}`]?.rucula_kg)||0;
+    const lkg=Number(ctdsKgLive.current[`${f.id_control}__${f.sucursal}`]?.lechuga_kg)||0;
+    (['rucula_kg','lechuga_kg'] as const).forEach(k=>seKg(f.id_control,f.sucursal,k,'saving'));
     try{
-      await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:Number(qKg(f.id_control,f.sucursal,'rucula_kg'))||0,lechuga_kg:Number(qKg(f.id_control,f.sucursal,'lechuga_kg'))||0}]})});
-    }catch{}
+      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:rkg,lechuga_kg:lkg}]})});
+      if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error((j as any).error||'Error');};
+      (['rucula_kg','lechuga_kg'] as const).forEach(k=>{seKg(f.id_control,f.sucursal,k,'saved');setTimeout(()=>seKg(f.id_control,f.sucursal,k,'idle'),2000);});
+    }catch(err:any){
+      (['rucula_kg','lechuga_kg'] as const).forEach(k=>seKg(f.id_control,f.sucursal,k,'error'));
+      setMsg({t:'err',s:`Error al guardar KG de ${f.nombre_display}: ${err.message}`});
+    }
   }
   async function exportar(){
     setExp(true);setMsg(null);
@@ -536,15 +552,22 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
                       </td>
                       {(['rucula_kg','lechuga_kg'] as const).map(k=>{
                         const val=qKg(f.id_control,f.sucursal,k);
+                        const estKg=estsKg[`${f.id_control}__${f.sucursal}`]?.[k]||'idle';
+                        const bdrCol=estKg==='saved'?'#22c55e':estKg==='error'?'#ef4444':Number(val)>0?'#fbbf24':'#e5e7eb';
                         return(
                           <td key={k} style={{padding:'3px 8px',textAlign:'center'}}>
-                            <input type="number" min={0} step={0.1} value={val} placeholder="0"
-                              onChange={ev=>onChangeKg(f,k,ev.target.value)} onBlur={()=>saveKg(f)}
-                              style={{width:'90px',textAlign:'center',fontSize:'15px',fontWeight:700,
-                                border:`2px solid ${Number(val)>0?'#fbbf24':'#e5e7eb'}`,
-                                borderRadius:'6px',padding:'5px 4px',
-                                background:Number(val)>0?'#fffbeb':'white',
-                                color:Number(val)>0?'#92400e':'#9ca3af',outline:'none'}}/>
+                            <div style={{position:'relative',display:'inline-block'}}>
+                              <input type="number" min={0} step={0.1} value={val} placeholder="0"
+                                onChange={ev=>onChangeKg(f,k,ev.target.value)} onBlur={()=>saveKg(f)}
+                                style={{width:'90px',textAlign:'center',fontSize:'15px',fontWeight:700,
+                                  border:`2px solid ${bdrCol}`,
+                                  borderRadius:'6px',padding:'5px 4px',
+                                  background:Number(val)>0?'#fffbeb':'white',
+                                  color:Number(val)>0?'#92400e':'#9ca3af',outline:'none'}}/>
+                              {estKg==='saving'&&<span style={{position:'absolute',right:'4px',top:'50%',transform:'translateY(-50%)',fontSize:'9px',color:'#9ca3af'}}>⏳</span>}
+                              {estKg==='saved'&&<span style={{position:'absolute',right:'4px',top:'50%',transform:'translateY(-50%)',fontSize:'9px',color:'#22c55e'}}>✓</span>}
+                              {estKg==='error'&&<span style={{position:'absolute',right:'4px',top:'50%',transform:'translateY(-50%)',fontSize:'9px',color:'#ef4444'}}>✗</span>}
+                            </div>
                           </td>
                         );
                       })}

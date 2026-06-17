@@ -58,7 +58,8 @@ export async function updateRow(sheetName: string, keyColumn: string, keyValue: 
   const newRow = [...currentRow];
   for (const [col, val] of Object.entries(updates)) {
     const colIdx = headers.indexOf(col);
-    if (colIdx >= 0) newRow[colIdx] = val;
+    if (colIdx === -1) throw new Error(`Columna "${col}" no encontrada en hoja "${sheetName}". Agregá la columna y volvé a intentar.`);
+    newRow[colIdx] = val;
   }
   while (newRow.length < headers.length) newRow.push('');
   await sheets.spreadsheets.values.update({
