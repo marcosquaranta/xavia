@@ -50,9 +50,12 @@ export async function POST(req: NextRequest) {
     if (!ventasFecha.length) return NextResponse.json({ error: 'Sin ventas para esa fecha' }, { status: 400 });
 
     // Usar correlativo manual si se provee, sino leer de Config
-    let lastA = correlaA !== undefined ? Number(correlaA) : Number(config.find(c => c.clave === 'last_factura_a')?.valor || 665);
-    let lastB = correlaB !== undefined ? Number(correlaB) : Number(config.find(c => c.clave === 'last_factura_b')?.valor || 575);
+    // El frontend manda correlaA = "próximo número a usar", el backend hace ++lastA antes de usarlo,
+    // así que arrancamos en correlaA-1 para que el primer ++lastA dé correlaA.
+    let lastA = correlaA !== undefined ? Number(correlaA) - 1 : Number(config.find(c => c.clave === 'last_factura_a')?.valor || 665);
+    let lastB = correlaB !== undefined ? Number(correlaB) - 1 : Number(config.find(c => c.clave === 'last_factura_b')?.valor || 575);
 
+    const initialA = lastA, initialB = lastB;
     const fechaDate = new Date(fecha + 'T12:00:00');
     const wb = XLSX.utils.book_new();
     const rows: any[][] = [COLS];
@@ -175,11 +178,11 @@ export async function POST(req: NextRequest) {
     XLSX.utils.book_append_sheet(wb, ws, 'Facturacion');
     const xlsxBuf = XLSX.write(wb, { type: 'buffer', bookType: 'biff8' }); // formato .xls nativo
 
-    // Guardar correlativo actualizado
+    // Guardar correlativo solo si se usó (cambió respecto al inicial)
     const cfgA = config.find(c => c.clave === 'last_factura_a');
     const cfgB = config.find(c => c.clave === 'last_factura_b');
-    if (cfgA) await updateRow('Config', 'clave', 'last_factura_a', { valor: lastA });
-    if (cfgB) await updateRow('Config', 'clave', 'last_factura_b', { valor: lastB });
+    if (cfgA && lastA > initialA) await updateRow('Config', 'clave', 'last_factura_a', { valor: lastA });
+    if (cfgB && lastB > initialB) await updateRow('Config', 'clave', 'last_factura_b', { valor: lastB });
 
     // Marcar ventas como exportadas y resetear cantidades a 0
     for (const v of ventasFecha) {
