@@ -11,6 +11,13 @@ export async function POST(req: NextRequest) {
     const ventas = await readSheet<VentaDia>('Ventas');
     const fechaCarga = new Date().toISOString().split('T')[0];
 
+    // Calcular el próximo ID una sola vez y usar un contador incremental
+    // para evitar IDs duplicados cuando se insertan múltiples filas en la misma request.
+    let nextId = ventas
+      .map(v => parseInt(v.id_venta?.replace('V-', '') || '0'))
+      .filter(n => !isNaN(n))
+      .reduce((m, n) => Math.max(m, n), 0) + 1;
+
     for (const l of lineas) {
       const existente = ventas.find(v =>
         v.fecha === fecha && String(v.id_control) === String(l.id_control) && v.sucursal === l.sucursal
@@ -24,9 +31,8 @@ export async function POST(req: NextRequest) {
           usuario: user.email, fecha_carga: fechaCarga,
         });
       } else {
-        const maxId = ventas.map(v => parseInt(v.id_venta?.replace('V-','') || '0')).filter(n => !isNaN(n)).reduce((m,n) => Math.max(m,n), 0);
         await appendRow('Ventas', [
-          `V-${String(maxId+1).padStart(5,'0')}`, fecha,
+          `V-${String(nextId++).padStart(5,'0')}`, fecha,
           l.id_control, l.nombre_cliente, l.sucursal,
           l.rucula || 0, l.lechuga_crespa || 0, l.hoja_roble || 0,
           l.bandeja_rucula || 0, l.albahaca || 0,
