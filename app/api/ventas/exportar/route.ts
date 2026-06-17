@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { readSheet, updateRow } from '@/lib/sheets';
+import { readSheet, updateRow, batchUpdateRows } from '@/lib/sheets';
 import type { ClienteVenta, PrecioVenta, VentaDia, ConfigItem, Lote } from '@/lib/types';
 import * as XLSX from 'xlsx';
 // Email via Resend API (sin dependencias extra)
@@ -184,15 +184,16 @@ export async function POST(req: NextRequest) {
     if (cfgA && lastA > initialA) await updateRow('Config', 'clave', 'last_factura_a', { valor: lastA });
     if (cfgB && lastB > initialB) await updateRow('Config', 'clave', 'last_factura_b', { valor: lastB });
 
-    // Marcar ventas como exportadas y resetear cantidades a 0
-    for (const v of ventasFecha) {
-      await updateRow('Ventas', 'id_venta', v.id_venta, {
-        exportado: 'SI',
-        fecha_carga: new Date().toISOString().split('T')[0],
+    // Marcar ventas como exportadas y resetear cantidades — un solo batchUpdate
+    const resetFecha = new Date().toISOString().split('T')[0];
+    await batchUpdateRows('Ventas', 'id_venta', ventasFecha.map(v => ({
+      keyValue: v.id_venta,
+      updates: {
+        exportado: 'SI', fecha_carga: resetFecha,
         rucula: 0, lechuga_crespa: 0, hoja_roble: 0, bandeja_rucula: 0, albahaca: 0,
         rucula_kg: 0, lechuga_kg: 0,
-      });
-    }
+      },
+    })));
 
     // Enviar email via Resend (sin SMTP, sin dependencias)
     let emailOk = false;
