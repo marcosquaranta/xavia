@@ -222,10 +222,10 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'8px'}}>
             {CULTIVOS_ST.map(c=>{
               // Total en kg = paq×factor/1000 + kg_vendidos
-              const totA   = c.paqA   * c.factor/1000 + c.kgA;
-              const totAnt = c.paqAnt * c.factor/1000 + c.kgAnt;
-              const totM   = c.paqM   * c.factor/1000 + c.kgM;
-              const totMAnt= c.paqMAnt* c.factor/1000 + c.kgMAnt;
+              const totA   = c.paqA   * c.factor/1000 + (c.kgA   || 0);
+              const totAnt = c.paqAnt * c.factor/1000 + (c.kgAnt || 0);
+              const totM   = c.paqM   * c.factor/1000 + (c.kgM   || 0);
+              const totMAnt= c.paqMAnt* c.factor/1000 + (c.kgMAnt|| 0);
               const ps = pct(Math.round(totA*10), Math.round(totAnt*10));
               const pm = pct(Math.round(totM*10), Math.round(totMAnt*10));
               const hayKg  = c.kgA>0||c.kgAnt>0||c.kgM>0||c.kgMAnt>0;

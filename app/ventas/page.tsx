@@ -25,8 +25,8 @@ function calcStats(ventas: VentaDia[]) {
     const f = safeD(v.fecha); if (!f) continue;
     const keysPaq = ['rucula','lechuga_crespa','hoja_roble'] as const;
     const keysKg  = ['rucula_kg','lechuga_kg'] as const;
-    const addPaq = (t: typeof r.semanaActual)  => { for (const k of keysPaq) t[k] += Number((v as any)[k]||0); };
-    const addKg  = (t: typeof kg.semanaActual) => { for (const k of keysKg)  t[k] += Number((v as any)[k]||0); };
+    const addPaq = (t: typeof r.semanaActual)  => { for (const k of keysPaq) t[k] += Number((v as any)[k]) || 0; };
+    const addKg  = (t: typeof kg.semanaActual) => { for (const k of keysKg)  t[k] += Number((v as any)[k]) || 0; };
     if (f >= ini7)                          { addPaq(r.semanaActual);  addKg(kg.semanaActual); }
     if (f >= ini14 && f < ini7)            { addPaq(r.semanaAnterior); addKg(kg.semanaAnterior); }
     if (f >= iniMes)                        { addPaq(r.mesActual);     addKg(kg.mesActual); }
