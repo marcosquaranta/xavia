@@ -60,7 +60,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
   const [historial,setHistorial]=useState<any[]>([]);
   const [loadHist,setLoadHist]=useState(false);
   const [limpiando,setLimpiando]=useState(false);
-  const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number};lechuga:{stockActual:number};factorGrPaq:{rucula:number;lechuga:number}}|null>(null);
+  const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number;diasPromedio:number};lechuga:{stockActual:number;diasPromedio:number};factorGrPaq:{rucula:number;lechuga:number}}|null>(null);
   const [cosechaEst,setCosechaEst]=useState({rucula:'',lechuga:''});
   const [ctdsKg,setCtdsKg]=useState<CKG>({});
   const tmrs=useRef<Record<string,ReturnType<typeof setTimeout>>>({});
@@ -200,8 +200,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
     <div>
       {/* Stats — consolidado por cultivo */}
       {(()=>{
-        const fR = stockCamara?.factorGrPaq?.rucula  ?? 210;
-        const fL = stockCamara?.factorGrPaq?.lechuga ?? 330;
+        const fR = stockCamara?.factorGrPaq?.rucula  || 210;
+        const fL = stockCamara?.factorGrPaq?.lechuga || 330;
         const CULTIVOS_ST = [
           { cultivo:'rucula',  label:'Rúcula',  color:'#166534', top:'#166534',
             paqA: stats.semanaActual.rucula,   paqAnt: stats.semanaAnterior.rucula,
@@ -284,7 +284,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}}>
           {(['rucula','lechuga'] as const).map(cultivo=>{
             const sc      = stockCamara?.[cultivo]?.stockActual ?? null;
-            const factor  = stockCamara?.factorGrPaq?.[cultivo] ?? (cultivo==='rucula'?210:330);
+            const diasCam = stockCamara?.[cultivo]?.diasPromedio ?? null;
+            const factor  = stockCamara?.factorGrPaq?.[cultivo] || (cultivo==='rucula'?210:330);
             const estPaq  = Number(cosechaEst[cultivo])||0;
             const totalPaq= sc!==null ? sc+estPaq : estPaq;
             const totalKg = totalPaq * factor / 1000;
@@ -318,7 +319,10 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
                 <div style={{background:'white',borderRadius:'6px',padding:'6px 8px',marginBottom:'6px'}}>
                   <p style={{margin:'0 0 3px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase',fontWeight:600}}>Disponible</p>
                   {sc!==null
-                    ? <p style={{margin:'0 0 1px',fontSize:'13px',fontWeight:700,color:'#111827'}}>{sc} paq cámara{estPaq>0?` + ${estPaq} est.`:''}</p>
+                    ? <div style={{display:'flex',alignItems:'baseline',gap:'8px',flexWrap:'wrap'}}>
+                        <p style={{margin:'0 0 1px',fontSize:'13px',fontWeight:700,color:'#111827'}}>{sc} paq cámara{estPaq>0?` + ${estPaq} est.`:''}</p>
+                        {diasCam!==null&&diasCam>0&&<span style={{fontSize:'10px',color:diasCam>=5?'#dc2626':diasCam>=3?'#d97706':'#059669',fontWeight:600}}>⏱ {diasCam}d en cámara</span>}
+                      </div>
                     : <p style={{margin:'0 0 1px',fontSize:'12px',color:'#9ca3af'}}>Sin stock cámara</p>}
                   <div style={{display:'flex',gap:'6px',alignItems:'center'}}>
                     <span style={{fontSize:'11px',color:'#6b7280'}}>+ Cosecha est.</span>
@@ -564,8 +568,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
 
         {/* ── Resumen del día ── */}
         {hayV&&(()=>{
-          const fR = stockCamara?.factorGrPaq?.rucula  ?? 210;
-          const fL = stockCamara?.factorGrPaq?.lechuga ?? 330;
+          const fR = stockCamara?.factorGrPaq?.rucula  || 210;
+          const fL = stockCamara?.factorGrPaq?.lechuga || 330;
           const lecPaq = tots.lechuga_crespa+tots.hoja_roble;
           const rTotKg = tots.rucula*fR/1000 + totsKg.rucula_kg;
           const lTotKg = lecPaq*fL/1000       + totsKg.lechuga_kg;
