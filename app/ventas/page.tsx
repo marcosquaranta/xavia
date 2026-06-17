@@ -10,13 +10,23 @@ function safeD(s: any): Date | null {
   try { const d = new Date(String(s||'').split(/[\sT]/)[0]+'T12:00:00'); return isNaN(d.getTime())?null:d; } catch { return null; }
 }
 
+function startOfWeek(d: Date): Date {
+  // Lunes de la semana actual
+  const r = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dow = r.getDay(); // 0=dom, 1=lun
+  r.setDate(r.getDate() - (dow === 0 ? 6 : dow - 1));
+  return r;
+}
+
 function calcStats(ventas: VentaDia[]) {
   const hoy = new Date();
-  const ini7  = new Date(hoy); ini7.setDate(hoy.getDate()-7);
-  const ini14 = new Date(hoy); ini14.setDate(hoy.getDate()-14);
-  const iniMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-  const iniMesAnt = new Date(hoy.getFullYear(), hoy.getMonth()-1, 1);
-  const finMesAnt = new Date(hoy.getFullYear(), hoy.getMonth(), 0, 23, 59, 59);
+  // Semana calendario: lunes actual y lunes anterior
+  const iniSemAct  = startOfWeek(hoy);
+  const iniSemAnt  = new Date(iniSemAct); iniSemAnt.setDate(iniSemAct.getDate() - 7);
+  const finSemAnt  = new Date(iniSemAct); finSemAnt.setTime(finSemAnt.getTime() - 1);
+  const iniMes     = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  const iniMesAnt  = new Date(hoy.getFullYear(), hoy.getMonth()-1, 1);
+  const finMesAnt  = new Date(hoy.getFullYear(), hoy.getMonth(), 0, 23, 59, 59);
   const emptyPaq = () => ({ rucula: 0, lechuga_crespa: 0, hoja_roble: 0 });
   const emptyKg  = () => ({ rucula_kg: 0, lechuga_kg: 0 });
   const r = { semanaActual: emptyPaq(), semanaAnterior: emptyPaq(), mesActual: emptyPaq(), mesAnterior: emptyPaq() };
@@ -27,10 +37,10 @@ function calcStats(ventas: VentaDia[]) {
     const keysKg  = ['rucula_kg','lechuga_kg'] as const;
     const addPaq = (t: typeof r.semanaActual)  => { for (const k of keysPaq) t[k] += Number((v as any)[k]) || 0; };
     const addKg  = (t: typeof kg.semanaActual) => { for (const k of keysKg)  t[k] += Number((v as any)[k]) || 0; };
-    if (f >= ini7)                          { addPaq(r.semanaActual);  addKg(kg.semanaActual); }
-    if (f >= ini14 && f < ini7)            { addPaq(r.semanaAnterior); addKg(kg.semanaAnterior); }
-    if (f >= iniMes)                        { addPaq(r.mesActual);     addKg(kg.mesActual); }
-    if (f >= iniMesAnt && f <= finMesAnt)  { addPaq(r.mesAnterior);   addKg(kg.mesAnterior); }
+    if (f >= iniSemAct)                         { addPaq(r.semanaActual);  addKg(kg.semanaActual); }
+    if (f >= iniSemAnt && f < iniSemAct)        { addPaq(r.semanaAnterior); addKg(kg.semanaAnterior); }
+    if (f >= iniMes)                             { addPaq(r.mesActual);     addKg(kg.mesActual); }
+    if (f >= iniMesAnt && f <= finMesAnt)        { addPaq(r.mesAnterior);   addKg(kg.mesAnterior); }
   }
   return { ...r, kg };
 }
