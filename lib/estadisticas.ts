@@ -182,6 +182,7 @@ export interface BarraSemana {
 export interface DatosCicloGrafico {
   barras: BarraSemana[];
   semanasCosecha: number;  // semana estimada de cosecha según la variedad
+  factorPaq: number;       // plantas por paquete promedio de las variedades del cultivo
 }
 
 /**
@@ -269,8 +270,14 @@ export function distribucionPorSemana(
   }
   const semanasCosecha = Math.ceil(diasProm / 7);
 
+  // Factor de conversión plantas→paquetes: promedio de plantas_por_unidad_esperado de variedades del cultivo
+  const varsConFactor = varsCultivo.filter(v => Number(v.plantas_por_unidad_esperado) > 0);
+  const factorPaq = varsConFactor.length > 0
+    ? Math.round(varsConFactor.reduce((acc, v) => acc + Number(v.plantas_por_unidad_esperado), 0) / varsConFactor.length)
+    : 1;
+
   const barras = Array.from(mapa.values()).sort((a, b) => a.semana - b.semana);
-  return { barras, semanasCosecha };
+  return { barras, semanasCosecha, factorPaq };
 }
 
 function safeParseDate2(s: any): Date | null {
@@ -297,6 +304,10 @@ export interface ResumenCosechaCultivo {
   proyectadoEstaSemanaPlantas: number; // siempre en plantas
   proyectadoRestoMes: number;
   proyectadoMesTotal: number;
+  proyectadoJueves: number;          // lotes listos para el próximo jueves de reparto
+  proyectadoLunes: number;           // lotes listos para el próximo lunes de reparto
+  fechaJueves: string;               // ISO date del próximo jueves
+  fechaLunes: string;                // ISO date del próximo lunes
   plantasPorPaquete: number;          // factor de conversión rúcula (default 3)
 }
 
@@ -316,6 +327,19 @@ export function resumenCosechaPorCultivo(
   // Mes anterior proporcional: solo hasta el mismo día del mes anterior
   const mesPrevio = new Date(anioActual, mesActual - 1, 1);
   const finPropMesPrevio = new Date(anioActual, mesActual - 1, diaHoy, 23, 59, 59);
+
+  // Próximos jueves y lunes de reparto
+  function proximoDiaSemana(diaSemana: number): Date { // 0=dom,1=lun,4=jue
+    const d = new Date(hoy);
+    const diff = (diaSemana - d.getDay() + 7) % 7 || 7; // si hoy es ese día, siguiente semana
+    d.setDate(d.getDate() + diff);
+    d.setHours(23, 59, 59, 0);
+    return d;
+  }
+  const proxJueves = proximoDiaSemana(4); // 4 = jueves
+  const proxLunes  = proximoDiaSemana(1); // 1 = lunes
+  // Ventana: [hoy+1 .. jueves] para jueves, (jueves .. lunes] para lunes
+  const manana = new Date(hoy); manana.setDate(hoy.getDate() + 1); manana.setHours(0,0,0,0);
 
   // Próximos 7 días y fin de semana para "esta semana"
   const enSemana = new Date(hoy); enSemana.setDate(hoy.getDate() + 7);
@@ -386,10 +410,22 @@ export function resumenCosechaPorCultivo(
     } catch { return null; }
   }
 
-  const PLANTAS_POR_PAQUETE = 3;
+  // Factor por cultivo desde variedades (plantas_por_unidad_esperado), default 3 rúcula / 1 lechuga
+  function factorPorCultivo(cultivo: 'rucula' | 'lechuga'): number {
+    const vars = variedades.filter(v =>
+      v.activo === 'SI' &&
+      Number(v.plantas_por_unidad_esperado) > 0 &&
+      (cultivo === 'rucula'
+        ? String(v.variedad).toLowerCase().includes('rucula') || String(v.variedad).toLowerCase().includes('rúcula')
+        : !String(v.variedad).toLowerCase().includes('rucula') && !String(v.variedad).toLowerCase().includes('rúcula') && !String(v.variedad).toLowerCase().includes('albahaca'))
+    );
+    if (vars.length === 0) return cultivo === 'rucula' ? 3 : 1;
+    return Math.round(vars.reduce((a, v) => a + Number(v.plantas_por_unidad_esperado), 0) / vars.length);
+  }
 
   return (['lechuga', 'rucula'] as const).map((cultivo) => {
     const label = cultivo === 'lechuga' ? 'Lechuga' : 'Rúcula';
+    const PLANTAS_POR_PAQUETE = factorPorCultivo(cultivo);
 
     // Cosechado mes actual (hasta hoy)
     const cosechadoMes = lotes
@@ -424,18 +460,25 @@ export function resumenCosechaPorCultivo(
     );
 
     let proyectadoPlantas7d = 0, proyectadoPlantasResto = 0;
+    let plantasJueves = 0, plantasLunes = 0;
     for (const l of lotesActivos) {
       const est = estFechaCosecha(l);
       if (!est) continue;
       const plantas = Number(l.plantas_estimadas_actual) || 0;
       if (est >= hoy && est <= enSemana) proyectadoPlantas7d += plantas;
       else if (est > enSemana && est <= finMesActual) proyectadoPlantasResto += plantas;
+      // Ventanas de reparto: jueves y lunes
+      if (est >= manana && est <= proxJueves) plantasJueves += plantas;
+      else if (est > proxJueves && est <= proxLunes) plantasLunes += plantas;
     }
 
-    const convFactor = cultivo === 'rucula' ? PLANTAS_POR_PAQUETE : 1;
+    const convFactor = PLANTAS_POR_PAQUETE;
     const proyectadoEstaSemana = Math.round(proyectadoPlantas7d / convFactor);
     const proyectadoRestoMes = Math.round(proyectadoPlantasResto / convFactor);
     const proyectadoMesTotal = proyectadoEstaSemana + proyectadoRestoMes;
+    const proyectadoJueves = Math.round(plantasJueves / convFactor);
+    const proyectadoLunes  = Math.round(plantasLunes  / convFactor);
+    const fmtDate = (d: Date) => d.toISOString().split('T')[0];
 
     // Variación: proyectado total del mes vs total mes anterior
     const variacionFinal = cosechadoMesAntProporcional > 0
@@ -446,6 +489,8 @@ export function resumenCosechaPorCultivo(
       cultivo, label, cosechadoMes, cosechadoMesAntProporcional, variacionPct: variacionFinal,
       proyectadoEstaSemana, proyectadoEstaSemanaPlantas: proyectadoPlantas7d,
       proyectadoRestoMes, proyectadoMesTotal, plantasPorPaquete: PLANTAS_POR_PAQUETE,
+      proyectadoJueves, proyectadoLunes,
+      fechaJueves: fmtDate(proxJueves), fechaLunes: fmtDate(proxLunes),
     };
   });
 }

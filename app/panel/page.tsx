@@ -268,25 +268,30 @@ export default async function PanelPage({ searchParams }: {
           </div>
 
           {/* ── helper para card de proyección ── */}
-          {[
-            { r: rL, label: 'LECHUGA', colorTop: '#4d7c0f', colorF2: '#4d7c0f', bgStock: '#f0fdf4',
-              subtitulo: null, unidad: 'pl est.',
-              boxes: rL ? [['Cosechado',rL.cosechadoMes,'#4d7c0f','#f7fee7'],['Prox 7d',rL.proyectadoEstaSemana,'#854d0e','#fefce8'],['Resto mes',rL.proyectadoRestoMes,'#059669','#f0fdf4']] : [],
-              totalProyectado: rL ? rL.cosechadoMes+rL.proyectadoMesTotal : 0,
-              varPct: rL?.variacionPct ?? null,
-              infoLine: rL ? `F1: ${resumen.lechuga.fase_1.toLocaleString('es-AR')} · F2: ${resumen.lechuga.fase_2.toLocaleString('es-AR')}` : '',
-              camara: camaraLechuga,
-            },
-            { r: rR, label: 'RÚCULA', colorTop: '#166534', colorF2: '#166534', bgStock: '#dcfce7',
-              subtitulo: rR ? `~${((rR.cosechadoMes+rR.proyectadoMesTotal)*rR.plantasPorPaquete).toLocaleString('es-AR')} plantas` : null,
-              unidad: 'paq. est.',
-              boxes: rR ? [['Cosechado',rR.cosechadoMes,'#166534','#dcfce7'],['Prox 7d',rR.proyectadoEstaSemana,'#854d0e','#fefce8'],['Resto mes',rR.proyectadoRestoMes,'#059669','#f0fdf4']] : [],
-              totalProyectado: rR ? rR.cosechadoMes+rR.proyectadoMesTotal : 0,
-              varPct: rR?.variacionPct ?? null,
-              infoLine: rR ? `Plant.: ${resumen.rucula.plantinera.toLocaleString('es-AR')} · F2: ${Math.round(resumen.rucula.fase_2/3).toLocaleString('es-AR')} paq.` : '',
-              camara: camaraRucula,
-            },
-          ].map(({ r, label, colorTop, bgStock, subtitulo, unidad, boxes, totalProyectado, varPct, infoLine, camara }) => r && (
+          {(() => {
+            const fmtDD = (iso: string) => { const [,m,d]=iso.split('-'); return `${d}/${m}`; };
+            const factorR = ciclosRucula.factorPaq || 3;
+            return [
+              { r: rL, label: 'LECHUGA', colorTop: '#4d7c0f', bgStock: '#f0fdf4',
+                subtitulo: null, unidad: 'pl est.',
+                boxes: rL ? [['Cosechado',rL.cosechadoMes,'#4d7c0f','#f7fee7'],['Prox 7d',rL.proyectadoEstaSemana,'#854d0e','#fefce8'],['Resto mes',rL.proyectadoRestoMes,'#059669','#f0fdf4']] : [],
+                reparto: rL ? { jue: rL.proyectadoJueves, lun: rL.proyectadoLunes, fechaJue: fmtDD(rL.fechaJueves), fechaLun: fmtDD(rL.fechaLunes) } : null,
+                totalProyectado: rL ? rL.cosechadoMes+rL.proyectadoMesTotal : 0,
+                varPct: rL?.variacionPct ?? null,
+                infoLine: rL ? `F1: ${resumen.lechuga.fase_1.toLocaleString('es-AR')} · F2: ${resumen.lechuga.fase_2.toLocaleString('es-AR')}` : '',
+                camara: camaraLechuga,
+              },
+              { r: rR, label: 'RÚCULA', colorTop: '#166534', bgStock: '#dcfce7',
+                subtitulo: rR ? `~${((rR.cosechadoMes+rR.proyectadoMesTotal)*factorR).toLocaleString('es-AR')} plantas` : null,
+                unidad: 'paq. est.',
+                boxes: rR ? [['Cosechado',rR.cosechadoMes,'#166534','#dcfce7'],['Prox 7d',rR.proyectadoEstaSemana,'#854d0e','#fefce8'],['Resto mes',rR.proyectadoRestoMes,'#059669','#f0fdf4']] : [],
+                reparto: rR ? { jue: rR.proyectadoJueves, lun: rR.proyectadoLunes, fechaJue: fmtDD(rR.fechaJueves), fechaLun: fmtDD(rR.fechaLunes) } : null,
+                totalProyectado: rR ? rR.cosechadoMes+rR.proyectadoMesTotal : 0,
+                varPct: rR?.variacionPct ?? null,
+                infoLine: rR ? `Plant.: ${resumen.rucula.plantinera.toLocaleString('es-AR')} · F2: ${Math.round(resumen.rucula.fase_2/factorR).toLocaleString('es-AR')} paq.` : '',
+                camara: camaraRucula,
+              },
+            ].map(({ r, label, colorTop, bgStock, subtitulo, unidad, boxes, reparto, totalProyectado, varPct, infoLine, camara }) => r && (
             <div key={label} style={{ background:'white', border:'1px solid #e5e7eb', borderTop:`4px solid ${colorTop}`, borderRadius:'10px', padding:'14px', display:'flex', flexDirection:'column' }}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
                 <span style={{ background:colorTop, color:'white', padding:'1px 8px', borderRadius:'4px', fontSize:'11px', fontWeight:800 }}>{label}</span>
@@ -296,7 +301,6 @@ export default async function PanelPage({ searchParams }: {
                 <span style={{ fontSize:'28px', fontWeight:800, color:'#14532d', lineHeight:1 }}>{totalProyectado.toLocaleString('es-AR')}</span>
                 <span style={{ fontSize:'11px', color:'#6b7280' }}>{unidad}</span>
               </div>
-              {/* Subtítulo: plantas para rúcula, espacio fijo para lechuga */}
               <p style={{ margin:'0 0 3px', fontSize:'10px', color:'#9ca3af', minHeight:'14px' }}>{subtitulo || ''}</p>
               {varPct !== null ? (
                 <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'8px' }}>
@@ -314,6 +318,19 @@ export default async function PanelPage({ searchParams }: {
                   </div>
                 ))}
               </div>
+              {/* Reparto por día */}
+              {reparto && (reparto.jue > 0 || reparto.lun > 0) && (
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4px', marginTop:'6px' }}>
+                  <div style={{ background:'#faf5ff', border:'1px solid #e9d5ff', borderRadius:'5px', padding:'5px', textAlign:'center' }}>
+                    <p style={{ margin:'0 0 1px', fontSize:'8px', color:'#7c3aed', fontWeight:700, textTransform:'uppercase' }}>🚚 Jue {reparto.fechaJue}</p>
+                    <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:reparto.jue>0?'#111827':'#d1d5db' }}>{reparto.jue>0?reparto.jue.toLocaleString('es-AR'):'—'}</p>
+                  </div>
+                  <div style={{ background:'#faf5ff', border:'1px solid #e9d5ff', borderRadius:'5px', padding:'5px', textAlign:'center' }}>
+                    <p style={{ margin:'0 0 1px', fontSize:'8px', color:'#7c3aed', fontWeight:700, textTransform:'uppercase' }}>🚚 Lun {reparto.fechaLun}</p>
+                    <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:reparto.lun>0?'#111827':'#d1d5db' }}>{reparto.lun>0?reparto.lun.toLocaleString('es-AR'):'—'}</p>
+                  </div>
+                </div>
+              )}
               <div style={{ marginTop:'7px', fontSize:'10px', color:'#6b7280' }}>{infoLine}</div>
               {camara.stockActual > 0 && (() => {
                 const dc = camara.diasPromedio;
@@ -333,7 +350,8 @@ export default async function PanelPage({ searchParams }: {
                 );
               })()}
             </div>
-          ))}
+          ))
+        })()}
         </div>
 
         {/* ══ FILA 2: CICLOS + ÚLTIMOS MOVIMIENTOS ══ */}
@@ -422,7 +440,7 @@ export default async function PanelPage({ searchParams }: {
             <p style={{ margin:'0 0 3px', fontSize:'11px', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.3px' }}>Distribución en mesadas</p>
             <p style={{ margin:'0 0 10px', fontSize:'10px', color:'#9ca3af' }}>Semana de ciclo · F2 · en paquetes</p>
             <GraficoCiclos titulo="Rúcula" color="#166534" colorF1="#6ee7b7" colorF2="#047857"
-              barras={ciclosRucula.barras} semanasCosecha={ciclosRucula.semanasCosecha} semanaActual={0} sinF1 paqFactor={3} />
+              barras={ciclosRucula.barras} semanasCosecha={ciclosRucula.semanasCosecha} semanaActual={0} sinF1 paqFactor={ciclosRucula.factorPaq||3} />
           </div>
         </div>
 
