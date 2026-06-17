@@ -198,7 +198,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
       const emailTxt = j.emailOk ? ' · Email ✓' : enviarEmail ? ` · Email falló: ${j.emailError||'error'}` : '';
       setMsg({t:'ok',s:`${j.facturas} facturas · A→${j.lastA} · B→${j.lastB}${emailTxt}`});
       setCorrelaA(String(j.lastA+1)); setCorrelaB(String(j.lastB+1));
-      setCtds({});setEsts({});setFc({});
+      // Limpiar estado local (la hoja conserva los valores como registro histórico)
+      setCtds({});setEsts({});setCtdsKg({});ctdsKgLive.current={};setFc({});
     }catch(err:any){setMsg({t:'err',s:err.message});}
     setExp(false);
   }

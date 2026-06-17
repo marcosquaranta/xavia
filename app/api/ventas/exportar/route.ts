@@ -184,15 +184,11 @@ export async function POST(req: NextRequest) {
     if (cfgA && lastA > initialA) await updateRow('Config', 'clave', 'last_factura_a', { valor: lastA });
     if (cfgB && lastB > initialB) await updateRow('Config', 'clave', 'last_factura_b', { valor: lastB });
 
-    // Marcar ventas como exportadas y resetear cantidades — un solo batchUpdate
+    // Marcar ventas como exportadas — conserva los valores para registro histórico
     const resetFecha = new Date().toISOString().split('T')[0];
     await batchUpdateRows('Ventas', 'id_venta', ventasFecha.map(v => ({
       keyValue: v.id_venta,
-      updates: {
-        exportado: 'SI', fecha_carga: resetFecha,
-        rucula: 0, lechuga_crespa: 0, hoja_roble: 0, bandeja_rucula: 0, albahaca: 0,
-        rucula_kg: 0, lechuga_kg: 0,
-      },
+      updates: { exportado: 'SI', fecha_carga: resetFecha },
     })));
 
     // Enviar email via Resend (sin SMTP, sin dependencias)
