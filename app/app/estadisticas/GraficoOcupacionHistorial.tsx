@@ -5,6 +5,7 @@ export interface DiaOcupacion {
   fecha: string;
   loteId: string | null;
   cultivo: 'lechuga' | 'rucula' | 'albahaca' | null;
+  pct: number; // 0-100
 }
 
 export interface MesadaOcupacion {
@@ -54,24 +55,19 @@ function MiniChart({
     return acc;
   }, []);
 
-  // Para cada mesada: construir path tipo "step" (escalón)
+  // Para cada mesada: construir path tipo "step" (escalón) usando pct real
   function stepPath(m: MesadaOcupacion): string {
     if (!m.dias.length) return '';
     const segs: string[] = [];
     for (let i = 0; i < m.dias.length; i++) {
-      const occ = m.dias[i].cultivo !== null ? 100 : 0;
+      const pct = m.dias[i].pct ?? (m.dias[i].cultivo !== null ? 100 : 0);
       const x = px(i);
-      const y = py(occ);
+      const y = py(pct);
       if (i === 0) segs.push(`M ${x} ${y}`);
       else {
-        // Escalón horizontal desde el punto anterior hasta x actual, luego vertical
-        const prevOcc = m.dias[i - 1].cultivo !== null ? 100 : 0;
-        if (occ !== prevOcc) {
-          segs.push(`H ${x}`);
-          segs.push(`V ${y}`);
-        } else {
-          segs.push(`H ${x}`);
-        }
+        const prevPct = m.dias[i - 1].pct ?? (m.dias[i - 1].cultivo !== null ? 100 : 0);
+        if (pct !== prevPct) { segs.push(`H ${x}`); segs.push(`V ${y}`); }
+        else { segs.push(`H ${x}`); }
       }
     }
     return segs.join(' ');
@@ -135,9 +131,10 @@ function MiniChart({
 
           {/* Puntos hover */}
           {hoverI !== null && mesadas.map((m, mi) => {
-            const occ = m.dias[hoverI]?.cultivo !== null ? 100 : 0;
+            const dia = m.dias[hoverI];
+            const pct = dia?.pct ?? (dia?.cultivo !== null ? 100 : 0);
             return (
-              <circle key={m.nombre} cx={px(hoverI)} cy={py(occ)} r={3}
+              <circle key={m.nombre} cx={px(hoverI)} cy={py(pct)} r={3}
                 fill={PALETA[mi % PALETA.length]} stroke="white" strokeWidth={1.5} />
             );
           })}
@@ -162,8 +159,8 @@ function MiniChart({
                 <div key={m.nombre} style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '2px' }}>
                   <div style={{ width: 8, height: 8, borderRadius: 2, background: PALETA[mi % PALETA.length], flexShrink: 0 }} />
                   <span style={{ color: '#374151' }}>{m.nombre}</span>
-                  <span style={{ color: dia?.cultivo ? colorNave : '#9ca3af', fontWeight: 600, marginLeft: 'auto', paddingLeft: 8 }}>
-                    {dia?.cultivo ? '● ocupada' : '○ libre'}
+                  <span style={{ color: (dia?.pct ?? 0) > 0 ? colorNave : '#9ca3af', fontWeight: 600, marginLeft: 'auto', paddingLeft: 8 }}>
+                    {(dia?.pct ?? 0) > 0 ? `${dia!.pct}%` : '○ libre'}
                   </span>
                 </div>
               );

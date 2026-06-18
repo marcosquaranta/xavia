@@ -207,8 +207,9 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     movByLote.get(mv.id_lote)!.push(mv);
   }
 
-  // Construir mapa (mesada, fecha) → ocupación
-  const ocupMap = new Map<string, { loteId: string; cultivo: 'lechuga' | 'rucula' | 'albahaca' }>();
+  // Construir mapa (mesada, fecha) → conteo de lotes simultáneos + cultivo dominante
+  const ocupCount   = new Map<string, number>();  // key = `mesada||fecha`
+  const ocupCultivo = new Map<string, 'lechuga' | 'rucula' | 'albahaca'>();
 
   for (const lote of lotes) {
     const movsLote = (movByLote.get(lote.id_lote) || [])
@@ -244,22 +245,33 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
         }
       }
 
-      // Marcar cada día de nuestro rango que caiga en [desde, hasta)
+      // Acumular lotes por día
       for (const fecha of fechasHist) {
         if (fecha >= desde && fecha < hasta) {
           const key = `${mesada}||${fecha}`;
-          if (!ocupMap.has(key)) ocupMap.set(key, { loteId: lote.id_lote, cultivo });
+          ocupCount.set(key, (ocupCount.get(key) || 0) + 1);
+          if (!ocupCultivo.has(key)) ocupCultivo.set(key, cultivo);
         }
       }
     }
+  }
+
+  // Capacidad de cada mesada = máximo de lotes simultáneos que tuvo (mínimo 1)
+  const capacidadMesada = new Map<string, number>();
+  for (const [key, count] of ocupCount) {
+    const mesada = key.split('||')[0];
+    capacidadMesada.set(mesada, Math.max(capacidadMesada.get(mesada) || 0, count));
   }
 
   const ocupacionHistorial: MesadaOcupacion[] = mesadasHist.map(mes => ({
     nombre: mes.nombre.replace(/^Nave \d+ - /, ''),
     nave: Number(mes.nave),
     dias: fechasHist.map(fecha => {
-      const ocup = ocupMap.get(`${mes.nombre}||${fecha}`);
-      return { fecha, loteId: ocup?.loteId ?? null, cultivo: ocup?.cultivo ?? null } as DiaOcupacion;
+      const key = `${mes.nombre}||${fecha}`;
+      const count = ocupCount.get(key) || 0;
+      const cap   = capacidadMesada.get(mes.nombre) || 1;
+      const pct   = count > 0 ? Math.round((count / cap) * 100) : 0;
+      return { fecha, loteId: null, cultivo: ocupCultivo.get(key) ?? null, pct } as DiaOcupacion;
     }),
   }));
 
