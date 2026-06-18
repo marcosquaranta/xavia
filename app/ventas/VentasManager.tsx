@@ -38,7 +38,7 @@ function pct(a:number,b:number){if(!b)return null;return Math.round(((a-b)/b)*10
 export default function VentasManager({clientes,precios,frecuencias,stats,ventas7}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;ventas7:VentaDia[]}) {
   const hoy = new Date().toISOString().split('T')[0];
   const [fecha,setFecha]=useState(hoy);
-  const [ff,setFf]=useState(hoy);
+  const [showExpSelector,setShowExpSelector]=useState(false);
   const [fc,setFc]=useState<Record<string,string>>({});
   const [ctds,setCtds]=useState<Ctds>({});
   const [ests,setEsts]=useState<Ests>({});
@@ -214,7 +214,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
       ].filter(l=>l.rucula>0||l.lechuga_crespa>0||l.hoja_roble>0||l.bandeja_rucula>0||l.albahaca>0||l.rucula_kg>0||l.lechuga_kg>0);
       const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:currentExportId,lineas:todasLineas})});
       if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar ventas');}
-      const r=await fetch('/api/ventas/exportar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,fechaFactura:ff,fechasCliente:fc,correlaA:Number(correlaA),correlaB:Number(correlaB),enviarEmail,...(currentExportId?{id_exportacion:currentExportId}:{})})});
+      const r=await fetch('/api/ventas/exportar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,fechasCliente:fc,correlaA:Number(correlaA),correlaB:Number(correlaB),enviarEmail,...(currentExportId?{id_exportacion:currentExportId}:{})})});
       const j=await r.json();if(!r.ok)throw new Error(j.error);
       const bytes=Uint8Array.from(atob(j.file),c=>c.charCodeAt(0));
       const url=URL.createObjectURL(new Blob([bytes]));
@@ -417,10 +417,40 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
       </div>
 
       {/* Controles */}
-      <div style={{display:'flex',gap:'10px',alignItems:'flex-end',flexWrap:'wrap',marginBottom:'10px'}}>
+      <div style={{display:'flex',gap:'10px',alignItems:'flex-end',flexWrap:'wrap',marginBottom:'8px'}}>
         <div>
-          <label style={{fontSize:'10px',color:'#6b7280',display:'block',marginBottom:'2px'}}>FECHA VENTA</label>
+          <label style={{fontSize:'10px',color:'#6b7280',display:'block',marginBottom:'2px'}}>FECHA FACTURACIÓN</label>
           <input type="date" value={fecha} onChange={ev=>setFecha(ev.target.value)} style={{fontSize:'14px',fontWeight:600,border:'1px solid #e5e7eb',borderRadius:'7px',padding:'6px 10px'}}/>
+        </div>
+        {/* Selector de exportaciones anteriores */}
+        <div style={{position:'relative'}}>
+          <button onClick={()=>{if(!showExpSelector){cargarHistorial();}setShowExpSelector(p=>!p);}}
+            style={{background:currentExportId?'#dbeafe':'white',border:`1px solid ${currentExportId?'#93c5fd':'#e5e7eb'}`,borderRadius:'7px',padding:'6px 10px',fontSize:'12px',cursor:'pointer',color:currentExportId?'#1e40af':'#6b7280',fontWeight:currentExportId?700:400,marginTop:'14px',whiteSpace:'nowrap'}}>
+            {currentExportId?`📋 ${currentExportId}`:'📋 Exportaciones'}
+          </button>
+          {showExpSelector&&(
+            <div style={{position:'absolute',top:'100%',left:0,zIndex:100,background:'white',border:'1px solid #e5e7eb',borderRadius:'8px',boxShadow:'0 4px 12px rgba(0,0,0,0.1)',minWidth:'300px',maxHeight:'280px',overflowY:'auto',marginTop:'4px'}}>
+              {loadHist?<p style={{padding:'12px',fontSize:'12px',color:'#9ca3af'}}>Cargando…</p>:(
+                <>
+                  <div style={{padding:'8px',borderBottom:'1px solid #f3f4f6'}}>
+                    <button onClick={()=>{setCurrentExportId(null);setFechaExportada(false);setShowExpSelector(false);}}
+                      style={{width:'100%',textAlign:'left',background:!currentExportId?'#eff6ff':'none',border:'none',borderRadius:'5px',padding:'5px 8px',fontSize:'12px',cursor:'pointer',color:'#374151',fontWeight:!currentExportId?700:400}}>
+                      ✏️ Nueva sesión (pendientes)
+                    </button>
+                  </div>
+                  {historial.exportaciones.length===0?<p style={{padding:'12px',fontSize:'12px',color:'#9ca3af'}}>Sin exportaciones previas</p>:(
+                    historial.exportaciones.map((h:any)=>(
+                      <button key={h.id_exportacion} onClick={()=>{cargarExportacion(h.id_exportacion,h.fecha);setShowExpSelector(false);}}
+                        style={{width:'100%',textAlign:'left',background:h.id_exportacion===currentExportId?'#dbeafe':'none',border:'none',borderBottom:'1px solid #f9fafb',padding:'7px 10px',fontSize:'12px',cursor:'pointer',color:'#374151',display:'block'}}>
+                        <span style={{fontFamily:'monospace',color:'#1e40af',fontWeight:600}}>{h.id_exportacion}</span>
+                        <span style={{color:'#9ca3af',marginLeft:'8px',fontSize:'11px'}}>{h.fecha} · {h.clientes} fact.</span>
+                      </button>
+                    ))
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </div>
         <label style={{display:'flex',alignItems:'center',gap:'5px',fontSize:'11px',color:'#6b7280',cursor:'pointer',userSelect:'none',marginBottom:'2px'}}>
           <input type="checkbox" checked={extras} onChange={ev=>setExtras(ev.target.checked)}/> Bandeja + Albahaca
@@ -434,21 +464,20 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
           <span>📤</span>Exportar Xubio
         </button>
       </div>
+      {/* Click outside para cerrar selector */}
+      {showExpSelector&&<div style={{position:'fixed',inset:0,zIndex:99}} onClick={()=>setShowExpSelector(false)}/>}
 
-      {/* Banner fecha ya exportada */}
-      {fechaExportada&&(
-        <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'8px',padding:'8px 14px',marginBottom:'10px',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
-          <span style={{fontSize:'13px'}}>📋</span>
-          <span style={{fontSize:'13px',color:'#1e40af',fontWeight:600}}>Esta fecha ya fue exportada.</span>
-          <span style={{fontSize:'12px',color:'#3b82f6'}}>Podés editar los valores y volver a exportar — se generará un nuevo archivo con los datos actualizados.</span>
+      {/* Banner exportación cargada */}
+      {currentExportId&&(
+        <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'8px',padding:'8px 14px',marginBottom:'8px',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
+          <span style={{fontSize:'13px',color:'#1e40af',fontWeight:600}}>📋 Editando exportación {currentExportId}</span>
+          <span style={{fontSize:'12px',color:'#3b82f6'}}>Modificá los valores y volvé a exportar.</span>
+          <button onClick={()=>{setCurrentExportId(null);setFechaExportada(false);setCtds({});setCtdsKg({});ctdsKgLive.current={};}}
+            style={{marginLeft:'auto',background:'none',border:'1px solid #bfdbfe',borderRadius:'5px',padding:'2px 8px',fontSize:'11px',cursor:'pointer',color:'#1e40af'}}>
+            × Cerrar
+          </button>
         </div>
       )}
-      {/* Fecha facturación */}
-      <div style={{background:'#fffbeb',border:'1px solid #fde047',borderRadius:'7px',padding:'7px 14px',marginBottom:'10px',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
-        <span style={{fontSize:'11px',fontWeight:600,color:'#92400e'}}>📅 Fecha facturación</span>
-        <input type="date" value={ff} onChange={ev=>setFf(ev.target.value)} style={{fontSize:'12px',fontWeight:600,border:'1px solid #fde047',borderRadius:'5px',padding:'3px 8px',color:'#713f12'}}/>
-        <span style={{fontSize:'10px',color:'#92400e'}}>Cambiable por cliente ↓</span>
-      </div>
 
       {/* Panel pre-exportación */}
       {showPreExport && (
@@ -531,8 +560,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
                       );
                     })()}
                     <td style={{padding:'3px 5px'}}>
-                      <input type="date" value={fc[f.id_control]||ff} onChange={ev=>setFc(p=>({...p,[f.id_control]:ev.target.value}))}
-                        style={{width:'100%',fontSize:'10px',border:`1px solid ${fc[f.id_control]&&fc[f.id_control]!==ff?'#fbbf24':'#e5e7eb'}`,borderRadius:'5px',padding:'4px 3px',background:fc[f.id_control]&&fc[f.id_control]!==ff?'#fffbeb':'white',color:fc[f.id_control]&&fc[f.id_control]!==ff?'#92400e':'#9ca3af'}}/>
+                      <input type="date" value={fc[f.id_control]||fecha} onChange={ev=>setFc(p=>({...p,[f.id_control]:ev.target.value}))}
+                        style={{width:'100%',fontSize:'10px',border:`1px solid ${fc[f.id_control]&&fc[f.id_control]!==fecha?'#fbbf24':'#e5e7eb'}`,borderRadius:'5px',padding:'4px 3px',background:fc[f.id_control]&&fc[f.id_control]!==fecha?'#fffbeb':'white',color:fc[f.id_control]&&fc[f.id_control]!==fecha?'#92400e':'#9ca3af'}}/>
                     </td>
                   </tr>
                 );
@@ -618,8 +647,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
                         </p>
                       </td>
                       <td style={{padding:'3px 5px'}}>
-                        <input type="date" value={fc[f.id_control]||ff} onChange={ev=>setFc(p=>({...p,[f.id_control]:ev.target.value}))}
-                          style={{width:'100%',fontSize:'10px',border:`1px solid ${fc[f.id_control]&&fc[f.id_control]!==ff?'#fbbf24':'#e5e7eb'}`,borderRadius:'5px',padding:'4px 3px',background:fc[f.id_control]&&fc[f.id_control]!==ff?'#fffbeb':'white',color:fc[f.id_control]&&fc[f.id_control]!==ff?'#92400e':'#9ca3af'}}/>
+                        <input type="date" value={fc[f.id_control]||fecha} onChange={ev=>setFc(p=>({...p,[f.id_control]:ev.target.value}))}
+                          style={{width:'100%',fontSize:'10px',border:`1px solid ${fc[f.id_control]&&fc[f.id_control]!==fecha?'#fbbf24':'#e5e7eb'}`,borderRadius:'5px',padding:'4px 3px',background:fc[f.id_control]&&fc[f.id_control]!==fecha?'#fffbeb':'white',color:fc[f.id_control]&&fc[f.id_control]!==fecha?'#92400e':'#9ca3af'}}/>
                       </td>
                     </tr>
                   );
@@ -680,7 +709,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
       <div style={{marginTop:'14px',borderTop:'1px solid #f3f4f6',paddingTop:'10px'}}>
         <button onClick={()=>{ if(!showHistorial){cargarHistorial();} setShowHistorial(!showHistorial); }}
           style={{background:'none',border:'1px solid #e5e7eb',borderRadius:'6px',padding:'4px 12px',fontSize:'11px',cursor:'pointer',color:'#6b7280'}}>
-          {showHistorial?'▲ Ocultar historial':'▼ Ver historial de ventas guardadas'}
+          {showHistorial?'▲ Ocultar pendientes':'▼ Ver sesiones sin exportar'}
         </button>
         {showHistorial && (
           <div style={{marginBottom:'8px',textAlign:'right'}}>
@@ -691,77 +720,34 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
         )}
         {showHistorial && (
           <div style={{marginTop:'10px'}}>
-            {loadHist ? <p style={{color:'#9ca3af',fontSize:'12px'}}>Cargando…</p> : (historial.exportaciones.length===0&&historial.pendientes.length===0) ? <p style={{color:'#9ca3af',fontSize:'12px'}}>Sin datos.</p> : (
-              <div>
-                {/* Exportaciones */}
-                {historial.exportaciones.length>0&&(
-                  <div style={{marginBottom:'10px'}}>
-                    <p style={{fontSize:'11px',fontWeight:700,color:'#1e40af',margin:'0 0 4px'}}>Exportaciones</p>
-                    <table style={{fontSize:'12px',width:'100%'}}>
-                      <thead><tr style={{background:'#eff6ff',borderBottom:'1px solid #bfdbfe'}}>
-                        <th style={{textAlign:'left',padding:'5px 8px'}}>ID exportación</th>
-                        <th style={{textAlign:'left',padding:'5px 8px'}}>Fecha</th>
-                        <th style={{textAlign:'right',padding:'5px 6px'}}>Rúcula paq</th>
-                        <th style={{textAlign:'right',padding:'5px 6px'}}>Lechuga paq</th>
-                        <th style={{textAlign:'right',padding:'5px 6px'}}>Rúcula kg</th>
-                        <th style={{textAlign:'right',padding:'5px 6px'}}>Lechuga kg</th>
-                        <th style={{padding:'5px 6px'}}></th>
-                      </tr></thead>
-                      <tbody>
-                        {historial.exportaciones.map((h:any)=>(
-                          <tr key={h.id_exportacion} style={{borderBottom:'1px solid #f3f4f6',background:h.id_exportacion===currentExportId?'#dbeafe':'white'}}>
-                            <td style={{padding:'5px 8px',fontFamily:'monospace',fontSize:'11px',color:'#1e40af'}}>{h.id_exportacion}</td>
-                            <td style={{padding:'5px 8px',whiteSpace:'nowrap'}}>{h.fecha}</td>
-                            <td style={{textAlign:'right',padding:'5px 6px',color:'#166534'}}>{h.rucula>0?h.rucula:'—'}</td>
-                            <td style={{textAlign:'right',padding:'5px 6px',color:'#4d7c0f'}}>{h.lechuga>0?h.lechuga:'—'}</td>
-                            <td style={{textAlign:'right',padding:'5px 6px',color:'#92400e'}}>{h.rucula_kg>0?h.rucula_kg.toFixed(1)+' kg':'—'}</td>
-                            <td style={{textAlign:'right',padding:'5px 6px',color:'#b45309'}}>{h.lechuga_kg>0?h.lechuga_kg.toFixed(1)+' kg':'—'}</td>
-                            <td style={{padding:'5px 6px'}}>
-                              <button onClick={()=>{cargarExportacion(h.id_exportacion,h.fecha);setShowHistorial(false);}}
-                                style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'5px',padding:'2px 8px',fontSize:'11px',cursor:'pointer',color:'#1e40af'}}>
-                                📋 Cargar
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                {/* Pendientes */}
-                {historial.pendientes.length>0&&(
-                  <div>
-                    <p style={{fontSize:'11px',fontWeight:700,color:'#92400e',margin:'0 0 4px'}}>Pendientes (no exportados)</p>
-                    <table style={{fontSize:'12px',width:'100%'}}>
-                      <thead><tr style={{background:'#fefce8',borderBottom:'1px solid #fde68a'}}>
-                        <th style={{textAlign:'left',padding:'5px 8px'}}>Fecha</th>
-                        <th style={{textAlign:'right',padding:'5px 6px'}}>Rúcula paq</th>
-                        <th style={{textAlign:'right',padding:'5px 6px'}}>Lechuga paq</th>
-                        <th style={{textAlign:'right',padding:'5px 6px'}}>Rúcula kg</th>
-                        <th style={{textAlign:'right',padding:'5px 6px'}}>Lechuga kg</th>
-                        <th style={{padding:'5px 6px'}}></th>
-                      </tr></thead>
-                      <tbody>
-                        {historial.pendientes.map((h:any)=>(
-                          <tr key={h.fecha} style={{borderBottom:'1px solid #f3f4f6',background:h.fecha===fecha?'#fef9c3':'white'}}>
-                            <td style={{padding:'5px 8px',fontWeight:600,whiteSpace:'nowrap'}}>{h.fecha}</td>
-                            <td style={{textAlign:'right',padding:'5px 6px',color:'#166534'}}>{h.rucula>0?h.rucula:'—'}</td>
-                            <td style={{textAlign:'right',padding:'5px 6px',color:'#4d7c0f'}}>{h.lechuga>0?h.lechuga:'—'}</td>
-                            <td style={{textAlign:'right',padding:'5px 6px',color:'#92400e'}}>{h.rucula_kg>0?h.rucula_kg.toFixed(1)+' kg':'—'}</td>
-                            <td style={{textAlign:'right',padding:'5px 6px',color:'#b45309'}}>{h.lechuga_kg>0?h.lechuga_kg.toFixed(1)+' kg':'—'}</td>
-                            <td style={{padding:'5px 6px'}}>
-                              <button onClick={()=>{setFecha(h.fecha);setShowHistorial(false);}}
-                                style={{background:'none',border:'1px solid #e5e7eb',borderRadius:'5px',padding:'2px 8px',fontSize:'11px',cursor:'pointer',color:'#374151'}}>
-                                Ir →
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+            {loadHist ? <p style={{color:'#9ca3af',fontSize:'12px'}}>Cargando…</p> : historial.pendientes.length===0 ? <p style={{color:'#9ca3af',fontSize:'12px'}}>Sin sesiones pendientes.</p> : (
+              <table style={{fontSize:'12px',width:'100%'}}>
+                <thead><tr style={{background:'#fefce8',borderBottom:'1px solid #fde68a'}}>
+                  <th style={{textAlign:'left',padding:'5px 8px'}}>Fecha</th>
+                  <th style={{textAlign:'right',padding:'5px 6px'}}>Rúcula</th>
+                  <th style={{textAlign:'right',padding:'5px 6px'}}>Lechuga</th>
+                  <th style={{textAlign:'right',padding:'5px 6px'}}>R. kg</th>
+                  <th style={{textAlign:'right',padding:'5px 6px'}}>L. kg</th>
+                  <th style={{padding:'5px 6px'}}></th>
+                </tr></thead>
+                <tbody>
+                  {historial.pendientes.map((h:any)=>(
+                    <tr key={h.fecha} style={{borderBottom:'1px solid #f3f4f6',background:h.fecha===fecha?'#fef9c3':'white'}}>
+                      <td style={{padding:'5px 8px',fontWeight:600,whiteSpace:'nowrap'}}>{h.fecha}</td>
+                      <td style={{textAlign:'right',padding:'5px 6px',color:'#166534'}}>{h.rucula>0?h.rucula:'—'}</td>
+                      <td style={{textAlign:'right',padding:'5px 6px',color:'#4d7c0f'}}>{h.lechuga>0?h.lechuga:'—'}</td>
+                      <td style={{textAlign:'right',padding:'5px 6px',color:'#92400e'}}>{h.rucula_kg>0?h.rucula_kg.toFixed(1)+' kg':'—'}</td>
+                      <td style={{textAlign:'right',padding:'5px 6px',color:'#b45309'}}>{h.lechuga_kg>0?h.lechuga_kg.toFixed(1)+' kg':'—'}</td>
+                      <td style={{padding:'5px 6px'}}>
+                        <button onClick={()=>{setFecha(h.fecha);setShowHistorial(false);}}
+                          style={{background:'none',border:'1px solid #e5e7eb',borderRadius:'5px',padding:'2px 8px',fontSize:'11px',cursor:'pointer',color:'#374151'}}>
+                          Ir →
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
         )}
