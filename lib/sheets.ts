@@ -44,6 +44,15 @@ export async function appendRow(sheetName: string, values: any[]): Promise<void>
   });
 }
 
+export async function appendRows(sheetName: string, rows: any[][]): Promise<void> {
+  if (!rows.length) return;
+  const sheets = getClient();
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`,
+    valueInputOption: 'USER_ENTERED', requestBody: { values: rows },
+  });
+}
+
 export async function updateRow(sheetName: string, keyColumn: string, keyValue: string, updates: Record<string, any>): Promise<boolean> {
   const sheets = getClient();
   const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH` });

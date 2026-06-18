@@ -20,43 +20,39 @@ export function ocupacionPorMesada(ubicaciones: Ubicacion[], lotes: Lote[]): Ocu
 }
 
 export function ocupacionPorNave(ubicaciones: Ubicacion[], lotes: Lote[]): OcupacionNave[] {
-  // Solo lotes en mesadas (F1 y F2) — excluir plantineras del cálculo de ocupación
   const enMesadas = lotes.filter((l) =>
     l.estado === 'activo' && (l.fase_actual === 'fase_1' || l.fase_actual === 'fase_2')
   );
+
+  function normNombre(s: string) {
+    return s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+
   return [1, 2].map((nave) => {
-    // Solo mesadas (no plantineras) para capacidad
     const mesadas = ubicaciones.filter((u) => Number(u.nave) === nave && u.activo === 'SI' && u.tipo === 'mesada');
-    const cap = mesadas.reduce((acc, u) => acc + (Number(u.capacidad_calculada) || 0), 0);
 
-    // Calcular tubos totales y ocupados
-    // orificios_por_perfil × perfiles_por_modulo × modulos = capacidad
-    // tubos = perfiles_por_modulo × modulos (un "tubo" = un perfil)
-    const tubosTotales = mesadas.reduce((acc, u) => {
-      const perfiles = Number(u.perfiles_por_modulo) || 0;
-      const modulos = Number(u.modulos) || 0;
-      return acc + perfiles * modulos;
-    }, 0);
+    // Usar perfiles_por_modulo directamente (no capacidad_calculada que puede tener fórmulas)
+    const tubosTotales = mesadas.reduce((acc, u) => acc + ((Number(u.modulos) || 1) * (Number(u.perfiles_por_modulo) || 0)), 0);
 
-    // Plantas vivas en mesadas de esta nave
+    // Matching flexible con normalización de tildes
     const lotesNave = enMesadas.filter((l) => {
-      const u = ubicaciones.find((ub) => ub.nombre === l.ubicacion_actual);
-      return u && Number(u.nave) === nave && u.tipo === 'mesada';
+      const ubicNorm = normNombre(String(l.ubicacion_actual || ''));
+      return mesadas.some((m) => normNombre(m.nombre) === ubicNorm);
     });
-    const plantas = lotesNave.reduce((acc, l) => acc + (Number(l.plantas_estimadas_actual) || 0), 0);
 
-    // Tubos ocupados = suma de tubos_ocupados_actual de lotes en mesadas
+    const plantas = lotesNave.reduce((acc, l) => acc + (Number(l.plantas_estimadas_actual) || 0), 0);
     const tubosOcupados = lotesNave.reduce((acc, l) => acc + (Number(l.tubos_ocupados_actual) || 0), 0);
     const tubosLibres = Math.max(0, tubosTotales - tubosOcupados);
+    const m2 = Number(mesadas[0]?.metros_cuadrados) || (nave === 1 ? 500 : 1100);
+    const pct = tubosTotales > 0 ? (tubosOcupados / tubosTotales) * 100 : 0;
 
-    const m2 = mesadas.reduce((acc, u) => acc + (Number(u.metros_cuadrados) || 0), 0) || Number(mesadas[0]?.metros_cuadrados) || 0;
-    const pct = cap > 0 ? (plantas / cap) * 100 : 0;
     return {
-      nave, metros_cuadrados: m2, capacidad_total: cap,
+      nave, metros_cuadrados: m2,
+      capacidad_total: tubosTotales,
       tubos_totales: tubosTotales, tubos_ocupados: tubosOcupados, tubos_libres: tubosLibres,
       plantas_vivas: plantas,
       densidad_actual: m2 > 0 ? Math.round((plantas / m2) * 10) / 10 : 0,
-      densidad_maxima: m2 > 0 ? Math.round((cap / m2) * 10) / 10 : 0,
+      densidad_maxima: 0,
       ocupacion_pct: Math.round(pct * 10) / 10,
     };
   });
@@ -140,36 +136,84 @@ export function ocupacionPlantineras(ubicaciones: Ubicacion[], lotes: Lote[]): O
 }
 
 export interface TubosMesada {
-  id_ubicacion: string; nombre: string; nave: number; sector_fase: string;
-  variedad_asignada: string; tubos_totales: number; tubos_ocupados: number;
-  tubos_libres: number; ocupacion_pct: number; lotes_count: number;
+  id_ubicacion: string;
+  nombre: string;
+  nave: number;
+  sector_fase: string;
+  variedad_asignada: string;
+  tubos_totales: number;      // perfiles_por_modulo = total de tubos
+  tubos_ocupados: number;     // suma tubos_ocupados_actual de lotes activos
+  tubos_libres: number;
+  ocupacion_pct: number;
+  lotes_count: number;
 }
 
 export interface ResumenTubosNave {
-  nave: number; mesadas: TubosMesada[];
-  tubos_totales: number; tubos_ocupados: number; tubos_libres: number; ocupacion_pct: number;
+  nave: number;
+  mesadas: TubosMesada[];
+  tubos_totales: number;
+  tubos_ocupados: number;
+  tubos_libres: number;
+  ocupacion_pct: number;
 }
 
 export function tubosPorMesada(ubicaciones: Ubicacion[], lotes: Lote[]): ResumenTubosNave[] {
   const activos = lotes.filter((l) => l.estado === 'activo' && (l.fase_actual === 'fase_1' || l.fase_actual === 'fase_2'));
-  function norm(s: string) { return s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
-  function normBase(s: string) { return norm(s.replace(/\s*\([^F][^)]*\)\s*$/, '').replace(/\s*\(\d[^)]*\)\s*$/, '')); }
+
   const mesadas: TubosMesada[] = ubicaciones
     .filter((u) => u.activo === 'SI' && u.tipo === 'mesada')
     .sort((a, b) => Number(a.orden_visual) - Number(b.orden_visual))
     .map((u) => {
+            // tubos totales = modulos × perfiles_por_modulo (cuando modulos > 1)
+      // Si perfiles_por_modulo ya es el total (modulos=1), da el mismo resultado
       const modulos = Number(u.modulos) || 1;
       const perfilesPorMod = Number(u.perfiles_por_modulo) || 0;
       const tubosTotal = modulos * perfilesPorMod;
-      const nombreNorm = norm(u.nombre); const nombreBaseNorm = normBase(u.nombre);
-      const lotesAqui = activos.filter((l) => { const ubic = String(l.ubicacion_actual || ''); return norm(ubic) === nombreNorm || normBase(ubic) === nombreBaseNorm; });
+      // Matching flexible: normaliza tildes pero preserva F1/F2
+      // "Mesada Rucula 1" == "Mesada Rúcula 1" pero "Mesada Lechuga 1 (F1)" != "Mesada Lechuga 1 (F2)"
+      function norm(s: string) {
+        return s.trim()
+          .toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      }
+      // También intenta sin el sufijo descriptivo entre paréntesis (ej: "(22 orif/tubo)")
+      // pero NUNCA quita "(F1)" o "(F2)"
+      function normBase(s: string) {
+        return norm(s.replace(/\s*\([^F][^)]*\)\s*$/, '').replace(/\s*\(\d[^)]*\)\s*$/, ''));
+      }
+      const nombreNorm = norm(u.nombre);
+      const nombreBaseNorm = normBase(u.nombre);
+      const lotesAqui = activos.filter((l) => {
+        const ubic = String(l.ubicacion_actual || '');
+        return norm(ubic) === nombreNorm || normBase(ubic) === nombreBaseNorm;
+      });
       const tubosOcup = lotesAqui.reduce((acc, l) => acc + (Number(l.tubos_ocupados_actual) || 0), 0);
-      return { id_ubicacion: u.id_ubicacion, nombre: u.nombre, nave: Number(u.nave), sector_fase: String(u.sector_fase), variedad_asignada: String(u.variedad_asignada), tubos_totales: tubosTotal, tubos_ocupados: tubosOcup, tubos_libres: Math.max(0, tubosTotal - tubosOcup), ocupacion_pct: tubosTotal > 0 ? Math.round((tubosOcup / tubosTotal) * 100) : 0, lotes_count: lotesAqui.length };
+      const pct = tubosTotal > 0 ? Math.round((tubosOcup / tubosTotal) * 100) : 0;
+      return {
+        id_ubicacion: u.id_ubicacion,
+        nombre: u.nombre,
+        nave: Number(u.nave),
+        sector_fase: String(u.sector_fase),
+        variedad_asignada: String(u.variedad_asignada),
+        tubos_totales: tubosTotal,
+        tubos_ocupados: tubosOcup,
+        tubos_libres: Math.max(0, tubosTotal - tubosOcup),
+        ocupacion_pct: pct,
+        lotes_count: lotesAqui.length,
+      };
     });
+
   return [1, 2].map((nave) => {
-    const mn = mesadas.filter((m) => m.nave === nave);
-    const tot = mn.reduce((a, m) => a + m.tubos_totales, 0);
-    const ocu = mn.reduce((a, m) => a + m.tubos_ocupados, 0);
-    return { nave, mesadas: mn, tubos_totales: tot, tubos_ocupados: ocu, tubos_libres: Math.max(0, tot - ocu), ocupacion_pct: tot > 0 ? Math.round((ocu / tot) * 100) : 0 };
+    const mesadasNave = mesadas.filter((m) => m.nave === nave);
+    const tot = mesadasNave.reduce((a, m) => a + m.tubos_totales, 0);
+    const ocu = mesadasNave.reduce((a, m) => a + m.tubos_ocupados, 0);
+    return {
+      nave,
+      mesadas: mesadasNave,
+      tubos_totales: tot,
+      tubos_ocupados: ocu,
+      tubos_libres: Math.max(0, tot - ocu),
+      ocupacion_pct: tot > 0 ? Math.round((ocu / tot) * 100) : 0,
+    };
   });
 }

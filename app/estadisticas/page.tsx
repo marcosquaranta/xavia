@@ -3,6 +3,8 @@ import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { estadisticasDelMes, ciclosPorMesYAnioDetalle, cicloRealPorVariedad } from '@/lib/estadisticas';
 import { calcularDiasPorFase } from '@/lib/lotes';
+import { tubosPorMesada } from '@/lib/ocupacion';
+import { appendRows } from '@/lib/sheets';
 import type { Lote, Movimiento, Variedad, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
@@ -18,12 +20,16 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
   const naveFilter = searchParams.nave || 'todas';
 
+  interface OcupHistRow { fecha: string; mesada: string; nave: string; tubos_totales: string; tubos_ocupados: string; pct: string; }
+
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], variedades: Variedad[] = [], ubicaciones: Ubicacion[] = [];
+  let ocupHistRows: OcupHistRow[] = [];
   let err: string | null = null;
   try {
-    [lotes, movimientos, variedades, ubicaciones] = await Promise.all([
+    [lotes, movimientos, variedades, ubicaciones, ocupHistRows] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<Variedad>('Variedades'), readSheet<Ubicacion>('Ubicaciones'),
+      readSheet<OcupHistRow>('OcupacionHistorial'),
     ]);
   } catch (e: any) { err = e?.message || 'Error cargando datos'; }
 
@@ -169,11 +175,10 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     });
   }
 
-  // ── HISTORIAL DE OCUPACIÓN (últimos 60 días) ──
-  const HIST_DIAS = 60;
+  // ── HISTORIAL DE OCUPACIÓN (basado en tubos/agujeros reales) ──
+  const HIST_DIAS = 90;
   const hoyHist = new Date(); hoyHist.setHours(12, 0, 0, 0);
-  const mananaHist = new Date(hoyHist); mananaHist.setDate(mananaHist.getDate() + 1);
-  const mananaStr = mananaHist.toISOString().split('T')[0];
+  const hoyStr = hoyHist.toISOString().split('T')[0];
 
   const fechasHist: string[] = [];
   for (let i = HIST_DIAS - 1; i >= 0; i--) {
@@ -181,97 +186,58 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     fechasHist.push(d.toISOString().split('T')[0]);
   }
 
-  function normF(s: any): string {
-    if (!s) return '';
-    const str = String(s).trim();
-    if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.substring(0, 10);
-    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(str)) {
-      const [dd, mm, yyyy] = str.split('/');
-      return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
-    }
-    try { return new Date(str).toISOString().split('T')[0]; } catch { return ''; }
+  // Registrar snapshot de hoy si aún no existe
+  const hoyYaRegistrado = ocupHistRows.some(r => r.fecha === hoyStr);
+  if (!hoyYaRegistrado && ubicaciones.length > 0 && lotes.length > 0) {
+    try {
+      const resumen = tubosPorMesada(ubicaciones, lotes);
+      const newRows: any[][] = [];
+      for (const nave of resumen) {
+        for (const m of nave.mesadas) {
+          newRows.push([hoyStr, m.nombre, m.nave, m.tubos_totales, m.tubos_ocupados, m.ocupacion_pct]);
+        }
+      }
+      if (newRows.length) {
+        await appendRows('OcupacionHistorial', newRows);
+        // Add to in-memory rows so chart shows today
+        for (const r of newRows) {
+          ocupHistRows.push({ fecha: r[0], mesada: r[1], nave: String(r[2]), tubos_totales: String(r[3]), tubos_ocupados: String(r[4]), pct: String(r[5]) });
+        }
+      }
+    } catch {}
   }
 
+  // Construir MesadaOcupacion[] desde historial registrado
   const mesadasHist = ubicaciones
     .filter(u => u.tipo === 'mesada' && u.activo === 'SI')
     .sort((a, b) => (Number(a.nave) - Number(b.nave)) || (Number(a.orden_visual) - Number(b.orden_visual)));
 
-  // Mapa destino → nombre canónico de mesada (por nombre y por id)
-  const destAMesada = new Map<string, string>();
-  for (const m of mesadasHist) { destAMesada.set(m.nombre, m.nombre); destAMesada.set(m.id_ubicacion, m.nombre); }
-
-  // Índice movimientos por lote
-  const movByLote = new Map<string, typeof movimientos>();
-  for (const mv of movimientos) {
-    if (!movByLote.has(mv.id_lote)) movByLote.set(mv.id_lote, []);
-    movByLote.get(mv.id_lote)!.push(mv);
+  // Mapa mesada+fecha → pct
+  const pctMap = new Map<string, number>(); // key = `${mesada}||${fecha}`
+  for (const r of ocupHistRows) {
+    if (r.fecha && r.mesada) pctMap.set(`${r.mesada}||${r.fecha}`, Number(r.pct) || 0);
   }
 
-  // Construir mapa (mesada, fecha) → conteo de lotes simultáneos + cultivo dominante
-  const ocupCount   = new Map<string, number>();  // key = `mesada||fecha`
-  const ocupCultivo = new Map<string, 'lechuga' | 'rucula' | 'albahaca'>();
-
-  for (const lote of lotes) {
-    const movsLote = (movByLote.get(lote.id_lote) || [])
-      .map(mv => ({ ...mv, _f: normF(mv.fecha) }))
-      .filter(mv => mv._f)
-      .sort((a, b) => a._f.localeCompare(b._f));
-
-    if (!movsLote.length) continue;
-
-    const v = String(lote.variedad || '').toLowerCase();
-    const cultivo: 'lechuga' | 'rucula' | 'albahaca' =
-      v.includes('rucula') || v.includes('rúcula') ? 'rucula' :
-      v.includes('albahaca') ? 'albahaca' : 'lechuga';
-
-    for (let i = 0; i < movsLote.length; i++) {
-      const mv = movsLote[i];
-      const mesada = destAMesada.get(mv.ubicacion_destino);
-      if (!mesada) continue;
-
-      const desde = mv._f;
-      let hasta: string;
-      if (i + 1 < movsLote.length) {
-        hasta = movsLote[i + 1]._f;
-      } else if (lote.estado === 'activo') {
-        hasta = mananaStr;
-      } else {
-        const fc = normF(lote.fecha_cosecha || lote.fecha_ult_movimiento);
-        if (fc) {
-          const d2 = new Date(fc + 'T12:00:00'); d2.setDate(d2.getDate() + 1);
-          hasta = d2.toISOString().split('T')[0];
-        } else {
-          hasta = mananaStr;
-        }
-      }
-
-      // Acumular lotes por día
-      for (const fecha of fechasHist) {
-        if (fecha >= desde && fecha < hasta) {
-          const key = `${mesada}||${fecha}`;
-          ocupCount.set(key, (ocupCount.get(key) || 0) + 1);
-          if (!ocupCultivo.has(key)) ocupCultivo.set(key, cultivo);
-        }
-      }
-    }
-  }
-
-  // Capacidad de cada mesada = máximo de lotes simultáneos que tuvo (mínimo 1)
-  const capacidadMesada = new Map<string, number>();
-  for (const [key, count] of ocupCount) {
-    const mesada = key.split('||')[0];
-    capacidadMesada.set(mesada, Math.max(capacidadMesada.get(mesada) || 0, count));
+  // Determinar cultivo de cada mesada por su nombre
+  function cultivoMesada(nombre: string): 'lechuga' | 'rucula' | 'albahaca' | null {
+    const n = nombre.toLowerCase();
+    if (n.includes('rucula') || n.includes('rúcula')) return 'rucula';
+    if (n.includes('albahaca')) return 'albahaca';
+    if (n.includes('lechuga')) return 'lechuga';
+    return null;
   }
 
   const ocupacionHistorial: MesadaOcupacion[] = mesadasHist.map(mes => ({
     nombre: mes.nombre.replace(/^Nave \d+ - /, ''),
     nave: Number(mes.nave),
     dias: fechasHist.map(fecha => {
-      const key = `${mes.nombre}||${fecha}`;
-      const count = ocupCount.get(key) || 0;
-      const cap   = capacidadMesada.get(mes.nombre) || 1;
-      const pct   = count > 0 ? Math.round((count / cap) * 100) : 0;
-      return { fecha, loteId: null, cultivo: ocupCultivo.get(key) ?? null, pct } as DiaOcupacion;
+      const pct = pctMap.get(`${mes.nombre}||${fecha}`) ?? -1;
+      return {
+        fecha,
+        loteId: null,
+        cultivo: pct > 0 ? cultivoMesada(mes.nombre) : null,
+        pct: pct >= 0 ? pct : 0,
+      } as DiaOcupacion;
     }),
   }));
 
@@ -287,14 +253,14 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
         {/* Historial de ocupación — Nave 1 */}
         <div className="card">
           <p className="card-title">Historial de ocupación — Nave 1</p>
-          <p className="card-sub">Cada fila es una mesada · 2 meses · verde = lechuga · naranja = rúcula · violeta = albahaca</p>
+          <p className="card-sub">% de tubos/agujeros ocupados por mesada · 3 meses · verde = lechuga · naranja = rúcula</p>
           <GraficoOcupacionHistorial mesadas={ocupacionHistorial} fechas={fechasHist} nave={1} />
         </div>
 
         {/* Historial de ocupación — Nave 2 */}
         <div className="card">
           <p className="card-title">Historial de ocupación — Nave 2</p>
-          <p className="card-sub">Cada fila es una mesada · 2 meses · verde = lechuga · naranja = rúcula · violeta = albahaca</p>
+          <p className="card-sub">% de tubos/agujeros ocupados por mesada · 3 meses · verde = lechuga · naranja = rúcula</p>
           <GraficoOcupacionHistorial mesadas={ocupacionHistorial} fechas={fechasHist} nave={2} />
         </div>
 
