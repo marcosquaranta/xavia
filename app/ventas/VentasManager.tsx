@@ -63,6 +63,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
   const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number;diasPromedio:number};lechuga:{stockActual:number;diasPromedio:number};factorGrPaq:{rucula:number;lechuga:number}}|null>(null);
   const [cosechaEst,setCosechaEst]=useState({rucula:'',lechuga:''});
   const [ctdsKg,setCtdsKg]=useState<CKG>({});
+  const [fechaExportada,setFechaExportada]=useState(false);
   const ctdsKgLive=useRef<CKG>({});
   // Referencias directas a los inputs KG del DOM — fuente de verdad para saveKg
   const kgInputRefs=useRef<Record<string,{rucula_kg:HTMLInputElement|null;lechuga_kg:HTMLInputElement|null}>>({});
@@ -137,6 +138,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
         ckg[key]={rucula_kg:String(v.rucula_kg||''),lechuga_kg:String(v.lechuga_kg||'')};
       }
       ctdsKgLive.current = ckg;
+      setFechaExportada(data.some((v:VentaDia) => v.exportado === 'SI'));
       setCtds(c); setCtdsKg(ckg); setEsts({}); setEstsKg({});
     }).catch(()=>{}).finally(()=>setLoading(false));
   },[fecha]);
@@ -199,7 +201,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
       setMsg({t:'ok',s:`${j.facturas} facturas · A→${j.lastA} · B→${j.lastB}${emailTxt}`});
       setCorrelaA(String(j.lastA+1)); setCorrelaB(String(j.lastB+1));
       // Limpiar estado local (la hoja conserva los valores como registro histórico)
-      setCtds({});setEsts({});setCtdsKg({});ctdsKgLive.current={};setFc({});
+      setCtds({});setEsts({});setCtdsKg({});ctdsKgLive.current={};setFc({});setFechaExportada(true);
     }catch(err:any){setMsg({t:'err',s:err.message});}
     setExp(false);
   }
@@ -410,6 +412,14 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
         </button>
       </div>
 
+      {/* Banner fecha ya exportada */}
+      {fechaExportada&&(
+        <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'8px',padding:'8px 14px',marginBottom:'10px',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
+          <span style={{fontSize:'13px'}}>📋</span>
+          <span style={{fontSize:'13px',color:'#1e40af',fontWeight:600}}>Esta fecha ya fue exportada.</span>
+          <span style={{fontSize:'12px',color:'#3b82f6'}}>Podés editar los valores y volver a exportar — se generará un nuevo archivo con los datos actualizados.</span>
+        </div>
+      )}
       {/* Fecha facturación */}
       <div style={{background:'#fffbeb',border:'1px solid #fde047',borderRadius:'7px',padding:'7px 14px',marginBottom:'10px',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
         <span style={{fontSize:'11px',fontWeight:600,color:'#92400e'}}>📅 Fecha facturación</span>
@@ -662,27 +672,29 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
               <table style={{fontSize:'12px',width:'100%'}}>
                 <thead><tr style={{background:'#f8fafc',borderBottom:'1px solid #e5e7eb'}}>
                   <th style={{textAlign:'left',padding:'6px 10px'}}>Fecha</th>
-                  <th style={{textAlign:'right',padding:'6px 8px'}}>Clientes</th>
-                  <th style={{textAlign:'right',padding:'6px 8px'}}>Rúcula</th>
-                  <th style={{textAlign:'right',padding:'6px 8px'}}>Lechuga</th>
+                  <th style={{textAlign:'right',padding:'6px 8px'}}>Rúcula paq</th>
+                  <th style={{textAlign:'right',padding:'6px 8px'}}>Lechuga paq</th>
+                  <th style={{textAlign:'right',padding:'6px 8px'}}>Rúcula kg</th>
+                  <th style={{textAlign:'right',padding:'6px 8px'}}>Lechuga kg</th>
                   <th style={{textAlign:'center',padding:'6px 8px'}}>Estado</th>
                   <th style={{padding:'6px 8px'}}></th>
                 </tr></thead>
                 <tbody>
                   {historial.map((h:any)=>(
                     <tr key={h.fecha} style={{borderBottom:'1px solid #f3f4f6',background:h.fecha===fecha?'#eff6ff':'white'}}>
-                      <td style={{padding:'6px 10px',fontWeight:600}}>{h.fecha}</td>
-                      <td style={{textAlign:'right',padding:'6px 8px',color:'#6b7280'}}>{h.clientes}</td>
+                      <td style={{padding:'6px 10px',fontWeight:600,whiteSpace:'nowrap'}}>{h.fecha}</td>
                       <td style={{textAlign:'right',padding:'6px 8px',color:'#166534'}}>{h.rucula>0?h.rucula:'—'}</td>
                       <td style={{textAlign:'right',padding:'6px 8px',color:'#4d7c0f'}}>{h.lechuga>0?h.lechuga:'—'}</td>
+                      <td style={{textAlign:'right',padding:'6px 8px',color:'#92400e'}}>{h.rucula_kg>0?h.rucula_kg.toFixed(1)+' kg':'—'}</td>
+                      <td style={{textAlign:'right',padding:'6px 8px',color:'#b45309'}}>{h.lechuga_kg>0?h.lechuga_kg.toFixed(1)+' kg':'—'}</td>
                       <td style={{textAlign:'center',padding:'6px 8px'}}>
                         <span style={{fontSize:'10px',background:h.exportado?'#dcfce7':'#fef9c3',color:h.exportado?'#166534':'#92400e',padding:'1px 6px',borderRadius:'4px',fontWeight:600}}>
-                          {h.exportado?'Exportado':'Pendiente'}
+                          {h.exportado?'✓ Exportado':'Pendiente'}
                         </span>
                       </td>
                       <td style={{padding:'6px 8px'}}>
-                        <button onClick={()=>setFecha(h.fecha)} style={{background:'none',border:'1px solid #e5e7eb',borderRadius:'5px',padding:'2px 8px',fontSize:'11px',cursor:'pointer',color:'#374151'}}>
-                          Ir a esta fecha
+                        <button onClick={()=>{setFecha(h.fecha);setShowHistorial(false);}} style={{background:h.exportado?'#eff6ff':'none',border:`1px solid ${h.exportado?'#bfdbfe':'#e5e7eb'}`,borderRadius:'5px',padding:'2px 8px',fontSize:'11px',cursor:'pointer',color:h.exportado?'#1e40af':'#374151'}}>
+                          {h.exportado?'📋 Cargar':'Ir →'}
                         </button>
                       </td>
                     </tr>
