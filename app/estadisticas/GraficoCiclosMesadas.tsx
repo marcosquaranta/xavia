@@ -2,6 +2,7 @@
 
 interface CicloMesada {
   nombre: string; nave: number;
+  tipo: 'lechuga' | 'rucula' | 'mixta';
   lechugaF1: number; lechugaF2: number; lechugaTotal: number; lechugaN: number;
   ruculaF2: number; ruculaTotal: number; ruculaN: number;
   pesoGrLechuga: number; pesoGrRucula: number;
@@ -28,7 +29,7 @@ function SubGrafico({
   const chartH = H - PT - PB;
   const baseY = PT + chartH;
 
-  const maxDias = Math.max(...datos.map(d => d[totalKey] || 0), 1);
+  const maxDias = Math.max(...datos.map(d => d[totalKey] || 0), 20);
   const pesoPuntos = datos.map((d, i) => ({ i, gr: d[pesoKey] })).filter(p => p.gr > 0);
   const maxPeso = pesoPuntos.length ? Math.max(...pesoPuntos.map(p => p.gr), 1) : 1;
 
@@ -74,22 +75,31 @@ function SubGrafico({
           const total = d[totalKey];
           const f2 = d[f2Key];
           const f1 = f1Key ? d[f1Key] : 0;
-          if (!total) return null;
           const x0 = xC(i) - barW / 2;
           return (
             <g key={i}>
-              {/* F2 (fondo) */}
-              {f2 > 0 && (
-                <rect x={x0} y={yD(f2)} width={barW} height={(f2 / maxDias) * chartH} fill={f2Color} rx={2} />
+              {total === 0 ? (
+                /* Sin historial — barra vacía con patrón */
+                <>
+                  <rect x={x0} y={baseY - 18} width={barW} height={18} fill="#f3f4f6" rx={2} />
+                  <text x={xC(i)} y={baseY - 6} textAnchor="middle" fontSize={7} fill="#d1d5db">—</text>
+                </>
+              ) : (
+                <>
+                  {/* F2 (fondo) */}
+                  {f2 > 0 && (
+                    <rect x={x0} y={yD(f2)} width={barW} height={(f2 / maxDias) * chartH} fill={f2Color} rx={2} />
+                  )}
+                  {/* F1 (encima) */}
+                  {f1 > 0 && f1Key && (
+                    <rect x={x0} y={yD(total)} width={barW} height={(f1 / maxDias) * chartH} fill={f1Color!} rx={2} />
+                  )}
+                  {/* Etiqueta total */}
+                  <text x={xC(i)} y={yD(total) - 4} textAnchor="middle" fontSize={9} fill="#374151" fontWeight={600}>
+                    {total}d
+                  </text>
+                </>
               )}
-              {/* F1 (encima) */}
-              {f1 > 0 && f1Key && (
-                <rect x={x0} y={yD(total)} width={barW} height={(f1 / maxDias) * chartH} fill={f1Color!} rx={2} />
-              )}
-              {/* Etiqueta total */}
-              <text x={xC(i)} y={yD(total) - 4} textAnchor="middle" fontSize={9} fill="#374151" fontWeight={600}>
-                {total}d
-              </text>
               {/* Nave badge */}
               <rect x={xC(i) - 10} y={baseY + 6} width={20} height={11} rx={2} fill={NAVE_FILL[d.nave]} />
               <text x={xC(i)} y={baseY + 14.5} textAnchor="middle" fontSize={7} fill="white" fontWeight={700}>N{d.nave}</text>
@@ -129,8 +139,9 @@ function SubGrafico({
 export default function GraficoCiclosMesadas({ datos }: { datos: CicloMesada[] }) {
   if (!datos.length) return null;
 
-  const lechuga = datos.filter(d => d.lechugaTotal > 0);
-  const rucula  = datos.filter(d => d.ruculaTotal  > 0);
+  // Mostrar TODAS las mesadas del tipo correspondiente, aunque no tengan historial
+  const lechuga = datos.filter(d => d.tipo === 'lechuga' || d.tipo === 'mixta');
+  const rucula  = datos.filter(d => d.tipo === 'rucula'  || d.tipo === 'mixta');
 
   return (
     <div>

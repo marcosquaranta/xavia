@@ -118,16 +118,23 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   // Ciclos por mesada: usar movimientos de trasplante para saber qué lotes pasaron por cada mesada
   interface CicloMesada {
     nombre: string; nave: number;
+    tipo: 'lechuga' | 'rucula' | 'mixta';
     lechugaF1: number; lechugaF2: number; lechugaTotal: number; lechugaN: number;
     ruculaF2: number; ruculaTotal: number; ruculaN: number;
     pesoGrLechuga: number; pesoGrRucula: number;
   }
   const ciclosMesadas: CicloMesada[] = [];
+  const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0;
 
   for (const mes of mesadas) {
     if (naveFilter !== 'todas' && String(mes.nave) !== naveFilter) continue;
 
-    // Lotes que tuvieron algún movimiento hacia esta mesada
+    const nombreNorm = mes.nombre.toLowerCase();
+    const esRuculaMesada = nombreNorm.includes('rucula') || nombreNorm.includes('rúcula');
+    const esLechugaMesada = nombreNorm.includes('lechuga');
+    const tipo: CicloMesada['tipo'] = esRuculaMesada ? 'rucula' : esLechugaMesada ? 'lechuga' : 'mixta';
+
+    // Lotes cosechados que pasaron por esta mesada
     const lotesEnMesada = new Set(
       movimientos
         .filter(m => m.ubicacion_destino === mes.nombre || m.ubicacion_destino === mes.id_ubicacion)
@@ -151,12 +158,9 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
       if (p) (p.esRucula ? pRuc : pLech).push(p.gr);
     }
 
-    if (lF1.length + lF2.length + rF2.length === 0) continue;
-    const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0;
-
     ciclosMesadas.push({
       nombre: mes.nombre.replace(/^Nave \d+ - /, ''),
-      nave: Number(mes.nave),
+      nave: Number(mes.nave), tipo,
       lechugaF1: avg(lF1), lechugaF2: avg(lF2),
       lechugaTotal: avg(lF1.map((f,i) => f + (lF2[i]||0))),
       lechugaN: Math.max(lF1.length, lF2.length),
