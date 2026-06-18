@@ -10,10 +10,11 @@ export async function generarIdSiembra(nave: 1 | 2): Promise<string> {
   return id;
 }
 
-export function completarIdEnTrasplante(idProvisional: string, cultivo: 'L' | 'R' | 'A', mesada: 1 | 2): string {
+export function completarIdEnTrasplante(idProvisional: string, cultivo: 'L' | 'R' | 'A', mesada?: 1 | 2): string {
   const parts = parsearIdLote(idProvisional);
   if (!parts) throw new Error(`ID inválido: ${idProvisional}`);
-  return `N${parts.nave}${cultivo}${mesada}-${pad(parts.correlativo)}`;
+  const m = mesada ?? parts.mesada ?? 1;
+  return `N${parts.nave}${cultivo}${m}-${pad(parts.correlativo)}`;
 }
 
 /**
@@ -21,6 +22,24 @@ export function completarIdEnTrasplante(idProvisional: string, cultivo: 'L' | 'R
  * Si el ID candidato ya existe en Lotes, prueba con el siguiente correlativo disponible.
  * Si el correlativo ya existe con sufijo B, prueba C, D, etc.
  */
+export async function generarIdDivision(idPadre: string, lotesExistentes: string[]): Promise<string> {
+  const parts = parsearIdLote(idPadre);
+  if (!parts || !parts.cultivo) throw new Error(`ID inválido para división: ${idPadre}`);
+  const { nave, cultivo, correlativo } = parts;
+  const mesada = parts.mesada ?? 1;
+  const base = `N${nave}${cultivo}${mesada}-${pad(correlativo)}`;
+  const sufijos = ['B', 'C', 'D', 'E', 'F', 'G', 'H'];
+  for (const sufijo of sufijos) {
+    const candidato = `${base}${sufijo}`;
+    if (!lotesExistentes.includes(candidato)) return candidato;
+  }
+  const maxCorr = lotesExistentes
+    .map(parsearIdLote)
+    .filter((p): p is LoteIdParts => p !== null && p.nave === nave)
+    .reduce((max, p) => Math.max(max, p.correlativo), 0);
+  return `N${nave}${cultivo}${mesada}-${pad(maxCorr + 1)}`;
+}
+
 export async function generarIdCambioMesada(
   idActual: string,
   nuevaMesada: 1 | 2,

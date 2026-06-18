@@ -15,10 +15,12 @@ export interface Lote {
   id_lote: string; variedad: string; fecha_siembra: string;
   plantines_iniciales: number; fase_actual: Fase; ubicacion_actual: string;
   tubos_ocupados_actual: number | ''; plantas_estimadas_actual: number | '';
-  fecha_ult_movimiento: string; fecha_cosecha: string;
+  fecha_ult_movimiento: string; fecha_f1: string; fecha_f2: string; fecha_cosecha: string;
   unidades_cosechadas: number | ''; plantas_por_unidad_real: number | '';
   descarte_reportado: number | ''; peso_muestra_kg: number | '';
-  peso_total_estimado_kg: number | ''; usuario_creador: string;
+  peso_muestra_paquete_gr: number | ''; peso_total_estimado_kg: number | '';
+  dias_plantinera: number | ''; dias_f1: number | ''; dias_f2: number | ''; dias_total: number | '';
+  usuario_creador: string;
   foto_url: string; lote_origen: string; semilla_id: string;
   destino_cosecha: DestinoCosecha | ''; notas: string; estado: EstadoLote;
 }
@@ -57,6 +59,85 @@ export interface Semilla {
 }
 
 export interface ConfigItem { clave: string; valor: string | number; descripcion: string; }
+
+export interface ClienteVenta {
+  id_control: string;
+  nombre_xubio: string;
+  nombre_display: string;
+  alias: string;
+  tipo_factura: string;
+  punto_venta: string;
+  sucursales: string;
+  activo: string;
+  unidad: 'paq' | 'kg' | '';
+}
+
+export interface PrecioVenta {
+  id_control: string;
+  nombre_cliente: string;
+  sucursal_obs: string;
+  rucula: string;
+  lechuga_crespa: string;
+  hoja_roble: string;
+  bandeja_rucula: string;
+  albahaca: string;
+  rucula_kg: string;
+  lechuga_kg: string;
+}
+
+export interface VentaDia {
+  id_venta: string;
+  fecha: string;
+  id_control: string;
+  nombre_cliente: string;
+  sucursal: string;
+  rucula: string;
+  lechuga_crespa: string;
+  hoja_roble: string;
+  bandeja_rucula: string;
+  albahaca: string;
+  rucula_kg: string;
+  lechuga_kg: string;
+  exportado: string;
+  usuario: string;
+  fecha_carga: string;
+}
+
+export interface Articulo {
+  id_articulo: string;
+  categoria: string;
+  articulo: string;
+  unidad_medida: string;
+  activo: string;
+}
+
+export interface StockMes {
+  id_stock: string;
+  id_articulo: string;
+  categoria: string;
+  articulo: string;
+  unidad_medida: string;
+  anio: number | string;
+  mes: number | string;
+  stock_inicial: number | string;
+  compras: number | string;
+  stock_final: number | string;
+  uso_calculado: number | string;
+  notas: string;
+  usuario: string;
+  fecha_carga: string;
+}
+
+export interface StockCamara {
+  id_registro: string;
+  cultivo: 'rucula' | 'lechuga';
+  fecha: string;
+  tipo: 'inicial' | 'ajuste';
+  cantidad_paq: number | string;
+  notas: string;
+  usuario: string;
+  fecha_carga: string;
+}
 
 export interface Cliente {
   id_cliente: string; nombre: string; tipo: string; contacto: string;

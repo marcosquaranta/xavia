@@ -5,7 +5,10 @@ interface Props {
   cultivoActivo: FiltroCultivo;
   faseActiva: FiltroFase;
   naveActiva: FiltroNave;
+  mesadaActiva?: string;
+  tiempoActivo?: string;
   conteos: ConteosFiltros;
+  ubicaciones?: import('@/lib/types').Ubicacion[];
   baseUrl: string;
 }
 

@@ -138,3 +138,38 @@ export function ocupacionPlantineras(ubicaciones: Ubicacion[], lotes: Lote[]): O
       };
     });
 }
+
+export interface TubosMesada {
+  id_ubicacion: string; nombre: string; nave: number; sector_fase: string;
+  variedad_asignada: string; tubos_totales: number; tubos_ocupados: number;
+  tubos_libres: number; ocupacion_pct: number; lotes_count: number;
+}
+
+export interface ResumenTubosNave {
+  nave: number; mesadas: TubosMesada[];
+  tubos_totales: number; tubos_ocupados: number; tubos_libres: number; ocupacion_pct: number;
+}
+
+export function tubosPorMesada(ubicaciones: Ubicacion[], lotes: Lote[]): ResumenTubosNave[] {
+  const activos = lotes.filter((l) => l.estado === 'activo' && (l.fase_actual === 'fase_1' || l.fase_actual === 'fase_2'));
+  function norm(s: string) { return s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  function normBase(s: string) { return norm(s.replace(/\s*\([^F][^)]*\)\s*$/, '').replace(/\s*\(\d[^)]*\)\s*$/, '')); }
+  const mesadas: TubosMesada[] = ubicaciones
+    .filter((u) => u.activo === 'SI' && u.tipo === 'mesada')
+    .sort((a, b) => Number(a.orden_visual) - Number(b.orden_visual))
+    .map((u) => {
+      const modulos = Number(u.modulos) || 1;
+      const perfilesPorMod = Number(u.perfiles_por_modulo) || 0;
+      const tubosTotal = modulos * perfilesPorMod;
+      const nombreNorm = norm(u.nombre); const nombreBaseNorm = normBase(u.nombre);
+      const lotesAqui = activos.filter((l) => { const ubic = String(l.ubicacion_actual || ''); return norm(ubic) === nombreNorm || normBase(ubic) === nombreBaseNorm; });
+      const tubosOcup = lotesAqui.reduce((acc, l) => acc + (Number(l.tubos_ocupados_actual) || 0), 0);
+      return { id_ubicacion: u.id_ubicacion, nombre: u.nombre, nave: Number(u.nave), sector_fase: String(u.sector_fase), variedad_asignada: String(u.variedad_asignada), tubos_totales: tubosTotal, tubos_ocupados: tubosOcup, tubos_libres: Math.max(0, tubosTotal - tubosOcup), ocupacion_pct: tubosTotal > 0 ? Math.round((tubosOcup / tubosTotal) * 100) : 0, lotes_count: lotesAqui.length };
+    });
+  return [1, 2].map((nave) => {
+    const mn = mesadas.filter((m) => m.nave === nave);
+    const tot = mn.reduce((a, m) => a + m.tubos_totales, 0);
+    const ocu = mn.reduce((a, m) => a + m.tubos_ocupados, 0);
+    return { nave, mesadas: mn, tubos_totales: tot, tubos_ocupados: ocu, tubos_libres: Math.max(0, tot - ocu), ocupacion_pct: tot > 0 ? Math.round((ocu / tot) * 100) : 0 };
+  });
+}

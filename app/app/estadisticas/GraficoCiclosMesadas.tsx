@@ -31,8 +31,6 @@ function SubGrafico({
   const maxDias = Math.max(...datos.map(d => d[totalKey] || 0), 1);
   const pesoPuntos = datos.map((d, i) => ({ i, gr: d[pesoKey] })).filter(p => p.gr > 0);
   const maxPeso = pesoPuntos.length ? Math.max(...pesoPuntos.map(p => p.gr), 1) : 1;
-
-  // Redondear el techo del eje de peso a múltiplo de 50
   const pesoMax = Math.ceil(maxPeso / 50) * 50;
 
   const slotW = chartW / datos.length;
@@ -50,7 +48,7 @@ function SubGrafico({
       <p style={{ margin: '0 0 4px', fontSize: '12px', fontWeight: 700, color: '#374151' }}>{titulo}</p>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
 
-        {/* Grid + eje Y izquierdo (días) */}
+        {/* Grid + eje Y izquierdo */}
         {ticksDias.map((v, idx) => (
           <g key={idx}>
             <line x1={PL} x2={W - PR} y1={yD(v)} y2={yD(v)} stroke={idx === 0 ? '#e5e7eb' : '#f3f4f6'} strokeWidth={1} />
@@ -58,14 +56,14 @@ function SubGrafico({
           </g>
         ))}
 
-        {/* Eje Y derecho (gramos) */}
-        {pesoPuntos.length > 0 && ticksPeso.map((v, idx) => (
-          <text key={idx} x={W - PR + 5} y={yP(v) + 4} textAnchor="start" fontSize={9} fill="#f97316">{v}g</text>
-        ))}
+        {/* Eje Y derecho (peso) */}
         {pesoPuntos.length > 0 && (
           <>
             <line x1={W - PR} x2={W - PR} y1={PT} y2={baseY} stroke="#fed7aa" strokeWidth={1} strokeDasharray="3 2" />
             <text x={W - 4} y={PT - 8} textAnchor="end" fontSize={8} fill="#f97316" fontWeight={600}>peso →</text>
+            {ticksPeso.map((v, idx) => (
+              <text key={idx} x={W - PR + 5} y={yP(v) + 4} textAnchor="start" fontSize={9} fill="#f97316">{v}g</text>
+            ))}
           </>
         )}
 
@@ -78,27 +76,15 @@ function SubGrafico({
           const x0 = xC(i) - barW / 2;
           return (
             <g key={i}>
-              {/* F2 (fondo) */}
-              {f2 > 0 && (
-                <rect x={x0} y={yD(f2)} width={barW} height={(f2 / maxDias) * chartH} fill={f2Color} rx={2} />
-              )}
-              {/* F1 (encima) */}
-              {f1 > 0 && f1Key && (
-                <rect x={x0} y={yD(total)} width={barW} height={(f1 / maxDias) * chartH} fill={f1Color!} rx={2} />
-              )}
-              {/* Etiqueta total */}
-              <text x={xC(i)} y={yD(total) - 4} textAnchor="middle" fontSize={9} fill="#374151" fontWeight={600}>
-                {total}d
-              </text>
-              {/* Nave badge */}
+              {f2 > 0 && <rect x={x0} y={yD(f2)} width={barW} height={(f2 / maxDias) * chartH} fill={f2Color} rx={2} />}
+              {f1 > 0 && f1Key && <rect x={x0} y={yD(total)} width={barW} height={(f1 / maxDias) * chartH} fill={f1Color!} rx={2} />}
+              <text x={xC(i)} y={yD(total) - 4} textAnchor="middle" fontSize={9} fill="#374151" fontWeight={600}>{total}d</text>
+              {/* Badge nave */}
               <rect x={xC(i) - 10} y={baseY + 6} width={20} height={11} rx={2} fill={NAVE_FILL[d.nave]} />
               <text x={xC(i)} y={baseY + 14.5} textAnchor="middle" fontSize={7} fill="white" fontWeight={700}>N{d.nave}</text>
-              {/* Nombre mesada, rotado */}
-              <text
-                x={xC(i)} y={baseY + 26}
-                textAnchor="end" fontSize={8} fill="#6b7280"
-                transform={`rotate(-38,${xC(i)},${baseY + 26})`}
-              >
+              {/* Nombre mesada */}
+              <text x={xC(i)} y={baseY + 26} textAnchor="end" fontSize={8} fill="#6b7280"
+                transform={`rotate(-38,${xC(i)},${baseY + 26})`}>
                 {d.nombre.length > 16 ? d.nombre.slice(0, 16) + '…' : d.nombre}
               </text>
             </g>
@@ -112,13 +98,10 @@ function SubGrafico({
             fill="none" stroke="#fb923c" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.8}
           />
         )}
-        {/* Dots de peso */}
         {pesoPuntos.map(p => (
           <g key={p.i}>
             <circle cx={xC(p.i)} cy={yP(p.gr)} r={5} fill="#fb923c" stroke="white" strokeWidth={1.5} />
-            <text x={xC(p.i)} y={yP(p.gr) - 8} textAnchor="middle" fontSize={8} fill="#ea580c" fontWeight={600}>
-              {p.gr}g
-            </text>
+            <text x={xC(p.i)} y={yP(p.gr) - 8} textAnchor="middle" fontSize={8} fill="#ea580c" fontWeight={600}>{p.gr}g</text>
           </g>
         ))}
       </svg>
@@ -128,13 +111,10 @@ function SubGrafico({
 
 export default function GraficoCiclosMesadas({ datos }: { datos: CicloMesada[] }) {
   if (!datos.length) return null;
-
   const lechuga = datos.filter(d => d.lechugaTotal > 0);
   const rucula  = datos.filter(d => d.ruculaTotal  > 0);
-
   return (
     <div>
-      {/* Leyenda */}
       <div style={{ display: 'flex', gap: '16px', fontSize: '11px', marginBottom: '14px', flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
           <span style={{ width: 10, height: 10, background: '#86efac', borderRadius: 2, display: 'inline-block' }} /> Lechuga F1
@@ -146,31 +126,16 @@ export default function GraficoCiclosMesadas({ datos }: { datos: CicloMesada[] }
           <span style={{ width: 10, height: 10, background: '#166534', borderRadius: 2, display: 'inline-block' }} /> Rúcula F2
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <svg width={10} height={10} style={{ display: 'inline-block' }}>
-            <circle cx={5} cy={5} r={4} fill="#fb923c" />
-          </svg>
-          Peso prom. gr/paq (eje derecho →)
+          <svg width={10} height={10} style={{ display: 'inline-block' }}><circle cx={5} cy={5} r={4} fill="#fb923c" /></svg>
+          Peso prom. gr/paq (eje der. →)
         </span>
       </div>
-
-      <SubGrafico
-        titulo="Lechuga — ciclos por mesada"
-        datos={lechuga}
-        f1Color="#86efac"
-        f2Color="#4d7c0f"
-        pesoKey="pesoGrLechuga"
-        totalKey="lechugaTotal"
-        f2Key="lechugaF2"
-        f1Key="lechugaF1"
-      />
-      <SubGrafico
-        titulo="Rúcula — ciclos por mesada"
-        datos={rucula}
+      <SubGrafico titulo="Lechuga — ciclos por mesada" datos={lechuga}
+        f1Color="#86efac" f2Color="#4d7c0f"
+        pesoKey="pesoGrLechuga" totalKey="lechugaTotal" f2Key="lechugaF2" f1Key="lechugaF1" />
+      <SubGrafico titulo="Rúcula — ciclos por mesada" datos={rucula}
         f2Color="#166534"
-        pesoKey="pesoGrRucula"
-        totalKey="ruculaTotal"
-        f2Key="ruculaF2"
-      />
+        pesoKey="pesoGrRucula" totalKey="ruculaTotal" f2Key="ruculaF2" />
     </div>
   );
 }

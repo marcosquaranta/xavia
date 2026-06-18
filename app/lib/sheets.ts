@@ -75,6 +75,39 @@ function colLetter(col: number): string {
   return letter;
 }
 
+export async function batchUpdateRows(
+  sheetName: string,
+  keyColumn: string,
+  updates: Array<{ keyValue: string; updates: Record<string, any> }>
+): Promise<void> {
+  if (!updates.length) return;
+  const sheets = getClient();
+  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH` });
+  const rows = response.data.values;
+  if (!rows || rows.length < 2) return;
+  const headers = rows[0];
+  const keyIndex = headers.indexOf(keyColumn);
+  if (keyIndex === -1) throw new Error(`Columna ${keyColumn} no encontrada en ${sheetName}`);
+  const data: { range: string; values: any[][] }[] = [];
+  for (const { keyValue, updates: upd } of updates) {
+    const rowIndex = rows.findIndex((r, idx) => idx > 0 && String(r[keyIndex]) === String(keyValue));
+    if (rowIndex === -1) continue;
+    const newRow = [...rows[rowIndex]];
+    for (const [col, val] of Object.entries(upd)) {
+      const colIdx = headers.indexOf(col);
+      if (colIdx === -1) throw new Error(`Columna "${col}" no encontrada en hoja "${sheetName}".`);
+      newRow[colIdx] = val;
+    }
+    while (newRow.length < headers.length) newRow.push('');
+    data.push({ range: `${sheetName}!A${rowIndex + 1}:${colLetter(headers.length)}${rowIndex + 1}`, values: [newRow] });
+  }
+  if (!data.length) return;
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId: SHEET_ID,
+    requestBody: { valueInputOption: 'USER_ENTERED', data },
+  });
+}
+
 export async function deleteRow(sheetName: string, keyColumn: string, keyValue: string): Promise<boolean> {
   const sheets = getClient();
   const sheetMeta = await sheets.spreadsheets.get({ spreadsheetId: SHEET_ID });

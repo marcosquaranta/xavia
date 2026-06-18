@@ -25,7 +25,9 @@ interface Props {
   colorF2: string;
   barras: BarraSemana[];
   semanasCosecha: number;   // semana estimada de cosecha según días de variedad
-  semanaActual: number;     // semana en la que estamos hoy dentro del ciclo
+  semanaActual: number;
+  sinF1?: boolean;
+  paqFactor?: number;
 }
 
 export default function GraficoCiclos({

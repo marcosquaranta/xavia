@@ -8,6 +8,8 @@ import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
 import GraficoCiclosMesadas from './GraficoCiclosMesadas';
 import GraficoPesaje from './GraficoPesaje';
+import GraficoOcupacionHistorial from './GraficoOcupacionHistorial';
+import type { MesadaOcupacion, DiaOcupacion } from './GraficoOcupacionHistorial';
 export const dynamic = 'force-dynamic';
 
 export default async function EstadisticasPage({ searchParams }: { searchParams: { nave?: string } }) {
@@ -101,11 +103,24 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     return porVariedad;
   }
 
+  // Peso promedio por lote cosechado (gr por paquete)
+  const pesoLoteMap = new Map<string, { gr: number; esRucula: boolean }>();
+  for (const l of cosechados) {
+    const gr = Number(l.peso_muestra_paquete_gr) > 0
+      ? Number(l.peso_muestra_paquete_gr)
+      : Number(l.peso_muestra_kg) > 0 ? Math.round(Number(l.peso_muestra_kg) * 1000) : 0;
+    if (gr > 0) {
+      const v = String(l.variedad || '').toLowerCase();
+      pesoLoteMap.set(l.id_lote, { gr, esRucula: v.includes('rucula') || v.includes('rúcula') });
+    }
+  }
+
   // Ciclos por mesada: usar movimientos de trasplante para saber qué lotes pasaron por cada mesada
   interface CicloMesada {
     nombre: string; nave: number;
     lechugaF1: number; lechugaF2: number; lechugaTotal: number; lechugaN: number;
     ruculaF2: number; ruculaTotal: number; ruculaN: number;
+    pesoGrLechuga: number; pesoGrRucula: number;
   }
   const ciclosMesadas: CicloMesada[] = [];
 
@@ -120,6 +135,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     );
 
     const lF1: number[] = [], lF2: number[] = [], rF2: number[] = [];
+    const pLech: number[] = [], pRuc: number[] = [];
     for (const idLote of lotesEnMesada) {
       const d = diasPorLote.get(String(idLote));
       if (!d) continue;
@@ -131,6 +147,8 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
         if (d.f1 !== null && d.f1 > 0) lF1.push(d.f1);
         if (d.f2 > 0) lF2.push(d.f2);
       }
+      const p = pesoLoteMap.get(String(idLote));
+      if (p) (p.esRucula ? pRuc : pLech).push(p.gr);
     }
 
     if (lF1.length + lF2.length + rF2.length === 0) continue;
@@ -143,8 +161,103 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
       lechugaTotal: avg(lF1.map((f,i) => f + (lF2[i]||0))),
       lechugaN: Math.max(lF1.length, lF2.length),
       ruculaF2: avg(rF2), ruculaTotal: avg(rF2), ruculaN: rF2.length,
+      pesoGrLechuga: avg(pLech), pesoGrRucula: avg(pRuc),
     });
   }
+
+  // ── HISTORIAL DE OCUPACIÓN (últimos 60 días) ──
+  const HIST_DIAS = 60;
+  const hoyHist = new Date(); hoyHist.setHours(12, 0, 0, 0);
+  const mananaHist = new Date(hoyHist); mananaHist.setDate(mananaHist.getDate() + 1);
+  const mananaStr = mananaHist.toISOString().split('T')[0];
+
+  const fechasHist: string[] = [];
+  for (let i = HIST_DIAS - 1; i >= 0; i--) {
+    const d = new Date(hoyHist); d.setDate(d.getDate() - i);
+    fechasHist.push(d.toISOString().split('T')[0]);
+  }
+
+  function normF(s: any): string {
+    if (!s) return '';
+    const str = String(s).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.substring(0, 10);
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(str)) {
+      const [dd, mm, yyyy] = str.split('/');
+      return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+    }
+    try { return new Date(str).toISOString().split('T')[0]; } catch { return ''; }
+  }
+
+  const mesadasHist = ubicaciones
+    .filter(u => u.tipo === 'mesada' && u.activo === 'SI')
+    .sort((a, b) => (Number(a.nave) - Number(b.nave)) || (Number(a.orden_visual) - Number(b.orden_visual)));
+
+  // Mapa destino → nombre canónico de mesada (por nombre y por id)
+  const destAMesada = new Map<string, string>();
+  for (const m of mesadasHist) { destAMesada.set(m.nombre, m.nombre); destAMesada.set(m.id_ubicacion, m.nombre); }
+
+  // Índice movimientos por lote
+  const movByLote = new Map<string, typeof movimientos>();
+  for (const mv of movimientos) {
+    if (!movByLote.has(mv.id_lote)) movByLote.set(mv.id_lote, []);
+    movByLote.get(mv.id_lote)!.push(mv);
+  }
+
+  // Construir mapa (mesada, fecha) → ocupación
+  const ocupMap = new Map<string, { loteId: string; cultivo: 'lechuga' | 'rucula' | 'albahaca' }>();
+
+  for (const lote of lotes) {
+    const movsLote = (movByLote.get(lote.id_lote) || [])
+      .map(mv => ({ ...mv, _f: normF(mv.fecha) }))
+      .filter(mv => mv._f)
+      .sort((a, b) => a._f.localeCompare(b._f));
+
+    if (!movsLote.length) continue;
+
+    const v = String(lote.variedad || '').toLowerCase();
+    const cultivo: 'lechuga' | 'rucula' | 'albahaca' =
+      v.includes('rucula') || v.includes('rúcula') ? 'rucula' :
+      v.includes('albahaca') ? 'albahaca' : 'lechuga';
+
+    for (let i = 0; i < movsLote.length; i++) {
+      const mv = movsLote[i];
+      const mesada = destAMesada.get(mv.ubicacion_destino);
+      if (!mesada) continue;
+
+      const desde = mv._f;
+      let hasta: string;
+      if (i + 1 < movsLote.length) {
+        hasta = movsLote[i + 1]._f;
+      } else if (lote.estado === 'activo') {
+        hasta = mananaStr;
+      } else {
+        const fc = normF(lote.fecha_cosecha || lote.fecha_ult_movimiento);
+        if (fc) {
+          const d2 = new Date(fc + 'T12:00:00'); d2.setDate(d2.getDate() + 1);
+          hasta = d2.toISOString().split('T')[0];
+        } else {
+          hasta = mananaStr;
+        }
+      }
+
+      // Marcar cada día de nuestro rango que caiga en [desde, hasta)
+      for (const fecha of fechasHist) {
+        if (fecha >= desde && fecha < hasta) {
+          const key = `${mesada}||${fecha}`;
+          if (!ocupMap.has(key)) ocupMap.set(key, { loteId: lote.id_lote, cultivo });
+        }
+      }
+    }
+  }
+
+  const ocupacionHistorial: MesadaOcupacion[] = mesadasHist.map(mes => ({
+    nombre: mes.nombre.replace(/^Nave \d+ - /, ''),
+    nave: Number(mes.nave),
+    dias: fechasHist.map(fecha => {
+      const ocup = ocupMap.get(`${mes.nombre}||${fecha}`);
+      return { fecha, loteId: ocup?.loteId ?? null, cultivo: ocup?.cultivo ?? null } as DiaOcupacion;
+    }),
+  }));
 
   const nombre = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
 
@@ -154,6 +267,20 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
       <div className="container">
         <h1 className="page-title">Estadísticas</h1>
         <p className="page-subtitle">{nombre}</p>
+
+        {/* Historial de ocupación — Nave 1 */}
+        <div className="card">
+          <p className="card-title">Historial de ocupación — Nave 1</p>
+          <p className="card-sub">Cada fila es una mesada · 2 meses · verde = lechuga · naranja = rúcula · violeta = albahaca</p>
+          <GraficoOcupacionHistorial mesadas={ocupacionHistorial} fechas={fechasHist} nave={1} />
+        </div>
+
+        {/* Historial de ocupación — Nave 2 */}
+        <div className="card">
+          <p className="card-title">Historial de ocupación — Nave 2</p>
+          <p className="card-sub">Cada fila es una mesada · 2 meses · verde = lechuga · naranja = rúcula · violeta = albahaca</p>
+          <GraficoOcupacionHistorial mesadas={ocupacionHistorial} fechas={fechasHist} nave={2} />
+        </div>
 
         {/* Evolución mensual */}
         <div className="card">

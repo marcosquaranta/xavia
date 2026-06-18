@@ -95,7 +95,49 @@ export async function proximoIdMovimiento(): Promise<number> {
 }
 
 export type FiltroCultivos = 'todos' | 'lechuga' | 'rucula' | 'albahaca' | 'plantinera' | 'fase_1' | 'fase_2' | 'cosechados';
+export type FiltroCultivo = 'todos' | 'lechuga' | 'rucula' | 'albahaca';
+export type FiltroFase = 'todas' | 'plantinera' | 'fase_1' | 'fase_2' | 'cosechados';
 export type FiltroNave = 'todas' | '1' | '2';
+export type FiltroMesada = string;
+export type FiltroTiempo = 'todos' | '7d' | '30d' | '90d';
+
+export function aplicarFiltros3(lotes: Lote[], cultivo: FiltroCultivo, fase: FiltroFase, nave: FiltroNave, mesada: FiltroMesada = 'todas', tiempo: FiltroTiempo = 'todos'): Lote[] {
+  let base = fase === 'cosechados'
+    ? lotes.filter((l) => l.estado === 'cosechado')
+    : lotes.filter((l) => l.estado === 'activo');
+  if (nave !== 'todas') {
+    const n = Number(nave);
+    base = base.filter((l) => {
+      const ubic = String(l.ubicacion_actual || '');
+      if (ubic.toLowerCase().includes('nave 1')) return n === 1;
+      if (ubic.toLowerCase().includes('nave 2')) return n === 2;
+      return naveDeLote(l.id_lote) === n;
+    });
+  }
+  if (cultivo !== 'todos') {
+    const cod = cultivo === 'lechuga' ? 'L' : cultivo === 'rucula' ? 'R' : 'A';
+    base = base.filter((l) => codigoCultivo(l.variedad) === cod);
+  }
+  if (fase === 'plantinera') base = base.filter((l) => l.fase_actual === 'plantin');
+  else if (fase === 'fase_1') base = base.filter((l) => l.fase_actual === 'fase_1');
+  else if (fase === 'fase_2') base = base.filter((l) => l.fase_actual === 'fase_2');
+  if (mesada && mesada !== 'todas') {
+    function normM(s: string) { return s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+    const mesadaNorm = normM(mesada);
+    base = base.filter((l) => normM(String(l.ubicacion_actual || '')) === mesadaNorm);
+  }
+  if (tiempo !== 'todos' && fase === 'cosechados') {
+    const hoy = new Date();
+    const dias = tiempo === '7d' ? 7 : tiempo === '30d' ? 30 : 90;
+    const limite = new Date(hoy); limite.setDate(hoy.getDate() - dias);
+    base = base.filter((l) => {
+      const f = l.fecha_ult_movimiento || l.fecha_cosecha;
+      if (!f) return false;
+      try { return new Date(String(f).split(/[\sT]/)[0]) >= limite; } catch { return false; }
+    });
+  }
+  return base;
+}
 
 export function aplicarFiltros(lotes: Lote[], filtro: FiltroCultivos, nave: FiltroNave): Lote[] {
   let base = filtro === 'cosechados' ? lotes.filter((l) => l.estado === 'cosechado') : lotes.filter((l) => l.estado === 'activo');

@@ -16,7 +16,7 @@ function fmt(f: string): string {
   if (!f) return '-';
   try { const [, m, d] = String(f).split('-'); return d + '/' + m; } catch { return f; }
 }
-export default function LoteCard({ lote, movimientos, ubicaciones, variedades }: { lote: Lote; movimientos: Movimiento[]; ubicaciones: Ubicacion[]; variedades: Variedad[] }) {
+export default function LoteCard({ lote, movimientos, ubicaciones, variedades }: { lote: Lote; movimientos: Movimiento[]; ubicaciones: Ubicacion[]; variedades: Variedad[]; ciclosReales?: Map<string, number> }) {
   let dias: any;
   try { dias = calcularDiasPorFase(lote, movimientos); }
   catch { dias = { plantinera: 0, fase_1: null, fase_2: 0, total: 0, fechas: { siembra: '', fase_1_inicio: null, fase_2_inicio: null, cosecha: null } }; }
