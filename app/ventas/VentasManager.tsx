@@ -57,8 +57,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
   const [correlaA,setCorrelaA]=useState<string>('');
   const [correlaB,setCorrelaB]=useState<string>('');
   const [enviarEmail,setEnviarEmail]=useState(true);
-  const [historial,setHistorial]=useState<any[]>([]);
+  const [historial,setHistorial]=useState<{exportaciones:any[];pendientes:any[]}>({exportaciones:[],pendientes:[]});
   const [loadHist,setLoadHist]=useState(false);
+  const [currentExportId,setCurrentExportId]=useState<string|null>(null);
   const [limpiando,setLimpiando]=useState(false);
   const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number;diasPromedio:number};lechuga:{stockActual:number;diasPromedio:number};factorGrPaq:{rucula:number;lechuga:number}}|null>(null);
   const [cosechaEst,setCosechaEst]=useState({rucula:'',lechuga:''});
@@ -122,13 +123,32 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
   function cargarHistorial(){
     setLoadHist(true);
     fetch('/api/ventas/historial').then(r=>r.json()).then(j=>{
-      setHistorial(j.fechas||[]);
+      setHistorial({exportaciones:j.exportaciones||[],pendientes:j.pendientes||[]});
       if(j.lastA) setCorrelaA(String(j.lastA+1));
       if(j.lastB) setCorrelaB(String(j.lastB+1));
     }).catch(()=>{}).finally(()=>setLoadHist(false));
   }
 
+  function cargarExportacion(idExp:string, fechaExp:string){
+    setCurrentExportId(idExp);
+    setFecha(fechaExp);
+    setShowHistorial(false);
+    setLoading(true);setMsg(null);
+    fetch(`/api/ventas/fecha?id_exportacion=${idExp}`).then(r=>r.json()).then((data:VentaDia[])=>{
+      const c:Ctds={}; const ckg:CKG={};
+      for(const v of data){
+        const key=`${v.id_control}__${v.sucursal}`;
+        c[key]={rucula:String(v.rucula||''),lechuga_crespa:String(v.lechuga_crespa||''),hoja_roble:String(v.hoja_roble||''),bandeja_rucula:String(v.bandeja_rucula||''),albahaca:String(v.albahaca||'')};
+        ckg[key]={rucula_kg:String(v.rucula_kg||''),lechuga_kg:String(v.lechuga_kg||'')};
+      }
+      ctdsKgLive.current=ckg;
+      setFechaExportada(true);
+      setCtds(c);setCtdsKg(ckg);setEsts({});setEstsKg({});
+    }).catch(()=>{}).finally(()=>setLoading(false));
+  }
+
   useEffect(()=>{
+    if(currentExportId) return; // Si estamos editando una exportación, no recargar por fecha
     setLoading(true);setMsg(null);
     fetch(`/api/ventas/fecha?fecha=${fecha}`).then(r=>r.json()).then((data:VentaDia[])=>{
       const c:Ctds={}; const ckg:CKG={};
@@ -138,7 +158,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
         ckg[key]={rucula_kg:String(v.rucula_kg||''),lechuga_kg:String(v.lechuga_kg||'')};
       }
       ctdsKgLive.current = ckg;
-      setFechaExportada(data.some((v:VentaDia) => v.exportado === 'SI'));
+      setFechaExportada(false);
+      setCurrentExportId(null);
       setCtds(c); setCtdsKg(ckg); setEsts({}); setEstsKg({});
     }).catch(()=>{}).finally(()=>setLoading(false));
   },[fecha]);
@@ -152,7 +173,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
     if(q(f.id_control,f.sucursal,k)==='')return;
     se(f.id_control,f.sucursal,k,'saving');
     try{
-      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:Number(q(f.id_control,f.sucursal,'rucula'))||0,lechuga_crespa:Number(q(f.id_control,f.sucursal,'lechuga_crespa'))||0,hoja_roble:Number(q(f.id_control,f.sucursal,'hoja_roble'))||0,bandeja_rucula:Number(q(f.id_control,f.sucursal,'bandeja_rucula'))||0,albahaca:Number(q(f.id_control,f.sucursal,'albahaca'))||0}]})});
+      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:currentExportId,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:Number(q(f.id_control,f.sucursal,'rucula'))||0,lechuga_crespa:Number(q(f.id_control,f.sucursal,'lechuga_crespa'))||0,hoja_roble:Number(q(f.id_control,f.sucursal,'hoja_roble'))||0,bandeja_rucula:Number(q(f.id_control,f.sucursal,'bandeja_rucula'))||0,albahaca:Number(q(f.id_control,f.sucursal,'albahaca'))||0}]})});
       if(!r.ok)throw new Error();
       se(f.id_control,f.sucursal,k,'saved');setTimeout(()=>se(f.id_control,f.sucursal,k,'idle'),2000);
     }catch{se(f.id_control,f.sucursal,k,'error');}
@@ -172,7 +193,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
     const lkg=Number(domRefs?.lechuga_kg?.value)||0;
     (['rucula_kg','lechuga_kg'] as const).forEach(k=>seKg(f.id_control,f.sucursal,k,'saving'));
     try{
-      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:rkg,lechuga_kg:lkg}]})});
+      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:currentExportId,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:rkg,lechuga_kg:lkg}]})});
       if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error((j as any).error||'Error');};
       (['rucula_kg','lechuga_kg'] as const).forEach(k=>{seKg(f.id_control,f.sucursal,k,'saved');setTimeout(()=>seKg(f.id_control,f.sucursal,k,'idle'),2000);});
     }catch(err:any){
@@ -190,9 +211,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
         ...filasNormales.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:Number(q(f.id_control,f.sucursal,'rucula'))||0,lechuga_crespa:Number(q(f.id_control,f.sucursal,'lechuga_crespa'))||0,hoja_roble:Number(q(f.id_control,f.sucursal,'hoja_roble'))||0,bandeja_rucula:Number(q(f.id_control,f.sucursal,'bandeja_rucula'))||0,albahaca:Number(q(f.id_control,f.sucursal,'albahaca'))||0,rucula_kg:0,lechuga_kg:0})),
         ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg:Number(dr?.lechuga_kg?.value)||0};}),
       ];
-      const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,lineas:todasLineas})});
+      const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:currentExportId,lineas:todasLineas})});
       if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar ventas');}
-      const r=await fetch('/api/ventas/exportar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,fechaFactura:ff,fechasCliente:fc,correlaA:Number(correlaA),correlaB:Number(correlaB),enviarEmail})});
+      const r=await fetch('/api/ventas/exportar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,fechaFactura:ff,fechasCliente:fc,correlaA:Number(correlaA),correlaB:Number(correlaB),enviarEmail,...(currentExportId?{id_exportacion:currentExportId}:{})})});
       const j=await r.json();if(!r.ok)throw new Error(j.error);
       const bytes=Uint8Array.from(atob(j.file),c=>c.charCodeAt(0));
       const url=URL.createObjectURL(new Blob([bytes]));
@@ -201,7 +222,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
       setMsg({t:'ok',s:`${j.facturas} facturas · A→${j.lastA} · B→${j.lastB}${emailTxt}`});
       setCorrelaA(String(j.lastA+1)); setCorrelaB(String(j.lastB+1));
       // Limpiar estado local (la hoja conserva los valores como registro histórico)
-      setCtds({});setEsts({});setCtdsKg({});ctdsKgLive.current={};setFc({});setFechaExportada(true);
+      setCtds({});setEsts({});setCtdsKg({});ctdsKgLive.current={};setFc({});
+      setCurrentExportId(null);setFechaExportada(false);
     }catch(err:any){setMsg({t:'err',s:err.message});}
     setExp(false);
   }
@@ -668,39 +690,77 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
         )}
         {showHistorial && (
           <div style={{marginTop:'10px'}}>
-            {loadHist ? <p style={{color:'#9ca3af',fontSize:'12px'}}>Cargando…</p> : historial.length === 0 ? <p style={{color:'#9ca3af',fontSize:'12px'}}>Sin datos.</p> : (
-              <table style={{fontSize:'12px',width:'100%'}}>
-                <thead><tr style={{background:'#f8fafc',borderBottom:'1px solid #e5e7eb'}}>
-                  <th style={{textAlign:'left',padding:'6px 10px'}}>Fecha</th>
-                  <th style={{textAlign:'right',padding:'6px 8px'}}>Rúcula paq</th>
-                  <th style={{textAlign:'right',padding:'6px 8px'}}>Lechuga paq</th>
-                  <th style={{textAlign:'right',padding:'6px 8px'}}>Rúcula kg</th>
-                  <th style={{textAlign:'right',padding:'6px 8px'}}>Lechuga kg</th>
-                  <th style={{textAlign:'center',padding:'6px 8px'}}>Estado</th>
-                  <th style={{padding:'6px 8px'}}></th>
-                </tr></thead>
-                <tbody>
-                  {historial.map((h:any)=>(
-                    <tr key={h.fecha} style={{borderBottom:'1px solid #f3f4f6',background:h.fecha===fecha?'#eff6ff':'white'}}>
-                      <td style={{padding:'6px 10px',fontWeight:600,whiteSpace:'nowrap'}}>{h.fecha}</td>
-                      <td style={{textAlign:'right',padding:'6px 8px',color:'#166534'}}>{h.rucula>0?h.rucula:'—'}</td>
-                      <td style={{textAlign:'right',padding:'6px 8px',color:'#4d7c0f'}}>{h.lechuga>0?h.lechuga:'—'}</td>
-                      <td style={{textAlign:'right',padding:'6px 8px',color:'#92400e'}}>{h.rucula_kg>0?h.rucula_kg.toFixed(1)+' kg':'—'}</td>
-                      <td style={{textAlign:'right',padding:'6px 8px',color:'#b45309'}}>{h.lechuga_kg>0?h.lechuga_kg.toFixed(1)+' kg':'—'}</td>
-                      <td style={{textAlign:'center',padding:'6px 8px'}}>
-                        <span style={{fontSize:'10px',background:h.exportado?'#dcfce7':'#fef9c3',color:h.exportado?'#166534':'#92400e',padding:'1px 6px',borderRadius:'4px',fontWeight:600}}>
-                          {h.exportado?'✓ Exportado':'Pendiente'}
-                        </span>
-                      </td>
-                      <td style={{padding:'6px 8px'}}>
-                        <button onClick={()=>{setFecha(h.fecha);setShowHistorial(false);}} style={{background:h.exportado?'#eff6ff':'none',border:`1px solid ${h.exportado?'#bfdbfe':'#e5e7eb'}`,borderRadius:'5px',padding:'2px 8px',fontSize:'11px',cursor:'pointer',color:h.exportado?'#1e40af':'#374151'}}>
-                          {h.exportado?'📋 Cargar':'Ir →'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            {loadHist ? <p style={{color:'#9ca3af',fontSize:'12px'}}>Cargando…</p> : (historial.exportaciones.length===0&&historial.pendientes.length===0) ? <p style={{color:'#9ca3af',fontSize:'12px'}}>Sin datos.</p> : (
+              <div>
+                {/* Exportaciones */}
+                {historial.exportaciones.length>0&&(
+                  <div style={{marginBottom:'10px'}}>
+                    <p style={{fontSize:'11px',fontWeight:700,color:'#1e40af',margin:'0 0 4px'}}>Exportaciones</p>
+                    <table style={{fontSize:'12px',width:'100%'}}>
+                      <thead><tr style={{background:'#eff6ff',borderBottom:'1px solid #bfdbfe'}}>
+                        <th style={{textAlign:'left',padding:'5px 8px'}}>ID exportación</th>
+                        <th style={{textAlign:'left',padding:'5px 8px'}}>Fecha</th>
+                        <th style={{textAlign:'right',padding:'5px 6px'}}>Rúcula paq</th>
+                        <th style={{textAlign:'right',padding:'5px 6px'}}>Lechuga paq</th>
+                        <th style={{textAlign:'right',padding:'5px 6px'}}>Rúcula kg</th>
+                        <th style={{textAlign:'right',padding:'5px 6px'}}>Lechuga kg</th>
+                        <th style={{padding:'5px 6px'}}></th>
+                      </tr></thead>
+                      <tbody>
+                        {historial.exportaciones.map((h:any)=>(
+                          <tr key={h.id_exportacion} style={{borderBottom:'1px solid #f3f4f6',background:h.id_exportacion===currentExportId?'#dbeafe':'white'}}>
+                            <td style={{padding:'5px 8px',fontFamily:'monospace',fontSize:'11px',color:'#1e40af'}}>{h.id_exportacion}</td>
+                            <td style={{padding:'5px 8px',whiteSpace:'nowrap'}}>{h.fecha}</td>
+                            <td style={{textAlign:'right',padding:'5px 6px',color:'#166534'}}>{h.rucula>0?h.rucula:'—'}</td>
+                            <td style={{textAlign:'right',padding:'5px 6px',color:'#4d7c0f'}}>{h.lechuga>0?h.lechuga:'—'}</td>
+                            <td style={{textAlign:'right',padding:'5px 6px',color:'#92400e'}}>{h.rucula_kg>0?h.rucula_kg.toFixed(1)+' kg':'—'}</td>
+                            <td style={{textAlign:'right',padding:'5px 6px',color:'#b45309'}}>{h.lechuga_kg>0?h.lechuga_kg.toFixed(1)+' kg':'—'}</td>
+                            <td style={{padding:'5px 6px'}}>
+                              <button onClick={()=>{cargarExportacion(h.id_exportacion,h.fecha);setShowHistorial(false);}}
+                                style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'5px',padding:'2px 8px',fontSize:'11px',cursor:'pointer',color:'#1e40af'}}>
+                                📋 Cargar
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {/* Pendientes */}
+                {historial.pendientes.length>0&&(
+                  <div>
+                    <p style={{fontSize:'11px',fontWeight:700,color:'#92400e',margin:'0 0 4px'}}>Pendientes (no exportados)</p>
+                    <table style={{fontSize:'12px',width:'100%'}}>
+                      <thead><tr style={{background:'#fefce8',borderBottom:'1px solid #fde68a'}}>
+                        <th style={{textAlign:'left',padding:'5px 8px'}}>Fecha</th>
+                        <th style={{textAlign:'right',padding:'5px 6px'}}>Rúcula paq</th>
+                        <th style={{textAlign:'right',padding:'5px 6px'}}>Lechuga paq</th>
+                        <th style={{textAlign:'right',padding:'5px 6px'}}>Rúcula kg</th>
+                        <th style={{textAlign:'right',padding:'5px 6px'}}>Lechuga kg</th>
+                        <th style={{padding:'5px 6px'}}></th>
+                      </tr></thead>
+                      <tbody>
+                        {historial.pendientes.map((h:any)=>(
+                          <tr key={h.fecha} style={{borderBottom:'1px solid #f3f4f6',background:h.fecha===fecha?'#fef9c3':'white'}}>
+                            <td style={{padding:'5px 8px',fontWeight:600,whiteSpace:'nowrap'}}>{h.fecha}</td>
+                            <td style={{textAlign:'right',padding:'5px 6px',color:'#166534'}}>{h.rucula>0?h.rucula:'—'}</td>
+                            <td style={{textAlign:'right',padding:'5px 6px',color:'#4d7c0f'}}>{h.lechuga>0?h.lechuga:'—'}</td>
+                            <td style={{textAlign:'right',padding:'5px 6px',color:'#92400e'}}>{h.rucula_kg>0?h.rucula_kg.toFixed(1)+' kg':'—'}</td>
+                            <td style={{textAlign:'right',padding:'5px 6px',color:'#b45309'}}>{h.lechuga_kg>0?h.lechuga_kg.toFixed(1)+' kg':'—'}</td>
+                            <td style={{padding:'5px 6px'}}>
+                              <button onClick={()=>{setFecha(h.fecha);setShowHistorial(false);}}
+                                style={{background:'none',border:'1px solid #e5e7eb',borderRadius:'5px',padding:'2px 8px',fontSize:'11px',cursor:'pointer',color:'#374151'}}>
+                                Ir →
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}

@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
 
   try {
-    const { fecha, fechaFactura, fechasCliente = {}, correlaA, correlaB, enviarEmail = true } = await req.json();
+    const { fecha, fechaFactura, fechasCliente = {}, correlaA, correlaB, enviarEmail = true, id_exportacion: idExpReexport } = await req.json();
     const fechaBase = fechaFactura || fecha;
     const [clientes, precios, ventas, config, lotes] = await Promise.all([
       readSheet<ClienteVenta>('Clientes'),
@@ -46,8 +46,16 @@ export async function POST(req: NextRequest) {
       readSheet<Lote>('Lotes'),
     ]);
 
-    const ventasFecha = ventas.filter(v => v.fecha === fecha);
-    if (!ventasFecha.length) return NextResponse.json({ error: 'Sin ventas para esa fecha' }, { status: 400 });
+    // Re-export: usar filas de la exportación anterior. Export nuevo: solo filas no exportadas.
+    const ventasFecha = idExpReexport
+      ? ventas.filter(v => v.exportado === idExpReexport)
+      : ventas.filter(v => v.fecha === fecha && (!v.exportado || v.exportado === ''));
+    if (!ventasFecha.length) return NextResponse.json({ error: 'Sin ventas para exportar' }, { status: 400 });
+
+    // Generar ID de exportación (nuevo o reusar el existente para re-export)
+    const now = new Date();
+    const hhmm = `${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
+    const id_exportacion = idExpReexport || `EXP-${fecha.replace(/-/g,'')}-${hhmm}`;
 
     // Usar correlativo manual si se provee, sino leer de Config
     // El frontend manda correlaA = "próximo número a usar", el backend hace ++lastA antes de usarlo,
@@ -184,11 +192,11 @@ export async function POST(req: NextRequest) {
     if (cfgA && lastA > initialA) await updateRow('Config', 'clave', 'last_factura_a', { valor: lastA });
     if (cfgB && lastB > initialB) await updateRow('Config', 'clave', 'last_factura_b', { valor: lastB });
 
-    // Marcar ventas como exportadas — conserva los valores para registro histórico
+    // Marcar filas con el ID de exportación (conserva valores para historial)
     const resetFecha = new Date().toISOString().split('T')[0];
     await batchUpdateRows('Ventas', 'id_venta', ventasFecha.map(v => ({
       keyValue: v.id_venta,
-      updates: { exportado: 'SI', fecha_carga: resetFecha },
+      updates: { exportado: id_exportacion, fecha_carga: resetFecha },
     })));
 
     // Enviar email via Resend (sin SMTP, sin dependencias)
@@ -231,7 +239,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true, emailOk, emailError,
       facturas: controlesUsados.length,
-      lastA, lastB,
+      lastA, lastB, id_exportacion,
       filename: `xavia_xubio_${fechaLimpia}.xls`,
       file: Buffer.from(xlsxBuf).toString('base64'),
     });

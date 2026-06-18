@@ -7,8 +7,7 @@ export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
   try {
-    const { fecha, lineas } = await req.json();
-    // Una sola lectura para todas las lineas
+    const { fecha, lineas, id_exportacion } = await req.json();
     const ventas = await readSheet<VentaDia>('Ventas');
     const fechaCarga = new Date().toISOString().split('T')[0];
 
@@ -20,8 +19,13 @@ export async function POST(req: NextRequest) {
     const toUpdate: Array<{ keyValue: string; updates: Record<string, any> }> = [];
 
     for (const l of lineas) {
+      // Si hay id_exportacion: re-editando una exportación existente → buscar esa fila
+      // Si no: sesión nueva → solo buscar filas no exportadas
       const existente = ventas.find(v =>
-        v.fecha === fecha && String(v.id_control) === String(l.id_control) && v.sucursal === l.sucursal
+        v.fecha === fecha &&
+        String(v.id_control) === String(l.id_control) &&
+        v.sucursal === l.sucursal &&
+        (id_exportacion ? v.exportado === id_exportacion : (!v.exportado || v.exportado === ''))
       );
       if (existente) {
         toUpdate.push({
@@ -35,7 +39,6 @@ export async function POST(req: NextRequest) {
           },
         });
       } else {
-        // appendRow es secuencial para evitar IDs duplicados
         await appendRow('Ventas', [
           `V-${String(nextId++).padStart(5, '0')}`, fecha,
           l.id_control, l.nombre_cliente, l.sucursal,
@@ -47,7 +50,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Un solo batchUpdate para todas las filas existentes
     if (toUpdate.length) {
       await batchUpdateRows('Ventas', 'id_venta', toUpdate);
     }

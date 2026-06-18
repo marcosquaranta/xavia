@@ -11,24 +11,64 @@ export async function GET() {
       readSheet<VentaDia>('Ventas'),
       readSheet<ConfigItem>('Config'),
     ]);
-    // Agrupar por fecha con resumen
-    const porFecha = new Map<string, { fecha: string; clientes: number; exportado: boolean; rucula: number; lechuga: number; rucula_kg: number; lechuga_kg: number }>();
+
+    // Agrupar por id_exportacion (cada exportación es una entrada separada)
+    type EntradaExp = {
+      id_exportacion: string; fecha: string; fecha_exportacion: string;
+      clientes: number; rucula: number; lechuga: number; rucula_kg: number; lechuga_kg: number;
+    };
+    const porExp = new Map<string, EntradaExp>();
+
+    // Filas pendientes (no exportadas aún) → agrupar por fecha
+    type EntradaPend = {
+      fecha: string; clientes: number; rucula: number; lechuga: number; rucula_kg: number; lechuga_kg: number;
+    };
+    const pendientes = new Map<string, EntradaPend>();
+
     for (const v of ventas) {
       if (!v.fecha) continue;
-      const f = String(v.fecha).split(/[\sT]/)[0];
-      const ex = porFecha.get(f) || { fecha: f, clientes: 0, exportado: false, rucula: 0, lechuga: 0, rucula_kg: 0, lechuga_kg: 0 };
-      ex.clientes++;
-      ex.rucula += Number(v.rucula || 0);
-      ex.lechuga += Number(v.lechuga_crespa || 0) + Number(v.hoja_roble || 0);
-      ex.rucula_kg += Number(v.rucula_kg || 0);
-      ex.lechuga_kg += Number(v.lechuga_kg || 0);
-      if (v.exportado === 'SI') ex.exportado = true;
-      porFecha.set(f, ex);
+      const fecha = String(v.fecha).split(/[\sT]/)[0];
+      const expId = String(v.exportado || '');
+
+      if (expId && expId !== '') {
+        // Fila exportada
+        const ex = porExp.get(expId) || {
+          id_exportacion: expId, fecha, fecha_exportacion: String(v.fecha_carga || fecha),
+          clientes: 0, rucula: 0, lechuga: 0, rucula_kg: 0, lechuga_kg: 0,
+        };
+        ex.clientes++;
+        ex.rucula   += Number(v.rucula || 0);
+        ex.lechuga  += Number(v.lechuga_crespa || 0) + Number(v.hoja_roble || 0);
+        ex.rucula_kg  += Number(v.rucula_kg || 0);
+        ex.lechuga_kg += Number(v.lechuga_kg || 0);
+        porExp.set(expId, ex);
+      } else {
+        // Fila pendiente
+        const p = pendientes.get(fecha) || {
+          fecha, clientes: 0, rucula: 0, lechuga: 0, rucula_kg: 0, lechuga_kg: 0,
+        };
+        p.clientes++;
+        p.rucula   += Number(v.rucula || 0);
+        p.lechuga  += Number(v.lechuga_crespa || 0) + Number(v.hoja_roble || 0);
+        p.rucula_kg  += Number(v.rucula_kg || 0);
+        p.lechuga_kg += Number(v.lechuga_kg || 0);
+        pendientes.set(fecha, p);
+      }
     }
-    const fechas = [...porFecha.values()].sort((a, b) => b.fecha.localeCompare(a.fecha)).slice(0, 30);
+
+    // Exportaciones ordenadas por id (más reciente primero)
+    const exportaciones = [...porExp.values()]
+      .sort((a, b) => b.id_exportacion.localeCompare(a.id_exportacion))
+      .slice(0, 40);
+
+    // Pendientes ordenadas por fecha desc
+    const pendientesArr = [...pendientes.values()]
+      .sort((a, b) => b.fecha.localeCompare(a.fecha))
+      .slice(0, 10);
+
     const lastA = Number(config.find(c => c.clave === 'last_factura_a')?.valor || 665);
     const lastB = Number(config.find(c => c.clave === 'last_factura_b')?.valor || 575);
-    return NextResponse.json({ fechas, lastA, lastB });
+    return NextResponse.json({ exportaciones, pendientes: pendientesArr, lastA, lastB });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
