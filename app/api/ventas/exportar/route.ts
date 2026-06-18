@@ -81,6 +81,7 @@ export async function POST(req: NextRequest) {
     const controlesUsados = [...porControl.keys()].sort((a,b) =>
       controlesOrden.indexOf(a) - controlesOrden.indexOf(b)
     );
+    let facturasGeneradas = 0;
 
     // Trazabilidad: lotes cosechados en la fecha (±1 día)
     function lotesParaCliente(idControl: string, fechaFact: string): string {
@@ -129,6 +130,7 @@ export async function POST(req: NextRequest) {
           .some(k => Number((l as any)[k]) > 0)
       );
       if (!tieneVentas) continue;
+      facturasGeneradas++;
 
       const esA = cliente.tipo_factura === 'A';
       const pv = Number(cliente.punto_venta);
@@ -214,8 +216,8 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify({
             from: 'Xavia App <ventas@xavia.com.ar>',
             to: ['administracion@xavia.com.ar'],
-            subject: `Ventas Xavia — ${fecha} (${controlesUsados.length} facturas)`,
-            html: `<p>Se adjunta archivo de ventas del <strong>${fecha}</strong>.<br>Facturas: <strong>${controlesUsados.length}</strong> · A hasta <strong>${lastA}</strong> · B hasta <strong>${lastB}</strong></p>`,
+            subject: `Ventas Xavia — ${fecha} (${facturasGeneradas} facturas)`,
+            html: `<p>Se adjunta archivo de ventas del <strong>${fecha}</strong>.<br>Facturas: <strong>${facturasGeneradas}</strong> · A hasta <strong>${lastA}</strong> · B hasta <strong>${lastB}</strong></p>`,
             attachments: [{
               filename: nombreArchivo,
               content: Buffer.from(xlsxBuf).toString('base64'),
@@ -238,7 +240,7 @@ export async function POST(req: NextRequest) {
     const fechaLimpia = fecha.replace(/-/g, '');
     return NextResponse.json({
       ok: true, emailOk, emailError,
-      facturas: controlesUsados.length,
+      facturas: facturasGeneradas,
       lastA, lastB, id_exportacion,
       filename: `xavia_xubio_${fechaLimpia}.xls`,
       file: Buffer.from(xlsxBuf).toString('base64'),
