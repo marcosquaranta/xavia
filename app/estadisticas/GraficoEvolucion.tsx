@@ -68,15 +68,6 @@ export default function GraficoEvolucion({ curvas, anioActual, anioAnterior }: {
           const datF2 = c.datosActual.filter(([, v]) => v.f2 > 0) as [number, { total: number; f2: number }][];
           return (
             <g key={c.variedad}>
-              {/* Año anterior - punteado tenue */}
-              {c.datosAnterior.length > 0 && (
-                <path d={pathLine(c.datosAnterior)} fill="none" stroke={cl.total} strokeWidth={1.5} strokeDasharray="5 4" opacity={0.35} />
-              )}
-              {/* Total año actual - línea fina */}
-              {c.datosActual.length > 0 && (
-                <path d={pathLine(c.datosActual.map(([m, v]) => [m, v.total] as [number, number]))} fill="none" stroke={cl.total} strokeWidth={1.5} opacity={0.6} />
-              )}
-              {/* F2 año actual - línea gruesa destacada */}
               {datF2.length > 0 && (
                 <>
                   <path d={pathF2(datF2)} fill="none" stroke={cl.f2} strokeWidth={3} />
@@ -102,16 +93,8 @@ export default function GraficoEvolucion({ curvas, anioActual, anioAnterior }: {
               <circle cx={12} cy={5} r={3.5} fill={col(c.variedad).f2} />
             </svg>
             <span style={{ color: '#374151' }}>{c.variedad} F2</span>
-            <svg width={20} height={10}>
-              <line x1={0} y1={5} x2={20} y2={5} stroke={col(c.variedad).total} strokeWidth={1.5} opacity={0.6} />
-            </svg>
-            <span style={{ color: '#9ca3af' }}>total</span>
           </div>
         ))}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <svg width={20} height={10}><line x1={0} y1={5} x2={20} y2={5} stroke="#9ca3af" strokeWidth={1.5} strokeDasharray="4 3" /></svg>
-          <span style={{ color: '#9ca3af' }}>{anioAnterior}</span>
-        </div>
       </div>
     </div>
   );

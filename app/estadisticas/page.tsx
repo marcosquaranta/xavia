@@ -10,11 +10,12 @@ import GraficoCiclosMesadas from './GraficoCiclosMesadas';
 import GraficoPesaje from './GraficoPesaje';
 export const dynamic = 'force-dynamic';
 
-export default async function EstadisticasPage({ searchParams }: { searchParams: { nave?: string } }) {
+export default async function EstadisticasPage({ searchParams }: { searchParams: { nave?: string; periodo?: string } }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   const naveFilter = searchParams.nave || 'todas';
+  const periodoMesada = (searchParams.periodo || 'anio') as 'mes' | 'mes_ant' | 'anio' | 'siempre';
 
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], variedades: Variedad[] = [], ubicaciones: Ubicacion[] = [];
   let err: string | null = null;
@@ -38,13 +39,18 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   const nombreMes = hoy.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
   const varActivas = variedades.filter(v => v.activo === 'SI');
 
-  // Puntos de pesaje testigo: lotes cosechados por paquete con peso_muestra_kg > 0
+  // Puntos de pesaje testigo: lotes cosechados con peso registrado
   const puntosPesaje = lotes
-    .filter(l => l.estado === 'cosechado' && l.fecha_cosecha && Number(l.peso_muestra_kg) > 0 && (l.destino_cosecha === 'paquete' || l.destino_cosecha === 'bandeja'))
+    .filter(l => {
+      if (l.estado !== 'cosechado' || !l.fecha_cosecha) return false;
+      return Number(l.peso_muestra_paquete_gr) > 0 || Number(l.peso_muestra_kg) > 0;
+    })
     .map(l => ({
       fecha: String(l.fecha_cosecha),
       variedad: l.variedad,
-      peso_gr: Math.round(Number(l.peso_muestra_kg) * 1000),
+      peso_gr: Number(l.peso_muestra_paquete_gr) > 0
+        ? Number(l.peso_muestra_paquete_gr)
+        : Math.round(Number(l.peso_muestra_kg) * 1000),
       paquetes: Number(l.unidades_cosechadas) || 0,
     }))
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
@@ -70,7 +76,26 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   // Para cada mesada: promedio de dias_f1, dias_f2 de cosechados cuyo historial de movimientos
   // incluye esa mesada como ubicacion_destino
   const mesadas = ubicaciones.filter(u => u.tipo === 'mesada' && u.activo === 'SI');
-  const cosechados = lotes.filter(l => l.estado === 'cosechado');
+
+  // Filtro de período para ciclos por mesada
+  function cosechadosEnPeriodo(periodo: typeof periodoMesada) {
+    const todos = lotes.filter(l => l.estado === 'cosechado');
+    if (periodo === 'siempre') return todos;
+    const ahora = new Date();
+    let desde: Date;
+    if (periodo === 'mes') {
+      desde = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
+    } else if (periodo === 'mes_ant') {
+      const mp = new Date(ahora); mp.setMonth(mp.getMonth() - 1);
+      desde = new Date(mp.getFullYear(), mp.getMonth(), 1);
+      const hasta = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
+      return todos.filter(l => { const f = new Date(String(l.fecha_cosecha)+'T12:00:00'); return f >= desde && f < hasta; });
+    } else { // anio
+      desde = new Date(ahora.getFullYear(), 0, 1);
+    }
+    return todos.filter(l => new Date(String(l.fecha_cosecha)+'T12:00:00') >= desde);
+  }
+  const cosechados = cosechadosEnPeriodo(periodoMesada);
 
   // Mapear id_lote → dias por fase
   const diasPorLote = new Map<string, { f1: number|null; f2: number; total: number; variedad: string; nave: number }>();
@@ -204,16 +229,16 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                 <tbody>
                   {statsActual.map((s: any) => {
                     const ant = statsPasado.find((x:any) => x.variedad === s.variedad);
-                    const dU = ant ? s.unidades - ant.unidades : null;
-                    const dC = ant ? s.ciclo_prom - ant.ciclo_prom : null;
+                    const dU = ant ? s.cosechado - ant.cosechado : null;
+                    const dC = ant ? s.ciclo_promedio - ant.ciclo_promedio : null;
                     return (
                       <tr key={s.variedad}>
                         <td>{s.variedad}</td>
-                        <td style={{ textAlign:'right', fontWeight:500 }}>{s.unidades?.toLocaleString?.('es-AR')} {s.tipo_unidad}</td>
+                        <td style={{ textAlign:'right', fontWeight:500 }}>{s.cosechado?.toLocaleString?.('es-AR')} paq.</td>
                         <td style={{ textAlign:'right', color:dU===null?'#9ca3af':dU>=0?'#059669':'#dc2626' }}>
                           {dU===null?'—':(dU>=0?'+':'')+dU}
                         </td>
-                        <td style={{ textAlign:'right' }}>{s.ciclo_prom>0?s.ciclo_prom+'d':'—'}</td>
+                        <td style={{ textAlign:'right' }}>{s.ciclo_promedio>0?s.ciclo_promedio+'d':'—'}</td>
                         <td style={{ textAlign:'right', color:dC===null?'#9ca3af':dC<=0?'#059669':'#dc2626' }}>
                           {dC===null?'—':(dC>0?'+':'')+dC+'d'}
                         </td>
@@ -234,18 +259,30 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
         {/* Ciclos por mesada */}
         <div className="card">
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'10px', flexWrap:'wrap', gap:'8px' }}>
             <div>
               <p className="card-title" style={{ margin:'0 0 2px' }}>Ciclos promedio por mesada</p>
               <p className="card-sub" style={{ margin:0 }}>Basado en lotes cosechados · días F1 + F2 sin plantinera</p>
             </div>
-            <div style={{ display:'flex', gap:'6px' }}>
-              {[['todas','Ambas'],['1','Nave 1'],['2','Nave 2']].map(([v,l]) => (
-                <a key={v} href={`/estadisticas${v!=='todas'?`?nave=${v}`:''}`}
-                  style={{ padding:'4px 10px', borderRadius:'6px', fontSize:'12px', fontWeight:naveFilter===v?700:400, background:naveFilter===v?'#111827':'#f3f4f6', color:naveFilter===v?'white':'#374151', textDecoration:'none' }}>
-                  {l}
-                </a>
-              ))}
+            <div style={{ display:'flex', flexDirection:'column', gap:'6px', alignItems:'flex-end' }}>
+              {/* Filtro período */}
+              <div style={{ display:'flex', gap:'4px' }}>
+                {([['mes','Este mes'],['mes_ant','Mes ant.'],['anio','Este año'],['siempre','Siempre']] as const).map(([v,l]) => (
+                  <a key={v} href={`/estadisticas?${new URLSearchParams({ ...(naveFilter!=='todas'?{nave:naveFilter}:{}), periodo:v }).toString()}`}
+                    style={{ padding:'3px 8px', borderRadius:'5px', fontSize:'11px', fontWeight:periodoMesada===v?700:400, background:periodoMesada===v?'#374151':'#f3f4f6', color:periodoMesada===v?'white':'#6b7280', textDecoration:'none' }}>
+                    {l}
+                  </a>
+                ))}
+              </div>
+              {/* Filtro nave */}
+              <div style={{ display:'flex', gap:'4px' }}>
+                {([['todas','Ambas'],['1','Nave 1'],['2','Nave 2']] as const).map(([v,l]) => (
+                  <a key={v} href={`/estadisticas?${new URLSearchParams({ ...(v!=='todas'?{nave:v}:{}), periodo:periodoMesada }).toString()}`}
+                    style={{ padding:'3px 8px', borderRadius:'5px', fontSize:'11px', fontWeight:naveFilter===v?700:400, background:naveFilter===v?'#111827':'#f3f4f6', color:naveFilter===v?'white':'#374151', textDecoration:'none' }}>
+                    {l}
+                  </a>
+                ))}
+              </div>
             </div>
           </div>
 
