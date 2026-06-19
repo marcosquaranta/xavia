@@ -26,7 +26,7 @@ export default async function CultivosPage({
   const mesada = searchParams.mesada || 'todas';
   const tiempo = (searchParams.tiempo || 'todos') as any;
   const query = (searchParams.q || '').trim().toLowerCase();
-  const orden = searchParams.orden === 'desc' ? 'desc' : 'asc';
+  const orden = searchParams.orden === 'asc' ? 'asc' : 'desc';
 
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [], variedades: Variedad[] = [];
   let err: string | null = null;
@@ -81,7 +81,7 @@ export default async function CultivosPage({
               className="btn secondary"
               style={{ fontSize: '12px' }}
             >
-              {orden === 'asc' ? '↑ Más viejos primero' : '↓ Más nuevos primero'}
+              {orden === 'desc' ? '↓ Más nuevos primero' : '↑ Más viejos primero'}
             </Link>
             <Link href="/cultivos/nuevo" className="btn">+ Nuevo lote</Link>
           </div>

@@ -143,15 +143,17 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     const pLech: number[] = [], pRuc: number[] = [];
     for (const idLote of lotesEnMesada) {
       const d = diasPorLote.get(String(idLote));
-      if (!d) continue;
-      const vNorm = d.variedad.toLowerCase();
-      const esR = vNorm.includes('rucula') || vNorm.includes('rúcula');
-      if (esR) {
-        if (d.f2 > 0) rF2.push(d.f2);
-      } else {
-        if (d.f1 !== null && d.f1 > 0) lF1.push(d.f1);
-        if (d.f2 > 0) lF2.push(d.f2);
+      if (d) {
+        const vNorm = d.variedad.toLowerCase();
+        const esR = vNorm.includes('rucula') || vNorm.includes('rúcula');
+        if (esR) {
+          if (d.f2 > 0) rF2.push(d.f2);
+        } else {
+          if (d.f1 !== null && d.f1 > 0) lF1.push(d.f1);
+          if (d.f2 > 0) lF2.push(d.f2);
+        }
       }
+      // Peso independiente del filtro de ciclo
       const p = pesoLoteMap.get(String(idLote));
       if (p) (p.esRucula ? pRuc : pLech).push(p.gr);
     }

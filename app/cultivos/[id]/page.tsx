@@ -20,7 +20,7 @@ export default async function DetalleLotePage({ params }: { params: { id: string
   let dias: any;
   try { dias = calcularDiasPorFase(lote, movimientos); }
   catch { dias = { plantinera: 0, fase_1: null, fase_2: 0, total: 0, fechas: { siembra: lote.fecha_siembra, fase_1_inicio: null, fase_2_inicio: null, cosecha: null } }; }
-  const movsLote = movimientos.filter((m) => m.id_lote === idLote).sort((a, b) => String(a.fecha || '').localeCompare(String(b.fecha || '')));
+  const movsLote = movimientos.filter((m) => m.id_lote === idLote).sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
   const ult = movsLote[movsLote.length - 1];
   const variedad = variedades.find((v) => v.variedad === lote.variedad);
   const labelFase = lote.fase_actual === 'plantin' ? 'Plantinera' : lote.fase_actual === 'fase_1' ? 'Fase 1' : 'Fase 2';
@@ -53,6 +53,12 @@ export default async function DetalleLotePage({ params }: { params: { id: string
               ...((lote.descarte_reportado && Number(lote.descarte_reportado) > 0) ? [['Descarte', lote.descarte_reportado + ' plantas', null]] : []),
               ...((lote.plantas_por_unidad_real && Number(lote.plantas_por_unidad_real) > 1) ? [['Plantas/paquete', lote.plantas_por_unidad_real, 'real']] : []),
               ...((lote.plantines_iniciales) ? [['Plantines usados', lote.plantines_iniciales, 'total del lote']] : []),
+              ...(() => {
+                const gr = Number(lote.peso_muestra_paquete_gr) > 0
+                  ? Number(lote.peso_muestra_paquete_gr)
+                  : Number(lote.peso_muestra_kg) > 0 ? Math.round(Number(lote.peso_muestra_kg) * 1000) : 0;
+                return gr > 0 ? [['Pasaje testigo', gr + ' g/paq', 'gramos por paquete']] : [];
+              })(),
             ] : []),
           ].map(([label, value, sub]: any) => (
             <div key={label} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '14px' }}>
