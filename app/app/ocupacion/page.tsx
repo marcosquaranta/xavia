@@ -28,18 +28,14 @@ export default async function OcupacionPage() {
   // Leer historial de ocupación (hoja puede no existir aún)
   try { ocupHistRows = await readSheet<OcupHistRow>('OcupacionHistorial'); } catch {}
 
-  // Registrar snapshot de hoy si aún no existe
+  // Registrar snapshot de hoy si el cron aún no lo hizo (fallback al abrir la página)
   const hoyStr = new Date().toISOString().split('T')[0];
-  const hoyYaRegistrado = ocupHistRows.some(r => r.fecha === hoyStr);
-  if (!hoyYaRegistrado && ubicaciones.length > 0 && lotes.length > 0) {
+  if (!ocupHistRows.some(r => r.fecha === hoyStr) && lotes.length > 0 && ubicaciones.length > 0) {
     try {
       const resumen = tubosPorMesada(ubicaciones, lotes);
-      const newRows: any[][] = [];
-      for (const nave of resumen) {
-        for (const m of nave.mesadas) {
-          newRows.push([hoyStr, m.nombre, m.nave, m.tubos_totales, m.tubos_ocupados, m.ocupacion_pct]);
-        }
-      }
+      const newRows: any[][] = resumen.flatMap(nave =>
+        nave.mesadas.map(m => [hoyStr, m.nombre, m.nave, m.tubos_totales, m.tubos_ocupados, m.ocupacion_pct])
+      );
       if (newRows.length) {
         await appendRows('OcupacionHistorial', newRows);
         for (const r of newRows)
