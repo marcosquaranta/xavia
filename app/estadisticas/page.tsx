@@ -158,9 +158,13 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     const tipo: CicloMesada['tipo'] = esRuculaMesada ? 'rucula' : esLechugaMesada ? 'lechuga' : 'mixta';
 
     // Lotes cosechados que pasaron por esta mesada
+    // ubicacion_destino puede tener o no el prefijo "Nave X - "
+    const nombreCorto = mes.nombre.replace(/^Nave \d+ - /i, '');
     const lotesEnMesada = new Set(
       movimientos
-        .filter(m => m.ubicacion_destino === mes.nombre || m.ubicacion_destino === mes.id_ubicacion)
+        .filter(m => m.ubicacion_destino === mes.nombre
+          || m.ubicacion_destino === mes.id_ubicacion
+          || m.ubicacion_destino === nombreCorto)
         .map(m => m.id_lote)
     );
 

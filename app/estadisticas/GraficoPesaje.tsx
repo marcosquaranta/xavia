@@ -14,22 +14,35 @@ export default function GraficoPesaje({ puntos }: { puntos: PuntoPesaje[] }) {
     </div>
   );
 
+  // Agrupar por (fecha, cultivo) y promediar pesos
+  function agrupar(cultivo: string): { fecha: string; peso_gr: number }[] {
+    const esRucula = (v: string) => v.toLowerCase().includes('rucula') || v.toLowerCase().includes('rúcula');
+    const filtrados = puntos.filter(p => cultivo === 'rucula' ? esRucula(p.variedad) : !esRucula(p.variedad));
+    const byFecha = new Map<string, number[]>();
+    for (const p of filtrados) {
+      const arr = byFecha.get(p.fecha) || [];
+      arr.push(p.peso_gr);
+      byFecha.set(p.fecha, arr);
+    }
+    return [...byFecha.entries()]
+      .map(([fecha, pesos]) => ({ fecha, peso_gr: Math.round(pesos.reduce((a,b)=>a+b,0)/pesos.length) }))
+      .sort((a,b) => a.fecha.localeCompare(b.fecha));
+  }
+
   const W = 700, H = 260, L = 52, R = 680, T = 24, Bot = 220;
-  const pesos = puntos.map(p => p.peso_gr);
+  const todosAgrupados = [...agrupar('rucula'), ...agrupar('lechuga')];
+  const pesos = todosAgrupados.map(p => p.peso_gr);
   const minP = Math.floor(Math.min(...pesos) * 0.9);
   const maxP = Math.ceil(Math.max(...pesos) * 1.1);
-  const fechas = [...new Set(puntos.map(p => p.fecha))].sort();
+  const fechas = [...new Set(todosAgrupados.map(p => p.fecha))].sort();
   const xOf = (f: string) => fechas.length < 2
     ? (L + R) / 2
     : L + ((fechas.indexOf(f) / (fechas.length - 1)) * (R - L));
-  const yOf = (v: number) => Bot - ((v - minP) / (maxP - minP)) * (Bot - T);
+  const yOf = (v: number) => Bot - ((v - minP) / (maxP - minP || 1)) * (Bot - T);
 
   function pathFor(cultivo: string) {
-    const pts = puntos.filter(p => {
-      const v = p.variedad.toLowerCase();
-      return cultivo === 'rucula' ? (v.includes('rucula') || v.includes('rúcula')) : (v.includes('lechuga'));
-    }).sort((a, b) => a.fecha.localeCompare(b.fecha));
-    if (!pts.length) return { path: '', circles: [] };
+    const pts = agrupar(cultivo);
+    if (!pts.length) return { path: '', circles: [] as typeof pts };
     const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(p.fecha)} ${yOf(p.peso_gr)}`).join(' ');
     return { path, circles: pts };
   }
@@ -41,10 +54,7 @@ export default function GraficoPesaje({ puntos }: { puntos: PuntoPesaje[] }) {
     <div>
       <div style={{ display: 'flex', gap: '16px', marginBottom: '8px', flexWrap: 'wrap' }}>
         {CULTIVOS.map(c => {
-          const pts = puntos.filter(p => {
-            const v = p.variedad.toLowerCase();
-            return c.key === 'rucula' ? (v.includes('rucula') || v.includes('rúcula')) : v.includes('lechuga');
-          });
+          const pts = agrupar(c.key);
           if (!pts.length) return null;
           const ultimo = pts[pts.length - 1];
           return (
