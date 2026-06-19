@@ -34,7 +34,7 @@ export default async function OcupacionPage() {
     try {
       const resumen = tubosPorMesada(ubicaciones, lotes);
       const newRows: any[][] = resumen.flatMap(nave =>
-        nave.mesadas.map(m => [hoyStr, m.nombre, m.nave, m.tubos_totales, m.tubos_ocupados, m.ocupacion_pct])
+        nave.mesadas.filter(m => m.sector_fase !== 'fase_1').map(m => [hoyStr, m.nombre, m.nave, m.tubos_totales, m.tubos_ocupados, m.ocupacion_pct])
       );
       if (newRows.length) {
         await appendRows('OcupacionHistorial', newRows);
@@ -63,7 +63,7 @@ export default async function OcupacionPage() {
     return null;
   }
   const mesadasOrdenadas = ubicaciones
-    .filter(u => u.tipo === 'mesada' && u.activo === 'SI')
+    .filter(u => u.tipo === 'mesada' && u.activo === 'SI' && u.sector_fase !== 'fase_1')
     .sort((a, b) => (Number(a.nave) - Number(b.nave)) || (Number(a.orden_visual) - Number(b.orden_visual)));
   const ocupacionHistorial: MesadaOcupacion[] = mesadasOrdenadas.map(mes => ({
     nombre: mes.nombre.replace(/^Nave \d+ - /, ''),
@@ -77,8 +77,10 @@ export default async function OcupacionPage() {
   const tubosPorNave = tubosPorMesada(ubicaciones, lotes);
   const capacidad = calcularCapacidadMensual(ubicaciones, lotes);
 
-  const tubosTotalGlobal = tubosPorNave.reduce((a: number, n: any) => a + n.tubos_totales, 0);
-  const tubosOcupGlobal = tubosPorNave.reduce((a: number, n: any) => a + n.tubos_ocupados, 0);
+  const tubosTotalGlobal = tubosPorNave.reduce((a: number, n: any) =>
+    a + n.mesadas.filter((m: any) => m.sector_fase !== 'fase_1').reduce((s: number, m: any) => s + m.tubos_totales, 0), 0);
+  const tubosOcupGlobal = tubosPorNave.reduce((a: number, n: any) =>
+    a + n.mesadas.filter((m: any) => m.sector_fase !== 'fase_1').reduce((s: number, m: any) => s + m.tubos_ocupados, 0), 0);
   const ocPct = tubosTotalGlobal > 0 ? Math.round((tubosOcupGlobal / tubosTotalGlobal) * 100) : 0;
 
   function colorOc(pct: number) {
@@ -104,7 +106,7 @@ export default async function OcupacionPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginBottom: '16px' }}>
           {[
             ['Ocupación global', ocPct + '%', `${tubosOcupGlobal.toLocaleString('es-AR')} / ${tubosTotalGlobal.toLocaleString('es-AR')} tubos`],
-            ['Tubos ocupados', tubosOcupGlobal.toLocaleString('es-AR'), 'en F1 y F2'],
+            ['Tubos ocupados', tubosOcupGlobal.toLocaleString('es-AR'), 'en F2'],
             ['Tubos libres', (tubosTotalGlobal - tubosOcupGlobal).toLocaleString('es-AR'), 'disponibles'],
           ].map(([label, value, sub]: any) => (
             <div key={label} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '14px' }}>
@@ -124,11 +126,11 @@ export default async function OcupacionPage() {
                   NAVE {nave.nave}
                 </span>
                 <span style={{ fontSize: '12px', color: '#6b7280' }}>
-                  {nave.tubos_ocupados.toLocaleString('es-AR')} / {nave.tubos_totales.toLocaleString('es-AR')} tubos · {nave.ocupacion_pct}%
+                  {nave.mesadas.filter((m:any)=>m.sector_fase!=='fase_1').reduce((s:number,m:any)=>s+m.tubos_ocupados,0).toLocaleString('es-AR')} / {nave.mesadas.filter((m:any)=>m.sector_fase!=='fase_1').reduce((s:number,m:any)=>s+m.tubos_totales,0).toLocaleString('es-AR')} tubos
                 </span>
               </div>
               <div style={{ width: '100px', height: '5px', background: '#f3f4f6', borderRadius: '3px', overflow: 'hidden' }}>
-                <div style={{ width: Math.min(100, nave.ocupacion_pct) + '%', height: '100%', background: nave.nave === 1 ? '#881337' : '#7c3aed' }} />
+                <div style={{ width: (() => { const f2=nave.mesadas.filter((m:any)=>m.sector_fase!=='fase_1'); const tot=f2.reduce((s:number,m:any)=>s+m.tubos_totales,0); const ocu=f2.reduce((s:number,m:any)=>s+m.tubos_ocupados,0); return Math.min(100,tot>0?Math.round(ocu/tot*100):0); })()+'%', height: '100%', background: nave.nave === 1 ? '#881337' : '#7c3aed' }} />
               </div>
             </div>
 
@@ -136,7 +138,6 @@ export default async function OcupacionPage() {
               <thead>
                 <tr>
                   <th>Mesada</th>
-                  <th style={{ textAlign: 'center' }}>Fase</th>
                   <th style={{ textAlign: 'right' }}>Tubos totales</th>
                   <th style={{ textAlign: 'right' }}>Ocupados</th>
                   <th style={{ textAlign: 'right' }}>Libres</th>
@@ -145,7 +146,7 @@ export default async function OcupacionPage() {
                 </tr>
               </thead>
               <tbody>
-                {nave.mesadas.map((m: any) => (
+                {nave.mesadas.filter((m: any) => m.sector_fase !== 'fase_1').map((m: any) => (
                   <tr key={m.id_ubicacion}>
                     <td style={{ fontWeight: 500, fontSize: '13px' }}>
                       <Link
@@ -155,15 +156,6 @@ export default async function OcupacionPage() {
                       >
                         {m.nombre.replace(/^Nave \d+ - /, '')}
                       </Link>
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <span style={{
-                        background: m.sector_fase === 'fase_1' ? '#dbeafe' : '#dcfce7',
-                        color: m.sector_fase === 'fase_1' ? '#881337' : '#166534',
-                        padding: '1px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600,
-                      }}>
-                        {m.sector_fase === 'fase_1' ? 'F1' : 'F2'}
-                      </span>
                     </td>
                     <td style={{ textAlign: 'right' }}>{m.tubos_totales.toLocaleString('es-AR')}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600 }}>{m.tubos_ocupados.toLocaleString('es-AR')}</td>

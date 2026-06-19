@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
     const resumen = tubosPorMesada(ubicaciones, lotes);
     const rows: any[][] = [];
     for (const nave of resumen) {
-      for (const m of nave.mesadas) {
+      for (const m of nave.mesadas.filter(m => m.sector_fase !== 'fase_1')) {
         rows.push([hoyStr, m.nombre, m.nave, m.tubos_totales, m.tubos_ocupados, m.ocupacion_pct]);
       }
     }
