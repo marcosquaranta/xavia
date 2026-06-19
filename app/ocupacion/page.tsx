@@ -1,24 +1,82 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
-import { readSheet } from '@/lib/sheets';
+import { readSheet, appendRows } from '@/lib/sheets';
 import { tubosPorMesada } from '@/lib/ocupacion';
 import { calcularCapacidadMensual } from '@/lib/capacidad';
 import type { Lote, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
+import GraficoOcupacionHistorial from '@/app/estadisticas/GraficoOcupacionHistorial';
+import type { MesadaOcupacion, DiaOcupacion } from '@/app/estadisticas/GraficoOcupacionHistorial';
 export const dynamic = 'force-dynamic';
+
+interface OcupHistRow { fecha: string; mesada: string; nave: string; tubos_totales: string; tubos_ocupados: string; pct: string; }
 
 export default async function OcupacionPage() {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   let lotes: Lote[] = [], ubicaciones: Ubicacion[] = [];
+  let ocupHistRows: OcupHistRow[] = [];
   try {
     [lotes, ubicaciones] = await Promise.all([
       readSheet<Lote>('Lotes'),
       readSheet<Ubicacion>('Ubicaciones'),
     ]);
   } catch {}
+
+  // Leer historial de ocupación (hoja puede no existir aún)
+  try { ocupHistRows = await readSheet<OcupHistRow>('OcupacionHistorial'); } catch {}
+
+  // Registrar snapshot de hoy si aún no existe
+  const hoyStr = new Date().toISOString().split('T')[0];
+  const hoyYaRegistrado = ocupHistRows.some(r => r.fecha === hoyStr);
+  if (!hoyYaRegistrado && ubicaciones.length > 0 && lotes.length > 0) {
+    try {
+      const resumen = tubosPorMesada(ubicaciones, lotes);
+      const newRows: any[][] = [];
+      for (const nave of resumen) {
+        for (const m of nave.mesadas) {
+          newRows.push([hoyStr, m.nombre, m.nave, m.tubos_totales, m.tubos_ocupados, m.ocupacion_pct]);
+        }
+      }
+      if (newRows.length) {
+        await appendRows('OcupacionHistorial', newRows);
+        for (const r of newRows)
+          ocupHistRows.push({ fecha: r[0], mesada: r[1], nave: String(r[2]), tubos_totales: String(r[3]), tubos_ocupados: String(r[4]), pct: String(r[5]) });
+      }
+    } catch {}
+  }
+
+  // Construir datos del gráfico histórico (últimos 90 días)
+  const HIST_DIAS = 90;
+  const fechasHist: string[] = [];
+  for (let i = HIST_DIAS - 1; i >= 0; i--) {
+    const d = new Date(hoyStr + 'T12:00:00'); d.setDate(d.getDate() - i);
+    fechasHist.push(d.toISOString().split('T')[0]);
+  }
+  const pctMap = new Map<string, number>();
+  for (const r of ocupHistRows) {
+    if (r.fecha && r.mesada) pctMap.set(`${r.mesada}||${r.fecha}`, Number(r.pct) || 0);
+  }
+  function cultivoMesada(nombre: string): 'lechuga' | 'rucula' | 'albahaca' | null {
+    const n = nombre.toLowerCase();
+    if (n.includes('rucula') || n.includes('rúcula')) return 'rucula';
+    if (n.includes('albahaca')) return 'albahaca';
+    if (n.includes('lechuga')) return 'lechuga';
+    return null;
+  }
+  const mesadasOrdenadas = ubicaciones
+    .filter(u => u.tipo === 'mesada' && u.activo === 'SI')
+    .sort((a, b) => (Number(a.nave) - Number(b.nave)) || (Number(a.orden_visual) - Number(b.orden_visual)));
+  const ocupacionHistorial: MesadaOcupacion[] = mesadasOrdenadas.map(mes => ({
+    nombre: mes.nombre.replace(/^Nave \d+ - /, ''),
+    nave: Number(mes.nave),
+    dias: fechasHist.map(fecha => {
+      const pct = pctMap.get(`${mes.nombre}||${fecha}`) ?? -1;
+      return { fecha, loteId: null, cultivo: pct > 0 ? cultivoMesada(mes.nombre) : null, pct: pct >= 0 ? pct : 0 } as DiaOcupacion;
+    }),
+  }));
 
   const tubosPorNave = tubosPorMesada(ubicaciones, lotes);
   const capacidad = calcularCapacidadMensual(ubicaciones, lotes);
@@ -134,7 +192,21 @@ export default async function OcupacionPage() {
           </div>
         ))}
 
-        {/* ===== SECCIÓN 2: CAPACIDAD MENSUAL ===== */}
+        {/* ===== SECCIÓN 2: HISTORIAL DE OCUPACIÓN ===== */}
+        <h2 style={{ fontSize: '15px', fontWeight: 600, margin: '24px 0 12px', color: '#374151' }}>
+          Historial de ocupación
+        </h2>
+        <p style={{ fontSize: '12px', color: '#6b7280', margin: '-8px 0 14px' }}>
+          % de tubos/agujeros ocupados por mesada · últimos 3 meses
+        </p>
+        <div className="card" style={{ marginBottom: '14px' }}>
+          <GraficoOcupacionHistorial mesadas={ocupacionHistorial} fechas={fechasHist} nave={1} />
+        </div>
+        <div className="card" style={{ marginBottom: '14px' }}>
+          <GraficoOcupacionHistorial mesadas={ocupacionHistorial} fechas={fechasHist} nave={2} />
+        </div>
+
+        {/* ===== SECCIÓN 4: CAPACIDAD MENSUAL ===== */}
         <h2 style={{ fontSize: '15px', fontWeight: 600, margin: '24px 0 12px', color: '#374151' }}>
           Capacidad productiva mensual
         </h2>

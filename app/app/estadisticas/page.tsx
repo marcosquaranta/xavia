@@ -3,15 +3,11 @@ import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { estadisticasDelMes, ciclosPorMesYAnioDetalle, cicloRealPorVariedad } from '@/lib/estadisticas';
 import { calcularDiasPorFase } from '@/lib/lotes';
-import { tubosPorMesada } from '@/lib/ocupacion';
-import { appendRows } from '@/lib/sheets';
 import type { Lote, Movimiento, Variedad, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
 import GraficoCiclosMesadas from './GraficoCiclosMesadas';
 import GraficoPesaje from './GraficoPesaje';
-import GraficoOcupacionHistorial from './GraficoOcupacionHistorial';
-import type { MesadaOcupacion, DiaOcupacion } from './GraficoOcupacionHistorial';
 export const dynamic = 'force-dynamic';
 
 export default async function EstadisticasPage({ searchParams }: { searchParams: { nave?: string } }) {
@@ -20,16 +16,12 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
   const naveFilter = searchParams.nave || 'todas';
 
-  interface OcupHistRow { fecha: string; mesada: string; nave: string; tubos_totales: string; tubos_ocupados: string; pct: string; }
-
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], variedades: Variedad[] = [], ubicaciones: Ubicacion[] = [];
-  let ocupHistRows: OcupHistRow[] = [];
   let err: string | null = null;
   try {
-    [lotes, movimientos, variedades, ubicaciones, ocupHistRows] = await Promise.all([
+    [lotes, movimientos, variedades, ubicaciones] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<Variedad>('Variedades'), readSheet<Ubicacion>('Ubicaciones'),
-      readSheet<OcupHistRow>('OcupacionHistorial'),
     ]);
   } catch (e: any) { err = e?.message || 'Error cargando datos'; }
 
@@ -175,72 +167,6 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     });
   }
 
-  // ── HISTORIAL DE OCUPACIÓN (basado en tubos/agujeros reales) ──
-  const HIST_DIAS = 90;
-  const hoyHist = new Date(); hoyHist.setHours(12, 0, 0, 0);
-  const hoyStr = hoyHist.toISOString().split('T')[0];
-
-  const fechasHist: string[] = [];
-  for (let i = HIST_DIAS - 1; i >= 0; i--) {
-    const d = new Date(hoyHist); d.setDate(d.getDate() - i);
-    fechasHist.push(d.toISOString().split('T')[0]);
-  }
-
-  // Registrar snapshot de hoy si aún no existe
-  const hoyYaRegistrado = ocupHistRows.some(r => r.fecha === hoyStr);
-  if (!hoyYaRegistrado && ubicaciones.length > 0 && lotes.length > 0) {
-    try {
-      const resumen = tubosPorMesada(ubicaciones, lotes);
-      const newRows: any[][] = [];
-      for (const nave of resumen) {
-        for (const m of nave.mesadas) {
-          newRows.push([hoyStr, m.nombre, m.nave, m.tubos_totales, m.tubos_ocupados, m.ocupacion_pct]);
-        }
-      }
-      if (newRows.length) {
-        await appendRows('OcupacionHistorial', newRows);
-        // Add to in-memory rows so chart shows today
-        for (const r of newRows) {
-          ocupHistRows.push({ fecha: r[0], mesada: r[1], nave: String(r[2]), tubos_totales: String(r[3]), tubos_ocupados: String(r[4]), pct: String(r[5]) });
-        }
-      }
-    } catch {}
-  }
-
-  // Construir MesadaOcupacion[] desde historial registrado
-  const mesadasHist = ubicaciones
-    .filter(u => u.tipo === 'mesada' && u.activo === 'SI')
-    .sort((a, b) => (Number(a.nave) - Number(b.nave)) || (Number(a.orden_visual) - Number(b.orden_visual)));
-
-  // Mapa mesada+fecha → pct
-  const pctMap = new Map<string, number>(); // key = `${mesada}||${fecha}`
-  for (const r of ocupHistRows) {
-    if (r.fecha && r.mesada) pctMap.set(`${r.mesada}||${r.fecha}`, Number(r.pct) || 0);
-  }
-
-  // Determinar cultivo de cada mesada por su nombre
-  function cultivoMesada(nombre: string): 'lechuga' | 'rucula' | 'albahaca' | null {
-    const n = nombre.toLowerCase();
-    if (n.includes('rucula') || n.includes('rúcula')) return 'rucula';
-    if (n.includes('albahaca')) return 'albahaca';
-    if (n.includes('lechuga')) return 'lechuga';
-    return null;
-  }
-
-  const ocupacionHistorial: MesadaOcupacion[] = mesadasHist.map(mes => ({
-    nombre: mes.nombre.replace(/^Nave \d+ - /, ''),
-    nave: Number(mes.nave),
-    dias: fechasHist.map(fecha => {
-      const pct = pctMap.get(`${mes.nombre}||${fecha}`) ?? -1;
-      return {
-        fecha,
-        loteId: null,
-        cultivo: pct > 0 ? cultivoMesada(mes.nombre) : null,
-        pct: pct >= 0 ? pct : 0,
-      } as DiaOcupacion;
-    }),
-  }));
-
   const nombre = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
 
   return (
@@ -249,20 +175,6 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
       <div className="container">
         <h1 className="page-title">Estadísticas</h1>
         <p className="page-subtitle">{nombre}</p>
-
-        {/* Historial de ocupación — Nave 1 */}
-        <div className="card">
-          <p className="card-title">Historial de ocupación — Nave 1</p>
-          <p className="card-sub">% de tubos/agujeros ocupados por mesada · 3 meses · verde = lechuga · naranja = rúcula</p>
-          <GraficoOcupacionHistorial mesadas={ocupacionHistorial} fechas={fechasHist} nave={1} />
-        </div>
-
-        {/* Historial de ocupación — Nave 2 */}
-        <div className="card">
-          <p className="card-title">Historial de ocupación — Nave 2</p>
-          <p className="card-sub">% de tubos/agujeros ocupados por mesada · 3 meses · verde = lechuga · naranja = rúcula</p>
-          <GraficoOcupacionHistorial mesadas={ocupacionHistorial} fechas={fechasHist} nave={2} />
-        </div>
 
         {/* Evolución mensual */}
         <div className="card">

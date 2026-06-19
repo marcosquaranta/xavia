@@ -1,144 +1,305 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
-import { readSheet } from '@/lib/sheets';
-import { ocupacionPorMesada, ocupacionPorNave, proyectarEntregas, nivelOcupacion, ocupacionPlantineras } from '@/lib/ocupacion';
-import { diasPromedioPorVariedad, mapaDiasPromedio } from '@/lib/estadisticas';
-import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
+import { readSheet, appendRows } from '@/lib/sheets';
+import { tubosPorMesada } from '@/lib/ocupacion';
+import { calcularCapacidadMensual } from '@/lib/capacidad';
+import type { Lote, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
+import GraficoOcupacionHistorial from '@/app/estadisticas/GraficoOcupacionHistorial';
+import type { MesadaOcupacion, DiaOcupacion } from '@/app/estadisticas/GraficoOcupacionHistorial';
 export const dynamic = 'force-dynamic';
+
+interface OcupHistRow { fecha: string; mesada: string; nave: string; tubos_totales: string; tubos_ocupados: string; pct: string; }
+
 export default async function OcupacionPage() {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
-  let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [];
-  try { [lotes, movimientos, ubicaciones] = await Promise.all([readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'), readSheet<Ubicacion>('Ubicaciones')]); } catch {}
-  let mesadas: any[] = [], naves: any[] = [], tiempos: any[] = [], entregas: any[] = [], plantineras: any[] = [];
-  try { mesadas = ocupacionPorMesada(ubicaciones, lotes); naves = ocupacionPorNave(ubicaciones, lotes); plantineras = ocupacionPlantineras(ubicaciones, lotes); tiempos = diasPromedioPorVariedad(lotes, movimientos, 60); const diasMap = mapaDiasPromedio(lotes, movimientos); entregas = proyectarEntregas(lotes, diasMap, 2); } catch {}
-  const capTotal = naves.reduce((a: number, n: any) => a + n.capacidad_total, 0);
-  const plantasTot = naves.reduce((a: number, n: any) => a + n.plantas_vivas, 0);
-  const ocGlobal = capTotal > 0 ? Math.round((plantasTot / capTotal) * 100) : 0;
+
+  let lotes: Lote[] = [], ubicaciones: Ubicacion[] = [];
+  let ocupHistRows: OcupHistRow[] = [];
+  try {
+    [lotes, ubicaciones] = await Promise.all([
+      readSheet<Lote>('Lotes'),
+      readSheet<Ubicacion>('Ubicaciones'),
+    ]);
+  } catch {}
+
+  // Leer historial de ocupación (hoja puede no existir aún)
+  try { ocupHistRows = await readSheet<OcupHistRow>('OcupacionHistorial'); } catch {}
+
+  // Registrar snapshot de hoy si aún no existe
+  const hoyStr = new Date().toISOString().split('T')[0];
+  const hoyYaRegistrado = ocupHistRows.some(r => r.fecha === hoyStr);
+  if (!hoyYaRegistrado && ubicaciones.length > 0 && lotes.length > 0) {
+    try {
+      const resumen = tubosPorMesada(ubicaciones, lotes);
+      const newRows: any[][] = [];
+      for (const nave of resumen) {
+        for (const m of nave.mesadas) {
+          newRows.push([hoyStr, m.nombre, m.nave, m.tubos_totales, m.tubos_ocupados, m.ocupacion_pct]);
+        }
+      }
+      if (newRows.length) {
+        await appendRows('OcupacionHistorial', newRows);
+        for (const r of newRows)
+          ocupHistRows.push({ fecha: r[0], mesada: r[1], nave: String(r[2]), tubos_totales: String(r[3]), tubos_ocupados: String(r[4]), pct: String(r[5]) });
+      }
+    } catch {}
+  }
+
+  // Construir datos del gráfico histórico (últimos 90 días)
+  const HIST_DIAS = 90;
+  const fechasHist: string[] = [];
+  for (let i = HIST_DIAS - 1; i >= 0; i--) {
+    const d = new Date(hoyStr + 'T12:00:00'); d.setDate(d.getDate() - i);
+    fechasHist.push(d.toISOString().split('T')[0]);
+  }
+  const pctMap = new Map<string, number>();
+  for (const r of ocupHistRows) {
+    if (r.fecha && r.mesada) pctMap.set(`${r.mesada}||${r.fecha}`, Number(r.pct) || 0);
+  }
+  function cultivoMesada(nombre: string): 'lechuga' | 'rucula' | 'albahaca' | null {
+    const n = nombre.toLowerCase();
+    if (n.includes('rucula') || n.includes('rúcula')) return 'rucula';
+    if (n.includes('albahaca')) return 'albahaca';
+    if (n.includes('lechuga')) return 'lechuga';
+    return null;
+  }
+  const mesadasOrdenadas = ubicaciones
+    .filter(u => u.tipo === 'mesada' && u.activo === 'SI')
+    .sort((a, b) => (Number(a.nave) - Number(b.nave)) || (Number(a.orden_visual) - Number(b.orden_visual)));
+  const ocupacionHistorial: MesadaOcupacion[] = mesadasOrdenadas.map(mes => ({
+    nombre: mes.nombre.replace(/^Nave \d+ - /, ''),
+    nave: Number(mes.nave),
+    dias: fechasHist.map(fecha => {
+      const pct = pctMap.get(`${mes.nombre}||${fecha}`) ?? -1;
+      return { fecha, loteId: null, cultivo: pct > 0 ? cultivoMesada(mes.nombre) : null, pct: pct >= 0 ? pct : 0 } as DiaOcupacion;
+    }),
+  }));
+
+  const tubosPorNave = tubosPorMesada(ubicaciones, lotes);
+  const capacidad = calcularCapacidadMensual(ubicaciones, lotes);
+
+  const tubosTotalGlobal = tubosPorNave.reduce((a: number, n: any) => a + n.tubos_totales, 0);
+  const tubosOcupGlobal = tubosPorNave.reduce((a: number, n: any) => a + n.tubos_ocupados, 0);
+  const ocPct = tubosTotalGlobal > 0 ? Math.round((tubosOcupGlobal / tubosTotalGlobal) * 100) : 0;
+
+  function colorOc(pct: number) {
+    return pct >= 75 ? '#059669' : pct >= 40 ? '#d97706' : '#9ca3af';
+  }
+
+  const totalLechugaMes = capacidad.reduce((a, n) => a + n.subtotal_lechuga.plantas_por_mes, 0);
+  const totalRuculaMes = capacidad.reduce((a, n) => a + n.subtotal_rucula.plantas_por_mes, 0);
+
   return (
     <>
       <Header user={user} current="ocupacion" />
       <div className="container">
-        <h1 className="page-title">Ocupación e indicadores</h1>
-        <p className="page-subtitle">Ocupación de mesadas (F1 y F2) · Plantineras excluidas · Capacidad instalada: {capTotal.toLocaleString('es-AR')} posiciones</p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+        <h1 className="page-title">Ocupación y capacidad</h1>
+        <p className="page-subtitle">Tubos ocupados vs disponibles · Capacidad productiva mensual</p>
+
+        {/* ===== SECCIÓN 1: OCUPACIÓN ACTUAL ===== */}
+        <h2 style={{ fontSize: '15px', fontWeight: 600, margin: '0 0 12px', color: '#374151' }}>
+          Ocupación actual
+        </h2>
+
+        {/* Stats globales */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginBottom: '16px' }}>
           {[
-            ['Ocupación global', ocGlobal + '%', plantasTot.toLocaleString('es-AR') + ' de ' + capTotal.toLocaleString('es-AR')],
-            ['Plantas en mesadas', plantasTot.toLocaleString('es-AR'), 'F1 y F2 · excluye plantineras'],
-            ['Tubos libres', naves.reduce((a: number, n: any) => a + (n.tubos_libres || 0), 0).toLocaleString('es-AR'), 'disponibles en mesadas'],
+            ['Ocupación global', ocPct + '%', `${tubosOcupGlobal.toLocaleString('es-AR')} / ${tubosTotalGlobal.toLocaleString('es-AR')} tubos`],
+            ['Tubos ocupados', tubosOcupGlobal.toLocaleString('es-AR'), 'en F1 y F2'],
+            ['Tubos libres', (tubosTotalGlobal - tubosOcupGlobal).toLocaleString('es-AR'), 'disponibles'],
           ].map(([label, value, sub]: any) => (
-            <div key={label} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px' }}>
-              <p style={{ margin: 0, fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{label}</p>
-              <p style={{ margin: '6px 0 0', fontSize: '22px', fontWeight: 600 }}>{value}</p>
-              <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#6b7280' }}>{sub}</p>
+            <div key={label} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '14px' }}>
+              <p style={{ margin: 0, fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{label}</p>
+              <p style={{ margin: '4px 0 0', fontSize: '20px', fontWeight: 600 }}>{value}</p>
+              <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#9ca3af' }}>{sub}</p>
             </div>
           ))}
         </div>
-        <div className="card">
-          <p className="card-title">Densidad por nave</p>
-          <table>
-            <thead><tr><th>Nave</th><th style={{ textAlign: 'right' }}>m²</th><th style={{ textAlign: 'right' }}>Capacidad</th><th style={{ textAlign: 'right' }}>Plantas vivas</th><th style={{ textAlign: 'right' }}>Densidad actual</th><th style={{ textAlign: 'right' }}>Densidad máx.</th><th style={{ textAlign: 'right' }}>Ocupación</th></tr></thead>
-            <tbody>
-              {naves.map((n: any) => (
-                <tr key={n.nave}>
-                  <td>Nave {n.nave}</td><td style={{ textAlign: 'right' }}>{n.metros_cuadrados}</td>
-                  <td style={{ textAlign: 'right' }}>{n.capacidad_total.toLocaleString('es-AR')}</td>
-                  <td style={{ textAlign: 'right' }}>{n.plantas_vivas.toLocaleString('es-AR')}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 500 }}>{n.densidad_actual} pl/m²</td>
-                  <td style={{ textAlign: 'right' }}>{n.densidad_maxima} pl/m²</td>
-                  <td style={{ textAlign: 'right', fontWeight: 500, color: n.ocupacion_pct >= 70 ? '#059669' : n.ocupacion_pct >= 40 ? '#d97706' : '#dc2626' }}>{n.ocupacion_pct}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {entregas.length > 0 && (
-          <div className="card">
-            <p className="card-title">Proyección de entregas</p>
-            <p className="card-sub">Todo en plantas (rúcula con paquetes de referencia).</p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '10px' }}>
-              {entregas.map((e: any, i: number) => (
-                <div key={i} style={{ background: i < 2 ? '#dbeafe' : '#f9fafb', borderRadius: '8px', padding: '12px 14px' }}>
-                  <p style={{ margin: '0 0 4px', fontSize: '10px', color: i < 2 ? '#1e40af' : '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>{e.diaSemana.charAt(0).toUpperCase() + e.diaSemana.slice(1)} · {e.fecha}</p>
-                  <p style={{ margin: '0 0 6px', fontSize: i < 2 ? '18px' : '16px', fontWeight: 600, color: i < 2 ? '#1e40af' : '#374151' }}>{e.total_plantas.toLocaleString('es-AR')} plantas</p>
-                  <div style={{ fontSize: '11px', color: i < 2 ? '#1e40af' : '#6b7280', lineHeight: 1.6 }}>
-                    {e.lechuga_crespa > 0 && <div>L. Crespa: {e.lechuga_crespa}</div>}
-                    {e.lechuga_roble > 0 && <div>H. Roble: {e.lechuga_roble}</div>}
-                    {e.rucula_plantas > 0 && <div>Rúcula: {e.rucula_plantas} (~{e.rucula_paquetes_aprox} paq)</div>}
-                    {e.albahaca_plantas > 0 && <div>Albahaca: {e.albahaca_plantas} (~{e.albahaca_paquetes_aprox} paq)</div>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        <div className="card">
-          <p className="card-title">Ocupación por mesada</p>
-          {mesadas.map((m: any) => {
-            const nivel = nivelOcupacion(m.ocupacion_pct);
-            return (
-              <div key={m.id_ubicacion} style={{ marginBottom: '12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
-                  <span style={{ fontWeight: 500 }}>{m.nombre}</span>
-                  <span style={{ color: '#6b7280' }}>{m.plantas_vivas.toLocaleString('es-AR')} / {m.capacidad.toLocaleString('es-AR')} · <span style={{ fontWeight: 500, color: nivel === 'ok' ? '#059669' : nivel === 'warn' ? '#d97706' : '#dc2626' }}>{m.ocupacion_pct}%</span></span>
-                </div>
-                <div style={{ height: '7px', background: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
-                  <div style={{ width: Math.min(100, m.ocupacion_pct) + '%', height: '100%', background: nivel === 'ok' ? '#10b981' : nivel === 'warn' ? '#d97706' : '#dc2626' }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        {/* Sección plantineras */}
-        {plantineras.length > 0 && (
-          <div className="card">
-            <p className="card-title">Plantineras</p>
-            <p className="card-sub">Capacidad de bandejas de germinación · No incluida en ocupación de mesadas</p>
-            {plantineras.map((p: any) => {
-              const color = p.ocupacion_pct >= 85 ? '#d97706' : p.ocupacion_pct >= 50 ? '#059669' : '#9ca3af';
-              return (
-                <div key={p.nombre} style={{ marginBottom: '14px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
-                    <span style={{ fontWeight: 500 }}>{p.nombre}</span>
-                    <span style={{ color: '#6b7280' }}>
-                      <strong style={{ color: '#1f2937' }}>{p.plantines.toLocaleString('es-AR')}</strong>
-                      {' / '}{p.capacidad.toLocaleString('es-AR')} plantines
-                      {' · '}
-                      <span style={{ color }}>
-                        {p.ocupacion_pct}%
-                      </span>
-                      {p.libres > 0 && <span style={{ color: '#059669' }}> · {p.libres.toLocaleString('es-AR')} libres</span>}
-                    </span>
-                  </div>
-                  <div style={{ height: '7px', background: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
-                    <div style={{ width: Math.min(100, p.ocupacion_pct) + '%', height: '100%', background: color, borderRadius: '4px' }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
 
-        {tiempos.length > 0 && (
-          <div className="card">
-            <p className="card-title">Tiempos promedio por fase (últimos 60 días)</p>
+        {/* Tabla de tubos por nave */}
+        {tubosPorNave.map((nave: any) => (
+          <div key={nave.nave} className="card" style={{ marginBottom: '14px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ background: nave.nave === 1 ? '#881337' : '#7c3aed', color: 'white', padding: '2px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 700 }}>
+                  NAVE {nave.nave}
+                </span>
+                <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                  {nave.tubos_ocupados.toLocaleString('es-AR')} / {nave.tubos_totales.toLocaleString('es-AR')} tubos · {nave.ocupacion_pct}%
+                </span>
+              </div>
+              <div style={{ width: '100px', height: '5px', background: '#f3f4f6', borderRadius: '3px', overflow: 'hidden' }}>
+                <div style={{ width: Math.min(100, nave.ocupacion_pct) + '%', height: '100%', background: nave.nave === 1 ? '#881337' : '#7c3aed' }} />
+              </div>
+            </div>
+
             <table>
-              <thead><tr><th>Variedad</th><th style={{ textAlign: 'right' }}>Plantinera</th><th style={{ textAlign: 'right' }}>F1</th><th style={{ textAlign: 'right' }}>F2</th><th style={{ textAlign: 'right' }}>Total</th><th style={{ textAlign: 'right' }}>Lotes</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Mesada</th>
+                  <th style={{ textAlign: 'center' }}>Fase</th>
+                  <th style={{ textAlign: 'right' }}>Tubos totales</th>
+                  <th style={{ textAlign: 'right' }}>Ocupados</th>
+                  <th style={{ textAlign: 'right' }}>Libres</th>
+                  <th style={{ textAlign: 'right' }}>Uso</th>
+                  <th style={{ textAlign: 'right' }}>Lotes</th>
+                </tr>
+              </thead>
               <tbody>
-                {tiempos.map((t: any) => (
-                  <tr key={t.variedad}>
-                    <td>{t.variedad}</td><td style={{ textAlign: 'right' }}>{t.plantinera}d</td>
-                    <td style={{ textAlign: 'right', color: t.fase_1 === null ? '#9ca3af' : 'inherit' }}>{t.fase_1 === null ? '—' : t.fase_1 + 'd'}</td>
-                    <td style={{ textAlign: 'right' }}>{t.fase_2}d</td>
-                    <td style={{ textAlign: 'right', fontWeight: 500 }}>{t.total}d</td>
-                    <td style={{ textAlign: 'right', color: '#6b7280' }}>{t.lotes_count}</td>
+                {nave.mesadas.map((m: any) => (
+                  <tr key={m.id_ubicacion}>
+                    <td style={{ fontWeight: 500, fontSize: '13px' }}>
+                      <Link
+                        href={`/cultivos?mesada=${encodeURIComponent(m.nombre)}`}
+                        style={{ color: 'inherit', textDecoration: 'none', borderBottom: '1px dashed #d1d5db' }}
+                        title={`Ver lotes activos en ${m.nombre}`}
+                      >
+                        {m.nombre.replace(/^Nave \d+ - /, '')}
+                      </Link>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <span style={{
+                        background: m.sector_fase === 'fase_1' ? '#dbeafe' : '#dcfce7',
+                        color: m.sector_fase === 'fase_1' ? '#881337' : '#166534',
+                        padding: '1px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600,
+                      }}>
+                        {m.sector_fase === 'fase_1' ? 'F1' : 'F2'}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right' }}>{m.tubos_totales.toLocaleString('es-AR')}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{m.tubos_ocupados.toLocaleString('es-AR')}</td>
+                    <td style={{ textAlign: 'right', color: m.tubos_libres > 0 ? '#059669' : '#9ca3af', fontWeight: 500 }}>
+                      {m.tubos_libres.toLocaleString('es-AR')}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'flex-end' }}>
+                        <div style={{ width: '50px', height: '4px', background: '#f3f4f6', borderRadius: '2px', overflow: 'hidden' }}>
+                          <div style={{ width: Math.min(100, m.ocupacion_pct) + '%', height: '100%', background: colorOc(m.ocupacion_pct) }} />
+                        </div>
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: colorOc(m.ocupacion_pct), minWidth: '30px', textAlign: 'right' }}>
+                          {m.ocupacion_pct}%
+                        </span>
+                      </div>
+                    </td>
+                    <td style={{ textAlign: 'right', color: '#9ca3af', fontSize: '12px' }}>{m.lotes_count}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        )}
+        ))}
+
+        {/* ===== SECCIÓN 2: HISTORIAL DE OCUPACIÓN ===== */}
+        <h2 style={{ fontSize: '15px', fontWeight: 600, margin: '24px 0 12px', color: '#374151' }}>
+          Historial de ocupación
+        </h2>
+        <p style={{ fontSize: '12px', color: '#6b7280', margin: '-8px 0 14px' }}>
+          % de tubos/agujeros ocupados por mesada · últimos 3 meses
+        </p>
+        <div className="card" style={{ marginBottom: '14px' }}>
+          <GraficoOcupacionHistorial mesadas={ocupacionHistorial} fechas={fechasHist} nave={1} />
+        </div>
+        <div className="card" style={{ marginBottom: '14px' }}>
+          <GraficoOcupacionHistorial mesadas={ocupacionHistorial} fechas={fechasHist} nave={2} />
+        </div>
+
+        {/* ===== SECCIÓN 4: CAPACIDAD MENSUAL ===== */}
+        <h2 style={{ fontSize: '15px', fontWeight: 600, margin: '24px 0 12px', color: '#374151' }}>
+          Capacidad productiva mensual
+        </h2>
+        <p style={{ fontSize: '12px', color: '#6b7280', margin: '-8px 0 14px' }}>
+          Días de ciclo calculados desde los últimos lotes cosechados de cada mesada · F1 lechuga = buffer, no cosecha directo
+        </p>
+
+        {capacidad.map((nave) => (
+          <div key={nave.nave} className="card" style={{ marginBottom: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+              <span style={{ background: nave.nave === 1 ? '#881337' : '#7c3aed', color: 'white', padding: '2px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 700 }}>
+                NAVE {nave.nave}
+              </span>
+              <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                {nave.total_plantas_por_mes.toLocaleString('es-AR')} plantas estimadas/mes
+              </span>
+            </div>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>Configuración</th>
+                  <th style={{ textAlign: 'right' }}>Perfiles</th>
+                  <th style={{ textAlign: 'right' }}>Orif/perf</th>
+                  <th style={{ textAlign: 'right' }}>Posiciones</th>
+                  <th style={{ textAlign: 'right' }}>Días ciclo</th>
+                  <th style={{ textAlign: 'right' }}>Ciclos/mes</th>
+                  <th style={{ textAlign: 'right' }}>Plantas/mes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nave.filas.map((f) => (
+                  <tr key={f.id_ubicacion} style={{ opacity: f.es_f1 ? 0.5 : 1 }}>
+                    <td style={{ fontWeight: 500 }}>
+                      {f.nombre_corto}
+                      {f.es_f1 && <span style={{ fontSize: '10px', color: '#9ca3af', marginLeft: '6px' }}>(buffer)</span>}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>{f.perfiles}</td>
+                    <td style={{ textAlign: 'right' }}>{f.orif_por_perfil}</td>
+                    <td style={{ textAlign: 'right' }}>{f.posiciones.toLocaleString('es-AR')}</td>
+                    <td style={{ textAlign: 'right', color: f.es_f1 ? '#9ca3af' : '#374151' }}>
+                      {f.es_f1 ? '—' : f.dias_ciclo + 'd'}
+                    </td>
+                    <td style={{ textAlign: 'right', color: f.es_f1 ? '#9ca3af' : '#374151' }}>
+                      {f.es_f1 ? '—' : f.ciclos_por_mes.toFixed(2)}
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: f.es_f1 ? 400 : 600, color: f.es_f1 ? '#9ca3af' : '#1f2937' }}>
+                      {f.es_f1 ? '—' : f.plantas_por_mes.toLocaleString('es-AR')}
+                    </td>
+                  </tr>
+                ))}
+
+                {/* Subtotal Lechuga */}
+                <tr style={{ background: '#f0fdf4', fontWeight: 600 }}>
+                  <td colSpan={3} style={{ color: '#166534', fontSize: '12px' }}>N{nave.nave} — Subtotal LECHUGA (F2)</td>
+                  <td style={{ textAlign: 'right', color: '#166534' }}>{nave.subtotal_lechuga.posiciones.toLocaleString('es-AR')}</td>
+                  <td colSpan={2} />
+                  <td style={{ textAlign: 'right', color: '#166534' }}>{nave.subtotal_lechuga.plantas_por_mes.toLocaleString('es-AR')}</td>
+                </tr>
+
+                {/* Subtotal Rúcula */}
+                <tr style={{ background: '#f0fdf4', fontWeight: 600 }}>
+                  <td colSpan={3} style={{ color: '#047857', fontSize: '12px' }}>N{nave.nave} — Subtotal RÚCULA</td>
+                  <td style={{ textAlign: 'right', color: '#047857' }}>{nave.subtotal_rucula.posiciones.toLocaleString('es-AR')}</td>
+                  <td colSpan={2} />
+                  <td style={{ textAlign: 'right', color: '#047857' }}>{nave.subtotal_rucula.plantas_por_mes.toLocaleString('es-AR')}</td>
+                </tr>
+
+                {/* Total nave */}
+                <tr style={{ background: '#dcfce7', fontWeight: 700 }}>
+                  <td colSpan={6} style={{ color: '#14532d', fontSize: '13px' }}>TOTAL NAVE {nave.nave} (plantas/mes)</td>
+                  <td style={{ textAlign: 'right', color: '#14532d', fontSize: '14px' }}>{nave.total_plantas_por_mes.toLocaleString('es-AR')}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        ))}
+
+        {/* Totales globales */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', marginTop: '4px' }}>
+          {[
+            ['TOTAL LECHUGA (ambas naves)', totalLechugaMes.toLocaleString('es-AR'), 'plantas/mes', '#4d7c0f'],
+            ['TOTAL RÚCULA (ambas naves)', totalRuculaMes.toLocaleString('es-AR'), 'plantas/mes', '#166534'],
+            ['TOTAL GENERAL', (totalLechugaMes + totalRuculaMes).toLocaleString('es-AR'), 'plantas/mes', '#881337'],
+          ].map(([label, value, sub, color]: any) => (
+            <div key={label} style={{ background: 'white', border: `2px solid ${color}20`, borderRadius: '10px', padding: '14px' }}>
+              <p style={{ margin: 0, fontSize: '10px', color, textTransform: 'uppercase', letterSpacing: '0.3px', fontWeight: 600 }}>{label}</p>
+              <p style={{ margin: '4px 0 0', fontSize: '24px', fontWeight: 700, color }}>{value}</p>
+              <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#9ca3af' }}>{sub}</p>
+            </div>
+          ))}
+        </div>
+
       </div>
     </>
   );
