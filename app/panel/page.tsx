@@ -88,9 +88,11 @@ export default async function PanelPage({ searchParams }: {
     ciclosRealesMap = cicloRealPorVariedad(lotes, [], 5);
   } catch {}
 
-  const ocGlobal = navesOcup.length > 0
-    ? Math.round(navesOcup.reduce((a:number,n:any)=>a+n.tubos_ocupados,0) /
-      Math.max(1, navesOcup.reduce((a:number,n:any)=>a+n.tubos_totales,0)) * 100)
+  // Ocupación solo F2
+  const mesadasF2 = tubosMesadas.flatMap((n:any) => (n.mesadas||[]).filter((m:any) => m.sector_fase !== 'fase_1'));
+  const ocGlobal = mesadasF2.length > 0
+    ? Math.round(mesadasF2.reduce((a:number,m:any)=>a+m.tubos_ocupados,0) /
+      Math.max(1, mesadasF2.reduce((a:number,m:any)=>a+m.tubos_totales,0)) * 100)
     : 0;
   const difPct = cosechadoMesPasado > 0 ? Math.round(((cosechadoMes-cosechadoMesPasado)/cosechadoMesPasado)*100) : 0;
 
@@ -172,14 +174,6 @@ export default async function PanelPage({ searchParams }: {
     }
   }
 
-  // 🔵 Sub-ocupación de mesadas F1 (< 40%)
-  for (const nave of tubosMesadas) {
-    for (const m of nave.mesadas || []) {
-      if (m.sector_fase === 'fase_1' && m.tubos_totales > 10 && m.ocupacion_pct < 40 && m.ocupacion_pct > 0) {
-        alertas.push({ tipo:'warn', msg:`${m.nombre.replace(/^Nave \d+ - /,'')} F1 al ${m.ocupacion_pct}% — sub-ocupada` });
-      }
-    }
-  }
 
   // 🔵 Mesadas vacías (prioridad 0 — van primero)
   for (const nave of tubosMesadas) {
@@ -262,8 +256,8 @@ export default async function PanelPage({ searchParams }: {
               </div>
             )}
             <div style={{ marginTop:'10px', paddingTop:'8px', borderTop:'1px solid #f3f4f6', fontSize:'11px', color:'#6b7280' }}>
-              Ocup. global: <strong>{ocGlobal}%</strong>
-              {navesOcup.map((n:any) => <span key={n.nave}> · N{n.nave}: <strong>{n.ocupacion_pct}%</strong></span>)}
+              Ocup. global (F2): <strong>{ocGlobal}%</strong>
+              {tubosMesadas.map((n:any) => { const f2=(n.mesadas||[]).filter((m:any)=>m.sector_fase!=='fase_1'); const tot=f2.reduce((s:number,m:any)=>s+m.tubos_totales,0); const ocu=f2.reduce((s:number,m:any)=>s+m.tubos_ocupados,0); const pct=tot>0?Math.round(ocu/tot*100):0; return <span key={n.nave}> · N{n.nave}: <strong>{pct}%</strong></span>; })}
             </div>
           </div>
 
@@ -472,31 +466,27 @@ export default async function PanelPage({ searchParams }: {
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'14px' }}>
           {tubosMesadas.map((nave: any) => (
             <div key={nave.nave} style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'12px' }}>
+              {(() => { const f2=(nave.mesadas||[]).filter((m:any)=>m.sector_fase!=='fase_1'); const tot=f2.reduce((s:number,m:any)=>s+m.tubos_totales,0); const ocu=f2.reduce((s:number,m:any)=>s+m.tubos_ocupados,0); const pct=tot>0?Math.round(ocu/tot*100):0; return (<>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
                 <span style={{ background:nave.nave===1?'#881337':'#7c3aed', color:'white', padding:'2px 10px', borderRadius:'5px', fontSize:'12px', fontWeight:700 }}>NAVE {nave.nave}</span>
-                <span style={{ fontSize:'11px', color:'#6b7280' }}>{nave.tubos_ocupados}/{nave.tubos_totales} · <strong>{nave.ocupacion_pct}%</strong></span>
+                <span style={{ fontSize:'11px', color:'#6b7280' }}>{ocu}/{tot} · <strong>{pct}%</strong></span>
               </div>
               <div style={{ height:'4px', background:'#f3f4f6', borderRadius:'2px', overflow:'hidden', marginBottom:'8px' }}>
-                <div style={{ width:Math.min(100,nave.ocupacion_pct)+'%', height:'100%', background:nave.nave===1?'#881337':'#7c3aed' }} />
+                <div style={{ width:Math.min(100,pct)+'%', height:'100%', background:nave.nave===1?'#881337':'#7c3aed' }} />
               </div>
+              </>); })()}
               <table style={{ fontSize:'11px' }}>
                 <thead><tr>
                   <th style={{ textAlign:'left', padding:'3px 6px' }}>Mesada</th>
-                  <th style={{ textAlign:'center', width:'26px' }}>F</th>
                   <th style={{ textAlign:'right' }}>Tot.</th>
                   <th style={{ textAlign:'right' }}>Ocup.</th>
                   <th style={{ textAlign:'right' }}>Lib.</th>
                   <th style={{ textAlign:'right' }}>%</th>
                 </tr></thead>
                 <tbody>
-                  {(nave.mesadas||[]).map((m: any) => (
+                  {(nave.mesadas||[]).filter((m:any)=>m.sector_fase!=='fase_1').map((m: any) => (
                     <tr key={m.id_ubicacion}>
-                      <td style={{ padding:'3px 6px', fontWeight:500 }}>{m.nombre.replace(/^Nave \d+ - /,'').replace(' (F1)','').replace(' (F2)','')}</td>
-                      <td style={{ textAlign:'center' }}>
-                        <span style={{ background:m.sector_fase==='fase_1'?'#dbeafe':'#dcfce7', color:m.sector_fase==='fase_1'?'#1e40af':'#166534', padding:'1px 4px', borderRadius:'3px', fontSize:'9px', fontWeight:600 }}>
-                          {m.sector_fase==='fase_1'?'F1':'F2'}
-                        </span>
-                      </td>
+                      <td style={{ padding:'3px 6px', fontWeight:500 }}>{m.nombre.replace(/^Nave \d+ - /,'').replace(' (F2)','')}</td>
                       <td style={{ textAlign:'right', color:'#6b7280' }}>{m.tubos_totales}</td>
                       <td style={{ textAlign:'right', fontWeight:600 }}>{m.tubos_ocupados}</td>
                       <td style={{ textAlign:'right', color:m.tubos_libres>0?'#059669':'#9ca3af' }}>{m.tubos_libres}</td>
