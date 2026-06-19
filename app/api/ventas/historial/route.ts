@@ -1,27 +1,29 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import type { VentaDia, ConfigItem } from '@/lib/types';
+import type { VentaDia, ClienteVenta, ConfigItem } from '@/lib/types';
 
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
   try {
-    const [ventas, config] = await Promise.all([
+    const [ventas, clientes, config] = await Promise.all([
       readSheet<VentaDia>('Ventas'),
+      readSheet<ClienteVenta>('Clientes'),
       readSheet<ConfigItem>('Config'),
     ]);
 
-    // Agrupar por id_exportacion (cada exportación es una entrada separada)
+    const clienteMap = new Map(clientes.map(c => [String(c.id_control), c.nombre_display || c.nombre_xubio || c.id_control]));
+
     type EntradaExp = {
       id_exportacion: string; fecha: string; fecha_exportacion: string;
-      clientes: number; rucula: number; lechuga: number; rucula_kg: number; lechuga_kg: number;
+      facturas: number; clientesNombres: string[];
+      rucula: number; lechuga: number; rucula_kg: number; lechuga_kg: number;
     };
     const porExp = new Map<string, EntradaExp>();
 
-    // Filas pendientes (no exportadas aún) → agrupar por fecha
     type EntradaPend = {
-      fecha: string; clientes: number; rucula: number; lechuga: number; rucula_kg: number; lechuga_kg: number;
+      fecha: string; filas: number; rucula: number; lechuga: number; rucula_kg: number; lechuga_kg: number;
     };
     const pendientes = new Map<string, EntradaPend>();
 
@@ -31,37 +33,41 @@ export async function GET() {
       const expId = String(v.exportado || '');
 
       if (expId && expId !== '') {
-        // Fila exportada
         const ex = porExp.get(expId) || {
           id_exportacion: expId, fecha, fecha_exportacion: String(v.fecha_carga || fecha),
-          clientes: 0, rucula: 0, lechuga: 0, rucula_kg: 0, lechuga_kg: 0,
+          facturas: 0, clientesNombres: [],
+          rucula: 0, lechuga: 0, rucula_kg: 0, lechuga_kg: 0,
         };
-        ex.clientes++;
-        ex.rucula   += Number(v.rucula || 0);
-        ex.lechuga  += Number(v.lechuga_crespa || 0) + Number(v.hoja_roble || 0);
+        // Contar clientes distintos con al menos una cantidad > 0
+        const tieneVentas = ['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca','rucula_kg','lechuga_kg']
+          .some(k => Number((v as any)[k]) > 0);
+        const nombre = clienteMap.get(String(v.id_control)) || String(v.id_control);
+        if (tieneVentas && !ex.clientesNombres.includes(nombre)) {
+          ex.facturas++;
+          ex.clientesNombres.push(nombre);
+        }
+        ex.rucula    += Number(v.rucula || 0);
+        ex.lechuga   += Number(v.lechuga_crespa || 0) + Number(v.hoja_roble || 0);
         ex.rucula_kg  += Number(v.rucula_kg || 0);
         ex.lechuga_kg += Number(v.lechuga_kg || 0);
         porExp.set(expId, ex);
       } else {
-        // Fila pendiente
         const p = pendientes.get(fecha) || {
-          fecha, clientes: 0, rucula: 0, lechuga: 0, rucula_kg: 0, lechuga_kg: 0,
+          fecha, filas: 0, rucula: 0, lechuga: 0, rucula_kg: 0, lechuga_kg: 0,
         };
-        p.clientes++;
-        p.rucula   += Number(v.rucula || 0);
-        p.lechuga  += Number(v.lechuga_crespa || 0) + Number(v.hoja_roble || 0);
+        p.filas++;
+        p.rucula    += Number(v.rucula || 0);
+        p.lechuga   += Number(v.lechuga_crespa || 0) + Number(v.hoja_roble || 0);
         p.rucula_kg  += Number(v.rucula_kg || 0);
         p.lechuga_kg += Number(v.lechuga_kg || 0);
         pendientes.set(fecha, p);
       }
     }
 
-    // Exportaciones ordenadas por id (más reciente primero)
     const exportaciones = [...porExp.values()]
       .sort((a, b) => b.id_exportacion.localeCompare(a.id_exportacion))
       .slice(0, 40);
 
-    // Pendientes ordenadas por fecha desc
     const pendientesArr = [...pendientes.values()]
       .sort((a, b) => b.fecha.localeCompare(a.fecha))
       .slice(0, 10);

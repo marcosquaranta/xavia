@@ -442,8 +442,15 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
                     historial.exportaciones.map((h:any)=>(
                       <button key={h.id_exportacion} onClick={()=>{cargarExportacion(h.id_exportacion,h.fecha);setShowExpSelector(false);}}
                         style={{width:'100%',textAlign:'left',background:h.id_exportacion===currentExportId?'#dbeafe':'none',border:'none',borderBottom:'1px solid #f9fafb',padding:'7px 10px',fontSize:'12px',cursor:'pointer',color:'#374151',display:'block'}}>
-                        <span style={{fontFamily:'monospace',color:'#1e40af',fontWeight:600}}>{h.id_exportacion}</span>
-                        <span style={{color:'#9ca3af',marginLeft:'8px',fontSize:'11px'}}>{h.fecha} · {h.clientes} fact.</span>
+                        <div style={{display:'flex',alignItems:'baseline',gap:'6px'}}>
+                          <span style={{fontFamily:'monospace',color:'#1e40af',fontWeight:600}}>{h.id_exportacion}</span>
+                          <span style={{color:'#9ca3af',fontSize:'11px'}}>{h.fecha} · {h.facturas ?? h.clientes ?? 0} fact.</span>
+                        </div>
+                        {h.clientesNombres?.length>0 && (
+                          <div style={{fontSize:'10px',color:'#6b7280',marginTop:'2px',lineHeight:'1.4'}}>
+                            {h.clientesNombres.join(' · ')}
+                          </div>
+                        )}
                       </button>
                     ))
                   )}
