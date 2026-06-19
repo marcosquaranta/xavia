@@ -150,7 +150,7 @@ export async function POST(req: NextRequest) {
       // Fila header (amarillo)
       const fechaEsteCliente = getFechaCliente(idControl);
       const headerRow = [
-        Number(idControl), cliente.nombre_display || cliente.nombre_xubio, 1, numFmt,
+        Number(idControl), cliente.nombre_xubio || cliente.nombre_display, 1, numFmt,
         fmtFecha(fechaEsteCliente), fmtFecha(addDays(fechaEsteCliente, 5)),
         undefined, 'Pesos Argentinos', undefined, lotesParaCliente(idControl, (fechasCliente as Record<string,string>)[idControl] || fechaBase),
         undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined
@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
       headerRows.push(rows.length);
       rows.push(headerRow);
 
-      const obsCliente = cliente.nombre_display || cliente.nombre_xubio;
+      const obsCliente = cliente.nombre_xubio || cliente.nombre_display;
       // Filas de productos (paquetes)
       for (const linea of lineas) {
         for (const prod of PRODS) {
