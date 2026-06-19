@@ -182,9 +182,13 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     }
 
     // Peso: via ubicacion_actual (más confiable — guarda la mesada donde estaba al cosechar)
+    // ubicacion_actual puede tener prefijo "Nave X - " aunque mes.nombre no lo tenga
     for (const l of cosechados) {
       const ua = String(l.ubicacion_actual || '');
-      if (ua !== mes.nombre && ua !== mes.id_ubicacion && ua !== nombreCorto) continue;
+      const uaCorto = ua.replace(/^Nave \d+ - /i, '');
+      const match = ua === mes.nombre || ua === mes.id_ubicacion || ua === nombreCorto
+        || uaCorto === mes.nombre || uaCorto === mes.id_ubicacion || uaCorto === nombreCorto;
+      if (!match) continue;
       const p = pesoLoteMap.get(l.id_lote);
       if (p) (p.esRucula ? pRuc : pLech).push(p.gr);
     }

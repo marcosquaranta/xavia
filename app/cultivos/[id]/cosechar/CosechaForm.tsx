@@ -14,7 +14,8 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
   const [pesoGr, setPesoGr] = useState(0);
   const [paquetes, setPaquetes] = useState(0);
   const [plantasPorPaqueteManual, setPlantasPorPaqueteManual] = useState(3); // editable, default 3
-  const [pesoPaqGr, setPesoPaqGr] = useState(0);
+  const [pesoPlantaGr, setPesoPlantaGr] = useState(0);
+  const pesoPaqGr = pesoPlantaGr > 0 ? Math.round(pesoPlantaGr * plantasPorPaqueteManual) : 0;
   const [bandejas, setBandejas] = useState(0);
   const [tubosBandejas, setTubosBandejas] = useState(0);
   const [pesoBandGr, setPesoBandGr] = useState(0);
@@ -102,7 +103,15 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
             <div><label>Paquetes armados (real) *</label><NumberInput value={paquetes} onChange={setPaquetes} min={0} required disabled={loading} /></div>
-            <div><label>Peso muestra paquete (gramos) — opcional</label><NumberInput value={pesoPaqGr} onChange={setPesoPaqGr} min={0} disabled={loading} placeholder="Ej: 45" /></div>
+            <div>
+              <label>Pesaje testigo — gramos/planta — opcional</label>
+              <NumberInput value={pesoPlantaGr} onChange={setPesoPlantaGr} min={0} disabled={loading} placeholder="Ej: 58" />
+              {pesoPlantaGr > 0 && (
+                <p style={{ margin: '3px 0 0', fontSize: '11px', color: '#166534' }}>
+                  → {pesoPaqGr} g/paq ({plantasPorPaqueteManual} plantas × {pesoPlantaGr} g)
+                </p>
+              )}
+            </div>
           </div>
 
           {paquetes > 0 && (

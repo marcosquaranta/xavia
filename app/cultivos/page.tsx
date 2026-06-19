@@ -59,10 +59,10 @@ export default async function CultivosPage({
     lotesFiltrados = aplicarFiltros3(lotes, cultivo, fase, nave, mesada, tiempo);
   }
 
-  // Ordenar por fecha de siembra
+  // Ordenar por último movimiento (fecha_ult_movimiento > fecha_cosecha > fecha_siembra)
   lotesFiltrados = [...lotesFiltrados].sort((a, b) => {
-    const fa = String(a.fecha_siembra || '');
-    const fb = String(b.fecha_siembra || '');
+    const fa = String(a.fecha_ult_movimiento || a.fecha_cosecha || a.fecha_siembra || '');
+    const fb = String(b.fecha_ult_movimiento || b.fecha_cosecha || b.fecha_siembra || '');
     return orden === 'asc' ? fa.localeCompare(fb) : fb.localeCompare(fa);
   });
 
