@@ -1,28 +1,29 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import { estadisticasDelMes, ciclosPorMesYAnioDetalle, cicloRealPorVariedad } from '@/lib/estadisticas';
+import { estadisticasDelMes } from '@/lib/estadisticas';
 import { calcularDiasPorFase } from '@/lib/lotes';
-import type { Lote, Movimiento, Variedad, Ubicacion } from '@/lib/types';
+import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
 import GraficoCiclosMesadas from './GraficoCiclosMesadas';
 import GraficoPesaje from './GraficoPesaje';
 export const dynamic = 'force-dynamic';
 
-export default async function EstadisticasPage({ searchParams }: { searchParams: { nave?: string; periodo?: string } }) {
+export default async function EstadisticasPage({ searchParams }: { searchParams: { nave?: string; periodo?: string; evo?: string } }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   const naveFilter = searchParams.nave || 'todas';
   const periodoMesada = (searchParams.periodo || 'anio') as 'mes' | 'mes_ant' | 'anio' | 'siempre';
+  const evoModo = (searchParams.evo === 'trimestre' ? 'trimestre' : 'anio') as 'anio' | 'trimestre';
 
-  let lotes: Lote[] = [], movimientos: Movimiento[] = [], variedades: Variedad[] = [], ubicaciones: Ubicacion[] = [];
+  let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [];
   let err: string | null = null;
   try {
-    [lotes, movimientos, variedades, ubicaciones] = await Promise.all([
+    [lotes, movimientos, ubicaciones] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
-      readSheet<Variedad>('Variedades'), readSheet<Ubicacion>('Ubicaciones'),
+      readSheet<Ubicacion>('Ubicaciones'),
     ]);
   } catch (e: any) { err = e?.message || 'Error cargando datos'; }
 
@@ -34,10 +35,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   );
 
   const hoy = new Date();
-  const anioActual = hoy.getFullYear();
-  const anioAnterior = anioActual - 1;
   const nombreMes = hoy.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
-  const varActivas = variedades.filter(v => v.activo === 'SI');
 
   // Puntos de pesaje testigo: lotes cosechados con peso registrado
   const puntosPesaje = lotes
@@ -55,22 +53,55 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     }))
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
 
-  let statsActual: any[] = [], statsPasado: any[] = [], curvas: any[] = [];
+  let statsActual: any[] = [], statsPasado: any[] = [];
   try { statsActual = estadisticasDelMes(lotes, movimientos, hoy); } catch {}
   try {
     const mesPasado = new Date(hoy); mesPasado.setMonth(mesPasado.getMonth() - 1);
     statsPasado = estadisticasDelMes(lotes, movimientos, mesPasado);
   } catch {}
-  try {
-    const cA = ciclosPorMesYAnioDetalle(lotes, movimientos, anioActual);
-    for (const v of varActivas) {
-      try {
-        const datosActual = Array.from((cA.get(v.variedad) || new Map()).entries())
-          .filter(([k]) => typeof k === 'number' && k >= 0 && k < 12) as [number, any][];
-        if (datosActual.length > 0) curvas.push({ variedad: v.variedad, datosActual, datosAnterior: [] });
-      } catch {}
+
+  // ── EVOLUCIÓN DE CICLOS (F2 promedio) ──
+  // Una línea de lechuga (promedio de todas las variedades) y una de rúcula.
+  // Modo año = buckets por mes (12); modo trimestre = buckets por semana (13).
+  const esRuculaV = (v: string) => { const x = String(v).toLowerCase(); return x.includes('rucula') || x.includes('rúcula'); };
+  function curvasEvo(modo: 'anio' | 'trimestre') {
+    const ahora = new Date();
+    let nBuckets: number, labels: string[], hoyIdx: number;
+    let bucketDe: (f: Date) => number;
+    if (modo === 'trimestre') {
+      nBuckets = 13;
+      const start = new Date(ahora); start.setDate(start.getDate() - 7 * (nBuckets - 1)); start.setHours(0, 0, 0, 0);
+      bucketDe = (f) => { const idx = Math.floor((f.getTime() - start.getTime()) / (7 * 86400000)); return idx >= 0 && idx < nBuckets ? idx : -1; };
+      labels = Array.from({ length: nBuckets }, (_, i) => { const d = new Date(start); d.setDate(d.getDate() + i * 7); return `${d.getDate()}/${d.getMonth() + 1}`; });
+      hoyIdx = nBuckets - 1;
+    } else {
+      nBuckets = 12;
+      bucketDe = (f) => f.getFullYear() === ahora.getFullYear() ? f.getMonth() : -1;
+      labels = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+      hoyIdx = ahora.getMonth();
     }
-  } catch {}
+    const acc = {
+      lechuga: Array.from({ length: nBuckets }, () => [] as number[]),
+      rucula: Array.from({ length: nBuckets }, () => [] as number[]),
+    };
+    for (const l of lotes) {
+      if (l.estado !== 'cosechado' || !l.fecha_cosecha) continue;
+      const f = new Date(String(l.fecha_cosecha) + 'T12:00:00');
+      if (isNaN(f.getTime())) continue;
+      const b = bucketDe(f); if (b < 0) continue;
+      let f2 = 0; try { f2 = calcularDiasPorFase(l, movimientos).fase_2; } catch {}
+      if (f2 <= 0) continue;
+      (esRuculaV(l.variedad) ? acc.rucula : acc.lechuga)[b].push(f2);
+    }
+    const avgArr = (a: number[][]) => a.map(xs => xs.length ? Math.round(xs.reduce((p, c) => p + c, 0) / xs.length) : 0);
+    const lech = avgArr(acc.lechuga), ruc = avgArr(acc.rucula);
+    const series = [
+      { nombre: 'Lechuga F2', color: '#4d7c0f', puntos: lech.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+      { nombre: 'Rúcula F2', color: '#166534', puntos: ruc.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+    ];
+    return { series, labels, hoyIdx };
+  }
+  const evo = curvasEvo(evoModo);
 
   // ── CICLOS POR MESADA ──
   // Para cada mesada: promedio de dias_f1, dias_f2 de cosechados cuyo historial de movimientos
@@ -227,6 +258,20 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
   const nombre = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
 
+  // Construye URLs preservando los filtros activos (nave, periodo, evo)
+  const buildUrl = (overrides: Record<string, string>) => {
+    const p: Record<string, string> = {};
+    if (naveFilter !== 'todas') p.nave = naveFilter;
+    if (periodoMesada !== 'anio') p.periodo = periodoMesada;
+    if (evoModo !== 'anio') p.evo = evoModo;
+    Object.assign(p, overrides);
+    if (p.nave === 'todas') delete p.nave;
+    if (p.periodo === 'anio') delete p.periodo;
+    if (p.evo === 'anio') delete p.evo;
+    const qs = new URLSearchParams(p).toString();
+    return `/estadisticas${qs ? '?' + qs : ''}`;
+  };
+
   return (
     <>
       <Header user={user} current="estadisticas" />
@@ -234,11 +279,23 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
         <h1 className="page-title">Estadísticas</h1>
         <p className="page-subtitle">{nombre}</p>
 
-        {/* Evolución mensual */}
+        {/* Evolución de ciclos */}
         <div className="card">
-          <p className="card-title">Evolución de ciclos · {anioActual}</p>
-          <p className="card-sub">Días F2 (línea gruesa) y total (línea fina) promedio por mes.</p>
-          <GraficoEvolucion curvas={curvas} anioActual={anioActual} anioAnterior={anioAnterior} />
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'10px', flexWrap:'wrap', gap:'8px' }}>
+            <div>
+              <p className="card-title" style={{ margin:'0 0 2px' }}>Evolución de ciclos</p>
+              <p className="card-sub" style={{ margin:0 }}>Días F2 promedio de lechuga y rúcula por {evoModo==='trimestre' ? 'semana (últimas 13)' : 'mes'}.</p>
+            </div>
+            <div style={{ display:'flex', gap:'4px' }}>
+              {([['anio','Año (meses)'],['trimestre','Trimestre (semanas)']] as const).map(([v,l]) => (
+                <a key={v} href={buildUrl({ evo:v })}
+                  style={{ padding:'3px 10px', borderRadius:'5px', fontSize:'11px', fontWeight:evoModo===v?700:400, background:evoModo===v?'#374151':'#f3f4f6', color:evoModo===v?'white':'#6b7280', textDecoration:'none' }}>
+                  {l}
+                </a>
+              ))}
+            </div>
+          </div>
+          <GraficoEvolucion series={evo.series} labels={evo.labels} hoyIdx={evo.hoyIdx} />
         </div>
 
         {/* Tabla mes actual */}
@@ -299,7 +356,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
               {/* Filtro período */}
               <div style={{ display:'flex', gap:'4px' }}>
                 {([['mes','Este mes'],['mes_ant','Mes ant.'],['anio','Este año'],['siempre','Siempre']] as const).map(([v,l]) => (
-                  <a key={v} href={`/estadisticas?${new URLSearchParams({ ...(naveFilter!=='todas'?{nave:naveFilter}:{}), periodo:v }).toString()}`}
+                  <a key={v} href={buildUrl({ periodo:v })}
                     style={{ padding:'3px 8px', borderRadius:'5px', fontSize:'11px', fontWeight:periodoMesada===v?700:400, background:periodoMesada===v?'#374151':'#f3f4f6', color:periodoMesada===v?'white':'#6b7280', textDecoration:'none' }}>
                     {l}
                   </a>
@@ -308,7 +365,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
               {/* Filtro nave */}
               <div style={{ display:'flex', gap:'4px' }}>
                 {([['todas','Ambas'],['1','Nave 1'],['2','Nave 2']] as const).map(([v,l]) => (
-                  <a key={v} href={`/estadisticas?${new URLSearchParams({ ...(v!=='todas'?{nave:v}:{}), periodo:periodoMesada }).toString()}`}
+                  <a key={v} href={buildUrl({ nave:v })}
                     style={{ padding:'3px 8px', borderRadius:'5px', fontSize:'11px', fontWeight:naveFilter===v?700:400, background:naveFilter===v?'#111827':'#f3f4f6', color:naveFilter===v?'white':'#374151', textDecoration:'none' }}>
                     {l}
                   </a>
