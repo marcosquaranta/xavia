@@ -115,13 +115,6 @@ function SubGrafico({
           );
         })}
 
-        {/* Línea de peso */}
-        {pesoPuntos.length > 1 && (
-          <polyline
-            points={pesoPuntos.map(p => `${xC(p.i)},${yP(p.gr)}`).join(' ')}
-            fill="none" stroke="#fb923c" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.8}
-          />
-        )}
         {/* Dots de peso */}
         {pesoPuntos.map(p => (
           <g key={p.i}>

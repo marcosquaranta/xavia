@@ -209,6 +209,22 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     });
   }
 
+  // Filas de la tabla: un ciclo F2 por cultivo, ordenadas por cultivo y luego nave
+  const filasTabla = ciclosMesadas
+    .map(m => {
+      const esRuc = m.tipo === 'rucula' || (m.tipo === 'mixta' && m.ruculaN > 0 && m.lechugaN === 0);
+      return {
+        nombre: m.nombre,
+        nave: m.nave,
+        cultivo: esRuc ? 'Rúcula' : 'Lechuga',
+        cultivoOrden: esRuc ? 1 : 0, // lechuga primero
+        f2: esRuc ? m.ruculaF2 : m.lechugaF2,
+        peso: esRuc ? m.pesoGrRucula : m.pesoGrLechuga,
+        n: esRuc ? m.ruculaN : m.lechugaN,
+      };
+    })
+    .sort((a, b) => a.cultivoOrden - b.cultivoOrden || a.nave - b.nave || a.nombre.localeCompare(b.nombre));
+
   const nombre = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
 
   return (
@@ -312,29 +328,30 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
               <table style={{ fontSize:'12px' }}>
                 <thead>
                   <tr>
+                    <th>Cultivo</th>
                     <th>Mesada</th>
                     <th style={{ textAlign:'center' }}>Nave</th>
-                    <th style={{ textAlign:'right', color:'#4d7c0f' }}>Lech F1</th>
-                    <th style={{ textAlign:'right', color:'#4d7c0f' }}>Lech F2</th>
-                    <th style={{ textAlign:'right', color:'#4d7c0f' }}>Lech Total</th>
-                    <th style={{ textAlign:'right', color:'#166534' }}>Rúc F2</th>
+                    <th style={{ textAlign:'right' }}>Ciclo F2 prom.</th>
+                    <th style={{ textAlign:'right', color:'#ea580c' }}>Peso prom.</th>
                     <th style={{ textAlign:'right', color:'#9ca3af', fontSize:'11px' }}>N cosechas</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {ciclosMesadas.map((m, i) => (
-                    <tr key={i} style={{ borderBottom:'1px solid #f3f4f6' }}>
-                      <td style={{ fontWeight:500 }}>{m.nombre}</td>
-                      <td style={{ textAlign:'center' }}>
-                        <span style={{ background:m.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 6px', borderRadius:'3px', fontSize:'10px', fontWeight:700 }}>N{m.nave}</span>
-                      </td>
-                      <td style={{ textAlign:'right', color:m.lechugaF1>0?'#374151':'#d1d5db' }}>{m.lechugaF1>0?m.lechugaF1+'d':'—'}</td>
-                      <td style={{ textAlign:'right', color:m.lechugaF2>0?'#374151':'#d1d5db' }}>{m.lechugaF2>0?m.lechugaF2+'d':'—'}</td>
-                      <td style={{ textAlign:'right', fontWeight:600, color:m.lechugaTotal>0?'#4d7c0f':'#d1d5db' }}>{m.lechugaTotal>0?m.lechugaTotal+'d':'—'}</td>
-                      <td style={{ textAlign:'right', fontWeight:600, color:m.ruculaF2>0?'#166534':'#d1d5db' }}>{m.ruculaF2>0?m.ruculaF2+'d':'—'}</td>
-                      <td style={{ textAlign:'right', color:'#9ca3af' }}>{m.lechugaN+m.ruculaN}</td>
-                    </tr>
-                  ))}
+                  {filasTabla.map((m, i) => {
+                    const colCultivo = m.cultivo==='Rúcula' ? '#166534' : '#4d7c0f';
+                    return (
+                      <tr key={i} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                        <td><span style={{ color:colCultivo, fontWeight:600 }}>{m.cultivo}</span></td>
+                        <td style={{ fontWeight:500 }}>{m.nombre}</td>
+                        <td style={{ textAlign:'center' }}>
+                          <span style={{ background:m.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 6px', borderRadius:'3px', fontSize:'10px', fontWeight:700 }}>N{m.nave}</span>
+                        </td>
+                        <td style={{ textAlign:'right', fontWeight:600, color:m.f2>0?colCultivo:'#d1d5db' }}>{m.f2>0?m.f2+'d':'—'}</td>
+                        <td style={{ textAlign:'right', fontWeight:600, color:m.peso>0?'#ea580c':'#d1d5db' }}>{m.peso>0?m.peso+'g':'—'}</td>
+                        <td style={{ textAlign:'right', color:'#9ca3af' }}>{m.n}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
