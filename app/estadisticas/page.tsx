@@ -138,6 +138,18 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     }
   }
 
+  // Normaliza nombres de mesada: quita prefijo "Nave X -", acentos, sufijos "(...)", minúsculas
+  const normMes = (s: string) => String(s || '')
+    .replace(/^Nave\s*\d+\s*-\s*/i, '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\([^)]*\)/g, '')
+    .toLowerCase().replace(/\s+/g, ' ').trim();
+  const naveDe = (ubic: string) => {
+    const m = String(ubic || '').match(/nave\s*(\d+)/i);
+    if (m) return Number(m[1]);
+    return String(ubic || '').toLowerCase().includes('n1') ? 1 : 2;
+  };
+
   // Ciclos por mesada: usar movimientos de trasplante para saber qué lotes pasaron por cada mesada
   interface CicloMesada {
     nombre: string; nave: number;
@@ -152,43 +164,36 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   for (const mes of mesadas) {
     if (naveFilter !== 'todas' && String(mes.nave) !== naveFilter) continue;
 
-    const nombreNorm = mes.nombre.toLowerCase();
-    const esRuculaMesada = nombreNorm.includes('rucula') || nombreNorm.includes('rúcula');
-    const esLechugaMesada = nombreNorm.includes('lechuga');
+    const mesKey = normMes(mes.nombre);
+    const mesNave = Number(mes.nave);
+    const esRuculaMesada = mesKey.includes('rucula');
+    const esLechugaMesada = mesKey.includes('lechuga');
     const tipo: CicloMesada['tipo'] = esRuculaMesada ? 'rucula' : esLechugaMesada ? 'lechuga' : 'mixta';
 
-    // Lotes cosechados que pasaron por esta mesada
-    // ubicacion_destino puede tener o no el prefijo "Nave X - "
-    const nombreCorto = mes.nombre.replace(/^Nave \d+ - /i, '');
+    // Lotes cosechados que pasaron por esta mesada (matching normalizado: sin acentos/sufijos/prefijo)
     const lotesEnMesada = new Set(
       movimientos
-        .filter(m => m.ubicacion_destino === mes.nombre
-          || m.ubicacion_destino === mes.id_ubicacion
-          || m.ubicacion_destino === nombreCorto)
+        .filter(m => normMes(m.ubicacion_destino) === mesKey)
         .map(m => m.id_lote)
     );
 
     const lF1: number[] = [], lF2: number[] = [], rF2: number[] = [];
     const pLech: number[] = [], pRuc: number[] = [];
 
-    // Ciclos: via movimientos (lotes que tuvieron destino = esta mesada)
+    // Ciclos: via movimientos (lotes que tuvieron destino = esta mesada, misma nave)
     for (const idLote of lotesEnMesada) {
       const d = diasPorLote.get(String(idLote));
-      if (!d) continue;
+      if (!d || d.nave !== mesNave) continue;
       const vNorm = d.variedad.toLowerCase();
       const esR = vNorm.includes('rucula') || vNorm.includes('rúcula');
       if (esR) { if (d.f2 > 0) rF2.push(d.f2); }
       else { if (d.f1 !== null && d.f1 > 0) lF1.push(d.f1); if (d.f2 > 0) lF2.push(d.f2); }
     }
 
-    // Peso: via ubicacion_actual (más confiable — guarda la mesada donde estaba al cosechar)
-    // ubicacion_actual puede tener prefijo "Nave X - " aunque mes.nombre no lo tenga
+    // Peso: via ubicacion_actual (guarda la mesada donde estaba al cosechar), matching normalizado + nave
     for (const l of cosechados) {
-      const ua = String(l.ubicacion_actual || '');
-      const uaCorto = ua.replace(/^Nave \d+ - /i, '');
-      const match = ua === mes.nombre || ua === mes.id_ubicacion || ua === nombreCorto
-        || uaCorto === mes.nombre || uaCorto === mes.id_ubicacion || uaCorto === nombreCorto;
-      if (!match) continue;
+      if (normMes(l.ubicacion_actual) !== mesKey) continue;
+      if (naveDe(l.ubicacion_actual) !== mesNave) continue;
       const p = pesoLoteMap.get(l.id_lote);
       if (p) (p.esRucula ? pRuc : pLech).push(p.gr);
     }
