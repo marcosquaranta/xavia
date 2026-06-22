@@ -22,7 +22,12 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades, c
   try { dias = calcularDiasPorFase(lote, movimientos); }
   catch { dias = { plantinera: 0, fase_1: null, fase_2: 0, total: 0, fechas: { siembra: '', fase_1_inicio: null, fase_2_inicio: null, cosecha: null } }; }
   const plantas = estimarPlantasActuales(lote, ubicaciones);
-  const nave = naveDeLote(lote.id_lote);
+  const nave = (() => {
+    const ubic = String(lote.ubicacion_actual || '').toLowerCase();
+    if (ubic.includes('nave 1')) return 1 as const;
+    if (ubic.includes('nave 2')) return 2 as const;
+    return naveDeLote(lote.id_lote);
+  })();
   const varDef = variedades.find((v) => v.variedad === lote.variedad);
   const diasEstimados = (ciclosReales ? getCicloReal(ciclosReales, lote.variedad) : undefined) || Number(varDef?.dias_estimados_cosecha) || 35;
   const t = tipo(lote.variedad); const col = COL[t];
