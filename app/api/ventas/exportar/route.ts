@@ -37,6 +37,20 @@ function getPrecio(precios: PrecioVenta[], id_control: string, sucursal: string,
 function fmtFecha(d: Date) { return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`; }
 function addDays(d: Date, n: number) { const r = new Date(d); r.setDate(r.getDate()+n); return r; }
 
+// Abrevia un nombre de cliente: sin acentos, sin formas societarias, 1-2 palabras significativas
+function abreviarCliente(nombre: string): string {
+  const limpio = String(nombre || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toUpperCase()
+    .replace(/\b(S\.?A\.?S?|S\.?R\.?L\.?|LTDA|SACI|S\.?H\.?|EIRL)\b/g, '')
+    .replace(/[^A-Z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const stop = ['LA','EL','LOS','LAS','DE','DEL','Y','SAN'];
+  const palabras = limpio.split(' ').filter(w => w && !stop.includes(w));
+  return (palabras.slice(0, 2).join(' ') || limpio).trim();
+}
+
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
@@ -88,6 +102,7 @@ export async function POST(req: NextRequest) {
       controlesOrden.indexOf(a) - controlesOrden.indexOf(b)
     );
     let facturasGeneradas = 0;
+    const clientesFacturados: string[] = [];
 
     // Trazabilidad: lotes cosechados en la fecha (±1 día)
     function lotesParaCliente(idControl: string, fechaFact: string): string {
@@ -137,6 +152,7 @@ export async function POST(req: NextRequest) {
       );
       if (!tieneVentas) continue;
       facturasGeneradas++;
+      clientesFacturados.push(cliente.nombre_display || cliente.nombre_xubio || idControl);
 
       const esA = cliente.tipo_factura === 'A';
       const pv = Number(cliente.punto_venta);
@@ -194,12 +210,20 @@ export async function POST(req: NextRequest) {
       updates: { exportado: id_exportacion, fecha_carga: resetFecha },
     })));
 
+    // Abreviaturas de clientes para filename y subject
+    const fechaLimpia = fecha.replace(/-/g, '');
+    const abrevs = clientesFacturados.map(abreviarCliente).filter(Boolean);
+    const clientesFilename = abrevs.map(a => a.replace(/ /g, '')).slice(0, 6).join('-')
+      + (abrevs.length > 6 ? `-mas${abrevs.length - 6}` : '');
+    const nombreArchivo = `xavia_xubio_${fechaLimpia}${clientesFilename ? '_' + clientesFilename : ''}.xls`;
+    const clientesSubject = abrevs.slice(0, 8).join(', ')
+      + (abrevs.length > 8 ? ` +${abrevs.length - 8}` : '');
+
     // Enviar email via Resend (sin SMTP, sin dependencias)
     let emailOk = false;
     let emailError = '';
     if (enviarEmail && process.env.RESEND_API_KEY) {
       try {
-        const nombreArchivo = `xavia_xubio_${fecha.replace(/-/g, '')}.xls`;
         const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: {
@@ -209,8 +233,8 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify({
             from: 'Xavia App <ventas@xavia.com.ar>',
             to: ['administracion@xavia.com.ar'],
-            subject: `Ventas Xavia — ${fecha} (${facturasGeneradas} facturas)`,
-            html: `<p>Se adjunta archivo de ventas del <strong>${fecha}</strong>.<br>Facturas: <strong>${facturasGeneradas}</strong> · A hasta <strong>${lastA}</strong> · B hasta <strong>${lastB}</strong></p>`,
+            subject: `Ventas Xavia — ${fecha}${clientesSubject ? ' — ' + clientesSubject : ''} (${facturasGeneradas} facturas)`,
+            html: `<p>Se adjunta archivo de ventas del <strong>${fecha}</strong>.<br>Clientes: <strong>${clientesFacturados.join(', ')}</strong><br>Facturas: <strong>${facturasGeneradas}</strong> · A hasta <strong>${lastA}</strong> · B hasta <strong>${lastB}</strong></p>`,
             attachments: [{
               filename: nombreArchivo,
               content: Buffer.from(xlsxBuf).toString('base64'),
@@ -230,12 +254,11 @@ export async function POST(req: NextRequest) {
       emailError = 'RESEND_API_KEY no configurada en Vercel';
     }
 
-    const fechaLimpia = fecha.replace(/-/g, '');
     return NextResponse.json({
       ok: true, emailOk, emailError,
       facturas: facturasGeneradas,
       lastA, lastB, id_exportacion,
-      filename: `xavia_xubio_${fechaLimpia}.xls`,
+      filename: nombreArchivo,
       file: Buffer.from(xlsxBuf).toString('base64'),
     });
   } catch (err: any) {
