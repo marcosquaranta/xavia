@@ -152,7 +152,15 @@ export interface ConteosFiltros { todos: number; lechuga: number; rucula: number
 
 export function contarPorFiltro(lotes: Lote[], nave: FiltroNave): ConteosFiltros {
   let base = lotes;
-  if (nave !== 'todas') { const n = Number(nave); base = base.filter((l) => naveDeLote(l.id_lote) === n); }
+  if (nave !== 'todas') {
+    const n = Number(nave);
+    base = base.filter((l) => {
+      const ubic = String(l.ubicacion_actual || '').toLowerCase();
+      if (ubic.includes('nave 1')) return n === 1;
+      if (ubic.includes('nave 2')) return n === 2;
+      return naveDeLote(l.id_lote) === n;
+    });
+  }
   const activos = base.filter((l) => l.estado === 'activo');
   const cont: ConteosFiltros = { todos: activos.length, lechuga: 0, rucula: 0, albahaca: 0, plantinera: 0, fase_1: 0, fase_2: 0, cosechados: base.filter((l) => l.estado === 'cosechado').length };
   for (const l of activos) {
