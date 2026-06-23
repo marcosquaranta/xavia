@@ -52,10 +52,12 @@ export function calcularCamara(
     .map(l => ({ fecha: parseDate(l.fecha_cosecha || l.fecha_ult_movimiento)!, cantidad: Number(l.unidades_cosechadas) || 0 }))
     .filter(e => e.cantidad > 0);
 
-  // Ventas exportadas desde fechaBase
+  // Ventas exportadas desde fechaBase (= producto que ya salió de cámara).
+  // El export marca `exportado` con el id de exportación (ej. "EXP-20260619-1430"),
+  // NO con el literal 'SI'. Por eso descontamos cualquier venta con exportado no vacío.
   const totalVendido = ventas
     .filter(v => {
-      if (v.exportado !== 'SI') return false;
+      if (!v.exportado || String(v.exportado).trim() === '') return false;
       const f = parseDate(v.fecha);
       return f && f > fechaBase;
     })
