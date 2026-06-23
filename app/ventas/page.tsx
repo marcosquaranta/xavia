@@ -4,6 +4,7 @@ import { readSheet } from '@/lib/sheets';
 import type { ClienteVenta, PrecioVenta, VentaDia } from '@/lib/types';
 import Header from '@/components/Header';
 import VentasManager from './VentasManager';
+import XubioResumen from './XubioResumen';
 export const dynamic = 'force-dynamic';
 
 function safeD(s: any): Date | null {
@@ -71,6 +72,7 @@ export default async function VentasPage() {
         <p className="page-subtitle">Carga diaria · Exportación Xubio</p>
         <div className="card">
           <VentasManager clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} ventas7={ventas7} />
+          <XubioResumen />
         </div>
       </div>
     </>
