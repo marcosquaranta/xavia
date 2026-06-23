@@ -13,13 +13,18 @@ const PROD_LABELS = [
   { key: 'bandeja_rucula', label: 'Bandeja Rúcula' },
   { key: 'albahaca',       label: 'Albahaca' },
 ];
+const KG_LABELS = [
+  { key: 'rucula_kg',  label: 'Rúcula KG' },
+  { key: 'lechuga_kg', label: 'Lechuga KG' },
+];
 
-function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, onSaved }: {
+function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, esKg, onSaved }: {
   idControl: string; nombreCliente: string; sucursalObs: string;
-  precioActual: PrecioVenta | undefined; onSaved: () => void;
+  precioActual: PrecioVenta | undefined; esKg: boolean; onSaved: () => void;
 }) {
+  const campos = esKg ? KG_LABELS : PROD_LABELS;
   const [vals, setVals] = useState<Record<string,string>>(() =>
-    Object.fromEntries(PROD_LABELS.map(p => [p.key, precioActual ? String((precioActual as any)[p.key] || '') : '']))
+    Object.fromEntries(campos.map(p => [p.key, precioActual ? String((precioActual as any)[p.key] || '') : '']))
   );
   const [saving, setSaving] = useState(false);
   const [ok, setOk] = useState(false);
@@ -31,7 +36,7 @@ function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, 
       const res = await fetch('/api/admin/precios', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id_control: idControl, nombre_cliente: nombreCliente, sucursal_obs: sucursalObs,
-          ...Object.fromEntries(PROD_LABELS.map(p => [p.key, Number(vals[p.key]) || 0])) }),
+          ...Object.fromEntries(campos.map(p => [p.key, Number(vals[p.key]) || 0])) }),
       });
       if (!res.ok) { const j = await res.json(); throw new Error(j.error); }
       setOk(true); setTimeout(() => setOk(false), 2000);
@@ -41,10 +46,12 @@ function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, 
   }
 
   return (
-    <div style={{ background: '#f9fafb', border: '1px solid #f3f4f6', borderRadius: '6px', padding: '10px 12px', marginBottom: '8px' }}>
-      <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#374151' }}>{sucursalObs}</p>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px', marginBottom: '8px' }}>
-        {PROD_LABELS.map(p => (
+    <div style={{ background: esKg ? '#fffbeb' : '#f9fafb', border: `1px solid ${esKg ? '#fde68a' : '#f3f4f6'}`, borderRadius: '6px', padding: '10px 12px', marginBottom: '8px' }}>
+      <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: esKg ? '#92400e' : '#374151' }}>
+        {sucursalObs}{esKg && <span style={{ marginLeft: '6px', fontWeight: 400, fontSize: '10px' }}>· precios por KG (cajón)</span>}
+      </p>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(campos.length, 5)}, 1fr)`, gap: '6px', marginBottom: '8px' }}>
+        {campos.map(p => (
           <div key={p.key}>
             <label style={{ fontSize: '10px' }}>{p.label}</label>
             <input type="number" value={vals[p.key]} onChange={e => setVals(v => ({ ...v, [p.key]: e.target.value }))}
@@ -74,6 +81,7 @@ function ClienteRow({ c, precios, onSaved }: { c: ClienteVenta; precios: PrecioV
     tipo_factura: c.tipo_factura,
     punto_venta: String(c.punto_venta || ''),
     sucursales: c.sucursales || '',
+    unidad: String(c.unidad || 'paq'),
   });
 
   const sucursalesArr = fields.sucursales ? fields.sucursales.split('|').map(s => s.trim()).filter(Boolean) : [];
@@ -159,6 +167,13 @@ function ClienteRow({ c, precios, onSaved }: { c: ClienteVenta; precios: PrecioV
                   <label style={{ fontSize: '11px' }}>Sucursales (separadas por |)</label>
                   <input type="text" value={fields.sucursales} onChange={e => setFields(f => ({ ...f, sucursales: e.target.value }))} disabled={saving} placeholder="Ej: Norte|Sur|Centro" />
                 </div>
+                <div>
+                  <label style={{ fontSize: '11px' }}>Unidad de venta</label>
+                  <select value={fields.unidad} onChange={e => setFields(f => ({ ...f, unidad: e.target.value }))} disabled={saving}>
+                    <option value="paq">Paquetes</option>
+                    <option value="kg">KG (cajón) — ej. Select Food</option>
+                  </select>
+                </div>
               </div>
               <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center' }}>
                 <button className="btn" style={{ fontSize: '11px', padding: '5px 12px' }} onClick={guardarCliente} disabled={saving}>
@@ -177,12 +192,12 @@ function ClienteRow({ c, precios, onSaved }: { c: ClienteVenta; precios: PrecioV
                     <PreciosSucursal key={suc}
                       idControl={String(c.id_control)} nombreCliente={c.nombre_xubio} sucursalObs={suc}
                       precioActual={precios.find(p => String(p.id_control) === String(c.id_control) && p.sucursal_obs === suc)}
-                      onSaved={onSaved} />
+                      esKg={c.unidad === 'kg'} onSaved={onSaved} />
                   ))
                 : <PreciosSucursal
                     idControl={String(c.id_control)} nombreCliente={c.nombre_xubio} sucursalObs={c.nombre_xubio}
                     precioActual={precios.find(p => String(p.id_control) === String(c.id_control))}
-                    onSaved={onSaved} />
+                    esKg={c.unidad === 'kg'} onSaved={onSaved} />
               }
             </div>
           </td>
