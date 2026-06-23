@@ -7,6 +7,7 @@ export default function Header({ user, current }: { user: UsuarioPublico; curren
     { href: '/cultivos', label: 'Mis Cultivos', key: 'cultivos' },
     { href: '/ocupacion', label: 'Ocupación', key: 'ocupacion' },
     { href: '/estadisticas', label: 'Estadísticas', key: 'estadisticas' },
+    { href: '/facturacion', label: 'Facturación', key: 'facturacion' },
   ];
   if (isAdmin) { items.push({ href: '/alertas', label: 'Alertas', key: 'alertas' }); items.push({ href: '/admin', label: 'Admin', key: 'admin' }); }
   return (

@@ -201,6 +201,25 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
       setMsg({t:'err',s:`Error al guardar KG de ${f.nombre_display}: ${err.message}`});
     }
   }
+  async function cargarVentas(){
+    setExp(true);setMsg(null);
+    try{
+      setShowPreExport(false);
+      Object.values(tmrs.current).forEach(t=>clearTimeout(t));
+      // Flush de todas las cantidades cargadas (igual que en exportar)
+      const todasLineas = [
+        ...filasNormales.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:Number(q(f.id_control,f.sucursal,'rucula'))||0,lechuga_crespa:Number(q(f.id_control,f.sucursal,'lechuga_crespa'))||0,hoja_roble:Number(q(f.id_control,f.sucursal,'hoja_roble'))||0,bandeja_rucula:Number(q(f.id_control,f.sucursal,'bandeja_rucula'))||0,albahaca:Number(q(f.id_control,f.sucursal,'albahaca'))||0,rucula_kg:0,lechuga_kg:0})),
+        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg:Number(dr?.lechuga_kg?.value)||0};}),
+      ].filter(l=>l.rucula>0||l.lechuga_crespa>0||l.hoja_roble>0||l.bandeja_rucula>0||l.albahaca>0||l.rucula_kg>0||l.lechuga_kg>0);
+      const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:todasLineas})});
+      if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar ventas');}
+      const r=await fetch('/api/ventas/cargar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha})});
+      const j=await r.json();if(!r.ok)throw new Error(j.error);
+      setMsg({t:'ok',s:`${j.clientes} cliente(s) cargados a Facturación. Revisalos y emitilos desde la sección Facturación.`});
+      setCtds({});setEsts({});setCtdsKg({});ctdsKgLive.current={};setFc({});
+    }catch(err:any){setMsg({t:'err',s:err.message});}
+    setExp(false);
+  }
   async function exportar(){
     setExp(true);setMsg(null);
     try{
@@ -465,9 +484,13 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
           style={{background:'none',border:'1px solid #fca5a5',borderRadius:'8px',padding:'8px 12px',fontWeight:600,fontSize:'12px',cursor:'pointer',color:'#dc2626',marginTop:'14px'}}>
           🗑 Limpiar día
         </button>
-        <button onClick={()=>{ if(hayV) setShowPreExport(true); }} disabled={!hayV}
-          style={{background:hayV?'#1d4ed8':'#e5e7eb',color:hayV?'white':'#9ca3af',border:'none',borderRadius:'8px',padding:'8px 18px',fontWeight:700,fontSize:'13px',cursor:hayV?'pointer':'not-allowed',marginLeft:'auto',display:'flex',alignItems:'center',gap:'5px'}}>
-          <span>📤</span>Exportar Xubio
+        <button onClick={()=>{ if(hayV&&!exp) setShowPreExport(true); }} disabled={!hayV||exp} title="Descargar Excel de respaldo"
+          style={{background:'white',color:hayV?'#6b7280':'#d1d5db',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'8px 12px',fontWeight:600,fontSize:'12px',cursor:hayV&&!exp?'pointer':'not-allowed',marginLeft:'auto',display:'flex',alignItems:'center',gap:'4px'}}>
+          <span>⬇</span>Excel
+        </button>
+        <button onClick={()=>{ if(hayV&&!exp) cargarVentas(); }} disabled={!hayV||exp}
+          style={{background:hayV&&!exp?'#1d4ed8':'#e5e7eb',color:hayV&&!exp?'white':'#9ca3af',border:'none',borderRadius:'8px',padding:'8px 18px',fontWeight:700,fontSize:'13px',cursor:hayV&&!exp?'pointer':'not-allowed',display:'flex',alignItems:'center',gap:'5px'}}>
+          <span>📥</span>{exp?'Cargando…':'Cargar ventas'}
         </button>
       </div>
       {/* Click outside para cerrar selector */}

@@ -78,6 +78,82 @@ export async function getUltimosNumerosPorPV(): Promise<UltimoNumeroPV[]> {
   }).sort((a, b) => a.pv.localeCompare(b.pv));
 }
 
+// ─────────────────────────────────────────────────────────────
+// Emisión de facturas (recurso /facturar)
+// ─────────────────────────────────────────────────────────────
+
+export const PV_ID_A = 126160; // PV 00002 — Factura A, electrónica con CAE
+export const PV_ID_B = 123457; // PV 00001 — Factura B, sin CAE
+
+// Mapeo de nuestros productos al código de producto en Xubio
+export const PRODUCTO_CODIGO: Record<string, string> = {
+  rucula: 'RUCULA_HIDROPONICA',
+  lechuga_crespa: 'LECHUGA_CRESPA_HIDROPONICA',
+  hoja_roble: 'LECHUGA_HOJA_DE_ROBLE_VERDE_HIDROPONICA',
+  bandeja_rucula: 'BANDEJA_RUCULA_HIDROPONICA',
+  albahaca: 'ALBAHACA_HIDROPONICA',
+  rucula_kg: 'RUCULA_HIDROPONICA_KG',
+  lechuga_kg: 'LECHUGA_HIDROPONICA_KG',
+};
+
+async function xubioPost<T = any>(path: string, body: any): Promise<{ ok: boolean; status: number; data: T }> {
+  const token = await getToken();
+  const res = await fetch(`${BASE}/${path}`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  });
+  const data = await res.json().catch(() => ({} as any));
+  return { ok: res.ok, status: res.status, data };
+}
+
+export interface ClienteXubio { cliente_id: number; nombre: string; }
+export async function getClientesXubio(): Promise<ClienteXubio[]> {
+  return xubioGet<ClienteXubio[]>('clienteBean');
+}
+
+const normNombre = (s: string) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
+
+// Busca el cliente en Xubio por nombre (normalizado, sin acentos/mayúsculas)
+export function matchClienteXubio(nombreLocal: string, clientes: ClienteXubio[]): number | null {
+  const target = normNombre(nombreLocal);
+  const found = clientes.find(c => normNombre(c.nombre) === target);
+  return found ? found.cliente_id : null;
+}
+
+export interface FacturaItem { codigo: string; cantidad: number; precio: number; descripcion?: string; }
+
+// Emite una factura en Xubio. Para PV electrónico (A) Xubio saca el CAE en el momento.
+export async function emitirFactura(args: { clienteId: number; esA: boolean; fecha: string; items: FacturaItem[] }):
+  Promise<{ ok: boolean; numeroDocumento?: string; cae?: string; transaccionid?: number; error?: string }> {
+  const fechaVto = (() => { const d = new Date(args.fecha + 'T12:00:00'); d.setDate(d.getDate() + 5); return fmtDia(d); })();
+  const body = {
+    tipo: 1,
+    cliente: { ID: args.clienteId },
+    fecha: args.fecha,
+    fechaVto,
+    puntoVenta: { ID: args.esA ? PV_ID_A : PV_ID_B },
+    condicionDePago: 1,
+    deposito: { codigo: 'DEPOSITO_UNIVERSAL' },
+    transaccionProductoItems: args.items.map(it => ({
+      producto: { codigo: it.codigo },
+      descripcion: it.descripcion || '',
+      cantidad: it.cantidad,
+      precio: it.precio,
+      precioconivaincluido: it.precio,
+      montoExento: 0,
+      porcentajeDescuento: 0,
+    })),
+  };
+  const res = await xubioPost<any>('facturar', body);
+  if (!res.ok) {
+    const err = res.data?.description || res.data?.error || `HTTP ${res.status}`;
+    return { ok: false, error: String(err) };
+  }
+  return { ok: true, numeroDocumento: res.data?.numeroDocumento, cae: res.data?.cae || res.data?.CAE, transaccionid: res.data?.transaccionid };
+}
+
 export interface VentaMes { mes: string; total: number; cantidad: number; }
 
 // Ventas (facturadas en Xubio) por mes en $, últimos N meses
