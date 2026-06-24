@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/facturacion/resumen-email",
-      "schedule": "0 23 * * *"
+      "schedule": "30 11 * * *"
     }
   ]
 }
