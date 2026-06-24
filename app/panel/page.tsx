@@ -207,10 +207,10 @@ export default async function PanelPage({ searchParams }: {
   const rR = resumenCosecha.find((r:any) => r.cultivo==='rucula');
 
   // ── LOTES FILTRADOS CON PAGINACIÓN ──
-  const conteos = contarPorFiltro(lotes, nave);
+  const conteos = contarPorFiltro(lotes, nave, ubicaciones);
   const lotesFiltrados = query
     ? lotes.filter(l => String(l.id_lote||'').toLowerCase().includes(query))
-    : aplicarFiltros3(lotes, cultivo, fase, nave, mesada, tiempo);
+    : aplicarFiltros3(lotes, cultivo, fase, nave, mesada, tiempo, ubicaciones);
   const totalPaginas = Math.ceil(lotesFiltrados.length / LOTES_POR_PAGINA);
   const lotesEnPagina = lotesFiltrados.slice((pagina-1)*LOTES_POR_PAGINA, pagina*LOTES_POR_PAGINA);
 

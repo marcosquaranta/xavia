@@ -88,6 +88,33 @@ export function naveDeLote(idLote: string): 1 | 2 | null {
   return Number(m[1]) as 1 | 2;
 }
 
+function normUbic(s: string) {
+  return String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+// Mapa: nombre de mesada/plantinera normalizado → nave
+export function mapaMesadaNave(ubicaciones: Ubicacion[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const u of ubicaciones) {
+    if (u.tipo === 'mesada' || u.tipo === 'plantinera') m.set(normUbic(u.nombre), Number(u.nave));
+  }
+  return m;
+}
+
+// Nave REAL del lote: prioriza su ubicación actual (mesada) sobre el prefijo del ID,
+// que queda obsoleto si el lote se trasplantó de una nave a otra.
+export function naveRealDeLote(l: Lote, mesadaNave?: Map<string, number>): 1 | 2 | null {
+  const ubic = String(l.ubicacion_actual || '');
+  const ubicL = ubic.toLowerCase();
+  if (ubicL.includes('nave 1')) return 1;
+  if (ubicL.includes('nave 2')) return 2;
+  if (mesadaNave) {
+    const n = mesadaNave.get(normUbic(ubic));
+    if (n === 1 || n === 2) return n;
+  }
+  return naveDeLote(l.id_lote);
+}
+
 export async function proximoIdMovimiento(): Promise<number> {
   const movimientos = await readSheet<Movimiento>('Movimientos');
   if (movimientos.length === 0) return 1;
@@ -102,18 +129,14 @@ export type FiltroTiempo = 'todos' | '7d' | '30d' | '90d'; // para cosechados
 // Alias para compatibilidad
 export type FiltroCultivos = FiltroCultivo;
 
-export function aplicarFiltros3(lotes: Lote[], cultivo: FiltroCultivo, fase: FiltroFase, nave: FiltroNave, mesada: FiltroMesada = 'todas', tiempo: FiltroTiempo = 'todos'): Lote[] {
+export function aplicarFiltros3(lotes: Lote[], cultivo: FiltroCultivo, fase: FiltroFase, nave: FiltroNave, mesada: FiltroMesada = 'todas', tiempo: FiltroTiempo = 'todos', ubicaciones?: Ubicacion[]): Lote[] {
+  const mesadaNave = ubicaciones ? mapaMesadaNave(ubicaciones) : undefined;
   let base = fase === 'cosechados'
     ? lotes.filter((l) => l.estado === 'cosechado')
     : lotes.filter((l) => l.estado === 'activo');
   if (nave !== 'todas') {
     const n = Number(nave);
-    base = base.filter((l) => {
-      const ubic = String(l.ubicacion_actual || '');
-      if (ubic.toLowerCase().includes('nave 1')) return n === 1;
-      if (ubic.toLowerCase().includes('nave 2')) return n === 2;
-      return naveDeLote(l.id_lote) === n;
-    });
+    base = base.filter((l) => naveRealDeLote(l, mesadaNave) === n);
   }
   if (cultivo !== 'todos') {
     const cod = cultivo === 'lechuga' ? 'L' : cultivo === 'rucula' ? 'R' : 'A';
@@ -150,16 +173,12 @@ export function aplicarFiltros(lotes: Lote[], filtro: FiltroCultivos, nave: Filt
 
 export interface ConteosFiltros { todos: number; lechuga: number; rucula: number; albahaca: number; plantinera: number; fase_1: number; fase_2: number; cosechados: number; }
 
-export function contarPorFiltro(lotes: Lote[], nave: FiltroNave): ConteosFiltros {
+export function contarPorFiltro(lotes: Lote[], nave: FiltroNave, ubicaciones?: Ubicacion[]): ConteosFiltros {
+  const mesadaNave = ubicaciones ? mapaMesadaNave(ubicaciones) : undefined;
   let base = lotes;
   if (nave !== 'todas') {
     const n = Number(nave);
-    base = base.filter((l) => {
-      const ubic = String(l.ubicacion_actual || '').toLowerCase();
-      if (ubic.includes('nave 1')) return n === 1;
-      if (ubic.includes('nave 2')) return n === 2;
-      return naveDeLote(l.id_lote) === n;
-    });
+    base = base.filter((l) => naveRealDeLote(l, mesadaNave) === n);
   }
   const activos = base.filter((l) => l.estado === 'activo');
   const cont: ConteosFiltros = { todos: activos.length, lechuga: 0, rucula: 0, albahaca: 0, plantinera: 0, fase_1: 0, fase_2: 0, cosechados: base.filter((l) => l.estado === 'cosechado').length };

@@ -44,7 +44,7 @@ export default async function CultivosPage({
     </>
   );
 
-  const conteos = contarPorFiltro(lotes, nave);
+  const conteos = contarPorFiltro(lotes, nave, ubicaciones);
 
   // Si hay búsqueda por ID, buscar en todos los lotes (activos y cosechados)
   // Ciclo real basado en cosechados recientes
@@ -56,7 +56,7 @@ export default async function CultivosPage({
       String(l.id_lote || '').toLowerCase().includes(query)
     );
   } else {
-    lotesFiltrados = aplicarFiltros3(lotes, cultivo, fase, nave, mesada, tiempo);
+    lotesFiltrados = aplicarFiltros3(lotes, cultivo, fase, nave, mesada, tiempo, ubicaciones);
   }
 
   // Ordenar por último movimiento (fecha_ult_movimiento > fecha_cosecha > fecha_siembra)
