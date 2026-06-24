@@ -89,7 +89,7 @@ export function naveDeLote(idLote: string): 1 | 2 | null {
 }
 
 function normUbic(s: string) {
-  return String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  return String(s || '').trim().toLowerCase().replace(/^nave\s*\d+\s*-\s*/, '').normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
 // Mapa: nombre de mesada/plantinera normalizado → nave
@@ -148,7 +148,7 @@ export function aplicarFiltros3(lotes: Lote[], cultivo: FiltroCultivo, fase: Fil
   // Filtro de mesada: normaliza tildes para comparación
   if (mesada && mesada !== 'todas') {
     function normM(s: string) {
-      return s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      return s.trim().toLowerCase().replace(/^nave\s*\d+\s*-\s*/, '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     }
     const mesadaNorm = normM(mesada);
     base = base.filter((l) => normM(String(l.ubicacion_actual || '')) === mesadaNorm);

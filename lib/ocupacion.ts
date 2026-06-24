@@ -25,7 +25,7 @@ export function ocupacionPorNave(ubicaciones: Ubicacion[], lotes: Lote[]): Ocupa
   );
 
   function normNombre(s: string) {
-    return s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return s.trim().toLowerCase().replace(/^nave\s*\d+\s*-\s*/, '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   }
 
   return [1, 2].map((nave) => {
@@ -174,6 +174,7 @@ export function tubosPorMesada(ubicaciones: Ubicacion[], lotes: Lote[]): Resumen
       function norm(s: string) {
         return s.trim()
           .toLowerCase()
+          .replace(/^nave\s*\d+\s*-\s*/, '')
           .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
       }
       // También intenta sin el sufijo descriptivo entre paréntesis (ej: "(22 orif/tubo)")
