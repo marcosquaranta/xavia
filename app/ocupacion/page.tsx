@@ -150,7 +150,7 @@ export default async function OcupacionPage() {
                   <tr key={m.id_ubicacion}>
                     <td style={{ fontWeight: 500, fontSize: '13px' }}>
                       <Link
-                        href={`/cultivos?mesada=${encodeURIComponent(m.nombre)}`}
+                        href={`/cultivos?nave=${m.nave}&mesada=${encodeURIComponent(m.nombre)}`}
                         style={{ color: 'inherit', textDecoration: 'none', borderBottom: '1px dashed #d1d5db' }}
                         title={`Ver lotes activos en ${m.nombre}`}
                       >
