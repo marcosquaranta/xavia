@@ -1,5 +1,5 @@
 import type { Lote, Ubicacion } from './types';
-import { codigoCultivo } from './lotes';
+import { codigoCultivo, naveRealDeLote, mapaMesadaNave } from './lotes';
 
 export interface OcupacionMesada { id_ubicacion: string; nombre: string; nave: number; capacidad: number; plantas_vivas: number; ocupacion_pct: number; huecos_libres: number; lotes_count: number; }
 export interface OcupacionNave { nave: number; metros_cuadrados: number; capacidad_total: number; tubos_totales: number; tubos_ocupados: number; tubos_libres: number; plantas_vivas: number; densidad_actual: number; densidad_maxima: number; ocupacion_pct: number; }
@@ -27,6 +27,7 @@ export function ocupacionPorNave(ubicaciones: Ubicacion[], lotes: Lote[]): Ocupa
   function normNombre(s: string) {
     return s.trim().toLowerCase().replace(/^nave\s*\d+\s*-\s*/, '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   }
+  const mesadaNaveMap = mapaMesadaNave(ubicaciones);
 
   return [1, 2].map((nave) => {
     const mesadas = ubicaciones.filter((u) => Number(u.nave) === nave && u.activo === 'SI' && u.tipo === 'mesada');
@@ -34,10 +35,12 @@ export function ocupacionPorNave(ubicaciones: Ubicacion[], lotes: Lote[]): Ocupa
     // Usar perfiles_por_modulo directamente (no capacidad_calculada que puede tener fórmulas)
     const tubosTotales = mesadas.reduce((acc, u) => acc + ((Number(u.modulos) || 1) * (Number(u.perfiles_por_modulo) || 0)), 0);
 
-    // Matching flexible con normalización de tildes
+    // Matching flexible con normalización de tildes + chequeo de nave
+    // (el nombre de mesada se repite entre naves)
     const lotesNave = enMesadas.filter((l) => {
       const ubicNorm = normNombre(String(l.ubicacion_actual || ''));
-      return mesadas.some((m) => normNombre(m.nombre) === ubicNorm);
+      const nombreOk = mesadas.some((m) => normNombre(m.nombre) === ubicNorm);
+      return nombreOk && naveRealDeLote(l, mesadaNaveMap) === nave;
     });
 
     const plantas = lotesNave.reduce((acc, l) => acc + (Number(l.plantas_estimadas_actual) || 0), 0);
@@ -159,6 +162,7 @@ export interface ResumenTubosNave {
 
 export function tubosPorMesada(ubicaciones: Ubicacion[], lotes: Lote[]): ResumenTubosNave[] {
   const activos = lotes.filter((l) => l.estado === 'activo' && (l.fase_actual === 'fase_1' || l.fase_actual === 'fase_2'));
+  const mesadaNave = mapaMesadaNave(ubicaciones);
 
   const mesadas: TubosMesada[] = ubicaciones
     .filter((u) => u.activo === 'SI' && u.tipo === 'mesada')
@@ -184,9 +188,12 @@ export function tubosPorMesada(ubicaciones: Ubicacion[], lotes: Lote[]): Resumen
       }
       const nombreNorm = norm(u.nombre);
       const nombreBaseNorm = normBase(u.nombre);
+      const naveU = Number(u.nave);
       const lotesAqui = activos.filter((l) => {
         const ubic = String(l.ubicacion_actual || '');
-        return norm(ubic) === nombreNorm || normBase(ubic) === nombreBaseNorm;
+        const nombreOk = norm(ubic) === nombreNorm || normBase(ubic) === nombreBaseNorm;
+        // El nombre de mesada se repite entre naves → exigir que la nave del lote coincida
+        return nombreOk && naveRealDeLote(l, mesadaNave) === naveU;
       });
       const tubosOcup = lotesAqui.reduce((acc, l) => acc + (Number(l.tubos_ocupados_actual) || 0), 0);
       const pct = tubosTotal > 0 ? Math.round((tubosOcup / tubosTotal) * 100) : 0;

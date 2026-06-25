@@ -92,12 +92,20 @@ function normUbic(s: string) {
   return String(s || '').trim().toLowerCase().replace(/^nave\s*\d+\s*-\s*/, '').normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
-// Mapa: nombre de mesada/plantinera normalizado → nave
+// Mapa: nombre de mesada/plantinera normalizado → nave.
+// OJO: muchas mesadas tienen el mismo nombre base en ambas naves (ej. "Mesada Rúcula 1").
+// En ese caso el nombre es ambiguo y NO se incluye en el mapa (se resuelve por otro lado).
 export function mapaMesadaNave(ubicaciones: Ubicacion[]): Map<string, number> {
-  const m = new Map<string, number>();
+  const naves = new Map<string, Set<number>>();
   for (const u of ubicaciones) {
-    if (u.tipo === 'mesada' || u.tipo === 'plantinera') m.set(normUbic(u.nombre), Number(u.nave));
+    if (u.tipo === 'mesada' || u.tipo === 'plantinera') {
+      const k = normUbic(u.nombre);
+      if (!naves.has(k)) naves.set(k, new Set());
+      naves.get(k)!.add(Number(u.nave));
+    }
   }
+  const m = new Map<string, number>();
+  for (const [k, set] of naves) if (set.size === 1) m.set(k, [...set][0]);
   return m;
 }
 
