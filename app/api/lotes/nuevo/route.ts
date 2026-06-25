@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { appendRow } from '@/lib/sheets';
+import { appendRow, appendRowObj } from '@/lib/sheets';
 import { generarIdSiembra } from '@/lib/loteId';
 import { proximoIdMovimiento } from '@/lib/lotes';
 
@@ -18,36 +18,21 @@ export async function POST(req: NextRequest) {
 
     // En plantinera siempre se guarda en plantines, sin conversión.
     // El factor ×2 de rúcula entra recién en el trasplante.
-    await appendRow('Lotes', [
-      idLote,              // id_lote
-      variedad,            // variedad
-      fecha_siembra,       // fecha_siembra
-      plantines_iniciales, // plantines_iniciales
-      'plantin',           // fase_actual
-      ubic,                // ubicacion_actual
-      '',                  // tubos_ocupados_actual
-      plantines_iniciales, // plantas_estimadas_actual (= plantines en esta fase)
-      fecha_siembra,       // fecha_ult_movimiento
-      '',                  // fecha_f1
-      '',                  // fecha_f2
-      '',                  // fecha_cosecha
-      '',                  // dias_plantinera
-      '',                  // dias_f1
-      '',                  // dias_f2
-      '',                  // dias_total
-      '',                  // unidades_cosechadas
-      '',                  // plantas_por_unidad_real
-      '',                  // descarte_reportado
-      '',                  // peso_muestra_kg
-      '',                  // peso_total_estimado_kg
-      user.email,          // usuario_creador
-      '',                  // foto_url
-      '',                  // lote_origen
-      semilla_id || '',    // semilla_id
-      '',                  // destino_cosecha
-      notas || '',         // notas
-      'activo',            // estado
-    ]);
+    // Por NOMBRE de columna (inmune al orden de la planilla)
+    await appendRowObj('Lotes', {
+      id_lote: idLote,
+      variedad,
+      fecha_siembra,
+      plantines_iniciales,
+      fase_actual: 'plantin',
+      ubicacion_actual: ubic,
+      plantas_estimadas_actual: plantines_iniciales,
+      fecha_ult_movimiento: fecha_siembra,
+      usuario_creador: user.email,
+      semilla_id: semilla_id || '',
+      notas: notas || '',
+      estado: 'activo',
+    });
 
     await appendRow('Movimientos', [
       idMov, idLote, fecha_siembra, 'siembra', '', 'plantin',

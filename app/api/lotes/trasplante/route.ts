@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { appendRow, readSheet, updateRow } from '@/lib/sheets';
+import { appendRow, appendRowObj, readSheet, updateRow } from '@/lib/sheets';
 import { completarIdEnTrasplante, generarIdDivision } from '@/lib/loteId';
 import { proximoIdMovimiento, codigoCultivo } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
@@ -119,37 +119,27 @@ if (nuevoId !== lote.id_lote) {
       notas: (String(lote.notas || '') + ` [dividido ${fecha}: ${plantasReales} plantas → ${idNuevo}]`).trim(),
     });
 
-    // Nuevo lote con orden exacto de columnas
-    await appendRow('Lotes', [
-      idNuevo,                    // id_lote
-      lote.variedad,              // variedad
-      lote.fecha_siembra,         // fecha_siembra
-      plantas_trasplantadas,      // plantines_iniciales
-      fase_destino,               // fase_actual
-      ubicDestino.nombre,         // ubicacion_actual
-      tubos_ocupados,             // tubos_ocupados_actual
-      plantasReales,              // plantas_estimadas_actual
-      fecha,                      // fecha_ult_movimiento
-      camposAnalisis.fecha_f1 || '', // fecha_f1
-      camposAnalisis.fecha_f2 || '', // fecha_f2
-      '',                         // fecha_cosecha
-      camposAnalisis.dias_plantinera || '', // dias_plantinera
-      camposAnalisis.dias_f1 || '',         // dias_f1
-      '',                         // dias_f2
-      '',                         // dias_total
-      '',                         // unidades_cosechadas
-      '',                         // plantas_por_unidad_real
-      '',                         // descarte_reportado
-      '',                         // peso_muestra_kg
-      '',                         // peso_total_estimado_kg
-      user.email,                 // usuario_creador
-      '',                         // foto_url
-      lote.id_lote,               // lote_origen
-      lote.semilla_id || '',      // semilla_id
-      '',                         // destino_cosecha
-      `Lote hijo de ${lote.id_lote}`, // notas
-      'activo',                   // estado
-    ]);
+    // Nuevo lote por NOMBRE de columna (inmune al orden de la planilla)
+    await appendRowObj('Lotes', {
+      id_lote: idNuevo,
+      variedad: lote.variedad,
+      fecha_siembra: lote.fecha_siembra,
+      plantines_iniciales: plantas_trasplantadas,
+      fase_actual: fase_destino,
+      ubicacion_actual: ubicDestino.nombre,
+      tubos_ocupados_actual: tubos_ocupados,
+      plantas_estimadas_actual: plantasReales,
+      fecha_ult_movimiento: fecha,
+      fecha_f1: camposAnalisis.fecha_f1 || '',
+      fecha_f2: camposAnalisis.fecha_f2 || '',
+      dias_plantinera: camposAnalisis.dias_plantinera || '',
+      dias_f1: camposAnalisis.dias_f1 || '',
+      usuario_creador: user.email,
+      lote_origen: lote.id_lote,
+      semilla_id: lote.semilla_id || '',
+      notas: `Lote hijo de ${lote.id_lote}`,
+      estado: 'activo',
+    });
 
     const idMov = await proximoIdMovimiento();
     await appendRow('Movimientos', [

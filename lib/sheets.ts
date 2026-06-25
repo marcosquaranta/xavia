@@ -44,12 +44,44 @@ export async function appendRow(sheetName: string, values: any[]): Promise<void>
   });
 }
 
+// Append por NOMBRE de columna: lee el header y ubica cada campo en su columna.
+// Inmune a cambios de orden o columnas nuevas en la planilla (a diferencia de appendRow posicional).
+export async function appendRowObj(sheetName: string, obj: Record<string, any>): Promise<void> {
+  const sheets = getClient();
+  const resp = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!1:1` });
+  const headers: string[] = (resp.data.values?.[0] as string[]) || [];
+  if (!headers.length) throw new Error(`No se pudo leer el header de ${sheetName}`);
+  const row = headers.map(h => (obj[h] !== undefined && obj[h] !== null ? obj[h] : ''));
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`,
+    valueInputOption: 'USER_ENTERED', requestBody: { values: [row] },
+  });
+}
+
 export async function appendRows(sheetName: string, rows: any[][]): Promise<void> {
   if (!rows.length) return;
   const sheets = getClient();
   await sheets.spreadsheets.values.append({
     spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`,
     valueInputOption: 'USER_ENTERED', requestBody: { values: rows },
+  });
+}
+
+// Lee las filas crudas (array posicional) incluyendo el header.
+export async function readRaw(sheetName: string): Promise<string[][]> {
+  const sheets = getClient();
+  const resp = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH` });
+  return (resp.data.values as string[][]) || [];
+}
+
+// Reescribe una fila completa ubicando cada campo del obj en su columna por nombre.
+export async function setRowByHeader(sheetName: string, rowNumber: number, headers: string[], obj: Record<string, any>): Promise<void> {
+  const sheets = getClient();
+  const row = headers.map(h => (obj[h] !== undefined && obj[h] !== null ? obj[h] : ''));
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SHEET_ID,
+    range: `${sheetName}!A${rowNumber}:${colLetter(headers.length)}${rowNumber}`,
+    valueInputOption: 'USER_ENTERED', requestBody: { values: [row] },
   });
 }
 

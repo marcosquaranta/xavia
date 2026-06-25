@@ -1,35 +1,58 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { readSheet, updateRow } from '@/lib/sheets';
-import type { Lote } from '@/lib/types';
+import { readRaw, setRowByHeader } from '@/lib/sheets';
 
 export const dynamic = 'force-dynamic';
 
-const FASES_ACTIVAS = ['plantin', 'fase_1', 'fase_2'];
+// Orden EXACTO con el que el append viejo (posicional) escribía las filas de Lotes.
+// La planilla tiene 2 columnas más (peso_muestra_paquete_gr, cajones_armados) que ese
+// array no contemplaba, por eso desde "usuario_creador" todo quedó corrido 2 columnas
+// (y el estado cayó en destino_cosecha, dejando 'estado' vacío).
+const OLD_ORDER = [
+  'id_lote', 'variedad', 'fecha_siembra', 'plantines_iniciales', 'fase_actual',
+  'ubicacion_actual', 'tubos_ocupados_actual', 'plantas_estimadas_actual', 'fecha_ult_movimiento',
+  'fecha_f1', 'fecha_f2', 'fecha_cosecha', 'dias_plantinera', 'dias_f1', 'dias_f2', 'dias_total',
+  'unidades_cosechadas', 'plantas_por_unidad_real', 'descarte_reportado', 'peso_muestra_kg',
+  'peso_total_estimado_kg', 'usuario_creador', 'foto_url', 'lote_origen', 'semilla_id',
+  'destino_cosecha', 'notas', 'estado',
+];
 
-// Encuentra lotes con estado vacío pero claramente activos (tienen fase y ubicación)
-// y los marca estado='activo'. Dry-run por defecto; ?apply=1 para aplicar.
+// Detecta filas corridas (estado vacío + destino_cosecha trae lo que debería ser el estado)
+// y las re-alinea reconstruyendo cada campo en su columna correcta. Dry-run; ?apply=1 aplica.
 export async function GET(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
 
   const apply = req.nextUrl.searchParams.get('apply') === '1';
-  const lotes = await readSheet<Lote>('Lotes');
+  const raw = await readRaw('Lotes');
+  if (raw.length < 2) return new NextResponse('sin datos', { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
 
-  const orfanos = lotes.filter(l =>
-    (!l.estado || String(l.estado).trim() === '') &&
-    FASES_ACTIVAS.includes(String(l.fase_actual)) &&
-    String(l.ubicacion_actual || '').trim() !== ''
-  );
+  const headers = raw[0];
+  const idxEstado = headers.indexOf('estado');
+  const idxDestino = headers.indexOf('destino_cosecha');
+  const idxId = headers.indexOf('id_lote');
 
-  if (apply) {
-    for (const l of orfanos) await updateRow('Lotes', 'id_lote', l.id_lote, { estado: 'activo' });
+  const fixes: { row: number; id: string; obj: Record<string, any> }[] = [];
+  for (let i = 1; i < raw.length; i++) {
+    const r = raw[i];
+    const estado = String(r[idxEstado] ?? '').trim();
+    const destino = String(r[idxDestino] ?? '').trim();
+    // firma de fila corrida: estado vacío y el valor que debería ser estado quedó en destino_cosecha
+    if (estado === '' && (destino === 'activo' || destino === 'cosechado')) {
+      const obj: Record<string, any> = {};
+      OLD_ORDER.forEach((f, k) => { obj[f] = r[k] !== undefined ? r[k] : ''; });
+      fixes.push({ row: i + 1, id: String(r[idxId] ?? ''), obj });
+    }
   }
 
-  const lines = orfanos.map(l => `id=${l.id_lote}  fase=${l.fase_actual}  tubos=${l.tubos_ocupados_actual}  ubic="${l.ubicacion_actual}"`);
+  if (apply) {
+    for (const f of fixes) await setRowByHeader('Lotes', f.row, headers, f.obj);
+  }
+
+  const lines = fixes.map(f => `fila ${f.row}: id=${f.id}  →  estado=${f.obj.estado}  usuario=${f.obj.usuario_creador}  origen=${f.obj.lote_origen}  semilla=${f.obj.semilla_id}`);
   const head = apply
-    ? `=== CORREGIDOS (estado → activo): ${orfanos.length} ===`
-    : `=== A CORREGIR (dry-run · abrí con ?apply=1 para aplicar): ${orfanos.length} ===`;
+    ? `=== RE-ALINEADAS: ${fixes.length} filas ===`
+    : `=== A RE-ALINEAR (dry-run · abrí con ?apply=1 para aplicar): ${fixes.length} filas ===`;
 
   return new NextResponse([head, ...lines].join('\n'), { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
 }
