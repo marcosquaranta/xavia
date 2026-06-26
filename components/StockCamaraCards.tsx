@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import type { ResultadoCamara } from '@/lib/camara';
 
 interface Props {
@@ -20,8 +21,8 @@ function SemaforoDias({ dias }: { dias: number }) {
   );
 }
 
-function CardCamara({ datos, cultivo, isAdmin, onSaved }: {
-  datos: ResultadoCamara; cultivo: string; isAdmin: boolean; onSaved: () => void;
+function CardCamara({ datos, cultivo, cultivoKey, isAdmin, onSaved }: {
+  datos: ResultadoCamara; cultivo: string; cultivoKey: string; isAdmin: boolean; onSaved: () => void;
 }) {
   const [mostrarForm, setMostrarForm] = useState(false);
   const [tipo, setTipo] = useState<'inicial' | 'ajuste'>('ajuste');
@@ -68,6 +69,12 @@ function CardCamara({ datos, cultivo, isAdmin, onSaved }: {
 
       {datos.stockActual > 0 && <SemaforoDias dias={datos.diasPromedio} />}
       {datos.stockActual === 0 && <span style={{ fontSize: '12px', color: '#9ca3af' }}>Sin stock registrado</span>}
+
+      <div style={{ marginTop: '8px' }}>
+        <Link href={`/stocks/${cultivoKey}`} style={{ fontSize: '12px', color: '#2563eb', textDecoration: 'none', fontWeight: 600 }}>
+          Ver detalle del mes →
+        </Link>
+      </div>
 
       {datos.base && (
         <p style={{ margin: '8px 0 0', fontSize: '10px', color: '#9ca3af' }}>
@@ -123,8 +130,8 @@ export default function StockCamaraCards({ rucula, lechuga, isAdmin }: Props) {
   const router = useRouter();
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
-      <CardCamara datos={rucula} cultivo="Rúcula" isAdmin={isAdmin} onSaved={() => router.refresh()} />
-      <CardCamara datos={lechuga} cultivo="Lechuga" isAdmin={isAdmin} onSaved={() => router.refresh()} />
+      <CardCamara datos={rucula} cultivo="Rúcula" cultivoKey="rucula" isAdmin={isAdmin} onSaved={() => router.refresh()} />
+      <CardCamara datos={lechuga} cultivo="Lechuga" cultivoKey="lechuga" isAdmin={isAdmin} onSaved={() => router.refresh()} />
     </div>
   );
 }

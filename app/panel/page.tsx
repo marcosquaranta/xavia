@@ -354,17 +354,18 @@ export default async function PanelPage({ searchParams }: {
                 const dc = camara.diasPromedio;
                 const cc = dc > 7 ? '#dc2626' : dc > 4 ? '#d97706' : '#059669';
                 const bc = dc > 7 ? '#fef2f2' : dc > 4 ? '#fffbeb' : '#f0fdf4';
+                const cultivoKey = label === 'RÚCULA' ? 'rucula' : 'lechuga';
                 return (
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4px', marginTop:'7px', paddingTop:'7px', borderTop:'1px solid #f3f4f6' }}>
+                  <Link href={`/stocks/${cultivoKey}`} title="Ver detalle del mes" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4px', marginTop:'7px', paddingTop:'7px', borderTop:'1px solid #f3f4f6', textDecoration:'none' }}>
                     <div style={{ background:bgStock, borderRadius:'5px', padding:'5px', textAlign:'center' }}>
-                      <p style={{ margin:'0 0 1px', fontSize:'8px', color:colorTop, fontWeight:700, textTransform:'uppercase' }}>Stock cámara</p>
+                      <p style={{ margin:'0 0 1px', fontSize:'8px', color:colorTop, fontWeight:700, textTransform:'uppercase' }}>Stock cámara →</p>
                       <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:'#111827' }}>{camara.stockActual.toLocaleString('es-AR')} paq.</p>
                     </div>
                     <div style={{ background:bc, borderRadius:'5px', padding:'5px', textAlign:'center' }}>
                       <p style={{ margin:'0 0 1px', fontSize:'8px', color:cc, fontWeight:700, textTransform:'uppercase' }}>Días en cámara</p>
                       <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:cc }}>{dc}d {dc > 7 ? '🔴' : dc > 4 ? '🟡' : '🟢'}</p>
                     </div>
-                  </div>
+                  </Link>
                 );
               })()}
             </div>
