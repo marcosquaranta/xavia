@@ -139,7 +139,8 @@ export default async function MovimientosPage({
                     const usuario = String(m.usuario || '').split('@')[0] || '—';
 
                     return (
-                      <div key={m.id_movimiento} style={{ background: 'white', border: '1px solid #f3f4f6', borderLeft: `4px solid ${t.color}`, borderRadius: '8px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      <Link key={m.id_movimiento} href={`/cultivos/${encodeURIComponent(String(m.id_lote || ''))}`}
+                        style={{ textDecoration: 'none', color: 'inherit', background: 'white', border: '1px solid #f3f4f6', borderLeft: `4px solid ${t.color}`, borderRadius: '8px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', cursor: 'pointer' }}>
                         {/* Badge tipo */}
                         <span style={{ background: t.bg, color: t.color, padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, minWidth: '80px', textAlign: 'center' }}>
                           {t.label}
@@ -147,9 +148,7 @@ export default async function MovimientosPage({
 
                         {/* Lote + variedad */}
                         <div style={{ flex: 1, minWidth: '120px' }}>
-                          <Link href={`/cultivos/${encodeURIComponent(String(m.id_lote || ''))}`} style={{ textDecoration: 'none' }}>
-                            <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '13px', color: '#1d4ed8', textDecoration: 'underline', textDecorationStyle: 'dotted' }}>{m.id_lote}</span>
-                          </Link>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '13px', color: '#1d4ed8', textDecoration: 'underline', textDecorationStyle: 'dotted' }}>{m.id_lote}</span>
                           {lote?.variedad && (
                             <span style={{ marginLeft: '8px', fontSize: '12px', color: colorVar, fontWeight: 500 }}>
                               {String(lote.variedad).split(' ').slice(0, 2).join(' ')}
@@ -184,7 +183,7 @@ export default async function MovimientosPage({
                         <span style={{ fontSize: '11px', color: '#9ca3af', minWidth: '60px', textAlign: 'right' }}>
                           {usuario}
                         </span>
-                      </div>
+                      </Link>
                     );
                   })}
                 </div>
