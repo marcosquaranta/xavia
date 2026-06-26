@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet, batchUpdateRows } from '@/lib/sheets';
+import { enviarResumenPendientes } from '@/lib/resumenFacturacion';
 import type { VentaDia } from '@/lib/types';
 
 const QTY_KEYS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg'];
@@ -26,8 +27,12 @@ export async function POST(req: NextRequest) {
       updates: { exportado: 'PENDIENTE' },
     })));
 
+    // Enviar el resumen de pendientes por mail (no bloquea la respuesta si falla)
+    let mail = false;
+    try { const r = await enviarResumenPendientes(); mail = !!r.ok && (r.facturas || 0) > 0; } catch {}
+
     const clientes = new Set(aCargar.map(v => v.id_control)).size;
-    return NextResponse.json({ ok: true, lineas: aCargar.length, clientes });
+    return NextResponse.json({ ok: true, lineas: aCargar.length, clientes, mail });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Error' }, { status: 500 });
   }
