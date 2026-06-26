@@ -58,8 +58,16 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
       <div>
         <p className="card-title">Resultado de la facturación</p>
         {result.emitidas.length > 0 && (
+          <div style={{ background: '#eff6ff', border: '1px solid #93c5fd', borderRadius: '8px', padding: '12px 14px', marginBottom: '14px' }}>
+            <p style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: '#1e40af' }}>📌 Último paso en Xubio (manual)</p>
+            <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: '#1e40af' }}>
+              Las facturas ya están importadas. Entrá a <strong>Xubio → Comprobantes de venta</strong>, seleccionalas y apretá <strong>"Obtener CAE"</strong> (las A), y después <strong>"Enviar por correo"</strong>. La API de Xubio no permite hacer esos dos pasos automáticamente.
+            </p>
+          </div>
+        )}
+        {result.emitidas.length > 0 && (
           <div style={{ marginBottom: '14px' }}>
-            <p style={{ fontSize: '12px', fontWeight: 700, color: '#166534', margin: '0 0 6px' }}>✓ Emitidas ({result.emitidas.length})</p>
+            <p style={{ fontSize: '12px', fontWeight: 700, color: '#166534', margin: '0 0 6px' }}>✓ Importadas a Xubio ({result.emitidas.length})</p>
             {result.emitidas.map((e, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', padding: '5px 10px', background: '#f0fdf4', borderRadius: '6px', marginBottom: '4px' }}>
                 <span>{e.cliente}</span>
@@ -102,7 +110,7 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
           ? <button className="btn" onClick={() => setConfirm(true)} disabled={loading || incluidas.length === 0}>📤 Facturar {incluidas.length} en Xubio</button>
           : (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '12px', color: '#dc2626', fontWeight: 600 }}>¿Emitir {incluidas.length} facturas? Las A salen con CAE.</span>
+              <span style={{ fontSize: '12px', color: '#dc2626', fontWeight: 600 }}>¿Importar {incluidas.length} facturas a Xubio? El CAE se obtiene después en Xubio.</span>
               <button className="btn" onClick={facturar} disabled={loading}>{loading ? 'Emitiendo…' : 'Sí, facturar'}</button>
               <button className="btn secondary" onClick={() => setConfirm(false)} disabled={loading}>Cancelar</button>
             </div>
