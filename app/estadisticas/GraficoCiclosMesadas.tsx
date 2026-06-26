@@ -11,16 +11,13 @@ interface CicloMesada {
 const NAVE_FILL: Record<number, string> = { 1: '#881337', 2: '#7c3aed' };
 
 function SubGrafico({
-  titulo, datos, f1Color, f2Color, pesoKey, totalKey, f2Key, f1Key,
+  titulo, datos, f2Color, pesoKey, f2Key,
 }: {
   titulo: string;
   datos: CicloMesada[];
-  f1Color?: string;
   f2Color: string;
   pesoKey: 'pesoGrLechuga' | 'pesoGrRucula';
-  totalKey: 'lechugaTotal' | 'ruculaTotal';
   f2Key: 'lechugaF2' | 'ruculaF2';
-  f1Key?: 'lechugaF1';
 }) {
   if (!datos.length) return null;
 
@@ -29,7 +26,7 @@ function SubGrafico({
   const chartH = H - PT - PB;
   const baseY = PT + chartH;
 
-  const maxDias = Math.max(...datos.map(d => d[totalKey] || 0), 20);
+  const maxDias = Math.max(...datos.map(d => d[f2Key] || 0), 20);
   const pesoPuntos = datos.map((d, i) => ({ i, gr: d[pesoKey] })).filter(p => p.gr > 0);
   const maxPeso = pesoPuntos.length ? Math.max(...pesoPuntos.map(p => p.gr), 1) : 1;
 
@@ -70,15 +67,13 @@ function SubGrafico({
           </>
         )}
 
-        {/* Barras */}
+        {/* Barras — solo F2 (la fase que marca el ritmo) */}
         {datos.map((d, i) => {
-          const total = d[totalKey];
           const f2 = d[f2Key];
-          const f1 = f1Key ? d[f1Key] : 0;
           const x0 = xC(i) - barW / 2;
           return (
             <g key={i}>
-              {total === 0 ? (
+              {f2 === 0 ? (
                 /* Sin historial — barra vacía con patrón */
                 <>
                   <rect x={x0} y={baseY - 18} width={barW} height={18} fill="#f3f4f6" rx={2} />
@@ -86,17 +81,9 @@ function SubGrafico({
                 </>
               ) : (
                 <>
-                  {/* F2 (fondo) */}
-                  {f2 > 0 && (
-                    <rect x={x0} y={yD(f2)} width={barW} height={(f2 / maxDias) * chartH} fill={f2Color} rx={2} />
-                  )}
-                  {/* F1 (encima) */}
-                  {f1 > 0 && f1Key && (
-                    <rect x={x0} y={yD(total)} width={barW} height={(f1 / maxDias) * chartH} fill={f1Color!} rx={2} />
-                  )}
-                  {/* Etiqueta total */}
-                  <text x={xC(i)} y={yD(total) - 4} textAnchor="middle" fontSize={9} fill="#374151" fontWeight={600}>
-                    {total}d
+                  <rect x={x0} y={yD(f2)} width={barW} height={(f2 / maxDias) * chartH} fill={f2Color} rx={2} />
+                  <text x={xC(i)} y={yD(f2) - 4} textAnchor="middle" fontSize={9} fill="#374151" fontWeight={600}>
+                    {f2}d
                   </text>
                 </>
               )}
@@ -141,9 +128,6 @@ export default function GraficoCiclosMesadas({ datos }: { datos: CicloMesada[] }
       {/* Leyenda */}
       <div style={{ display: 'flex', gap: '16px', fontSize: '11px', marginBottom: '14px', flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <span style={{ width: 10, height: 10, background: '#86efac', borderRadius: 2, display: 'inline-block' }} /> Lechuga F1
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
           <span style={{ width: 10, height: 10, background: '#4d7c0f', borderRadius: 2, display: 'inline-block' }} /> Lechuga F2
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -158,21 +142,17 @@ export default function GraficoCiclosMesadas({ datos }: { datos: CicloMesada[] }
       </div>
 
       <SubGrafico
-        titulo="Lechuga — ciclos por mesada"
+        titulo="Lechuga — ciclos por mesada (F2)"
         datos={lechuga}
-        f1Color="#86efac"
         f2Color="#4d7c0f"
         pesoKey="pesoGrLechuga"
-        totalKey="lechugaTotal"
         f2Key="lechugaF2"
-        f1Key="lechugaF1"
       />
       <SubGrafico
         titulo="Rúcula — ciclos por mesada"
         datos={rucula}
         f2Color="#166534"
         pesoKey="pesoGrRucula"
-        totalKey="ruculaTotal"
         f2Key="ruculaF2"
       />
     </div>

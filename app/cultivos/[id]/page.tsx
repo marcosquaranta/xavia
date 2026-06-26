@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { calcularDiasPorFase, claseVariedad } from '@/lib/lotes';
+import { diasPromedioPorVariedad } from '@/lib/estadisticas';
 import type { Lote, Movimiento, Variedad } from '@/lib/types';
 import Header from '@/components/Header';
 import AccionesLote from './AccionesLote';
@@ -23,6 +24,10 @@ export default async function DetalleLotePage({ params }: { params: { id: string
   const movsLote = movimientos.filter((m) => m.id_lote === idLote).sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
   const ult = movsLote[movsLote.length - 1];
   const variedad = variedades.find((v) => v.variedad === lote.variedad);
+  // Días estimados por fase = promedio real de la variedad (últimos cosechados)
+  let est: any = null;
+  try { est = diasPromedioPorVariedad(lotes, movimientos, 120).find((d) => d.variedad === lote.variedad) || null; } catch {}
+  const estSub = (n: number | null | undefined) => (n && Number(n) > 0 ? `est. ${Math.round(Number(n))} d` : null);
   const labelFase = lote.fase_actual === 'plantin' ? 'Plantinera' : lote.fase_actual === 'fase_1' ? 'Fase 1' : 'Fase 2';
   function fmt(f: string) { if (!f) return '-'; try { const [,m,d] = String(f).split('-'); return d+'/'+m; } catch { return f; } }
   function fmtFull(f: string) { if (!f) return '-'; try { const [y,m,d] = String(f).split('-'); return d+'/'+m+'/'+y; } catch { return f; } }
@@ -44,9 +49,9 @@ export default async function DetalleLotePage({ params }: { params: { id: string
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '20px' }}>
           {[
             ['Sembrado', fmtFull(dias.fechas.siembra), 'hace ' + dias.total + ' días'],
-            ['Plantinera', dias.plantinera + ' d', null],
-            ...(dias.fase_1 !== null ? [['Fase 1', dias.fase_1 + ' d', null]] : []),
-            ...(dias.fase_2 > 0 ? [['Fase 2', dias.fase_2 + ' d', null]] : []),
+            ['Plantinera', dias.plantinera + ' d', estSub(est?.plantinera)],
+            ...(dias.fase_1 !== null ? [['Fase 1', dias.fase_1 + ' d', estSub(est?.fase_1)]] : []),
+            ...(dias.fase_2 > 0 ? [['Fase 2', dias.fase_2 + ' d', estSub(est?.fase_2)]] : []),
             ...(variedad ? [['Ciclo est.', variedad.dias_estimados_cosecha + ' d', 'de la variedad']] : []),
             ...(lote.estado === 'cosechado' ? [
               ['Cosechado', (lote.unidades_cosechadas || 0) + (lote.destino_cosecha === 'planta' ? ' plantas' : ' paq.'), 'unidades'],
