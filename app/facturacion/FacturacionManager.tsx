@@ -15,16 +15,35 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
   const [result, setResult] = useState<{ emitidas: any[]; errores: any[] } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [excluidas, setExcluidas] = useState<Set<string>>(new Set());
+  const [quitando, setQuitando] = useState<string | null>(null);
 
-  const totalGeneral = facturas.reduce((a, f) => a + f.total, 0);
-  const totalUnidades = facturas.reduce((a, f) => a + f.unidades, 0);
-  const nA = facturas.filter(f => f.letra === 'A').length;
-  const nB = facturas.filter(f => f.letra === 'B').length;
+  const incluidas = facturas.filter(f => !excluidas.has(f.id_control));
+  const totalGeneral = incluidas.reduce((a, f) => a + f.total, 0);
+  const totalUnidades = incluidas.reduce((a, f) => a + f.unidades, 0);
+  const nA = incluidas.filter(f => f.letra === 'A').length;
+  const nB = incluidas.filter(f => f.letra === 'B').length;
+
+  function toggle(id: string) {
+    setExcluidas(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+
+  async function quitar(id: string) {
+    setQuitando(id); setErr(null);
+    try {
+      const r = await fetch('/api/facturacion/quitar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id_control: id }) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Error');
+      router.refresh();
+    } catch (e: any) { setErr(e.message); }
+    finally { setQuitando(null); }
+  }
 
   async function facturar() {
     setLoading(true); setErr(null); setResult(null);
     try {
-      const r = await fetch('/api/facturacion/emitir', { method: 'POST' });
+      const idControls = incluidas.map(f => f.id_control);
+      const r = await fetch('/api/facturacion/emitir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idControls }) });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'Error');
       setResult({ emitidas: j.emitidas || [], errores: j.errores || [] });
@@ -73,16 +92,17 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
       {/* Resumen + acción */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '14px', background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px 16px' }}>
         <div style={{ fontSize: '13px', color: '#374151' }}>
-          <strong>{facturas.length}</strong> facturas a emitir
+          <strong>{incluidas.length}</strong> facturas a emitir
+          {excluidas.size > 0 && <span style={{ color: '#9ca3af' }}> ({excluidas.size} sin tildar)</span>}
           <span style={{ color: '#9ca3af' }}> · {nA} A · {nB} B</span>
           <span style={{ marginLeft: '10px', fontSize: '14px', fontWeight: 700, color: '#374151' }}>{fmtU(totalUnidades)} u</span>
           <span style={{ marginLeft: '8px', fontSize: '16px', fontWeight: 800, color: '#111827' }}>{fmt(totalGeneral)}</span>
         </div>
         {!confirm
-          ? <button className="btn" onClick={() => setConfirm(true)} disabled={loading}>📤 Facturar en Xubio</button>
+          ? <button className="btn" onClick={() => setConfirm(true)} disabled={loading || incluidas.length === 0}>📤 Facturar {incluidas.length} en Xubio</button>
           : (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '12px', color: '#dc2626', fontWeight: 600 }}>¿Emitir {facturas.length} facturas? Las A salen con CAE.</span>
+              <span style={{ fontSize: '12px', color: '#dc2626', fontWeight: 600 }}>¿Emitir {incluidas.length} facturas? Las A salen con CAE.</span>
               <button className="btn" onClick={facturar} disabled={loading}>{loading ? 'Emitiendo…' : 'Sí, facturar'}</button>
               <button className="btn secondary" onClick={() => setConfirm(false)} disabled={loading}>Cancelar</button>
             </div>
@@ -91,11 +111,15 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
       {err && <div className="alert-box error" style={{ marginBottom: '12px' }}>{err}</div>}
 
       {/* Lista de facturas pendientes */}
-      {facturas.map(f => (
-        <div key={f.id_control} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', marginBottom: '8px', overflow: 'hidden' }}>
+      {facturas.map(f => {
+        const incluida = !excluidas.has(f.id_control);
+        return (
+        <div key={f.id_control} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', marginBottom: '8px', overflow: 'hidden', opacity: incluida ? 1 : 0.5 }}>
           <div onClick={() => setOpen(o => ({ ...o, [f.id_control]: !o[f.id_control] }))}
             style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', cursor: 'pointer', background: 'white' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input type="checkbox" checked={incluida} onClick={e => e.stopPropagation()} onChange={() => toggle(f.id_control)}
+                title="Incluir en la facturación" style={{ width: '17px', height: '17px', cursor: 'pointer' }} />
               <span style={{ fontSize: '11px', background: f.letra === 'A' ? '#dbeafe' : '#f3f4f6', color: f.letra === 'A' ? '#1e40af' : '#374151', padding: '1px 7px', borderRadius: '4px', fontWeight: 700 }}>Factura {f.letra}</span>
               <span style={{ fontWeight: 600, fontSize: '14px' }}>{f.cliente}</span>
               <span style={{ fontSize: '11px', color: '#9ca3af' }}>{f.lineas.length} ítems</span>
@@ -103,6 +127,11 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <span style={{ fontSize: '13px', fontWeight: 700, color: '#374151' }}>{fmtU(f.unidades)} u</span>
               <span style={{ fontSize: '15px', fontWeight: 800, color: '#111827' }}>{fmt(f.total)}</span>
+              <button onClick={e => { e.stopPropagation(); quitar(f.id_control); }} disabled={quitando === f.id_control}
+                title="Quitar de facturación (vuelve a borrador)"
+                style={{ background: 'none', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '5px', padding: '2px 7px', fontSize: '11px', cursor: 'pointer' }}>
+                {quitando === f.id_control ? '…' : '✕'}
+              </button>
               <span style={{ fontSize: '11px', color: '#9ca3af' }}>{open[f.id_control] ? '▲' : '▼'}</span>
             </div>
           </div>
@@ -129,7 +158,8 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
             </table>
           )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

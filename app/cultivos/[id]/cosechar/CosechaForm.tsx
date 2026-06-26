@@ -32,6 +32,7 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault(); setLoading(true); setError(null);
     if (!esPorPaquete && plantas <= 0) { setError('Ingresá la cantidad de plantas cosechadas'); setLoading(false); return; }
+    if (!esPorPaquete && pesoGr <= 0) { setError('Ingresá el peso de muestra (gramos por planta)'); setLoading(false); return; }
     if (esPorPaquete && paquetes <= 0) { setError('Ingresá la cantidad de paquetes armados'); setLoading(false); return; }
     try {
       const res = await fetch('/api/lotes/cosecha', {
@@ -64,7 +65,7 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
           <p style={{ margin: '0 0 10px', fontSize: '13px', fontWeight: 600, color: '#4d7c0f' }}>Cosecha por planta</p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
             <div><label>Plantas cosechadas *</label><NumberInput value={plantas} onChange={setPlantas} min={0} required disabled={loading} /></div>
-            <div><label>Peso de muestra (gramos) — opcional</label><NumberInput value={pesoGr} onChange={setPesoGr} min={0} disabled={loading} placeholder="Ej: 82" /></div>
+            <div><label style={{ color: '#dc2626' }}>Peso de muestra (gramos/planta) *</label><NumberInput value={pesoGr} onChange={setPesoGr} min={0} required disabled={loading} placeholder="Ej: 82" /></div>
           </div>
           {plantas > 0 && (
             <div style={{ marginTop: '12px', padding: '10px 12px', background: '#f9fafb', borderRadius: '6px', fontSize: '12px' }}>

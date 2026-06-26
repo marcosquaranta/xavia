@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet, batchUpdateRows } from '@/lib/sheets';
 import type { ClienteVenta, PrecioVenta, VentaDia } from '@/lib/types';
@@ -21,18 +21,24 @@ function getPrecio(precios: PrecioVenta[], id_control: string, sucursal: string,
   return Number((row as any)[key] || 0);
 }
 
-// Emite a Xubio todas las ventas acumuladas (PENDIENTE), una factura por cliente
-export async function POST() {
+// Emite a Xubio las ventas acumuladas (PENDIENTE), una factura por cliente.
+// Body opcional { idControls: string[] } para facturar solo esos clientes.
+export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
   try {
+    // Opcional: solo facturar estos clientes (los demás quedan pendientes)
+    let idControls: string[] | null = null;
+    try { const body = await req.json(); if (Array.isArray(body?.idControls)) idControls = body.idControls.map(String); } catch {}
+
     const [clientes, precios, ventas] = await Promise.all([
       readSheet<ClienteVenta>('Clientes'),
       readSheet<PrecioVenta>('Precios'),
       readSheet<VentaDia>('Ventas'),
     ]);
-    const pendientes = ventas.filter(v => v.exportado === 'PENDIENTE');
-    if (!pendientes.length) return NextResponse.json({ error: 'No hay ventas cargadas para facturar' }, { status: 400 });
+    const idSet = idControls ? new Set(idControls) : null;
+    const pendientes = ventas.filter(v => v.exportado === 'PENDIENTE' && (!idSet || idSet.has(String(v.id_control))));
+    if (!pendientes.length) return NextResponse.json({ error: 'No hay ventas seleccionadas para facturar' }, { status: 400 });
 
     const clientesXubio = await getClientesXubio();
 
