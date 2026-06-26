@@ -3,9 +3,10 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface Linea { producto: string; sucursal: string; cantidad: number; precio: number; importe: number; }
-interface FacturaPendiente { id_control: string; cliente: string; letra: string; fecha: string; lineas: Linea[]; total: number; }
+interface FacturaPendiente { id_control: string; cliente: string; letra: string; fecha: string; lineas: Linea[]; unidades: number; total: number; }
 
 const fmt = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
+const fmtU = (n: number) => Math.round(n).toLocaleString('es-AR');
 
 export default function FacturacionManager({ facturas }: { facturas: FacturaPendiente[] }) {
   const router = useRouter();
@@ -16,6 +17,7 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
   const [open, setOpen] = useState<Record<string, boolean>>({});
 
   const totalGeneral = facturas.reduce((a, f) => a + f.total, 0);
+  const totalUnidades = facturas.reduce((a, f) => a + f.unidades, 0);
   const nA = facturas.filter(f => f.letra === 'A').length;
   const nB = facturas.filter(f => f.letra === 'B').length;
 
@@ -73,7 +75,8 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
         <div style={{ fontSize: '13px', color: '#374151' }}>
           <strong>{facturas.length}</strong> facturas a emitir
           <span style={{ color: '#9ca3af' }}> · {nA} A · {nB} B</span>
-          <span style={{ marginLeft: '10px', fontSize: '16px', fontWeight: 800, color: '#111827' }}>{fmt(totalGeneral)}</span>
+          <span style={{ marginLeft: '10px', fontSize: '14px', fontWeight: 700, color: '#374151' }}>{fmtU(totalUnidades)} u</span>
+          <span style={{ marginLeft: '8px', fontSize: '16px', fontWeight: 800, color: '#111827' }}>{fmt(totalGeneral)}</span>
         </div>
         {!confirm
           ? <button className="btn" onClick={() => setConfirm(true)} disabled={loading}>📤 Facturar en Xubio</button>
@@ -98,6 +101,7 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
               <span style={{ fontSize: '11px', color: '#9ca3af' }}>{f.lineas.length} ítems</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 700, color: '#374151' }}>{fmtU(f.unidades)} u</span>
               <span style={{ fontSize: '15px', fontWeight: 800, color: '#111827' }}>{fmt(f.total)}</span>
               <span style={{ fontSize: '11px', color: '#9ca3af' }}>{open[f.id_control] ? '▲' : '▼'}</span>
             </div>

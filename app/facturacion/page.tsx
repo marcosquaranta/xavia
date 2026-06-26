@@ -36,6 +36,7 @@ export interface FacturaPendiente {
   letra: string;
   fecha: string;
   lineas: { producto: string; sucursal: string; cantidad: number; precio: number; importe: number }[];
+  unidades: number;
   total: number;
 }
 
@@ -76,6 +77,7 @@ export default async function FacturacionPage() {
       letra: cliente?.tipo_factura || '?',
       fecha: lineasV[0].fecha,
       lineas,
+      unidades: lineas.reduce((a, l) => a + l.cantidad, 0),
       total: lineas.reduce((a, l) => a + l.importe, 0),
     });
   }
