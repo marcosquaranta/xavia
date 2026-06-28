@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { appendRow, readSheet, updateRow } from '@/lib/sheets';
-import { proximoIdMovimiento, calcularDesvioCosecha } from '@/lib/lotes';
+import { appendRow, appendRowObj, readSheet, updateRow } from '@/lib/sheets';
+import { proximoIdMovimiento, calcularDesvioCosecha, codigoCultivo } from '@/lib/lotes';
+import { generarIdDivision, completarIdEnTrasplante } from '@/lib/loteId';
 import type { Lote, Movimiento } from '@/lib/types';
 
 function diasEntre(desde: string, hasta: string): number {
@@ -96,6 +97,79 @@ export async function POST(req: NextRequest) {
 
     const diasTotal = diasEntre(fechaSiembra, fecha);
 
+    const plantasQuedan = Number(body.plantas_quedan) || 0;
+    const esParcial = body.parcial === true && plantasQuedan > 0 && plantasQuedan < plantasEst;
+    const destino = modoFinal === 'cajon' ? 'cajon' : modoFinal === 'paquete' ? (Number(bandejas_armadas) > 0 ? 'bandeja' : 'paquete') : 'planta';
+
+    if (esParcial) {
+      // ── COSECHA PARCIAL: divide el lote. Un hijo cosechado con lo cosechado, el padre queda en la mesada ──
+      const tubosPadre = Number(lote.tubos_ocupados_actual) || 0;
+      const tubosPadreNuevo = tubosPadre > 0 ? Math.max(0, Math.round(tubosPadre * plantasQuedan / plantasEst)) : 0;
+      const tubosHijo = Math.max(0, tubosPadre - tubosPadreNuevo);
+      const plantasHijo = Math.max(1, plantasEst - plantasQuedan);
+      const descarteHijo = modoFinal === 'planta' ? Math.max(0, plantasHijo - unidades) : 0;
+
+      // Id del hijo (división): N1L-007 → N1L-007B
+      const idPadreCompleto = /^N[12][LRA]-/.test(lote.id_lote) ? lote.id_lote : completarIdEnTrasplante(lote.id_lote, codigoCultivo(lote.variedad));
+      const idHijo = await generarIdDivision(idPadreCompleto, lotes.map(l => l.id_lote));
+
+      await appendRowObj('Lotes', {
+        id_lote: idHijo,
+        variedad: lote.variedad,
+        fecha_siembra: lote.fecha_siembra,
+        plantines_iniciales: plantasHijo,
+        fase_actual: lote.fase_actual,
+        ubicacion_actual: lote.ubicacion_actual,
+        tubos_ocupados_actual: tubosHijo,
+        plantas_estimadas_actual: plantasHijo,
+        fecha_ult_movimiento: fecha,
+        fecha_f1: fechaF1 || lote.fecha_f1 || '',
+        fecha_f2: fechaF2 || lote.fecha_f2 || '',
+        fecha_cosecha: fecha,
+        dias_plantinera: diasPlantinera,
+        dias_f1: diasF1 || '',
+        dias_f2: diasF2 || '',
+        dias_total: diasTotal,
+        unidades_cosechadas: unidades,
+        plantas_por_unidad_real: es_por_paquete ? (Number(plantas_por_paquete) || 0) : 1,
+        descarte_reportado: descarteHijo,
+        peso_muestra_kg: pesoMuestra,
+        peso_total_estimado_kg: pesoKg > 0 ? pesoKg.toFixed(3) : '',
+        cajones_armados: modoFinal === 'cajon' ? (Number(cajones_armados) || 0) : '',
+        peso_muestra_paquete_gr: modoFinal === 'paquete' ? (Number(peso_muestra_paquete_gr) || '') : '',
+        destino_cosecha: destino,
+        estado: 'cosechado',
+        lote_origen: id_lote,
+        usuario_creador: user.email,
+        notas: `Cosecha parcial de ${id_lote}`,
+      });
+
+      // El padre queda activo con lo que sobra
+      await updateRow('Lotes', 'id_lote', id_lote, {
+        plantas_estimadas_actual: plantasQuedan,
+        tubos_ocupados_actual: tubosPadreNuevo,
+        fecha_ult_movimiento: fecha,
+      });
+
+      const idMov = await proximoIdMovimiento();
+      await appendRow('Movimientos', [
+        idMov, idHijo, fecha, 'cosecha',
+        lote.fase_actual, '',
+        lote.ubicacion_actual, '',
+        tubosHijo || '',
+        plantasHijo, unidades,
+        es_por_paquete ? (Number(plantas_por_paquete) || 0) : '',
+        tubos_consumidos_bandejas || '', bandejas_armadas || '',
+        descarteHijo, descarteHijo,
+        '', '',
+        '', '', '',
+        user.email || lote.usuario_creador, '',
+        `Cosecha parcial de ${id_lote}: ${unidades} ${es_por_paquete ? 'paquetes' : 'plantas'} (quedan ${plantasQuedan})`,
+      ]);
+
+      return NextResponse.json({ ok: true, parcial: true, id_hijo: idHijo, plantas_quedan: plantasQuedan });
+    }
+
     await updateRow('Lotes', 'id_lote', id_lote, {
       fecha_cosecha: fecha,
       unidades_cosechadas: unidades,
@@ -105,11 +179,7 @@ export async function POST(req: NextRequest) {
       peso_total_estimado_kg: pesoKg > 0 ? pesoKg.toFixed(3) : '',
       cajones_armados: modoFinal === 'cajon' ? (Number(cajones_armados) || 0) : '',
       peso_muestra_paquete_gr: modoFinal === 'paquete' ? (Number(peso_muestra_paquete_gr) || '') : '',
-      destino_cosecha: modoFinal === 'cajon'
-        ? 'cajon'
-        : modoFinal === 'paquete'
-          ? (Number(bandejas_armadas) > 0 ? 'bandeja' : 'paquete')
-          : 'planta',
+      destino_cosecha: destino,
       estado: 'cosechado',
       fecha_ult_movimiento: fecha,
       // Columnas de análisis

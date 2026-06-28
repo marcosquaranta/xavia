@@ -39,8 +39,8 @@ export function calcularDiasPorFase(lote: Lote, movimientos: Movimiento[]): Dias
     const aFase2 = movsLote.find((m) => m.tipo === 'trasplante' && m.fase_destino === 'fase_2');
     const cosecha = movsLote.find((m) => m.tipo === 'cosecha');
     const fechaSiembra = String(siembra?.fecha || lote.fecha_siembra || '');
-    const fechaFase1 = aFase1 ? String(aFase1.fecha) : null;
-    const fechaFase2 = aFase2 ? String(aFase2.fecha) : null;
+    const fechaFase1 = aFase1 ? String(aFase1.fecha) : (lote.fecha_f1 ? String(lote.fecha_f1) : null);
+    const fechaFase2 = aFase2 ? String(aFase2.fecha) : (lote.fecha_f2 ? String(lote.fecha_f2) : null);
     const fechaCosecha = cosecha ? String(cosecha.fecha) : String(lote.fecha_cosecha || '') || null;
     const hoy = todayISO();
     const finPlantinera = fechaFase1 || fechaFase2 || fechaCosecha || hoy;

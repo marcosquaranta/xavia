@@ -19,6 +19,8 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
   const [bandejas, setBandejas] = useState(0);
   const [tubosBandejas, setTubosBandejas] = useState(0);
   const [pesoBandGr, setPesoBandGr] = useState(0);
+  const [parcial, setParcial] = useState(false);
+  const [plantasQuedan, setPlantasQuedan] = useState(0);
 
   const plantasEst = Number(lote.plantas_estimadas_actual) || Number(lote.plantines_iniciales) || 0;
   const descarteAuto = useMemo(() => !esPorPaquete ? Math.max(0, plantasEst - plantas) : 0, [esPorPaquete, plantasEst, plantas]);
@@ -34,6 +36,7 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
     if (!esPorPaquete && plantas <= 0) { setError('Ingresá la cantidad de plantas cosechadas'); setLoading(false); return; }
     if (!esPorPaquete && pesoGr <= 0) { setError('Ingresá el peso de muestra (gramos por planta)'); setLoading(false); return; }
     if (esPorPaquete && paquetes <= 0) { setError('Ingresá la cantidad de paquetes armados'); setLoading(false); return; }
+    if (parcial && (plantasQuedan <= 0 || plantasQuedan >= plantasEst)) { setError(`En cosecha parcial, las plantas que quedan deben ser entre 1 y ${plantasEst - 1}`); setLoading(false); return; }
     try {
       const res = await fetch('/api/lotes/cosecha', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -45,6 +48,7 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
           peso_muestra_paquete_gr: pesoPaqGr, bandejas_armadas: bandejas,
           tubos_consumidos_bandejas: tubosBandejas, peso_muestra_bandeja_gr: pesoBandGr,
           plantas_estimadas_lote: plantasEst, usuario,
+          parcial, plantas_quedan: parcial ? plantasQuedan : 0,
         }),
       });
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || 'Error'); }
@@ -58,6 +62,23 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
       <div style={{ marginBottom: '14px' }}>
         <label>Fecha de cosecha *</label>
         <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} required disabled={loading} style={{ maxWidth: '220px' }} />
+      </div>
+
+      {/* Cosecha parcial */}
+      <div style={{ background: parcial ? '#eff6ff' : '#f9fafb', border: `1px solid ${parcial ? '#93c5fd' : '#e5e7eb'}`, borderRadius: '8px', padding: '12px 14px', marginBottom: '14px' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: parcial ? '#1e40af' : '#374151' }}>
+          <input type="checkbox" checked={parcial} onChange={e => setParcial(e.target.checked)} disabled={loading} style={{ width: '17px', height: '17px' }} />
+          Cosecha parcial — queda una parte en la mesada
+        </label>
+        {parcial && (
+          <div style={{ marginTop: '10px' }}>
+            <label style={{ fontSize: '12px' }}>Plantas que <strong>quedan</strong> en la mesada (de ~{plantasEst})</label>
+            <NumberInput value={plantasQuedan} onChange={setPlantasQuedan} min={0} disabled={loading} placeholder="Ej: 300" />
+            <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#6b7280' }}>
+              Se cosecha ~{Math.max(0, plantasEst - plantasQuedan)} plantas ahora. El lote sigue activo con {plantasQuedan || 0} plantas para cosechar después.
+            </p>
+          </div>
+        )}
       </div>
 
       {!esPorPaquete && (
