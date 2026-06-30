@@ -7,6 +7,7 @@ import { cosechadoEsteMes, plantasPorCultivo, distribucionPorSemana, resumenCose
 import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, StockCamara } from '@/lib/types';
 import { calcularCamara } from '@/lib/camara';
+import { calcularCapacidad, diasCicloDefault, calcularPlan, tareasDelDia, parseReparto, REPARTO_DEFAULT } from '@/lib/planificacion';
 import Header from '@/components/Header';
 import FiltrosLotes from '@/components/FiltrosLotes';
 import LoteCard from '@/components/LoteCard';
@@ -53,13 +54,25 @@ export default async function PanelPage({ searchParams }: {
 
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [], variedades: Variedad[] = [];
   let ventasPanel: VentaDia[] = [], registrosCamara: StockCamara[] = [];
+  let configRows: { clave: string; valor: any }[] = [];
   try {
-    [lotes, movimientos, ubicaciones, variedades, ventasPanel, registrosCamara] = await Promise.all([
+    [lotes, movimientos, ubicaciones, variedades, ventasPanel, registrosCamara, configRows] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<Ubicacion>('Ubicaciones'), readSheet<Variedad>('Variedades'),
       readSheet<VentaDia>('Ventas'),
       readSheet<StockCamara>('StockCamara').catch(() => []),
+      readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
     ]);
+  } catch {}
+
+  // ── Tareas de hoy (planificación) ──
+  let tareasHoy: { icon: string; txt: string; color: string }[] = [];
+  try {
+    const naves = calcularCapacidad(ubicaciones);
+    const plan = calcularPlan(naves, diasCicloDefault(lotes, movimientos));
+    const cfgRep = configRows.find(i => i.clave === 'plan_reparto');
+    const reparto = cfgRep ? parseReparto(cfgRep.valor) : REPARTO_DEFAULT;
+    tareasHoy = tareasDelDia(plan, reparto, new Date().getDay());
   } catch {}
 
   // Datos del panel
@@ -234,6 +247,23 @@ export default async function PanelPage({ searchParams }: {
       <div className="container">
         <h1 className="page-title">Panel de control</h1>
         <p className="page-subtitle">{hoyStr.charAt(0).toUpperCase()+hoyStr.slice(1)} · Bienvenido, {user.nombre}</p>
+
+        {/* ══ TAREAS DE HOY ══ */}
+        {tareasHoy.length > 0 && (
+          <div style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)', border:'1px solid #bfdbfe', borderRadius:'10px', padding:'14px', marginBottom:'14px' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'8px', flexWrap:'wrap', gap:'4px' }}>
+              <p style={{ margin:0, fontSize:'14px', fontWeight:800 }}>📋 Tareas de hoy</p>
+              <Link href="/planificacion" style={{ fontSize:'11px', color:'#6b7280', textDecoration:'none' }}>Planificación →</Link>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))', gap:'7px' }}>
+              {tareasHoy.map((t,i) => (
+                <div key={i} style={{ display:'flex', gap:'8px', alignItems:'flex-start', fontSize:'12.5px', lineHeight:1.4, background:'white', borderRadius:'7px', padding:'7px 10px', border:'1px solid #e5e7eb' }}>
+                  <span style={{ fontSize:'14px' }}>{t.icon}</span><span style={{ color:'#374151' }}>{t.txt}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ══ FILA 1: ALERTAS + PROYECCIONES ══ */}
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'12px', marginBottom:'14px' }}>

@@ -1,33 +1,20 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  CUB, POSPAQ, CUBPOSRUC, CUBPLLEC, DIAS, DIA_SIEMBRA, REPARTO_DEFAULT,
+  calcularPlan, repartoHelpers, tareasDelDia,
+  type Cultivo, type Slot, type NavesCap,
+} from '@/lib/planificacion';
 
-interface Cap {
-  ruc: number; rucPerfTot: number; rucPosPerf: number;
-  lecF2PerfTot: number; lecPosPerf: number;
-  lecF1PerfTot: number; lecF1PosPerf: number;
-}
-interface Props { naves: { 1: Cap; 2: Cap }; defaults: { rucDias: number; lecF2Dias: number; lecF1Dias: number }; }
+interface Props { naves: NavesCap; defaults: { rucDias: number; lecF2Dias: number; lecF1Dias: number }; repartoInicial: Slot[] }
 
-type Cultivo = 'lechuga' | 'rucula';
-interface Slot { cultivo: Cultivo; dia: number; pct: number } // dia 1=Lun … 6=Sáb
-
-const CUB = 345, POSPAQ = 3, CUBPOSRUC = 2, CUBPLLEC = 1;
-const lotesConv = (d: number) => Math.round(d / 7);
 const fmt = (n: number) => Math.round(n).toLocaleString('es-AR');
-
 const ROCKET = '#ca8a04', LEAF = '#4d7c0f';
-const DIAS = [{ n: 1, l: 'Lun', full: 'LUNES' }, { n: 2, l: 'Mar', full: 'MARTES' }, { n: 3, l: 'Mié', full: 'MIÉRCOLES' }, { n: 4, l: 'Jue', full: 'JUEVES' }, { n: 5, l: 'Vie', full: 'VIERNES' }, { n: 6, l: 'Sáb', full: 'SÁBADO' }];
-const REPARTO_DEFAULT: Slot[] = [
-  { cultivo: 'lechuga', dia: 1, pct: 35 }, { cultivo: 'lechuga', dia: 4, pct: 30 }, { cultivo: 'lechuga', dia: 5, pct: 35 },
-  { cultivo: 'rucula', dia: 2, pct: 45 }, { cultivo: 'rucula', dia: 5, pct: 55 },
-];
-const DIA_SIEMBRA = 3; // miércoles
-
 const inp: React.CSSProperties = { width: '80px', textAlign: 'center', fontFamily: 'monospace', fontSize: '14px', fontWeight: 700, border: '1px solid #d1d5db', borderRadius: '6px', padding: '6px', outline: 'none' };
 const card: React.CSSProperties = { background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px', marginBottom: '16px' };
 const sel: React.CSSProperties = { fontSize: '13px', border: '1px solid #d1d5db', borderRadius: '6px', padding: '5px 8px', background: 'white' };
 
-export default function PlanificacionManager({ naves, defaults }: Props) {
+export default function PlanificacionManager({ naves, defaults, repartoInicial }: Props) {
   const [tab, setTab] = useState<'calc' | 'crono'>('calc');
   const [rucDias, setRucDias] = useState(defaults.rucDias);
   const [lecF2Dias, setLecF2Dias] = useState(defaults.lecF2Dias);
@@ -37,38 +24,24 @@ export default function PlanificacionManager({ naves, defaults }: Props) {
   const [diasCos, setDiasCos] = useState(5);
   const [ritmoRuc, setRitmoRuc] = useState(150);
   const [ritmoLec, setRitmoLec] = useState(150);
-  const [reparto, setReparto] = useState<Slot[]>(REPARTO_DEFAULT);
+  const [reparto, setReparto] = useState<Slot[]>(repartoInicial);
+  const [guardado, setGuardado] = useState<'idle' | 'guardando' | 'ok'>('idle');
 
-  // Persistir el reparto (el criterio de días/%) en el navegador
+  // Guardar el reparto en la config compartida (debounced) — lo usa también el Panel
+  const first = useRef(true);
   useEffect(() => {
-    try { const s = localStorage.getItem('xavia_plan_reparto'); if (s) setReparto(JSON.parse(s)); } catch {}
-  }, []);
-  useEffect(() => {
-    try { localStorage.setItem('xavia_plan_reparto', JSON.stringify(reparto)); } catch {}
+    if (first.current) { first.current = false; return; }
+    setGuardado('guardando');
+    const t = setTimeout(() => {
+      fetch('/api/planificacion/reparto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reparto }) })
+        .then(() => setGuardado('ok')).catch(() => setGuardado('idle'));
+    }, 800);
+    return () => clearTimeout(t);
   }, [reparto]);
 
-  const rl = lotesConv(rucDias), f2l = lotesConv(lecF2Dias), f1l = lotesConv(lecF1Dias);
-
-  function calcNave(n: 1 | 2) {
-    const c = naves[n];
-    const rucPos = c.ruc / Math.max(1, rl);
-    const rucPaq = rucPos / POSPAQ;
-    const rucPl = rucPos * CUBPOSRUC / CUB;
-    const lote = (c.lecF2PerfTot / Math.max(1, f2l)) * c.lecPosPerf; // plantas/lote
-    const lecPl = lote * CUBPLLEC / CUB;
-    const f1PerfNec = Math.ceil(lote / Math.max(1, c.lecF1PosPerf) * f1l);
-    const f1OK = c.lecF1PerfTot - f1PerfNec;
-    const rucTrasp = Math.ceil(rucPos / Math.max(1, c.rucPosPerf));
-    const f1Trasp = Math.ceil(lote / Math.max(1, c.lecF1PosPerf));
-    const f2Trasp = Math.ceil(lote / Math.max(1, c.lecPosPerf));
-    return { c, rucPos, rucPaq, rucPl, lote, lecPl, f1PerfNec, f1OK, rucTrasp, f1Trasp, f2Trasp };
-  }
-  const n1 = calcNave(1), n2 = calcNave(2);
-
-  const totRucPaq = n1.rucPaq + n2.rucPaq;
-  const totRucPl = n1.rucPl + n2.rucPl;
-  const totLecPlantas = n1.lote + n2.lote;
-  const totLecPl = n1.lecPl + n2.lecPl;
+  const plan = calcularPlan(naves, { rucDias, lecF2Dias, lecF1Dias });
+  const { n1, n2, rl, f2l, f1l, totRucPaq, totRucPl, totLecPlantas, totLecPl } = plan;
+  const h = repartoHelpers(plan, reparto);
 
   // Mano de obra
   const hRuc = totRucPaq / Math.max(1, ritmoRuc / 2);
@@ -77,43 +50,20 @@ export default function PlanificacionManager({ naves, defaults }: Props) {
   const hDisp = personas * horas * diasCos;
   const alcanza = hNec <= hDisp;
 
-  // ── Reparto de cosecha por día (editable) ──
-  const totSemana = (cul: Cultivo) => cul === 'lechuga' ? totLecPlantas : totRucPaq;
-  const naveSemana = (cul: Cultivo, nave: 1 | 2) => cul === 'lechuga' ? (nave === 1 ? n1.lote : n2.lote) : (nave === 1 ? n1.rucPaq : n2.rucPaq);
-  const pctDia = (cul: Cultivo, dia: number) => reparto.filter(s => s.cultivo === cul && s.dia === dia).reduce((a, s) => a + s.pct, 0);
-  const cosDia = (cul: Cultivo, dia: number) => totSemana(cul) * pctDia(cul, dia) / 100;
-  const cosNaveDia = (cul: Cultivo, nave: 1 | 2, dia: number) => naveSemana(cul, nave) * pctDia(cul, dia) / 100;
-  const sumPct = (cul: Cultivo) => reparto.filter(s => s.cultivo === cul).reduce((a, s) => a + s.pct, 0);
-  const cosechaEnDia = (dia: number) => pctDia('lechuga', dia) > 0 || pctDia('rucula', dia) > 0;
-  const trasplanteEnDia = (dia: number) => dia === DIA_SIEMBRA || (dia > 1 && cosechaEnDia(dia - 1));
-  const siembraRucPl = (n1.rucPos * CUBPOSRUC / CUB + n2.rucPos * CUBPOSRUC / CUB);
-  const siembraLecPl = (n1.lote / CUB + n2.lote / CUB);
-
   const updSlot = (i: number, patch: Partial<Slot>) => setReparto(r => r.map((s, j) => j === i ? { ...s, ...patch } : s));
   const delSlot = (i: number) => setReparto(r => r.filter((_, j) => j !== i));
   const addSlot = () => setReparto(r => [...r, { cultivo: 'lechuga', dia: 1, pct: 0 }]);
 
-  // ── Tareas de hoy ──
-  const jsDay = new Date().getDay(); // 0=Dom … 6=Sáb
-  const hoyDia = jsDay === 0 ? 0 : jsDay; // 1..6 = Lun..Sáb, 0 = Dom
+  // Tareas / día de hoy
+  const jsDay = new Date().getDay();
+  const hoyDia = jsDay === 0 ? 0 : jsDay;
   const hoyNombre = jsDay === 0 ? 'Domingo' : DIAS[hoyDia - 1].full;
   const hoyFecha = new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long' });
-  const tareasHoy: { icon: string; txt: string; color: string }[] = [];
-  if (hoyDia >= 1 && hoyDia <= 6) {
-    if (pctDia('lechuga', hoyDia) > 0) tareasHoy.push({ icon: '🥬', color: LEAF, txt: `Cosechar ~${fmt(cosDia('lechuga', hoyDia))} plantas de lechuga — N1 ${fmt(cosNaveDia('lechuga', 1, hoyDia))} · N2 ${fmt(cosNaveDia('lechuga', 2, hoyDia))}` });
-    if (pctDia('rucula', hoyDia) > 0) tareasHoy.push({ icon: '🌿', color: ROCKET, txt: `Cosechar ~${fmt(cosDia('rucula', hoyDia))} paquetes de rúcula — N1 ${fmt(cosNaveDia('rucula', 1, hoyDia))} · N2 ${fmt(cosNaveDia('rucula', 2, hoyDia))}` });
-    if (hoyDia === DIA_SIEMBRA) tareasHoy.push({ icon: '🌱', color: '#0891b2', txt: `Sembrar ${siembraRucPl.toFixed(0)} planchas de rúcula + ${siembraLecPl.toFixed(1)} de lechuga` });
-    if (trasplanteEnDia(hoyDia)) tareasHoy.push({ icon: '🔄', color: '#7c3aed', txt: `Trasplantar a perfiles liberados (F1→F2 lechuga, plantinera→perfil rúcula${hoyDia === DIA_SIEMBRA ? ', plantinera→F1' : ''})` });
-    if (cosechaEnDia(hoyDia)) tareasHoy.push({ icon: '🧽', color: '#6b7280', txt: 'Lavar los perfiles cosechados' });
-    if (hoyDia === 5 || hoyDia === 6) tareasHoy.push({ icon: '📦', color: '#2563eb', txt: 'Hacer control de stock de rúculas y lechugas' });
-  }
+  const tareasHoy = tareasDelDia(plan, reparto, jsDay);
 
   const tabBtn = (id: 'calc' | 'crono', label: string) => (
     <button onClick={() => setTab(id)} style={{ background: tab === id ? '#111827' : '#f3f4f6', color: tab === id ? 'white' : '#374151', border: 'none', borderRadius: '7px', padding: '7px 16px', fontSize: '13px', fontWeight: tab === id ? 700 : 500, cursor: 'pointer' }}>{label}</button>
   );
-
-  const rucPaqN = { 1: Math.round(n1.rucPaq), 2: Math.round(n2.rucPaq) };
-  const lecN = { 1: Math.round(n1.lote), 2: Math.round(n2.lote) };
 
   return (
     <div>
@@ -161,7 +111,7 @@ export default function PlanificacionManager({ naves, defaults }: Props) {
           <div key={n} style={card}>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '12px' }}>
               <p style={{ margin: 0, fontSize: '17px', fontWeight: 800 }}>Nave {n}</p>
-              <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#9ca3af' }}>rúcula {fmt(d.c.ruc)} pos · lechuga F2 {d.c.lecF2PerfTot} perf</span>
+              <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#9ca3af' }}>rúcula {fmt(naves[n].ruc)} pos · lechuga F2 {naves[n].lecF2PerfTot} perf</span>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
               <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '14px' }}>
@@ -170,7 +120,7 @@ export default function PlanificacionManager({ naves, defaults }: Props) {
                 <div style={{ marginTop: '12px', borderTop: '1px dashed #e5e7eb', paddingTop: '10px', fontSize: '12px', color: '#6b7280' }}>
                   <Row k="Lote semanal" v={`${fmt(d.rucPos)} pos`} />
                   <Row k="Paquetes/sem" v={fmt(d.rucPaq)} />
-                  <Row k={`Perfiles (${rl} lotes)`} v={`${d.c.rucPerfTot}`} />
+                  <Row k={`Perfiles (${rl} lotes)`} v={`${naves[n].rucPerfTot}`} />
                 </div>
               </div>
               <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '14px' }}>
@@ -178,8 +128,8 @@ export default function PlanificacionManager({ naves, defaults }: Props) {
                 <p style={{ margin: 0, fontSize: '34px', fontWeight: 900, color: LEAF, lineHeight: 1 }}>{d.lecPl.toFixed(1)}<span style={{ fontSize: '12px', color: '#9ca3af', fontWeight: 400, display: 'block' }}>planchas / semana</span></p>
                 <div style={{ marginTop: '12px', borderTop: '1px dashed #e5e7eb', paddingTop: '10px', fontSize: '12px', color: '#6b7280' }}>
                   <Row k="Lote semanal" v={`${fmt(d.lote)} pl`} />
-                  <Row k={`Perfiles F2 (${f2l} lotes)`} v={`${d.c.lecF2PerfTot}`} />
-                  <Row k={`Perfiles F1 (${f1l} lotes)`} v={`${d.f1PerfNec} / ${d.c.lecF1PerfTot}`} />
+                  <Row k={`Perfiles F2 (${f2l} lotes)`} v={`${naves[n].lecF2PerfTot}`} />
+                  <Row k={`Perfiles F1 (${f1l} lotes)`} v={`${d.f1PerfNec} / ${naves[n].lecF1PerfTot}`} />
                 </div>
                 <p style={{ margin: '8px 0 0', fontSize: '11.5px', fontWeight: 600, color: d.f1OK >= -2 ? '#059669' : '#dc2626' }}>
                   F1: {d.f1OK >= -2 ? `✓ alcanza${d.f1OK > 2 ? ` (sobran ${d.f1OK})` : ''}` : `⚠ faltan ${-d.f1OK} perfiles`}
@@ -220,10 +170,13 @@ export default function PlanificacionManager({ naves, defaults }: Props) {
       {tab === 'crono' && <>
         {/* Reparto editable */}
         <div style={card}>
-          <p style={{ margin: '0 0 4px', fontSize: '15px', fontWeight: 700 }}>Reparto de cosecha por día</p>
-          <p style={{ margin: '0 0 12px', fontSize: '12px', color: '#6b7280' }}>Qué cultivo cosechar cada día y qué % del total semanal. Es el criterio que define el cronograma y las tareas del día. Se guarda en tu navegador.</p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '4px' }}>
+            <p style={{ margin: '0 0 4px', fontSize: '15px', fontWeight: 700 }}>Reparto de cosecha por día</p>
+            <span style={{ fontSize: '11px', color: guardado === 'ok' ? '#059669' : '#9ca3af' }}>{guardado === 'guardando' ? 'Guardando…' : guardado === 'ok' ? 'Guardado ✓' : ''}</span>
+          </div>
+          <p style={{ margin: '0 0 12px', fontSize: '12px', color: '#6b7280' }}>Qué cultivo cosechar cada día y qué % del total semanal. Es el criterio que define el cronograma y las tareas del día (también en el Panel). Se guarda para todos.</p>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', maxWidth: '520px' }}>
-            <thead><tr style={{ color: '#6b7280', fontSize: '11px', textTransform: 'uppercase' }}>{['Cultivo', 'Día', '%', ''].map(h => <th key={h} style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 600 }}>{h}</th>)}</tr></thead>
+            <thead><tr style={{ color: '#6b7280', fontSize: '11px', textTransform: 'uppercase' }}>{['Cultivo', 'Día', '%', ''].map(hh => <th key={hh} style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 600 }}>{hh}</th>)}</tr></thead>
             <tbody>
               {reparto.map((s, i) => (
                 <tr key={i}>
@@ -251,7 +204,7 @@ export default function PlanificacionManager({ naves, defaults }: Props) {
             <button onClick={addSlot} style={{ background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', cursor: 'pointer' }}>+ Agregar día</button>
             <button onClick={() => setReparto(REPARTO_DEFAULT)} style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: '12px', cursor: 'pointer', textDecoration: 'underline' }}>Restaurar criterio default</button>
             {(['lechuga', 'rucula'] as Cultivo[]).map(c => {
-              const t = sumPct(c); const ok = t === 100;
+              const t = h.sumPct(c); const ok = t === 100;
               return <span key={c} style={{ fontSize: '12px', fontWeight: 600, color: ok ? '#059669' : '#dc2626' }}>{c === 'lechuga' ? 'Lechuga' : 'Rúcula'}: {t}%{ok ? ' ✓' : ' ⚠ ≠100'}</span>;
             })}
           </div>
@@ -277,21 +230,21 @@ export default function PlanificacionManager({ naves, defaults }: Props) {
           <p style={{ margin: '0 0 12px', fontSize: '12px', color: '#6b7280' }}>Generado del reparto de arriba. La fila de hoy queda resaltada.</p>
           <div style={{ overflowX: 'auto' }}>
             <table className="crono-tbl" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '560px' }}>
-              <thead><tr style={{ background: '#374151', color: 'white' }}>{['Día', 'Cosecha', 'Lavado', 'Trasplantes', 'Siembra'].map(h => <th key={h} style={{ padding: '8px 7px', textAlign: 'left', border: '1px solid #e5e7eb' }}>{h}</th>)}</tr></thead>
+              <thead><tr style={{ background: '#374151', color: 'white' }}>{['Día', 'Cosecha', 'Lavado', 'Trasplantes', 'Siembra'].map(hh => <th key={hh} style={{ padding: '8px 7px', textAlign: 'left', border: '1px solid #e5e7eb' }}>{hh}</th>)}</tr></thead>
               <tbody>
                 {DIAS.map(d => {
-                  const hayLec = pctDia('lechuga', d.n) > 0, hayRuc = pctDia('rucula', d.n) > 0;
+                  const hayLec = h.pctDia('lechuga', d.n) > 0, hayRuc = h.pctDia('rucula', d.n) > 0;
                   const hayCos = hayLec || hayRuc;
                   const esHoy = d.n === hoyDia;
                   return (
                     <CronoRow key={d.n} dia={d.full} hoy={esHoy}
                       cos={hayCos ? <>
-                        {hayLec && <><b style={{ color: LEAF }}>Lechuga {fmt(cosDia('lechuga', d.n))}</b> <span style={{ color: '#9ca3af' }}>(N1 {fmt(cosNaveDia('lechuga', 1, d.n))}·N2 {fmt(cosNaveDia('lechuga', 2, d.n))})</span><br /></>}
-                        {hayRuc && <><b style={{ color: ROCKET }}>Rúcula {fmt(cosDia('rucula', d.n))} paq</b> <span style={{ color: '#9ca3af' }}>(N1 {fmt(cosNaveDia('rucula', 1, d.n))}·N2 {fmt(cosNaveDia('rucula', 2, d.n))})</span></>}
+                        {hayLec && <><b style={{ color: LEAF }}>Lechuga {fmt(h.cosDia('lechuga', d.n))}</b> <span style={{ color: '#9ca3af' }}>(N1 {fmt(h.cosNaveDia('lechuga', 1, d.n))}·N2 {fmt(h.cosNaveDia('lechuga', 2, d.n))})</span><br /></>}
+                        {hayRuc && <><b style={{ color: ROCKET }}>Rúcula {fmt(h.cosDia('rucula', d.n))} paq</b> <span style={{ color: '#9ca3af' }}>(N1 {fmt(h.cosNaveDia('rucula', 1, d.n))}·N2 {fmt(h.cosNaveDia('rucula', 2, d.n))})</span></>}
                       </> : '—'}
                       lav={hayCos ? 'Lavar perfiles cosechados' : '—'}
-                      tras={trasplanteEnDia(d.n) ? <>A perfiles liberados:<br />F1→F2 lechuga{d.n === DIA_SIEMBRA ? <><br />plantinera→F1 + rúcula→perfil</> : ''}</> : '—'}
-                      siem={d.n === DIA_SIEMBRA ? <><b>SIEMBRA</b><br />Rúcula {siembraRucPl.toFixed(0)} planchas<br />Lechuga {siembraLecPl.toFixed(1)} planchas</> : '—'} />
+                      tras={h.trasplanteEnDia(d.n) ? <>A perfiles liberados:<br />F1→F2 lechuga{d.n === DIA_SIEMBRA ? <><br />plantinera→F1 + rúcula→perfil</> : ''}</> : '—'}
+                      siem={d.n === DIA_SIEMBRA ? <><b>SIEMBRA</b><br />Rúcula {h.siembraRucPl.toFixed(0)} planchas<br />Lechuga {h.siembraLecPl.toFixed(1)} planchas</> : '—'} />
                   );
                 })}
               </tbody>
@@ -304,7 +257,7 @@ export default function PlanificacionManager({ naves, defaults }: Props) {
           <p style={{ margin: '0 0 12px', fontSize: '15px', fontWeight: 700 }}>Trasplantes por semana (lote completo)</p>
           <div style={{ overflowX: 'auto' }}>
             <table className="crono-tbl" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-              <thead><tr style={{ background: '#374151', color: 'white' }}>{['Movimiento', 'Nave 1', 'Nave 2'].map(h => <th key={h} style={{ padding: '8px 10px', textAlign: 'left', border: '1px solid #e5e7eb' }}>{h}</th>)}</tr></thead>
+              <thead><tr style={{ background: '#374151', color: 'white' }}>{['Movimiento', 'Nave 1', 'Nave 2'].map(hh => <th key={hh} style={{ padding: '8px 10px', textAlign: 'left', border: '1px solid #e5e7eb' }}>{hh}</th>)}</tr></thead>
               <tbody>
                 <TrasRow m="Rúcula: plantinera → perfil" a={`${n1.rucTrasp} perfiles`} b={`${n2.rucTrasp} perfiles`} />
                 <TrasRow m="Lechuga: plantinera → F1" a={`${n1.f1Trasp} perfiles`} b={`${n2.f1Trasp} perfiles`} />
