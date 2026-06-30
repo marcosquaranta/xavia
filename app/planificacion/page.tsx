@@ -1,7 +1,8 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import { calcularCapacidad, diasCicloDefault, parseReparto, REPARTO_DEFAULT, type Slot } from '@/lib/planificacion';
+import { parseReparto, REPARTO_DEFAULT, type Slot } from '@/lib/planificacion';
+import { calcularCapacidad, diasCicloDefault } from '@/lib/planificacionServer';
 import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
 import PlanificacionManager from './PlanificacionManager';

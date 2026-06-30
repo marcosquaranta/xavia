@@ -7,7 +7,8 @@ import { cosechadoEsteMes, plantasPorCultivo, distribucionPorSemana, resumenCose
 import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, StockCamara } from '@/lib/types';
 import { calcularCamara } from '@/lib/camara';
-import { calcularCapacidad, diasCicloDefault, calcularPlan, tareasDelDia, parseReparto, REPARTO_DEFAULT } from '@/lib/planificacion';
+import { calcularPlan, tareasDelDia, parseReparto, REPARTO_DEFAULT } from '@/lib/planificacion';
+import { calcularCapacidad, diasCicloDefault } from '@/lib/planificacionServer';
 import Header from '@/components/Header';
 import FiltrosLotes from '@/components/FiltrosLotes';
 import LoteCard from '@/components/LoteCard';
