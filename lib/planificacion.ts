@@ -72,16 +72,17 @@ export function repartoHelpers(plan: Plan, reparto: Slot[]) {
 export interface Tarea { icon: string; txt: string; color: string }
 
 // jsDay: 0=Dom … 6=Sáb (Date.getDay())
-export function tareasDelDia(plan: Plan, reparto: Slot[], jsDay: number): Tarea[] {
+// `trasplantes` viene del server (lotes reales listos para trasplantar) — se intercala
+// entre la cosecha y la siembra. Si no se pasa, no se muestran trasplantes.
+export function tareasDelDia(plan: Plan, reparto: Slot[], jsDay: number, trasplantes: Tarea[] = []): Tarea[] {
   const dia = jsDay === 0 ? 0 : jsDay;
   if (dia < 1 || dia > 6) return [];
   const h = repartoHelpers(plan, reparto);
   const t: Tarea[] = [];
   if (h.pctDia('lechuga', dia) > 0) t.push({ icon: '🥬', color: '#4d7c0f', txt: `Cosechar ~${fmt(h.cosDia('lechuga', dia))} plantas de lechuga — N1 ${fmt(h.cosNaveDia('lechuga', 1, dia))} · N2 ${fmt(h.cosNaveDia('lechuga', 2, dia))}` });
   if (h.pctDia('rucula', dia) > 0) t.push({ icon: '🌿', color: '#ca8a04', txt: `Cosechar ~${fmt(h.cosDia('rucula', dia))} paquetes de rúcula — N1 ${fmt(h.cosNaveDia('rucula', 1, dia))} · N2 ${fmt(h.cosNaveDia('rucula', 2, dia))}` });
-  if (dia === DIA_SIEMBRA) t.push({ icon: '🌱', color: '#0891b2', txt: `Sembrar ${h.siembraRucPl.toFixed(0)} planchas de rúcula + ${h.siembraLecPl.toFixed(1)} de lechuga` });
-  if (h.trasplanteEnDia(dia)) t.push({ icon: '🔄', color: '#7c3aed', txt: `Trasplantar a perfiles liberados (F1→F2 lechuga, plantinera→perfil rúcula${dia === DIA_SIEMBRA ? ', plantinera→F1' : ''})` });
-  if (h.cosechaEnDia(dia)) t.push({ icon: '🧽', color: '#6b7280', txt: 'Lavar los perfiles cosechados' });
+  for (const tr of trasplantes) t.push(tr);
+  if (dia === DIA_SIEMBRA) t.push({ icon: '🌱', color: '#0891b2', txt: `Sembrar según la planificación: ${h.siembraRucPl.toFixed(0)} planchas de rúcula + ${h.siembraLecPl.toFixed(1)} de lechuga` });
   if (dia === 5 || dia === 6) t.push({ icon: '📦', color: '#2563eb', txt: 'Hacer control de stock de rúculas y lechugas' });
   return t;
 }

@@ -1,8 +1,35 @@
 import type { Lote, Movimiento, Ubicacion } from './types';
 import { diasPromedioPorVariedad } from './estadisticas';
-import type { Cap, NavesCap, Dias } from './planificacion';
+import { calcularDiasPorFase } from './lotes';
+import type { Cap, NavesCap, Dias, Tarea } from './planificacion';
 
 const esRuculaVar = (v: string) => { const x = String(v).toLowerCase(); return x.includes('rucula') || x.includes('rúcula'); };
+
+// ── Trasplantes reales del día: lotes activos que ya cumplieron (o pasaron) su fase ──
+// Agrupa por transición (plantinera→F1, F1→F2) listando los IDs de lote.
+export function trasplantesDelDia(lotes: Lote[], movimientos: Movimiento[]): Tarea[] {
+  const estMap = new Map(diasPromedioPorVariedad(lotes, movimientos, 120).map(d => [d.variedad, d]));
+  const activos = lotes.filter(l => l.estado === 'activo');
+  const naveDe = (u: string) => /nave\s*2/i.test(String(u)) ? 2 : 1;
+  const grupos: Record<string, { de: string; lotes: { id: string; nave: number; faltan: number }[] }> = {};
+  for (const l of activos) {
+    let dias: any;
+    try { dias = calcularDiasPorFase(l, movimientos); } catch { continue; }
+    const est = estMap.get(l.variedad);
+    let de = '', a = '', faltan = 99;
+    if (l.fase_actual === 'plantin') {
+      const e = est?.plantinera || 10; faltan = e - dias.plantinera; de = 'plantinera'; a = 'Fase 1';
+    } else if (l.fase_actual === 'fase_1') {
+      const e = est?.fase_1 || 22; faltan = e - (dias.fase_1 || 0); de = 'Fase 1'; a = 'Fase 2';
+    } else continue;
+    if (faltan > 0) continue; // solo los que ya están listos / atrasados
+    (grupos[a] ??= { de, lotes: [] }).lotes.push({ id: l.id_lote, nave: naveDe(l.ubicacion_actual), faltan });
+  }
+  return Object.entries(grupos).map(([a, g]) => {
+    const ids = g.lotes.sort((x, y) => x.faltan - y.faltan).map(x => x.id).join(', ');
+    return { icon: '🔄', color: '#7c3aed', txt: `Trasplantar de ${g.de} → ${a}: ${ids}` };
+  });
+}
 
 // ── Capacidad por nave desde Ubicaciones ──
 export function calcularCapacidad(ubicaciones: Ubicacion[]): NavesCap {

@@ -8,7 +8,7 @@ import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, 
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, StockCamara } from '@/lib/types';
 import { calcularCamara } from '@/lib/camara';
 import { calcularPlan, tareasDelDia, parseReparto, REPARTO_DEFAULT } from '@/lib/planificacion';
-import { calcularCapacidad, diasCicloDefault } from '@/lib/planificacionServer';
+import { calcularCapacidad, diasCicloDefault, trasplantesDelDia } from '@/lib/planificacionServer';
 import Header from '@/components/Header';
 import FiltrosLotes from '@/components/FiltrosLotes';
 import LoteCard from '@/components/LoteCard';
@@ -73,7 +73,8 @@ export default async function PanelPage({ searchParams }: {
     const plan = calcularPlan(naves, diasCicloDefault(lotes, movimientos));
     const cfgRep = configRows.find(i => i.clave === 'plan_reparto');
     const reparto = cfgRep ? parseReparto(cfgRep.valor) : REPARTO_DEFAULT;
-    tareasHoy = tareasDelDia(plan, reparto, new Date().getDay());
+    const trasplantes = trasplantesDelDia(lotes, movimientos);
+    tareasHoy = tareasDelDia(plan, reparto, new Date().getDay(), trasplantes);
   } catch {}
 
   // Datos del panel

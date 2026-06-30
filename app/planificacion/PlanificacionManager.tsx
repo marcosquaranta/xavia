@@ -3,10 +3,10 @@ import { useEffect, useRef, useState } from 'react';
 import {
   CUB, POSPAQ, CUBPOSRUC, CUBPLLEC, DIAS, DIA_SIEMBRA, REPARTO_DEFAULT,
   calcularPlan, repartoHelpers, tareasDelDia,
-  type Cultivo, type Slot, type NavesCap,
+  type Cultivo, type Slot, type NavesCap, type Tarea,
 } from '@/lib/planificacion';
 
-interface Props { naves: NavesCap; defaults: { rucDias: number; lecF2Dias: number; lecF1Dias: number }; repartoInicial: Slot[] }
+interface Props { naves: NavesCap; defaults: { rucDias: number; lecF2Dias: number; lecF1Dias: number }; repartoInicial: Slot[]; trasplantesHoy: Tarea[] }
 
 const fmt = (n: number) => Math.round(n).toLocaleString('es-AR');
 const ROCKET = '#ca8a04', LEAF = '#4d7c0f';
@@ -14,7 +14,7 @@ const inp: React.CSSProperties = { width: '80px', textAlign: 'center', fontFamil
 const card: React.CSSProperties = { background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px', marginBottom: '16px' };
 const sel: React.CSSProperties = { fontSize: '13px', border: '1px solid #d1d5db', borderRadius: '6px', padding: '5px 8px', background: 'white' };
 
-export default function PlanificacionManager({ naves, defaults, repartoInicial }: Props) {
+export default function PlanificacionManager({ naves, defaults, repartoInicial, trasplantesHoy }: Props) {
   const [tab, setTab] = useState<'calc' | 'crono'>('calc');
   const [rucDias, setRucDias] = useState(defaults.rucDias);
   const [lecF2Dias, setLecF2Dias] = useState(defaults.lecF2Dias);
@@ -59,7 +59,7 @@ export default function PlanificacionManager({ naves, defaults, repartoInicial }
   const hoyDia = jsDay === 0 ? 0 : jsDay;
   const hoyNombre = jsDay === 0 ? 'Domingo' : DIAS[hoyDia - 1].full;
   const hoyFecha = new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long' });
-  const tareasHoy = tareasDelDia(plan, reparto, jsDay);
+  const tareasHoy = tareasDelDia(plan, reparto, jsDay, trasplantesHoy);
 
   const tabBtn = (id: 'calc' | 'crono', label: string) => (
     <button onClick={() => setTab(id)} style={{ background: tab === id ? '#111827' : '#f3f4f6', color: tab === id ? 'white' : '#374151', border: 'none', borderRadius: '7px', padding: '7px 16px', fontSize: '13px', fontWeight: tab === id ? 700 : 500, cursor: 'pointer' }}>{label}</button>
