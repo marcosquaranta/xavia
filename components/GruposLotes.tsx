@@ -52,6 +52,9 @@ export default function GruposLotes({ grupos, icono, etiqueta }: { grupos: Grupo
         {titulos.map(titulo => {
           const st = estiloTitulo(titulo);
           const gs = porTitulo.get(titulo)!;
+          // La mesada de origen (ej. "Plantinera") ya está en el título de la sección
+          // (ej. "Plantinera → Fase 1") — no repetirla en cada fila si es igual.
+          const deLabel = titulo.split(' → ')[0]?.trim().toLowerCase();
           return (
             <div key={titulo}>
               <p style={{ margin: '0 0 7px', display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', fontWeight: 800, color: st.color, background: st.bg, borderRadius: '5px', padding: '3px 10px' }}>
@@ -60,12 +63,13 @@ export default function GruposLotes({ grupos, icono, etiqueta }: { grupos: Grupo
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingLeft: '2px' }}>
                 {gs.map((g, i) => {
                   const c = estiloCultivo(g.cultivo);
+                  const mesadaEsRedundante = g.mesada.trim().toLowerCase() === deLabel;
                   return (
                   <div key={i}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', fontSize: '12.5px' }}>
                       <span style={{ background: g.nave === 1 ? '#881337' : '#7c3aed', color: 'white', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 700 }}>N{g.nave}</span>
                       <span style={{ background: c.bg, color: c.color, padding: '1px 7px', borderRadius: '3px', fontSize: '10px', fontWeight: 700 }}>{c.label}</span>
-                      <strong style={{ color: '#374151' }}>{g.mesada}</strong>
+                      {!mesadaEsRedundante && <strong style={{ color: '#374151' }}>{g.mesada}</strong>}
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', paddingLeft: '4px' }}>
                       {g.items.map(it => (

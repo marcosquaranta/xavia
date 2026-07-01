@@ -103,14 +103,10 @@ export default function PlanificacionManager({ naves, defaults, repartoInicial, 
                 ))}
               </div>
             )}
-            {gruposCosecha.length > 0 && (
-              <div style={{ background: 'white', borderRadius: '7px', padding: '10px 12px', border: '1px solid #e5e7eb', marginBottom: gruposTrasplante.length > 0 ? '12px' : 0 }}>
-                <GruposLotes grupos={gruposCosecha} icono="🌾" etiqueta="Cosechar" />
-              </div>
-            )}
-            {gruposTrasplante.length > 0 && (
-              <div style={{ background: 'white', borderRadius: '7px', padding: '10px 12px', border: '1px solid #e5e7eb' }}>
-                <GruposLotes grupos={gruposTrasplante} icono="🔄" etiqueta="Trasplantar" />
+            {(gruposCosecha.length > 0 || gruposTrasplante.length > 0) && (
+              <div style={{ background: 'white', borderRadius: '7px', padding: '10px 12px', border: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {gruposCosecha.length > 0 && <GruposLotes grupos={gruposCosecha} icono="🌾" etiqueta="Cosechar" />}
+                {gruposTrasplante.length > 0 && <GruposLotes grupos={gruposTrasplante} icono="🔄" etiqueta="Trasplantar" />}
               </div>
             )}
           </>}

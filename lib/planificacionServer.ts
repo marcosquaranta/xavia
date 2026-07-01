@@ -25,12 +25,9 @@ export interface GrupoLotes { nave: number; mesada: string; cultivo: 'rucula' | 
 function ordenarGrupos(grupos: Map<string, GrupoLotes>): GrupoLotes[] {
   const arr = Array.from(grupos.values());
   for (const g of arr) g.items.sort((x, y) => (y.dias - y.est) - (x.dias - x.est));
-  arr.sort((a, b) => {
-    const peorA = a.items[0] ? a.items[0].dias - a.items[0].est : 0;
-    const peorB = b.items[0] ? b.items[0].dias - b.items[0].est : 0;
-    if (peorA !== peorB) return peorB - peorA;
-    return a.nave - b.nave || a.mesada.localeCompare(b.mesada) || a.cultivo.localeCompare(b.cultivo);
-  });
+  // Nave primero, después cultivo, después mesada — para que sea fácil de recorrer
+  // (en vez de saltar de nave en nave según cuál está "peor").
+  arr.sort((a, b) => a.nave - b.nave || a.cultivo.localeCompare(b.cultivo) || a.mesada.localeCompare(b.mesada));
   return arr;
 }
 
