@@ -82,7 +82,7 @@ export default async function PanelPage({ searchParams }: {
     siembraHoy = siembraDelDia(plan, reparto, diaSemana);
     if (diaSemana >= 1 && diaSemana <= 6) {
       gruposTrasplante = trasplantesAgrupados(lotes, movimientos);
-      gruposCosecha = cosechasAgrupadas(lotes, movimientos, variedades);
+      gruposCosecha = cosechasAgrupadas(lotes, movimientos);
     }
   } catch {}
 

@@ -107,7 +107,7 @@ function CardCamara({ datos, cultivo, cultivoKey, isAdmin, onSaved }: {
           </div>
           <div>
             <label style={{ fontSize: '11px' }}>Cantidad (paquetes)</label>
-            <input type="number" value={cantidad} onChange={e => setCantidad(e.target.value)} required min="0" disabled={loading} />
+            <input type="number" value={cantidad} onChange={e => setCantidad(e.target.value)} required min="0" step="any" disabled={loading} />
           </div>
           <div>
             <label style={{ fontSize: '11px' }}>Notas</label>

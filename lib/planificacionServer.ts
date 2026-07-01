@@ -1,4 +1,4 @@
-import type { Lote, Movimiento, Ubicacion, Variedad } from './types';
+import type { Lote, Movimiento, Ubicacion } from './types';
 import { diasPromedioPorVariedad } from './estadisticas';
 import { calcularDiasPorFase } from './lotes';
 import type { Cap, NavesCap, Dias } from './planificacion';
@@ -65,25 +65,41 @@ export function trasplantesAgrupados(lotes: Lote[], movimientos: Movimiento[]): 
   return ordenarGrupos(grupos);
 }
 
-// ── Cosechas reales pendientes: lotes en Fase 2 que YA llegaron a su punto estimado de
-// cosecha (no antes), agrupados por nave + mesada, con los días del ciclo total ──
-export function cosechasAgrupadas(lotes: Lote[], movimientos: Movimiento[], variedades: Variedad[]): GrupoLotes[] {
-  const estimador = estimadorPorVariedad(lotes, movimientos);
-  const variedadMap = new Map(variedades.map(v => [normVar(v.variedad), v]));
+// Días en Fase 2 del ÚLTIMO lote cosechado de cada cultivo (rúcula/lechuga) — la
+// referencia real contra la que se compara si un lote activo ya está a tiempo de
+// cosecharse. Null si nunca se cosechó ese cultivo (no hay con qué comparar).
+function ultimoF2PorCultivo(lotes: Lote[], movimientos: Movimiento[]): { rucula: number | null; lechuga: number | null } {
+  const cosechados = lotes
+    .filter(l => l.estado === 'cosechado' && l.fecha_cosecha)
+    .sort((a, b) => String(b.fecha_cosecha || '').localeCompare(String(a.fecha_cosecha || '')));
+  const f2DelUltimo = (esRucula: boolean) => {
+    const l = cosechados.find(l => esRuculaVar(l.variedad) === esRucula);
+    if (!l) return null;
+    try { const d = calcularDiasPorFase(l, movimientos); return d.fase_2 > 0 ? d.fase_2 : null; } catch { return null; }
+  };
+  return { rucula: f2DelUltimo(true), lechuga: f2DelUltimo(false) };
+}
+
+// ── Cosechas reales pendientes: lotes en Fase 2 cuyos días EN FASE 2 ya alcanzan o
+// superan los días en Fase 2 del último lote cosechado de ese mismo cultivo. Agrupados
+// por nave + mesada. Si no hay un lote cosechado de referencia para ese cultivo, no
+// se muestra nada (no hay con qué comparar). ──
+export function cosechasAgrupadas(lotes: Lote[], movimientos: Movimiento[]): GrupoLotes[] {
+  const ref = ultimoF2PorCultivo(lotes, movimientos);
   const activos = lotes.filter(l => l.estado === 'activo' && l.fase_actual === 'fase_2');
   const grupos = new Map<string, GrupoLotes>();
   for (const l of activos) {
     let dias: any;
     try { dias = calcularDiasPorFase(l, movimientos); } catch { continue; }
-    const est = estimador(l.variedad);
-    const v = variedadMap.get(normVar(l.variedad));
-    const estTotal = Number(v?.dias_estimados_cosecha) || est?.total || 40;
-    if (dias.total < estTotal) continue; // todavía no llegó a la fecha estimada de cosecha
+    const refF2 = esRuculaVar(l.variedad) ? ref.rucula : ref.lechuga;
+    if (refF2 === null) continue; // sin referencia real para este cultivo
+    const diasF2 = dias.fase_2 || 0;
+    if (diasF2 < refF2) continue; // todavía no llegó a los días de F2 del último cosechado
     const nave = naveDeUbic(l.ubicacion_actual);
     const mesada = mesadaCorta(l.ubicacion_actual) || '(sin mesada)';
     const key = `${nave}|${mesada}`;
     if (!grupos.has(key)) grupos.set(key, { nave, mesada, titulo: 'Lista para cosechar', items: [] });
-    grupos.get(key)!.items.push({ id: l.id_lote, dias: dias.total, est: estTotal });
+    grupos.get(key)!.items.push({ id: l.id_lote, dias: diasF2, est: refF2 });
   }
   return ordenarGrupos(grupos);
 }

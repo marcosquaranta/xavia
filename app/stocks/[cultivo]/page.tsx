@@ -14,7 +14,7 @@ function parseD(s: any): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 const num = (x: any) => Number(x) || 0;
-const fmtN = (n: number) => Math.round(n).toLocaleString('es-AR');
+const fmtN = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: 2 });
 
 export default async function StockDetallePage({ params, searchParams }: { params: { cultivo: string }; searchParams: { mes?: string } }) {
   const user = await getCurrentUser();
