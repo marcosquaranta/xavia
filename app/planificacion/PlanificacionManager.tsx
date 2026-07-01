@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   CUB, POSPAQ, CUBPOSRUC, CUBPLLEC, DIAS, DIA_SIEMBRA, REPARTO_DEFAULT,
-  calcularPlan, repartoHelpers, tareasDelDia, planchas,
+  calcularPlan, repartoHelpers, tareasDelDia, siembraDelDia, planchas,
   type Cultivo, type Slot, type NavesCap, type Dias,
 } from '@/lib/planificacion';
 import type { GrupoLotes } from '@/lib/planificacionServer';
@@ -62,6 +62,7 @@ export default function PlanificacionManager({ naves, defaults, repartoInicial, 
   const hoyNombre = jsDay === 0 ? 'Domingo' : DIAS[hoyDia - 1].full;
   const hoyFecha = new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long' });
   const tareasHoy = tareasDelDia(plan, reparto, jsDay);
+  const siembraHoy = siembraDelDia(plan, reparto, jsDay);
 
   const tabBtn = (id: 'calc' | 'crono', label: string) => (
     <button onClick={() => setTab(id)} style={{ background: tab === id ? '#111827' : '#f3f4f6', color: tab === id ? 'white' : '#374151', border: 'none', borderRadius: '7px', padding: '7px 16px', fontSize: '13px', fontWeight: tab === id ? 700 : 500, cursor: 'pointer' }}>{label}</button>
@@ -75,9 +76,24 @@ export default function PlanificacionManager({ naves, defaults, repartoInicial, 
           <p style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>📋 Tareas de hoy</p>
           <span style={{ fontSize: '13px', color: '#6b7280', fontWeight: 600 }}>{hoyNombre} {hoyFecha}</span>
         </div>
-        {tareasHoy.length === 0 && gruposTrasplante.length === 0 && gruposCosecha.length === 0
+        {tareasHoy.length === 0 && gruposTrasplante.length === 0 && gruposCosecha.length === 0 && !siembraHoy
           ? <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>{hoyDia === 0 ? 'Domingo — sin tareas de producción programadas.' : 'Sin cosecha ni trasplantes programados para hoy.'}</p>
           : <>
+            {siembraHoy && (
+              <div style={{ background: 'white', borderRadius: '7px', padding: '10px 12px', border: '1px solid #e5e7eb', marginBottom: '12px' }}>
+                <p style={{ margin: '0 0 8px', fontSize: '13px', fontWeight: 700 }}>🌱 Sembrar hoy</p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: '10px' }}>
+                  <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '7px', padding: '8px 12px', textAlign: 'center' }}>
+                    <p style={{ margin: 0, fontSize: '26px', fontWeight: 900, color: ROCKET, lineHeight: 1 }}>{siembraHoy.rucPl}</p>
+                    <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#92400e', fontWeight: 600, textTransform: 'uppercase' }}>planchas rúcula</p>
+                  </div>
+                  <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '7px', padding: '8px 12px', textAlign: 'center' }}>
+                    <p style={{ margin: 0, fontSize: '26px', fontWeight: 900, color: LEAF, lineHeight: 1 }}>{siembraHoy.lecPl}</p>
+                    <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#166534', fontWeight: 600, textTransform: 'uppercase' }}>planchas lechuga</p>
+                  </div>
+                </div>
+              </div>
+            )}
             {tareasHoy.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', marginBottom: (gruposTrasplante.length > 0 || gruposCosecha.length > 0) ? '12px' : 0 }}>
                 {tareasHoy.map((t, i) => (

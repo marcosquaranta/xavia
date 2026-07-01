@@ -7,7 +7,7 @@ import { cosechadoEsteMes, plantasPorCultivo, distribucionPorSemana, resumenCose
 import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, StockCamara } from '@/lib/types';
 import { calcularCamara } from '@/lib/camara';
-import { calcularPlan, tareasDelDia, parseReparto, REPARTO_DEFAULT } from '@/lib/planificacion';
+import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
 import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
 import Header from '@/components/Header';
 import FiltrosLotes from '@/components/FiltrosLotes';
@@ -71,13 +71,15 @@ export default async function PanelPage({ searchParams }: {
   let tareasHoy: { icon: string; txt: string; color: string }[] = [];
   let gruposTrasplante: GrupoLotes[] = [];
   let gruposCosecha: GrupoLotes[] = [];
+  let siembraHoy: SiembraHoy | null = null;
   try {
     const naves = calcularCapacidad(ubicaciones);
     const plan = calcularPlan(naves, diasCicloDefault(lotes, movimientos));
     const cfgRep = configRows.find(i => i.clave === 'plan_reparto');
     const reparto = cfgRep ? parseReparto(cfgRep.valor) : REPARTO_DEFAULT;
-    tareasHoy = tareasDelDia(plan, reparto, new Date().getDay());
     const diaSemana = new Date().getDay();
+    tareasHoy = tareasDelDia(plan, reparto, diaSemana);
+    siembraHoy = siembraDelDia(plan, reparto, diaSemana);
     if (diaSemana >= 1 && diaSemana <= 6) {
       gruposTrasplante = trasplantesAgrupados(lotes, movimientos);
       gruposCosecha = cosechasAgrupadas(lotes, movimientos, variedades);
@@ -258,12 +260,27 @@ export default async function PanelPage({ searchParams }: {
         <p className="page-subtitle">{hoyStr.charAt(0).toUpperCase()+hoyStr.slice(1)} · Bienvenido, {user.nombre}</p>
 
         {/* ══ TAREAS DE HOY ══ */}
-        {(tareasHoy.length > 0 || gruposTrasplante.length > 0 || gruposCosecha.length > 0) && (
+        {(tareasHoy.length > 0 || gruposTrasplante.length > 0 || gruposCosecha.length > 0 || siembraHoy) && (
           <div style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)', border:'1px solid #bfdbfe', borderRadius:'10px', padding:'14px', marginBottom:'14px' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'8px', flexWrap:'wrap', gap:'4px' }}>
               <p style={{ margin:0, fontSize:'14px', fontWeight:800 }}>📋 Tareas de hoy</p>
               <Link href="/planificacion" style={{ fontSize:'11px', color:'#6b7280', textDecoration:'none' }}>Planificación →</Link>
             </div>
+            {siembraHoy && (
+              <div style={{ background:'white', borderRadius:'7px', padding:'10px 12px', border:'1px solid #e5e7eb', marginBottom:'10px' }}>
+                <p style={{ margin:'0 0 8px', fontSize:'13px', fontWeight:700 }}>🌱 Sembrar hoy</p>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))', gap:'10px' }}>
+                  <div style={{ background:'#fffbeb', border:'1px solid #fde68a', borderRadius:'7px', padding:'8px 12px', textAlign:'center' }}>
+                    <p style={{ margin:0, fontSize:'26px', fontWeight:900, color:'#ca8a04', lineHeight:1 }}>{siembraHoy.rucPl}</p>
+                    <p style={{ margin:'2px 0 0', fontSize:'10px', color:'#92400e', fontWeight:600, textTransform:'uppercase' }}>planchas rúcula</p>
+                  </div>
+                  <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:'7px', padding:'8px 12px', textAlign:'center' }}>
+                    <p style={{ margin:0, fontSize:'26px', fontWeight:900, color:'#4d7c0f', lineHeight:1 }}>{siembraHoy.lecPl}</p>
+                    <p style={{ margin:'2px 0 0', fontSize:'10px', color:'#166534', fontWeight:600, textTransform:'uppercase' }}>planchas lechuga</p>
+                  </div>
+                </div>
+              </div>
+            )}
             {tareasHoy.length > 0 && (
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))', gap:'7px', marginBottom: (gruposTrasplante.length > 0 || gruposCosecha.length > 0) ? '10px' : 0 }}>
                 {tareasHoy.map((t,i) => (

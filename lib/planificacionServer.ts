@@ -35,11 +35,14 @@ export function trasplantesAgrupados(lotes: Lote[], movimientos: Movimiento[]): 
     const est = estMap.get(l.variedad);
     let de = '', a = '', diasEnFase = 0, estFase = 0;
     if (l.fase_actual === 'plantin') {
-      estFase = est?.plantinera || 10; diasEnFase = dias.plantinera; de = 'Plantinera'; a = 'Fase 1';
+      // Default cultivo-aware (rúcula suele estar menos días en plantinera que lechuga)
+      // — evita falsos "listos" cuando no hay promedio real para esa variedad.
+      estFase = est?.plantinera || (esRuculaVar(l.variedad) ? 8 : 15);
+      diasEnFase = dias.plantinera; de = 'Plantinera'; a = 'Fase 1';
     } else if (l.fase_actual === 'fase_1') {
       estFase = est?.fase_1 || 22; diasEnFase = dias.fase_1 || 0; de = 'Fase 1'; a = 'Fase 2';
     } else continue;
-    if (estFase - diasEnFase > 0) continue; // todavía no está listo
+    if (diasEnFase < estFase) continue; // todavía no llegó a la fecha estimada
     const nave = naveDeUbic(l.ubicacion_actual);
     const mesada = mesadaCorta(l.ubicacion_actual) || '(sin mesada)';
     const titulo = `${de} → ${a}`;
@@ -50,8 +53,8 @@ export function trasplantesAgrupados(lotes: Lote[], movimientos: Movimiento[]): 
   return ordenarGrupos(grupos);
 }
 
-// ── Cosechas reales pendientes: lotes en Fase 2 que ya están (o casi) en su punto de
-// cosecha, agrupados por nave + mesada, con los días del ciclo total para marcar atraso ──
+// ── Cosechas reales pendientes: lotes en Fase 2 que YA llegaron a su punto estimado de
+// cosecha (no antes), agrupados por nave + mesada, con los días del ciclo total ──
 export function cosechasAgrupadas(lotes: Lote[], movimientos: Movimiento[], variedades: Variedad[]): GrupoLotes[] {
   const estMap = new Map(diasPromedioPorVariedad(lotes, movimientos, 120).map(d => [d.variedad, d]));
   const variedadMap = new Map(variedades.map(v => [v.variedad, v]));
@@ -63,8 +66,7 @@ export function cosechasAgrupadas(lotes: Lote[], movimientos: Movimiento[], vari
     const est = estMap.get(l.variedad);
     const v = variedadMap.get(l.variedad);
     const estTotal = Number(v?.dias_estimados_cosecha) || est?.total || 40;
-    const faltan = estTotal - dias.total;
-    if (faltan > 4) continue; // todavía falta bastante
+    if (dias.total < estTotal) continue; // todavía no llegó a la fecha estimada de cosecha
     const nave = naveDeUbic(l.ubicacion_actual);
     const mesada = mesadaCorta(l.ubicacion_actual) || '(sin mesada)';
     const key = `${nave}|${mesada}`;

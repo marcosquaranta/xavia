@@ -75,8 +75,10 @@ export function repartoHelpers(plan: Plan, reparto: Slot[]) {
 export interface Tarea { icon: string; txt: string; color: string }
 
 // jsDay: 0=Dom … 6=Sáb (Date.getDay())
-// Los trasplantes se muestran aparte (agrupados por nave/mesada, ver trasplantesAgrupados
-// en lib/planificacionServer.ts) porque necesitan su propio layout, no una línea de texto.
+// Los trasplantes y cosechas reales se muestran aparte (agrupados por nave/mesada, ver
+// trasplantesAgrupados/cosechasAgrupadas en lib/planificacionServer.ts). La siembra
+// también se muestra aparte (ver siembraDelDia) porque necesita números destacados,
+// no una línea de texto perdida entre las demás.
 export function tareasDelDia(plan: Plan, reparto: Slot[], jsDay: number): Tarea[] {
   const dia = jsDay === 0 ? 0 : jsDay;
   if (dia < 1 || dia > 6) return [];
@@ -84,9 +86,18 @@ export function tareasDelDia(plan: Plan, reparto: Slot[], jsDay: number): Tarea[
   const t: Tarea[] = [];
   if (h.pctDia('lechuga', dia) > 0) t.push({ icon: '🥬', color: '#4d7c0f', txt: `Cosechar ~${fmt(h.cosDia('lechuga', dia))} plantas de lechuga — N1 ${fmt(h.cosNaveDia('lechuga', 1, dia))} · N2 ${fmt(h.cosNaveDia('lechuga', 2, dia))}` });
   if (h.pctDia('rucula', dia) > 0) t.push({ icon: '🌿', color: '#ca8a04', txt: `Cosechar ~${fmt(h.cosDia('rucula', dia))} paquetes de rúcula — N1 ${fmt(h.cosNaveDia('rucula', 1, dia))} · N2 ${fmt(h.cosNaveDia('rucula', 2, dia))}` });
-  if (dia === DIA_SIEMBRA) t.push({ icon: '🌱', color: '#0891b2', txt: `Sembrar según la planificación: ${planchas(h.siembraRucPl)} planchas de rúcula + ${planchas(h.siembraLecPl)} de lechuga` });
   if (dia === 5 || dia === 6) t.push({ icon: '📦', color: '#2563eb', txt: 'Hacer control de stock de rúculas y lechugas' });
   return t;
+}
+
+export interface SiembraHoy { rucPl: number; lecPl: number }
+
+// Solo devuelve algo el día de siembra (miércoles) — se renderiza como bloque destacado,
+// no como línea de texto, para que los números por cultivo no se pierdan.
+export function siembraDelDia(plan: Plan, reparto: Slot[], jsDay: number): SiembraHoy | null {
+  if (jsDay !== DIA_SIEMBRA) return null;
+  const h = repartoHelpers(plan, reparto);
+  return { rucPl: planchas(h.siembraRucPl), lecPl: planchas(h.siembraLecPl) };
 }
 
 // Sanitiza un reparto venido de storage (JSON) — descarta entradas inválidas.
