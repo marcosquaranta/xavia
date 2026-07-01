@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Lote, Ubicacion } from '@/lib/types';
+import { estimarPlantasActuales } from '@/lib/lotes';
 import NumberInput from '@/components/NumberInput';
 
 const HOY = new Date().toISOString().split('T')[0];
@@ -32,10 +33,13 @@ export default function TrasplanteForm({
   const factor = esRucula ? 2 : 1;
   const labelFactor = esRucula ? '2 plantines/posición (rúcula)' : '1 plantín/posición (lechuga)';
 
-  const cantidadActual = (() => {
-    const est = Number(lote.plantas_estimadas_actual);
-    return est > 0 ? est : Number(lote.plantines_iniciales) || 0;
-  })();
+  // Misma función que usa el resto de la app (LoteCard, etc.) — si el lote sigue en
+  // plantinera, la cantidad real vive en plantines_iniciales, NUNCA en
+  // plantas_estimadas_actual (que es una cantidad de posiciones/tubos, otra unidad).
+  // Reimplementar esto acá había causado que, tras dividir un lote en un trasplante
+  // parcial, el padre mostrara la mitad de sus plantines disponibles (rúcula = 2
+  // plantines/posición) porque el campo equivocado quedaba con un valor > 0.
+  const cantidadActual = estimarPlantasActuales(lote, ubicacionesDestino);
 
   // Entrada por TUBOS → calcula posiciones y plantines
   function handleTubos(val: number) {

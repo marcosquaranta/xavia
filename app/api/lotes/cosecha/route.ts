@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { appendRow, appendRowObj, readSheet, updateRow } from '@/lib/sheets';
-import { proximoIdMovimiento, calcularDesvioCosecha, codigoCultivo } from '@/lib/lotes';
+import { calcularDesvioCosecha, codigoCultivo } from '@/lib/lotes';
+import { proximoIdMovimiento } from '@/lib/movimientos';
 import { generarIdDivision, completarIdEnTrasplante } from '@/lib/loteId';
 import type { Lote, Movimiento } from '@/lib/types';
 

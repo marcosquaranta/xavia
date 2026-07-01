@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { appendRow, appendRowObj, readSheet, updateRow } from '@/lib/sheets';
 import { completarIdEnTrasplante, generarIdDivision } from '@/lib/loteId';
-import { proximoIdMovimiento, codigoCultivo } from '@/lib/lotes';
+import { codigoCultivo } from '@/lib/lotes';
+import { proximoIdMovimiento } from '@/lib/movimientos';
 import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
 
 function diasEntre(desde: string, hasta: string): number {
@@ -112,9 +113,14 @@ if (nuevoId !== lote.id_lote) {
       : completarIdEnTrasplante(lote.id_lote, cultivo);
     const idNuevo = await generarIdDivision(idPadreCompleto, todosLosIds.filter((id: string) => id !== lote.id_lote));
 
+    // Si el padre queda en plantinera (fase_actual sigue 'plantin'), la cantidad real
+    // vive en plantines_iniciales — NO escribir plantas_estimadas_actual ahí (esa
+    // columna es en posiciones/tubos, otra unidad). Escribirla con un valor > 0
+    // hacía que se leyera esa cantidad equivocada (la mitad, en rúcula) en vez de
+    // plantines_iniciales al querer trasplantar el resto del lote más adelante.
     await updateRow('Lotes', 'id_lote', lote.id_lote, {
       plantines_iniciales: plantas_quedan,
-      plantas_estimadas_actual: plantasQuedanReales,
+      plantas_estimadas_actual: lote.fase_actual === 'plantin' ? '' : plantasQuedanReales,
       fecha_ult_movimiento: fecha,
       notas: (String(lote.notas || '') + ` [dividido ${fecha}: ${plantasReales} plantas → ${idNuevo}]`).trim(),
     });

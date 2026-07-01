@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { appendRow, appendRowObj } from '@/lib/sheets';
 import { generarIdSiembra } from '@/lib/loteId';
-import { proximoIdMovimiento } from '@/lib/lotes';
+import { proximoIdMovimiento } from '@/lib/movimientos';
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
