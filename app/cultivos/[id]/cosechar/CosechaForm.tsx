@@ -13,9 +13,8 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
   const [plantas, setPlantas] = useState(0);
   const [pesoGr, setPesoGr] = useState(0);
   const [paquetes, setPaquetes] = useState(0);
-  const [plantasPorPaqueteManual, setPlantasPorPaqueteManual] = useState(3); // editable, default 3
-  const [pesoPlantaGr, setPesoPlantaGr] = useState(0);
-  const pesoPaqGr = pesoPlantaGr > 0 ? Math.round(pesoPlantaGr * plantasPorPaqueteManual) : 0;
+  const [plantasPorPaqueteManual, setPlantasPorPaqueteManual] = useState(3); // editable, default 3 — solo para estimar CANTIDAD de paquetes, no interviene en el peso
+  const [pesoPaqGr, setPesoPaqGr] = useState(0); // peso del paquete pesado DIRECTAMENTE en la balanza — nunca se multiplica
   const [bandejas, setBandejas] = useState(0);
   const [tubosBandejas, setTubosBandejas] = useState(0);
   const [pesoBandGr, setPesoBandGr] = useState(0);
@@ -34,7 +33,7 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault(); setLoading(true); setError(null);
     if (!esPorPaquete && plantas <= 0) { setError('Ingresá la cantidad de plantas cosechadas'); setLoading(false); return; }
-    if (!esPorPaquete && pesoGr <= 0) { setError('Ingresá el peso de muestra (gramos por planta)'); setLoading(false); return; }
+    if (!esPorPaquete && pesoGr <= 0) { setError('Ingresá el pesaje testigo (peso del paquete en gramos)'); setLoading(false); return; }
     if (esPorPaquete && paquetes <= 0) { setError('Ingresá la cantidad de paquetes armados'); setLoading(false); return; }
     if (parcial && (plantasQuedan <= 0 || plantasQuedan >= plantasEst)) { setError(`En cosecha parcial, las plantas que quedan deben ser entre 1 y ${plantasEst - 1}`); setLoading(false); return; }
     try {
@@ -86,8 +85,9 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
           <p style={{ margin: '0 0 10px', fontSize: '13px', fontWeight: 600, color: '#4d7c0f' }}>Cosecha por planta</p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
             <div><label>Plantas cosechadas *</label><NumberInput value={plantas} onChange={setPlantas} min={0} required disabled={loading} /></div>
-            <div><label style={{ color: '#dc2626' }}>Peso de muestra (gramos/planta) *</label><NumberInput value={pesoGr} onChange={setPesoGr} min={0} required disabled={loading} placeholder="Ej: 82" /></div>
+            <div><label style={{ color: '#dc2626' }}>Pesaje testigo — peso del paquete en gramos *</label><NumberInput value={pesoGr} onChange={setPesoGr} min={0} required disabled={loading} placeholder="Ej: 82" /></div>
           </div>
+          <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#6b7280' }}>En lechuga, el paquete es 1 planta — pesá el paquete directamente, no se multiplica por nada.</p>
           {plantas > 0 && (
             <div style={{ marginTop: '12px', padding: '10px 12px', background: '#f9fafb', borderRadius: '6px', fontSize: '12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#6b7280' }}>Plantas estimadas</span><span>{plantasEst}</span></div>
@@ -126,15 +126,11 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
             <div><label>Paquetes armados (real) *</label><NumberInput value={paquetes} onChange={setPaquetes} min={0} required disabled={loading} /></div>
             <div>
-              <label>Pesaje testigo — gramos/planta — opcional</label>
-              <NumberInput value={pesoPlantaGr} onChange={setPesoPlantaGr} min={0} disabled={loading} placeholder="Ej: 58" />
-              {pesoPlantaGr > 0 && (
-                <p style={{ margin: '3px 0 0', fontSize: '11px', color: '#166534' }}>
-                  → {pesoPaqGr} g/paq ({plantasPorPaqueteManual} plantas × {pesoPlantaGr} g)
-                </p>
-              )}
+              <label>Pesaje testigo — peso del paquete en gramos — opcional</label>
+              <NumberInput value={pesoPaqGr} onChange={setPesoPaqGr} min={0} disabled={loading} placeholder="Ej: 210" />
             </div>
           </div>
+          <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#6b7280' }}>Pesá el paquete armado directamente en la balanza — es el peso final, no se multiplica por la cantidad de plantas por paquete.</p>
 
           {paquetes > 0 && (
             <div style={{ marginTop: '12px', padding: '10px 12px', background: '#f0fdf4', borderRadius: '6px', fontSize: '12px' }}>

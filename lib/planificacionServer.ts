@@ -1,4 +1,4 @@
-import type { Lote, Movimiento, Ubicacion } from './types';
+import type { Lote, Movimiento, Ubicacion, Variedad } from './types';
 import { diasPromedioPorVariedad } from './estadisticas';
 import { calcularDiasPorFase } from './lotes';
 import type { Cap, NavesCap, Dias } from './planificacion';
@@ -7,16 +7,28 @@ const esRuculaVar = (v: string) => { const x = String(v).toLowerCase(); return x
 const mesadaCorta = (s: string) => String(s || '').replace(/^Nave\s*\d+\s*-\s*/i, '').trim();
 const naveDeUbic = (u: string) => /nave\s*2/i.test(String(u)) ? 2 : 1;
 
-export interface TrasplanteItem { id: string; dias: number; est: number }
-export interface TrasplanteGrupo { nave: number; mesada: string; de: string; a: string; items: TrasplanteItem[] }
+export interface ItemLote { id: string; dias: number; est: number }
+export interface GrupoLotes { nave: number; mesada: string; titulo: string; items: ItemLote[] }
+
+function ordenarGrupos(grupos: Map<string, GrupoLotes>): GrupoLotes[] {
+  const arr = Array.from(grupos.values());
+  for (const g of arr) g.items.sort((x, y) => (y.dias - y.est) - (x.dias - x.est));
+  arr.sort((a, b) => {
+    const peorA = a.items[0] ? a.items[0].dias - a.items[0].est : 0;
+    const peorB = b.items[0] ? b.items[0].dias - b.items[0].est : 0;
+    if (peorA !== peorB) return peorB - peorA;
+    return a.nave - b.nave || a.mesada.localeCompare(b.mesada);
+  });
+  return arr;
+}
 
 // ── Trasplantes reales pendientes: lotes activos que ya cumplieron (o pasaron) su fase ──
 // Agrupados por nave + mesada + transición (plantinera→F1, F1→F2), con los días que
 // lleva cada lote en su fase actual para poder marcar los más atrasados.
-export function trasplantesAgrupados(lotes: Lote[], movimientos: Movimiento[]): TrasplanteGrupo[] {
+export function trasplantesAgrupados(lotes: Lote[], movimientos: Movimiento[]): GrupoLotes[] {
   const estMap = new Map(diasPromedioPorVariedad(lotes, movimientos, 120).map(d => [d.variedad, d]));
   const activos = lotes.filter(l => l.estado === 'activo');
-  const grupos = new Map<string, TrasplanteGrupo>();
+  const grupos = new Map<string, GrupoLotes>();
   for (const l of activos) {
     let dias: any;
     try { dias = calcularDiasPorFase(l, movimientos); } catch { continue; }
@@ -30,19 +42,36 @@ export function trasplantesAgrupados(lotes: Lote[], movimientos: Movimiento[]): 
     if (estFase - diasEnFase > 0) continue; // todavía no está listo
     const nave = naveDeUbic(l.ubicacion_actual);
     const mesada = mesadaCorta(l.ubicacion_actual) || '(sin mesada)';
-    const key = `${nave}|${mesada}|${de}|${a}`;
-    if (!grupos.has(key)) grupos.set(key, { nave, mesada, de, a, items: [] });
+    const titulo = `${de} → ${a}`;
+    const key = `${nave}|${mesada}|${titulo}`;
+    if (!grupos.has(key)) grupos.set(key, { nave, mesada, titulo, items: [] });
     grupos.get(key)!.items.push({ id: l.id_lote, dias: diasEnFase, est: estFase });
   }
-  const arr = Array.from(grupos.values());
-  for (const g of arr) g.items.sort((x, y) => (y.dias - y.est) - (x.dias - x.est));
-  arr.sort((a, b) => {
-    const peorA = a.items[0] ? a.items[0].dias - a.items[0].est : 0;
-    const peorB = b.items[0] ? b.items[0].dias - b.items[0].est : 0;
-    if (peorA !== peorB) return peorB - peorA;
-    return a.nave - b.nave || a.mesada.localeCompare(b.mesada);
-  });
-  return arr;
+  return ordenarGrupos(grupos);
+}
+
+// ── Cosechas reales pendientes: lotes en Fase 2 que ya están (o casi) en su punto de
+// cosecha, agrupados por nave + mesada, con los días del ciclo total para marcar atraso ──
+export function cosechasAgrupadas(lotes: Lote[], movimientos: Movimiento[], variedades: Variedad[]): GrupoLotes[] {
+  const estMap = new Map(diasPromedioPorVariedad(lotes, movimientos, 120).map(d => [d.variedad, d]));
+  const variedadMap = new Map(variedades.map(v => [v.variedad, v]));
+  const activos = lotes.filter(l => l.estado === 'activo' && l.fase_actual === 'fase_2');
+  const grupos = new Map<string, GrupoLotes>();
+  for (const l of activos) {
+    let dias: any;
+    try { dias = calcularDiasPorFase(l, movimientos); } catch { continue; }
+    const est = estMap.get(l.variedad);
+    const v = variedadMap.get(l.variedad);
+    const estTotal = Number(v?.dias_estimados_cosecha) || est?.total || 40;
+    const faltan = estTotal - dias.total;
+    if (faltan > 4) continue; // todavía falta bastante
+    const nave = naveDeUbic(l.ubicacion_actual);
+    const mesada = mesadaCorta(l.ubicacion_actual) || '(sin mesada)';
+    const key = `${nave}|${mesada}`;
+    if (!grupos.has(key)) grupos.set(key, { nave, mesada, titulo: 'Lista para cosechar', items: [] });
+    grupos.get(key)!.items.push({ id: l.id_lote, dias: dias.total, est: estTotal });
+  }
+  return ordenarGrupos(grupos);
 }
 
 // ── Capacidad por nave desde Ubicaciones ──

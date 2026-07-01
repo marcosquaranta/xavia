@@ -32,10 +32,8 @@ export default function EditarLoteForm({
   const [notas, setNotas]   = useState(String(lote.notas || ''));
 
   // Pesaje testigo — solo aplica a lotes cosechados por paquete o por planta (no cajón).
-  // El valor cargado ES el pasaje directo (gramos por paquete de rúcula, gramos por
-  // planta de lechuga) — no se multiplica por la cantidad de plantas por paquete.
-  const varLower = String(lote.variedad || '').toLowerCase();
-  const esRucula = varLower.includes('rucula') || varLower.includes('rúcula');
+  // Es siempre el peso del PAQUETE pesado directamente en la balanza (en lechuga, 1
+  // paquete = 1 planta) — nunca se multiplica por la cantidad de plantas por paquete.
   const editaPesaje = lote.estado === 'cosechado' && lote.destino_cosecha !== 'cajon';
   const pesoActualGr = Number(lote.peso_muestra_paquete_gr) > 0
     ? Number(lote.peso_muestra_paquete_gr)
@@ -194,14 +192,14 @@ export default function EditarLoteForm({
           </div>
           {editaPesaje && (
             <div>
-              <label>Pesaje testigo {esRucula ? '(gramos por paquete)' : '(gramos por planta)'}</label>
-              <NumberInput value={pesoGr} onChange={setPesoGr} min={0} disabled={loading} placeholder={esRucula ? 'Ej: 210' : 'Ej: 82'} />
+              <label>Pesaje testigo (gramos por paquete)</label>
+              <NumberInput value={pesoGr} onChange={setPesoGr} min={0} disabled={loading} placeholder="Ej: 210" />
             </div>
           )}
         </div>
         {editaPesaje && (
           <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#9ca3af' }}>
-            {esRucula ? 'Este es el peso del paquete pesado directamente — no se multiplica por la cantidad de plantas por paquete.' : 'Peso de una planta pesada directamente.'}
+            Es el peso del paquete pesado directamente en la balanza (en lechuga, 1 paquete = 1 planta) — no se multiplica por nada.
           </p>
         )}
         <div style={{ marginTop: '14px' }}>

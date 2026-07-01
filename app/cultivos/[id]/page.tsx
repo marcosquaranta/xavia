@@ -59,13 +59,12 @@ export default async function DetalleLotePage({ params }: { params: { id: string
               ...((lote.plantas_por_unidad_real && Number(lote.plantas_por_unidad_real) > 1) ? [['Plantas/paquete', lote.plantas_por_unidad_real, 'real']] : []),
               ...((lote.plantines_iniciales) ? [['Plantines usados', lote.plantines_iniciales, 'total del lote']] : []),
               ...(() => {
-                const esLechuga = claseVariedad(lote).includes('lechuga');
+                // El pasaje testigo es siempre el peso del PAQUETE pesado directamente en la
+                // balanza (en lechuga, 1 paquete = 1 planta) — nunca se multiplica por nada.
                 const gr = Number(lote.peso_muestra_paquete_gr) > 0
                   ? Number(lote.peso_muestra_paquete_gr)
                   : Number(lote.peso_muestra_kg) > 0 ? Math.round(Number(lote.peso_muestra_kg) * 1000) : 0;
-                const u = esLechuga ? 'g/planta' : 'g/paq';
-                const sub = esLechuga ? 'gramos por planta' : 'gramos por paquete';
-                return gr > 0 ? [['Pasaje testigo', gr + ' ' + u, sub]] : [];
+                return gr > 0 ? [['Pasaje testigo', gr + ' g/paq', 'gramos por paquete']] : [];
               })(),
             ] : []),
           ].map(([label, value, sub]: any) => (

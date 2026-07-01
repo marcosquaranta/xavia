@@ -5,10 +5,10 @@ import {
   calcularPlan, repartoHelpers, tareasDelDia, planchas,
   type Cultivo, type Slot, type NavesCap, type Dias,
 } from '@/lib/planificacion';
-import type { TrasplanteGrupo } from '@/lib/planificacionServer';
-import TrasplantesHoy from '@/components/TrasplantesHoy';
+import type { GrupoLotes } from '@/lib/planificacionServer';
+import GruposLotes from '@/components/GruposLotes';
 
-interface Props { naves: NavesCap; defaults: Dias; repartoInicial: Slot[]; gruposTrasplante: TrasplanteGrupo[] }
+interface Props { naves: NavesCap; defaults: Dias; repartoInicial: Slot[]; gruposTrasplante: GrupoLotes[]; gruposCosecha: GrupoLotes[] }
 
 const fmt = (n: number) => Math.round(n).toLocaleString('es-AR');
 const ROCKET = '#ca8a04', LEAF = '#4d7c0f';
@@ -16,7 +16,7 @@ const inp: React.CSSProperties = { width: '80px', textAlign: 'center', fontFamil
 const card: React.CSSProperties = { background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px', marginBottom: '16px' };
 const sel: React.CSSProperties = { fontSize: '13px', border: '1px solid #d1d5db', borderRadius: '6px', padding: '5px 8px', background: 'white' };
 
-export default function PlanificacionManager({ naves, defaults, repartoInicial, gruposTrasplante }: Props) {
+export default function PlanificacionManager({ naves, defaults, repartoInicial, gruposTrasplante, gruposCosecha }: Props) {
   const [tab, setTab] = useState<'calc' | 'crono'>('calc');
   const [rucDias, setRucDias] = useState(defaults.rucDias);
   const [lecF2Dias, setLecF2Dias] = useState(defaults.lecF2Dias);
@@ -75,11 +75,11 @@ export default function PlanificacionManager({ naves, defaults, repartoInicial, 
           <p style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>📋 Tareas de hoy</p>
           <span style={{ fontSize: '13px', color: '#6b7280', fontWeight: 600 }}>{hoyNombre} {hoyFecha}</span>
         </div>
-        {tareasHoy.length === 0 && gruposTrasplante.length === 0
+        {tareasHoy.length === 0 && gruposTrasplante.length === 0 && gruposCosecha.length === 0
           ? <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>{hoyDia === 0 ? 'Domingo — sin tareas de producción programadas.' : 'Sin cosecha ni trasplantes programados para hoy.'}</p>
           : <>
             {tareasHoy.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', marginBottom: gruposTrasplante.length > 0 ? '12px' : 0 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', marginBottom: (gruposTrasplante.length > 0 || gruposCosecha.length > 0) ? '12px' : 0 }}>
                 {tareasHoy.map((t, i) => (
                   <div key={i} style={{ display: 'flex', gap: '9px', alignItems: 'flex-start', fontSize: '13.5px', lineHeight: 1.4 }}>
                     <span style={{ fontSize: '15px' }}>{t.icon}</span><span style={{ color: '#374151' }}>{t.txt}</span>
@@ -87,9 +87,14 @@ export default function PlanificacionManager({ naves, defaults, repartoInicial, 
                 ))}
               </div>
             )}
+            {gruposCosecha.length > 0 && (
+              <div style={{ background: 'white', borderRadius: '7px', padding: '10px 12px', border: '1px solid #e5e7eb', marginBottom: gruposTrasplante.length > 0 ? '12px' : 0 }}>
+                <GruposLotes grupos={gruposCosecha} icono="🌾" etiqueta="Cosechar" />
+              </div>
+            )}
             {gruposTrasplante.length > 0 && (
               <div style={{ background: 'white', borderRadius: '7px', padding: '10px 12px', border: '1px solid #e5e7eb' }}>
-                <TrasplantesHoy grupos={gruposTrasplante} />
+                <GruposLotes grupos={gruposTrasplante} icono="🔄" etiqueta="Trasplantar" />
               </div>
             )}
           </>}

@@ -1,7 +1,7 @@
 import Link from 'next/link';
-import type { TrasplanteGrupo } from '@/lib/planificacionServer';
+import type { GrupoLotes } from '@/lib/planificacionServer';
 
-// Rojo = ya atrasado (días > estimado) · Ámbar = justo hoy · Gris = normal, listo pero sin demora
+// Rojo = ya atrasado (días > estimado) · Ámbar = justo hoy · Gris = normal, en margen
 function colorItem(dias: number, est: number) {
   const faltan = est - dias;
   if (faltan < 0) return '#dc2626';
@@ -9,18 +9,18 @@ function colorItem(dias: number, est: number) {
   return '#374151';
 }
 
-export default function TrasplantesHoy({ grupos, titulo = true }: { grupos: TrasplanteGrupo[]; titulo?: boolean }) {
+export default function GruposLotes({ grupos, icono, etiqueta }: { grupos: GrupoLotes[]; icono: string; etiqueta: string }) {
   if (!grupos.length) return null;
   return (
     <div>
-      {titulo && <p style={{ margin: '0 0 8px', fontSize: '13px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>🔄 Trasplantar</p>}
+      <p style={{ margin: '0 0 8px', fontSize: '13px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>{icono} {etiqueta}</p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         {grupos.map((g, i) => (
           <div key={i}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', fontSize: '12.5px' }}>
               <span style={{ background: g.nave === 1 ? '#881337' : '#7c3aed', color: 'white', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 700 }}>N{g.nave}</span>
               <strong style={{ color: '#374151' }}>{g.mesada}</strong>
-              <span style={{ color: '#9ca3af' }}>· {g.de} → {g.a}</span>
+              <span style={{ color: '#9ca3af' }}>· {g.titulo}</span>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', paddingLeft: '4px' }}>
               {g.items.map(it => (
