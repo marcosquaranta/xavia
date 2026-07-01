@@ -260,11 +260,31 @@ export default async function PanelPage({ searchParams }: {
         <p className="page-subtitle">{hoyStr.charAt(0).toUpperCase()+hoyStr.slice(1)} · Bienvenido, {user.nombre}</p>
 
         {/* ══ TAREAS DE HOY ══ */}
-        {(tareasHoy.length > 0 || gruposTrasplante.length > 0 || gruposCosecha.length > 0 || siembraHoy) && (
-          <div style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)', border:'1px solid #bfdbfe', borderRadius:'10px', padding:'14px', marginBottom:'14px' }}>
+        <div style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)', border:'1px solid #bfdbfe', borderRadius:'10px', padding:'14px', marginBottom:'14px' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'8px', flexWrap:'wrap', gap:'4px' }}>
               <p style={{ margin:0, fontSize:'14px', fontWeight:800 }}>📋 Tareas de hoy</p>
               <Link href="/planificacion" style={{ fontSize:'11px', color:'#6b7280', textDecoration:'none' }}>Planificación →</Link>
+            </div>
+            <div style={{ background:'white', borderRadius:'7px', padding:'10px 12px', border:'1px solid #e5e7eb', marginBottom:'10px' }}>
+                <p style={{ margin:'0 0 8px', fontSize:'13px', fontWeight:700 }}>⚠️ Alertas</p>
+                {alertas.length === 0 ? (
+                  <p style={{ margin:0, color:'#059669', fontSize:'12px', fontWeight:600 }}>✓ Sin alertas activas</p>
+                ) : (
+                  <div style={{ display:'flex', flexDirection:'column', gap:'6px', maxHeight:'180px', overflowY:'auto' }}>
+                    {alertas.map((a,i) => (
+                      <div key={i} style={{ fontSize:'11px', padding:'5px 8px', borderRadius:'5px', background:a.tipo==='error'?'#fef2f2':a.tipo==='warn'?'#fffbeb':'#eff6ff', color:a.tipo==='error'?'#dc2626':a.tipo==='warn'?'#92400e':'#1d4ed8', display:'flex', alignItems:'center', gap:'5px' }}>
+                        {a.tipo==='error'?'🔴':a.tipo==='warn'?'🟡':'🔵'}
+                        {a.lote ? (
+                          <Link href={`/cultivos/${encodeURIComponent(a.lote)}`} style={{ textDecoration:'none', color:'inherit', fontWeight:600 }}>{a.msg}</Link>
+                        ) : a.msg}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ marginTop:'10px', paddingTop:'8px', borderTop:'1px solid #f3f4f6', fontSize:'11px', color:'#6b7280' }}>
+                  Ocup. global (F2): <strong>{ocGlobal}%</strong>
+                  {tubosMesadas.map((n:any) => { const f2=(n.mesadas||[]).filter((m:any)=>m.sector_fase!=='fase_1'); const tot=f2.reduce((s:number,m:any)=>s+m.tubos_totales,0); const ocu=f2.reduce((s:number,m:any)=>s+m.tubos_ocupados,0); const pct=tot>0?Math.round(ocu/tot*100):0; return <span key={n.nave}> · N{n.nave}: <strong>{pct}%</strong></span>; })}
+                </div>
             </div>
             {siembraHoy && (
               <div style={{ background:'white', borderRadius:'7px', padding:'10px 12px', border:'1px solid #e5e7eb', marginBottom:'10px' }}>
@@ -296,34 +316,10 @@ export default async function PanelPage({ searchParams }: {
                 {gruposTrasplante.length > 0 && <GruposLotes grupos={gruposTrasplante} icono="🔄" etiqueta="Trasplantar" />}
               </div>
             )}
-          </div>
-        )}
+        </div>
 
-        {/* ══ FILA 1: ALERTAS + PROYECCIONES ══ */}
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'12px', marginBottom:'14px' }}>
-
-          {/* Alertas */}
-          <div style={{ background:'white', border:'1px solid #e5e7eb', borderTop:'4px solid #f59e0b', borderRadius:'10px', padding:'14px', gridColumn: alertas.length === 0 ? '1' : '1' }}>
-            <p style={{ margin:'0 0 8px', fontSize:'11px', fontWeight:700, color:'#92400e', textTransform:'uppercase' }}>⚠ Alertas</p>
-            {alertas.length === 0 ? (
-              <p style={{ color:'#059669', fontSize:'12px', fontWeight:600 }}>✓ Sin alertas activas</p>
-            ) : (
-              <div style={{ display:'flex', flexDirection:'column', gap:'6px', maxHeight:'180px', overflowY:'auto' }}>
-                {alertas.map((a,i) => (
-                  <div key={i} style={{ fontSize:'11px', padding:'5px 8px', borderRadius:'5px', background:a.tipo==='error'?'#fef2f2':a.tipo==='warn'?'#fffbeb':'#eff6ff', color:a.tipo==='error'?'#dc2626':a.tipo==='warn'?'#92400e':'#1d4ed8', display:'flex', alignItems:'center', gap:'5px' }}>
-                    {a.tipo==='error'?'🔴':a.tipo==='warn'?'🟡':'🔵'}
-                    {a.lote ? (
-                      <Link href={`/cultivos/${encodeURIComponent(a.lote)}`} style={{ textDecoration:'none', color:'inherit', fontWeight:600 }}>{a.msg}</Link>
-                    ) : a.msg}
-                  </div>
-                ))}
-              </div>
-            )}
-            <div style={{ marginTop:'10px', paddingTop:'8px', borderTop:'1px solid #f3f4f6', fontSize:'11px', color:'#6b7280' }}>
-              Ocup. global (F2): <strong>{ocGlobal}%</strong>
-              {tubosMesadas.map((n:any) => { const f2=(n.mesadas||[]).filter((m:any)=>m.sector_fase!=='fase_1'); const tot=f2.reduce((s:number,m:any)=>s+m.tubos_totales,0); const ocu=f2.reduce((s:number,m:any)=>s+m.tubos_ocupados,0); const pct=tot>0?Math.round(ocu/tot*100):0; return <span key={n.nave}> · N{n.nave}: <strong>{pct}%</strong></span>; })}
-            </div>
-          </div>
+        {/* ══ FILA 1: PROYECCIONES ══ */}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'14px' }}>
 
           {/* ── helper para card de proyección ── */}
           {(() => {
