@@ -31,6 +31,17 @@ export default function EditarLoteForm({
   const [tubos, setTubos]   = useState(Number(lote.tubos_ocupados_actual) || 0);
   const [notas, setNotas]   = useState(String(lote.notas || ''));
 
+  // Pesaje testigo — solo aplica a lotes cosechados por paquete o por planta (no cajón).
+  // El valor cargado ES el pasaje directo (gramos por paquete de rúcula, gramos por
+  // planta de lechuga) — no se multiplica por la cantidad de plantas por paquete.
+  const varLower = String(lote.variedad || '').toLowerCase();
+  const esRucula = varLower.includes('rucula') || varLower.includes('rúcula');
+  const editaPesaje = lote.estado === 'cosechado' && lote.destino_cosecha !== 'cajon';
+  const pesoActualGr = Number(lote.peso_muestra_paquete_gr) > 0
+    ? Number(lote.peso_muestra_paquete_gr)
+    : Number(lote.peso_muestra_kg) > 0 ? Math.round(Number(lote.peso_muestra_kg) * 1000) : 0;
+  const [pesoGr, setPesoGr] = useState(pesoActualGr);
+
   // Fechas de movimientos
   const [fechaSiembra,  setFechaSiembra]  = useState(fechas.siembra.fecha);
   const [fechaF1,       setFechaF1]       = useState(fechas.f1.fecha);
@@ -52,6 +63,7 @@ export default function EditarLoteForm({
           plantas_estimadas_actual: plantas,
           tubos_ocupados_actual: tubos,
           notas,
+          ...(editaPesaje ? { peso_testigo_gr: pesoGr } : {}),
           fechas: {
             siembra: { id: fechas.siembra.id, fecha: fechaSiembra },
             f1:      { id: fechas.f1.id,      fecha: fechaF1 },
@@ -180,7 +192,18 @@ export default function EditarLoteForm({
             <label>Tubos ocupados</label>
             <NumberInput value={tubos} onChange={setTubos} min={0} disabled={loading} />
           </div>
+          {editaPesaje && (
+            <div>
+              <label>Pesaje testigo {esRucula ? '(gramos por paquete)' : '(gramos por planta)'}</label>
+              <NumberInput value={pesoGr} onChange={setPesoGr} min={0} disabled={loading} placeholder={esRucula ? 'Ej: 210' : 'Ej: 82'} />
+            </div>
+          )}
         </div>
+        {editaPesaje && (
+          <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#9ca3af' }}>
+            {esRucula ? 'Este es el peso del paquete pesado directamente — no se multiplica por la cantidad de plantas por paquete.' : 'Peso de una planta pesada directamente.'}
+          </p>
+        )}
         <div style={{ marginTop: '14px' }}>
           <label>Notas</label>
           <textarea rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} disabled={loading} style={{ resize: 'vertical' }} />
