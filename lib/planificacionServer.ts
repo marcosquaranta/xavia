@@ -1,34 +1,48 @@
 import type { Lote, Movimiento, Ubicacion } from './types';
 import { diasPromedioPorVariedad } from './estadisticas';
 import { calcularDiasPorFase } from './lotes';
-import type { Cap, NavesCap, Dias, Tarea } from './planificacion';
+import type { Cap, NavesCap, Dias } from './planificacion';
 
 const esRuculaVar = (v: string) => { const x = String(v).toLowerCase(); return x.includes('rucula') || x.includes('rúcula'); };
+const mesadaCorta = (s: string) => String(s || '').replace(/^Nave\s*\d+\s*-\s*/i, '').trim();
+const naveDeUbic = (u: string) => /nave\s*2/i.test(String(u)) ? 2 : 1;
 
-// ── Trasplantes reales del día: lotes activos que ya cumplieron (o pasaron) su fase ──
-// Agrupa por transición (plantinera→F1, F1→F2) listando los IDs de lote.
-export function trasplantesDelDia(lotes: Lote[], movimientos: Movimiento[]): Tarea[] {
+export interface TrasplanteItem { id: string; dias: number; est: number }
+export interface TrasplanteGrupo { nave: number; mesada: string; de: string; a: string; items: TrasplanteItem[] }
+
+// ── Trasplantes reales pendientes: lotes activos que ya cumplieron (o pasaron) su fase ──
+// Agrupados por nave + mesada + transición (plantinera→F1, F1→F2), con los días que
+// lleva cada lote en su fase actual para poder marcar los más atrasados.
+export function trasplantesAgrupados(lotes: Lote[], movimientos: Movimiento[]): TrasplanteGrupo[] {
   const estMap = new Map(diasPromedioPorVariedad(lotes, movimientos, 120).map(d => [d.variedad, d]));
   const activos = lotes.filter(l => l.estado === 'activo');
-  const naveDe = (u: string) => /nave\s*2/i.test(String(u)) ? 2 : 1;
-  const grupos: Record<string, { de: string; lotes: { id: string; nave: number; faltan: number }[] }> = {};
+  const grupos = new Map<string, TrasplanteGrupo>();
   for (const l of activos) {
     let dias: any;
     try { dias = calcularDiasPorFase(l, movimientos); } catch { continue; }
     const est = estMap.get(l.variedad);
-    let de = '', a = '', faltan = 99;
+    let de = '', a = '', diasEnFase = 0, estFase = 0;
     if (l.fase_actual === 'plantin') {
-      const e = est?.plantinera || 10; faltan = e - dias.plantinera; de = 'plantinera'; a = 'Fase 1';
+      estFase = est?.plantinera || 10; diasEnFase = dias.plantinera; de = 'Plantinera'; a = 'Fase 1';
     } else if (l.fase_actual === 'fase_1') {
-      const e = est?.fase_1 || 22; faltan = e - (dias.fase_1 || 0); de = 'Fase 1'; a = 'Fase 2';
+      estFase = est?.fase_1 || 22; diasEnFase = dias.fase_1 || 0; de = 'Fase 1'; a = 'Fase 2';
     } else continue;
-    if (faltan > 0) continue; // solo los que ya están listos / atrasados
-    (grupos[a] ??= { de, lotes: [] }).lotes.push({ id: l.id_lote, nave: naveDe(l.ubicacion_actual), faltan });
+    if (estFase - diasEnFase > 0) continue; // todavía no está listo
+    const nave = naveDeUbic(l.ubicacion_actual);
+    const mesada = mesadaCorta(l.ubicacion_actual) || '(sin mesada)';
+    const key = `${nave}|${mesada}|${de}|${a}`;
+    if (!grupos.has(key)) grupos.set(key, { nave, mesada, de, a, items: [] });
+    grupos.get(key)!.items.push({ id: l.id_lote, dias: diasEnFase, est: estFase });
   }
-  return Object.entries(grupos).map(([a, g]) => {
-    const ids = g.lotes.sort((x, y) => x.faltan - y.faltan).map(x => x.id).join(', ');
-    return { icon: '🔄', color: '#7c3aed', txt: `Trasplantar de ${g.de} → ${a}: ${ids}` };
+  const arr = Array.from(grupos.values());
+  for (const g of arr) g.items.sort((x, y) => (y.dias - y.est) - (x.dias - x.est));
+  arr.sort((a, b) => {
+    const peorA = a.items[0] ? a.items[0].dias - a.items[0].est : 0;
+    const peorB = b.items[0] ? b.items[0].dias - b.items[0].est : 0;
+    if (peorA !== peorB) return peorB - peorA;
+    return a.nave - b.nave || a.mesada.localeCompare(b.mesada);
   });
+  return arr;
 }
 
 // ── Capacidad por nave desde Ubicaciones ──

@@ -1,8 +1,8 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import { parseReparto, REPARTO_DEFAULT, type Slot, type Tarea } from '@/lib/planificacion';
-import { calcularCapacidad, diasCicloDefault, trasplantesDelDia } from '@/lib/planificacionServer';
+import { parseReparto, REPARTO_DEFAULT, type Slot } from '@/lib/planificacion';
+import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, type TrasplanteGrupo } from '@/lib/planificacionServer';
 import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
 import PlanificacionManager from './PlanificacionManager';
@@ -30,8 +30,8 @@ export default async function PlanificacionPage() {
 
   const naves = calcularCapacidad(ubicaciones);
   const defaults = diasCicloDefault(lotes, movimientos);
-  let trasplantesHoy: Tarea[] = [];
-  try { trasplantesHoy = trasplantesDelDia(lotes, movimientos); } catch {}
+  let gruposTrasplante: TrasplanteGrupo[] = [];
+  try { gruposTrasplante = trasplantesAgrupados(lotes, movimientos); } catch {}
 
   return (
     <>
@@ -39,7 +39,7 @@ export default async function PlanificacionPage() {
       <div className="container">
         <h1 className="page-title">Planificación y Producción</h1>
         <p className="page-subtitle">Cuánto sembrar por semana según el ciclo, alimentado por la capacidad real de las naves y el último cultivo cosechado.</p>
-        <PlanificacionManager naves={naves} defaults={defaults} repartoInicial={reparto} trasplantesHoy={trasplantesHoy} />
+        <PlanificacionManager naves={naves} defaults={defaults} repartoInicial={reparto} gruposTrasplante={gruposTrasplante} />
       </div>
     </>
   );
