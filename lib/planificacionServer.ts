@@ -56,18 +56,28 @@ export function calcularCapacidad(ubicaciones: Ubicacion[]): NavesCap {
   return { 1: cap(1), 2: cap(2) };
 }
 
-// ── Días de ciclo default = promedio real de las cosechas ──
+function fmtFechaCorta(f: any): string {
+  const s = String(f || '').split(/[T ]/)[0];
+  const [y, m, d] = s.split('-');
+  return y && m && d ? `${d}/${m}/${y}` : s;
+}
+
+// ── Días de ciclo default = del ÚLTIMO lote cosechado de cada cultivo (no un promedio) ──
+// Así refleja el ciclo real más reciente. Sigue siendo editable en la UI para simular.
 export function diasCicloDefault(lotes: Lote[], movimientos: Movimiento[]): Dias {
-  const est = diasPromedioPorVariedad(lotes, movimientos, 120);
-  const avg = (arr: any[], key: string) => {
-    const vals = arr.map(d => Number(d[key])).filter(v => v && v > 0);
-    return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
-  };
-  const lechEst = est.filter(d => !esRuculaVar(d.variedad));
-  const rucEst = est.filter(d => esRuculaVar(d.variedad));
+  const cosechados = lotes
+    .filter(l => l.estado === 'cosechado' && l.fecha_cosecha)
+    .sort((a, b) => String(b.fecha_cosecha || '').localeCompare(String(a.fecha_cosecha || '')));
+  const ultimoRucula = cosechados.find(l => esRuculaVar(l.variedad));
+  const ultimoLechuga = cosechados.find(l => !esRuculaVar(l.variedad));
+  const dR = ultimoRucula ? calcularDiasPorFase(ultimoRucula, movimientos) : null;
+  const dL = ultimoLechuga ? calcularDiasPorFase(ultimoLechuga, movimientos) : null;
+
   return {
-    rucDias: avg(rucEst, 'fase_2') || avg(rucEst, 'total') || 32,
-    lecF2Dias: avg(lechEst, 'fase_2') || 35,
-    lecF1Dias: avg(lechEst, 'fase_1') || 25,
+    rucDias: (dR?.fase_2 || dR?.total) || 32,
+    lecF2Dias: dL?.fase_2 || 35,
+    lecF1Dias: dL?.fase_1 || 25,
+    rucFuente: ultimoRucula ? `último lote ${ultimoRucula.id_lote} · cosechado ${fmtFechaCorta(ultimoRucula.fecha_cosecha)}` : 'sin cosechas registradas, valor por defecto',
+    lecFuente: ultimoLechuga ? `último lote ${ultimoLechuga.id_lote} · cosechado ${fmtFechaCorta(ultimoLechuga.fecha_cosecha)}` : 'sin cosechas registradas, valor por defecto',
   };
 }

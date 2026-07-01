@@ -38,7 +38,7 @@ export default async function PlanificacionPage() {
       <Header user={user} current="planificacion" />
       <div className="container">
         <h1 className="page-title">Planificación y Producción</h1>
-        <p className="page-subtitle">Cuánto sembrar por semana según el ciclo, alimentado por la capacidad real de las naves y el promedio de cosechas.</p>
+        <p className="page-subtitle">Cuánto sembrar por semana según el ciclo, alimentado por la capacidad real de las naves y el último cultivo cosechado.</p>
         <PlanificacionManager naves={naves} defaults={defaults} repartoInicial={reparto} trasplantesHoy={trasplantesHoy} />
       </div>
     </>

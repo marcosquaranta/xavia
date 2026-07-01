@@ -20,9 +20,12 @@ export interface Cap {
   lecF1PerfTot: number; lecF1PosPerf: number;
 }
 export interface NavesCap { 1: Cap; 2: Cap }
-export interface Dias { rucDias: number; lecF2Dias: number; lecF1Dias: number }
+export interface Dias { rucDias: number; lecF2Dias: number; lecF1Dias: number; rucFuente?: string; lecFuente?: string }
 
 const fmt = (n: number) => Math.round(n).toLocaleString('es-AR');
+// Planchas = bandejas físicas de siembra: no existen fracciones, así que siempre se
+// redondea PARA ARRIBA (mejor sembrar de más que quedarse corto de plantines).
+export const planchas = (n: number) => Math.ceil(n);
 
 export interface PlanNave { rucPos: number; rucPaq: number; rucPl: number; lote: number; lecPl: number; f1PerfNec: number; f1OK: number; rucTrasp: number; f1Trasp: number; f2Trasp: number }
 export interface Plan {
@@ -82,7 +85,7 @@ export function tareasDelDia(plan: Plan, reparto: Slot[], jsDay: number, traspla
   if (h.pctDia('lechuga', dia) > 0) t.push({ icon: '🥬', color: '#4d7c0f', txt: `Cosechar ~${fmt(h.cosDia('lechuga', dia))} plantas de lechuga — N1 ${fmt(h.cosNaveDia('lechuga', 1, dia))} · N2 ${fmt(h.cosNaveDia('lechuga', 2, dia))}` });
   if (h.pctDia('rucula', dia) > 0) t.push({ icon: '🌿', color: '#ca8a04', txt: `Cosechar ~${fmt(h.cosDia('rucula', dia))} paquetes de rúcula — N1 ${fmt(h.cosNaveDia('rucula', 1, dia))} · N2 ${fmt(h.cosNaveDia('rucula', 2, dia))}` });
   for (const tr of trasplantes) t.push(tr);
-  if (dia === DIA_SIEMBRA) t.push({ icon: '🌱', color: '#0891b2', txt: `Sembrar según la planificación: ${h.siembraRucPl.toFixed(0)} planchas de rúcula + ${h.siembraLecPl.toFixed(1)} de lechuga` });
+  if (dia === DIA_SIEMBRA) t.push({ icon: '🌱', color: '#0891b2', txt: `Sembrar según la planificación: ${planchas(h.siembraRucPl)} planchas de rúcula + ${planchas(h.siembraLecPl)} de lechuga` });
   if (dia === 5 || dia === 6) t.push({ icon: '📦', color: '#2563eb', txt: 'Hacer control de stock de rúculas y lechugas' });
   return t;
 }

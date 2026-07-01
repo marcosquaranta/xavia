@@ -70,7 +70,12 @@ export default function TrasplanteForm({
   const descarteFinal = destinoRestante === 'descartar' ? descarte + restante : descarte;
   const hayRestante = restante > 0 && plantines > 0;
   const seDivide = plantasQueQuedan > 0 && plantines > 0;
-  const superaDisponibles = plantines > cantidadActual;
+  const superaDisponibles = plantines + descarte > cantidadActual;
+  const faltante = Math.max(0, plantines + descarte - cantidadActual);
+
+  // Cuánto SÍ alcanza a llenar con lo disponible, para sugerir una corrección
+  const maxPosiciones = orificios > 0 ? Math.floor(cantidadActual / factor) : 0;
+  const maxTubos = orificios > 0 ? Math.floor(maxPosiciones / orificios) : 0;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -184,7 +189,14 @@ export default function TrasplanteForm({
               </div>
               <div style={{ fontSize: '13px' }}>
                 {superaDisponibles ? (
-                  <span style={{ color: '#dc2626', fontWeight: 500 }}>⚠ Superás los {cantidadActual} disponibles</span>
+                  <div>
+                    <span style={{ color: '#dc2626', fontWeight: 500 }}>⚠ Superás los {cantidadActual} disponibles por {faltante}</span>
+                    {orificios > 0 && (
+                      <div style={{ fontSize: '11px', color: '#991b1b', marginTop: '2px' }}>
+                        Con {cantidadActual} plantines alcanzan ~{maxTubos} tubos ({maxPosiciones} posiciones)
+                      </div>
+                    )}
+                  </div>
                 ) : plantines > 0 ? (
                   <div>
                     <span style={{ color: '#059669', fontWeight: 500 }}>de {cantidadActual} disponibles</span>
@@ -230,9 +242,9 @@ export default function TrasplanteForm({
               <span>{descarte}</span>
             </div>
           )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, paddingTop: '6px', borderTop: '1px solid #e5e7eb', marginTop: '6px', color: restante > 0 ? '#d97706' : '#059669' }}>
-            <span>Restante en plantinera</span>
-            <span>{restante} plantines</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, paddingTop: '6px', borderTop: '1px solid #e5e7eb', marginTop: '6px', color: superaDisponibles ? '#dc2626' : restante > 0 ? '#d97706' : '#059669' }}>
+            <span>{superaDisponibles ? 'Faltan plantines' : 'Restante en plantinera'}</span>
+            <span>{superaDisponibles ? faltante : restante} plantines</span>
           </div>
         </div>
       )}
