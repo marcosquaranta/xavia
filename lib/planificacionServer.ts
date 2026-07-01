@@ -20,7 +20,7 @@ function estimadorPorVariedad(lotes: Lote[], movimientos: Movimiento[]) {
 }
 
 export interface ItemLote { id: string; dias: number; est: number }
-export interface GrupoLotes { nave: number; mesada: string; titulo: string; items: ItemLote[] }
+export interface GrupoLotes { nave: number; mesada: string; cultivo: 'rucula' | 'lechuga'; titulo: string; items: ItemLote[] }
 
 function ordenarGrupos(grupos: Map<string, GrupoLotes>): GrupoLotes[] {
   const arr = Array.from(grupos.values());
@@ -29,14 +29,17 @@ function ordenarGrupos(grupos: Map<string, GrupoLotes>): GrupoLotes[] {
     const peorA = a.items[0] ? a.items[0].dias - a.items[0].est : 0;
     const peorB = b.items[0] ? b.items[0].dias - b.items[0].est : 0;
     if (peorA !== peorB) return peorB - peorA;
-    return a.nave - b.nave || a.mesada.localeCompare(b.mesada);
+    return a.nave - b.nave || a.mesada.localeCompare(b.mesada) || a.cultivo.localeCompare(b.cultivo);
   });
   return arr;
 }
 
 // ── Trasplantes reales pendientes: lotes activos que ya cumplieron (o pasaron) su fase ──
-// Agrupados por nave + mesada + transición (plantinera→F1, F1→F2), con los días que
-// lleva cada lote en su fase actual para poder marcar los más atrasados.
+// Agrupados por nave + mesada + CULTIVO + transición (plantinera→F1, F1→F2), con los
+// días que lleva cada lote en su fase actual para poder marcar los más atrasados.
+// El cultivo es parte de la clave porque "Plantinera" es un mismo espacio físico
+// compartido por rúcula y lechuga (mismo nombre de mesada) — sin distinguir cultivo,
+// se mezclan lotes con umbrales de días muy distintos bajo un mismo grupo.
 export function trasplantesAgrupados(lotes: Lote[], movimientos: Movimiento[]): GrupoLotes[] {
   const estimador = estimadorPorVariedad(lotes, movimientos);
   const activos = lotes.filter(l => l.estado === 'activo');
@@ -44,12 +47,13 @@ export function trasplantesAgrupados(lotes: Lote[], movimientos: Movimiento[]): 
   for (const l of activos) {
     let dias: any;
     try { dias = calcularDiasPorFase(l, movimientos); } catch { continue; }
+    const esRucula = esRuculaVar(l.variedad);
     const est = estimador(l.variedad);
     let de = '', a = '', diasEnFase = 0, estFase = 0;
     if (l.fase_actual === 'plantin') {
       // Default cultivo-aware (rúcula suele estar menos días en plantinera que lechuga)
       // — evita falsos "listos" cuando no hay promedio real para esa variedad.
-      estFase = est?.plantinera || (esRuculaVar(l.variedad) ? 8 : 15);
+      estFase = est?.plantinera || (esRucula ? 8 : 15);
       diasEnFase = dias.plantinera; de = 'Plantinera'; a = 'Fase 1';
     } else if (l.fase_actual === 'fase_1') {
       estFase = est?.fase_1 || 22; diasEnFase = dias.fase_1 || 0; de = 'Fase 1'; a = 'Fase 2';
@@ -57,9 +61,10 @@ export function trasplantesAgrupados(lotes: Lote[], movimientos: Movimiento[]): 
     if (diasEnFase < estFase) continue; // todavía no llegó a la fecha estimada
     const nave = naveDeUbic(l.ubicacion_actual);
     const mesada = mesadaCorta(l.ubicacion_actual) || '(sin mesada)';
+    const cultivo: 'rucula' | 'lechuga' = esRucula ? 'rucula' : 'lechuga';
     const titulo = `${de} → ${a}`;
-    const key = `${nave}|${mesada}|${titulo}`;
-    if (!grupos.has(key)) grupos.set(key, { nave, mesada, titulo, items: [] });
+    const key = `${nave}|${mesada}|${cultivo}|${titulo}`;
+    if (!grupos.has(key)) grupos.set(key, { nave, mesada, cultivo, titulo, items: [] });
     grupos.get(key)!.items.push({ id: l.id_lote, dias: diasEnFase, est: estFase });
   }
   return ordenarGrupos(grupos);
@@ -91,14 +96,16 @@ export function cosechasAgrupadas(lotes: Lote[], movimientos: Movimiento[]): Gru
   for (const l of activos) {
     let dias: any;
     try { dias = calcularDiasPorFase(l, movimientos); } catch { continue; }
-    const refF2 = esRuculaVar(l.variedad) ? ref.rucula : ref.lechuga;
+    const esRucula = esRuculaVar(l.variedad);
+    const refF2 = esRucula ? ref.rucula : ref.lechuga;
     if (refF2 === null) continue; // sin referencia real para este cultivo
     const diasF2 = dias.fase_2 || 0;
     if (diasF2 < refF2) continue; // todavía no llegó a los días de F2 del último cosechado
     const nave = naveDeUbic(l.ubicacion_actual);
     const mesada = mesadaCorta(l.ubicacion_actual) || '(sin mesada)';
-    const key = `${nave}|${mesada}`;
-    if (!grupos.has(key)) grupos.set(key, { nave, mesada, titulo: 'Lista para cosechar', items: [] });
+    const cultivo: 'rucula' | 'lechuga' = esRucula ? 'rucula' : 'lechuga';
+    const key = `${nave}|${mesada}|${cultivo}`;
+    if (!grupos.has(key)) grupos.set(key, { nave, mesada, cultivo, titulo: 'Lista para cosechar', items: [] });
     grupos.get(key)!.items.push({ id: l.id_lote, dias: diasF2, est: refF2 });
   }
   return ordenarGrupos(grupos);

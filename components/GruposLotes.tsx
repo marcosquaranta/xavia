@@ -20,6 +20,15 @@ function estiloTitulo(titulo: string) {
   return TITULO_STYLE[titulo] || { color: '#166534', bg: '#dcfce7', icon: '🌾' };
 }
 
+// Mismos colores que en Planificación (rúcula/lechuga), para que el cultivo se
+// distinga siempre — muchas mesadas (ej. "Plantinera") comparten nombre entre
+// cultivos, así que no alcanza con el nombre de mesada para diferenciarlos.
+function estiloCultivo(cultivo: 'rucula' | 'lechuga') {
+  return cultivo === 'rucula'
+    ? { color: '#92400e', bg: '#fef3c7', label: 'Rúcula' }
+    : { color: '#166534', bg: '#dcfce7', label: 'Lechuga' };
+}
+
 export default function GruposLotes({ grupos, icono, etiqueta }: { grupos: GrupoLotes[]; icono: string; etiqueta: string }) {
   if (!grupos.length) return null;
 
@@ -49,10 +58,13 @@ export default function GruposLotes({ grupos, icono, etiqueta }: { grupos: Grupo
                 {st.icon} {titulo}
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingLeft: '2px' }}>
-                {gs.map((g, i) => (
+                {gs.map((g, i) => {
+                  const c = estiloCultivo(g.cultivo);
+                  return (
                   <div key={i}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', fontSize: '12.5px' }}>
                       <span style={{ background: g.nave === 1 ? '#881337' : '#7c3aed', color: 'white', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 700 }}>N{g.nave}</span>
+                      <span style={{ background: c.bg, color: c.color, padding: '1px 7px', borderRadius: '3px', fontSize: '10px', fontWeight: 700 }}>{c.label}</span>
                       <strong style={{ color: '#374151' }}>{g.mesada}</strong>
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', paddingLeft: '4px' }}>
@@ -68,7 +80,8 @@ export default function GruposLotes({ grupos, icono, etiqueta }: { grupos: Grupo
                       ))}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           );
