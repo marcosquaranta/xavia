@@ -6,6 +6,18 @@ import type { Cap, NavesCap, Dias } from './planificacion';
 const esRuculaVar = (v: string) => { const x = String(v).toLowerCase(); return x.includes('rucula') || x.includes('rúcula'); };
 const mesadaCorta = (s: string) => String(s || '').replace(/^Nave\s*\d+\s*-\s*/i, '').trim();
 const naveDeUbic = (u: string) => /nave\s*2/i.test(String(u)) ? 2 : 1;
+const normVar = (v: any) => String(v || '').trim().toLowerCase();
+
+// Promedio real por variedad: prioriza los últimos 120 días (más representativo del
+// ritmo actual); si esa variedad no se cosechó en ese lapso, busca en TODO el
+// historial disponible antes de recurrir a un default genérico por cultivo. El
+// matching se normaliza (trim + minúsculas) para no perder datos por espacios o
+// mayúsculas distintas entre el catálogo de variedades y los lotes.
+function estimadorPorVariedad(lotes: Lote[], movimientos: Movimiento[]) {
+  const reciente = new Map(diasPromedioPorVariedad(lotes, movimientos, 120).map(d => [normVar(d.variedad), d]));
+  const historico = new Map(diasPromedioPorVariedad(lotes, movimientos, 3650).map(d => [normVar(d.variedad), d]));
+  return (variedad: string) => reciente.get(normVar(variedad)) || historico.get(normVar(variedad)) || null;
+}
 
 export interface ItemLote { id: string; dias: number; est: number }
 export interface GrupoLotes { nave: number; mesada: string; titulo: string; items: ItemLote[] }
@@ -26,13 +38,13 @@ function ordenarGrupos(grupos: Map<string, GrupoLotes>): GrupoLotes[] {
 // Agrupados por nave + mesada + transición (plantinera→F1, F1→F2), con los días que
 // lleva cada lote en su fase actual para poder marcar los más atrasados.
 export function trasplantesAgrupados(lotes: Lote[], movimientos: Movimiento[]): GrupoLotes[] {
-  const estMap = new Map(diasPromedioPorVariedad(lotes, movimientos, 120).map(d => [d.variedad, d]));
+  const estimador = estimadorPorVariedad(lotes, movimientos);
   const activos = lotes.filter(l => l.estado === 'activo');
   const grupos = new Map<string, GrupoLotes>();
   for (const l of activos) {
     let dias: any;
     try { dias = calcularDiasPorFase(l, movimientos); } catch { continue; }
-    const est = estMap.get(l.variedad);
+    const est = estimador(l.variedad);
     let de = '', a = '', diasEnFase = 0, estFase = 0;
     if (l.fase_actual === 'plantin') {
       // Default cultivo-aware (rúcula suele estar menos días en plantinera que lechuga)
@@ -56,15 +68,15 @@ export function trasplantesAgrupados(lotes: Lote[], movimientos: Movimiento[]): 
 // ── Cosechas reales pendientes: lotes en Fase 2 que YA llegaron a su punto estimado de
 // cosecha (no antes), agrupados por nave + mesada, con los días del ciclo total ──
 export function cosechasAgrupadas(lotes: Lote[], movimientos: Movimiento[], variedades: Variedad[]): GrupoLotes[] {
-  const estMap = new Map(diasPromedioPorVariedad(lotes, movimientos, 120).map(d => [d.variedad, d]));
-  const variedadMap = new Map(variedades.map(v => [v.variedad, v]));
+  const estimador = estimadorPorVariedad(lotes, movimientos);
+  const variedadMap = new Map(variedades.map(v => [normVar(v.variedad), v]));
   const activos = lotes.filter(l => l.estado === 'activo' && l.fase_actual === 'fase_2');
   const grupos = new Map<string, GrupoLotes>();
   for (const l of activos) {
     let dias: any;
     try { dias = calcularDiasPorFase(l, movimientos); } catch { continue; }
-    const est = estMap.get(l.variedad);
-    const v = variedadMap.get(l.variedad);
+    const est = estimador(l.variedad);
+    const v = variedadMap.get(normVar(l.variedad));
     const estTotal = Number(v?.dias_estimados_cosecha) || est?.total || 40;
     if (dias.total < estTotal) continue; // todavía no llegó a la fecha estimada de cosecha
     const nave = naveDeUbic(l.ubicacion_actual);
