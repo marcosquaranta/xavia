@@ -32,7 +32,9 @@ export async function enviarResumenPendientes(): Promise<{ ok: boolean; facturas
   const porControl = new Map<string, VentaDia[]>();
   for (const v of pendientes) { const a = porControl.get(v.id_control) || []; a.push(v); porControl.set(v.id_control, a); }
 
-  const filas: { cliente: string; letra: string; unidades: number; total: number }[] = [];
+  const fmtFecha = (s: string) => { const [y, m, d] = String(s || '').split(/[T ]/)[0].split('-'); return d && m ? `${d}/${m}` : String(s || ''); };
+
+  const filas: { cliente: string; letra: string; unidades: number; total: number; fechas: string }[] = [];
   for (const [idControl, lineasV] of porControl) {
     const cliente = clientes.find(c => c.id_control === idControl);
     let total = 0, unidades = 0;
@@ -45,7 +47,8 @@ export async function enviarResumenPendientes(): Promise<{ ok: boolean; facturas
       }
     }
     if (unidades <= 0) continue;
-    filas.push({ cliente: cliente?.nombre_display || cliente?.nombre_xubio || idControl, letra: cliente?.tipo_factura || '?', unidades, total });
+    const fechas = Array.from(new Set(lineasV.map(l => String(l.fecha || '').split(/[T ]/)[0]).filter(Boolean))).sort().map(fmtFecha).join(', ');
+    filas.push({ cliente: cliente?.nombre_display || cliente?.nombre_xubio || idControl, letra: cliente?.tipo_factura || '?', unidades, total, fechas });
   }
   if (!filas.length) return { ok: true, facturas: 0, msg: 'Sin unidades' };
   filas.sort((a, b) => b.total - a.total);
@@ -61,6 +64,7 @@ export async function enviarResumenPendientes(): Promise<{ ok: boolean; facturas
   const rows = filas.map(f => `
     <tr>
       <td style="padding:6px 10px;border-bottom:1px solid #eee">${f.cliente}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;color:#555">${f.fechas}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:center">${f.letra}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${f.unidades.toLocaleString('es-AR')} u</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${fmt(f.total)}</td>
@@ -73,13 +77,14 @@ export async function enviarResumenPendientes(): Promise<{ ok: boolean; facturas
       <table style="border-collapse:collapse;width:100%;font-size:14px">
         <thead><tr style="background:#f5f5f5">
           <th style="padding:6px 10px;text-align:left">Cliente</th>
+          <th style="padding:6px 10px;text-align:left">Fecha</th>
           <th style="padding:6px 10px;text-align:center">Tipo</th>
           <th style="padding:6px 10px;text-align:right">Unidades</th>
           <th style="padding:6px 10px;text-align:right">Total</th>
         </tr></thead>
         <tbody>${rows}</tbody>
         <tfoot><tr>
-          <td colspan="2" style="padding:8px 10px;font-weight:700;border-top:2px solid #ddd">Total</td>
+          <td colspan="3" style="padding:8px 10px;font-weight:700;border-top:2px solid #ddd">Total</td>
           <td style="padding:8px 10px;text-align:right;font-weight:700;border-top:2px solid #ddd">${totalU.toLocaleString('es-AR')} u</td>
           <td style="padding:8px 10px;text-align:right;font-weight:800;border-top:2px solid #ddd">${fmt(grandTotal)}</td>
         </tr></tfoot>
