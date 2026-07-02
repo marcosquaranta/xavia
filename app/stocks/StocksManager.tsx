@@ -10,6 +10,45 @@ interface Props { articulos: Articulo[]; stocks: StockMes[]; lotes: Lote[]; usua
 
 function num(v: any) { const n = Number(v); return isNaN(n) ? 0 : n; }
 
+// ══ Carga masiva de compras: pegar filas "Artículo <tab/coma/espacios> Cantidad" ══
+function normalizar(s: string) {
+  return String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+function parseNumero(s: string): number {
+  let t = String(s || '').trim().replace(/[^\d.,-]/g, '');
+  if (t.includes(',') && t.includes('.')) t = t.replace(/\./g, '').replace(',', '.');
+  else if (t.includes(',')) t = t.replace(',', '.');
+  const n = parseFloat(t);
+  return isNaN(n) ? NaN : n;
+}
+function matchArticulo(nombre: string, articulos: Articulo[]): Articulo | null {
+  const n = normalizar(nombre);
+  if (!n) return null;
+  return articulos.find((a) => normalizar(a.articulo) === n)
+    || articulos.find((a) => normalizar(a.articulo).includes(n) || n.includes(normalizar(a.articulo)))
+    || null;
+}
+interface FilaPreview { linea: string; nombreDetectado: string; cantidad: number; id_articulo: string }
+function parsearPegado(texto: string, articulos: Articulo[]): FilaPreview[] {
+  const lineas = texto.split('\n').map((l) => l.trim()).filter(Boolean);
+  return lineas.map((linea) => {
+    let partes = linea.split('\t').map((s) => s.trim()).filter(Boolean);
+    if (partes.length < 2) partes = linea.split(',').map((s) => s.trim()).filter(Boolean);
+    if (partes.length < 2) partes = linea.split(/\s{2,}/).map((s) => s.trim()).filter(Boolean);
+    let nombreRaw = '', cantidadRaw = '';
+    if (partes.length >= 2) {
+      cantidadRaw = partes[partes.length - 1];
+      nombreRaw = partes.slice(0, -1).join(' ');
+    } else {
+      const m = /^(.*?)[\s:–-]+([\d.,]+)\s*$/.exec(linea);
+      if (m) { nombreRaw = m[1]; cantidadRaw = m[2]; } else { nombreRaw = linea; }
+    }
+    const cantidad = parseNumero(cantidadRaw);
+    const art = matchArticulo(nombreRaw, articulos);
+    return { linea, nombreDetectado: nombreRaw, cantidad: isNaN(cantidad) ? 0 : cantidad, id_articulo: art?.id_articulo || '' };
+  });
+}
+
 export default function StocksManager({ articulos, stocks, lotes, usuario }: Props) {
   const router = useRouter();
   const [anio, setAnio] = useState(HOY.getFullYear());
@@ -17,6 +56,45 @@ export default function StocksManager({ articulos, stocks, lotes, usuario }: Pro
   const [vista, setVista] = useState<'carga' | 'informe'>('carga');
   const [saving, setSaving] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, { ini: string; comp: string; fin: string; notas: string }>>({});
+
+  // Carga masiva de compras
+  const [mostrarCarga, setMostrarCarga] = useState(false);
+  const [pegado, setPegado] = useState('');
+  const [filasCarga, setFilasCarga] = useState<FilaPreview[] | null>(null);
+  const [guardandoMasivo, setGuardandoMasivo] = useState(false);
+  const [resultadoMasivo, setResultadoMasivo] = useState<string | null>(null);
+
+  function analizarPegado() {
+    setFilasCarga(parsearPegado(pegado, artActivos));
+    setResultadoMasivo(null);
+  }
+  function actualizarFilaCarga(i: number, patch: Partial<FilaPreview>) {
+    setFilasCarga((prev) => prev ? prev.map((f, j) => j === i ? { ...f, ...patch } : f) : prev);
+  }
+  function quitarFilaCarga(i: number) {
+    setFilasCarga((prev) => prev ? prev.filter((_, j) => j !== i) : prev);
+  }
+  async function confirmarCargaMasiva() {
+    if (!filasCarga) return;
+    const items = filasCarga.filter((f) => f.id_articulo && f.cantidad >= 0).map((f) => ({ id_articulo: f.id_articulo, compras: f.cantidad }));
+    if (!items.length) return;
+    setGuardandoMasivo(true);
+    try {
+      const res = await fetch('/api/stocks/compras-masivas', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ anio, mes, items }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || 'Error');
+      setResultadoMasivo(`✓ ${j.actualizados} actualizados, ${j.creados} nuevos.`);
+      setFilasCarga(null); setPegado('');
+      router.refresh();
+    } catch (err: any) {
+      setResultadoMasivo('Error: ' + (err.message || 'no se pudo guardar'));
+    } finally {
+      setGuardandoMasivo(false);
+    }
+  }
 
   const categorias = useMemo(() => Array.from(new Set(articulos.map((a) => a.categoria))).sort(), [articulos]);
 
@@ -127,11 +205,84 @@ export default function StocksManager({ articulos, stocks, lotes, usuario }: Pro
             Informe comparativo
           </button>
         </div>
+        {vista === 'carga' && (
+          <button onClick={() => { setMostrarCarga((v) => !v); setResultadoMasivo(null); }} className="btn secondary" style={{ fontSize: '12px' }}>
+            📋 Carga masiva de compras
+          </button>
+        )}
       </div>
 
       {/* ===== VISTA: CARGA MENSUAL ===== */}
       {vista === 'carga' && (
         <div>
+          {/* Panel de carga masiva de compras */}
+          {mostrarCarga && (
+            <div className="card" style={{ marginBottom: '12px', border: '1px solid #93c5fd', background: '#eff6ff' }}>
+              <p style={{ margin: '0 0 4px', fontSize: '13px', fontWeight: 700 }}>Carga masiva de compras — {MESES[mes - 1]} {anio}</p>
+              <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#6b7280' }}>
+                Pegá filas de tu remito o planilla, una por artículo: <code>Nombre del artículo · Cantidad</code> (funciona con tabulaciones, comas o espacios, tal cual se copia de Excel/Sheets). Esto <strong>reemplaza</strong> el valor de Compras de ese mes para cada artículo, no lo suma.
+              </p>
+              {!filasCarga ? (
+                <>
+                  <textarea rows={6} value={pegado} onChange={(e) => setPegado(e.target.value)}
+                    placeholder={'Cubos Oasis\t50\nGreen Up\t20\nBandejas rúcula\t300'}
+                    style={{ width: '100%', fontFamily: 'monospace', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '8px', resize: 'vertical' }} />
+                  <div style={{ marginTop: '8px' }}>
+                    <button onClick={analizarPegado} className="btn" style={{ fontSize: '12px' }} disabled={!pegado.trim()}>Analizar</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <table style={{ fontSize: '12px', width: '100%' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'left' }}>Línea pegada</th>
+                        <th style={{ textAlign: 'left', width: '220px' }}>Artículo</th>
+                        <th style={{ textAlign: 'right', width: '100px' }}>Compras</th>
+                        <th style={{ width: '30px' }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filasCarga.map((f, i) => (
+                        <tr key={i} style={{ background: f.id_articulo ? 'transparent' : '#fef2f2' }}>
+                          <td style={{ color: '#9ca3af', fontFamily: 'monospace', fontSize: '11px' }}>{f.linea}</td>
+                          <td style={{ padding: '2px 4px' }}>
+                            <select value={f.id_articulo} onChange={(e) => actualizarFilaCarga(i, { id_articulo: e.target.value })}
+                              style={{ width: '100%', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '3px 4px', color: f.id_articulo ? '#111827' : '#dc2626' }}>
+                              <option value="">— sin coincidencia —</option>
+                              {artActivos.map((a) => <option key={a.id_articulo} value={a.id_articulo}>{a.articulo}</option>)}
+                            </select>
+                          </td>
+                          <td style={{ padding: '2px 4px' }}>
+                            <input type="number" value={f.cantidad} onChange={(e) => actualizarFilaCarga(i, { cantidad: Number(e.target.value) || 0 })}
+                              style={{ width: '100%', textAlign: 'right', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '3px 6px' }}
+                              min={0} step={0.001} />
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button onClick={() => quitarFilaCarga(i)} title="Quitar" style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '14px' }}>×</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {filasCarga.some((f) => !f.id_articulo) && (
+                    <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#dc2626' }}>⚠ Las filas en rojo no encontraron artículo — elegilo del desplegable o quitá la fila.</p>
+                  )}
+                  <div style={{ marginTop: '10px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <button onClick={confirmarCargaMasiva} className="btn" style={{ fontSize: '12px' }}
+                      disabled={guardandoMasivo || !filasCarga.some((f) => f.id_articulo)}>
+                      {guardandoMasivo ? 'Guardando…' : `Confirmar carga (${filasCarga.filter((f) => f.id_articulo).length})`}
+                    </button>
+                    <button onClick={() => { setFilasCarga(null); }} className="btn secondary" style={{ fontSize: '12px' }} disabled={guardandoMasivo}>
+                      ← Volver a pegar
+                    </button>
+                  </div>
+                </>
+              )}
+              {resultadoMasivo && <p style={{ margin: '10px 0 0', fontSize: '12px', fontWeight: 600, color: resultadoMasivo.startsWith('Error') ? '#dc2626' : '#059669' }}>{resultadoMasivo}</p>}
+            </div>
+          )}
+
           {/* Usos del sistema para el mes seleccionado */}
           <div className="card" style={{ marginBottom: '12px' }}>
             <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
