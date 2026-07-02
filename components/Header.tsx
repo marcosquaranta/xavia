@@ -13,7 +13,11 @@ export default function Header({ user, current }: { user: UsuarioPublico; curren
   items.push({ href: '/movimientos', label: 'Actividad', key: 'movimientos' });
   items.push({ href: '/stocks', label: 'Stocks', key: 'stocks' });
   items.push({ href: '/planificacion', label: 'Planificación', key: 'planificacion' });
-  if (isAdmin) { items.push({ href: '/alertas', label: 'Alertas', key: 'alertas' }); items.push({ href: '/admin', label: 'Admin', key: 'admin' }); }
+  if (isAdmin) {
+    items.push({ href: '/alertas', label: 'Alertas', key: 'alertas' });
+    items.push({ href: '/gastos', label: 'Gastos', key: 'gastos' });
+    items.push({ href: '/admin', label: 'Admin', key: 'admin' });
+  }
   return (
     <div className="topbar">
       <Link href="/panel" className="logo" style={{ textDecoration: 'none', color: '#111827' }}>

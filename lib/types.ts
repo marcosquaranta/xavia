@@ -92,6 +92,19 @@ export interface StockMes {
   fecha_carga: string;
 }
 
+export type CategoriaGasto = 'insumos' | 'gastos_generales';
+export type MedioPagoGasto = 'Brubank' | 'Macro' | 'Caja MQ';
+export interface Gasto {
+  id_gasto: string;
+  fecha: string;
+  descripcion: string;
+  categoria: CategoriaGasto;
+  monto: number | string;
+  medio_pago: MedioPagoGasto | string;
+  usuario: string;
+  fecha_carga: string;
+}
+
 export interface ClienteVenta {
   id_control: string;
   nombre_xubio: string;
