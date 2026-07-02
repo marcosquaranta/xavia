@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, isAdmin } from '@/lib/auth';
 import { readSheet, appendRowObj } from '@/lib/sheets';
-import type { Gasto } from '@/lib/types';
+import { CATEGORIAS_GASTO, type Gasto } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     await appendRowObj('Gastos', {
       id_gasto, fecha,
       descripcion: String(descripcion).trim(),
-      categoria: categoria === 'insumos' ? 'insumos' : 'gastos_generales',
+      categoria: CATEGORIAS_GASTO.some((c) => c.value === categoria) ? categoria : 'gastos_generales',
       monto: montoNum,
       medio_pago,
       usuario: user.email,

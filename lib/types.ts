@@ -92,7 +92,15 @@ export interface StockMes {
   fecha_carga: string;
 }
 
-export type CategoriaGasto = 'insumos' | 'gastos_generales';
+export type CategoriaGasto = 'insumos' | 'gastos_generales' | 'mantenimiento' | 'inversion_equipamiento' | 'inversion_nave3' | 'abonos';
+export const CATEGORIAS_GASTO: { value: CategoriaGasto; label: string }[] = [
+  { value: 'gastos_generales', label: 'Gastos generales' },
+  { value: 'insumos', label: 'Insumos' },
+  { value: 'mantenimiento', label: 'Mantenimiento' },
+  { value: 'inversion_equipamiento', label: 'Inversión en equipamiento' },
+  { value: 'inversion_nave3', label: 'Inversión 3ra Nave' },
+  { value: 'abonos', label: 'Abonos' },
+];
 export type MedioPagoGasto = 'Brubank' | 'Macro' | 'Caja MQ';
 export interface Gasto {
   id_gasto: string;

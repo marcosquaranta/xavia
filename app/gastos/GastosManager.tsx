@@ -1,13 +1,13 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Gasto, CategoriaGasto } from '@/lib/types';
+import { CATEGORIAS_GASTO, type Gasto, type CategoriaGasto } from '@/lib/types';
 import NumberInput from '@/components/NumberInput';
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const MEDIOS = ['Brubank', 'Macro', 'Caja MQ'] as const;
-const LABEL_CAT: Record<string, string> = { insumos: 'Insumos', gastos_generales: 'Gastos generales' };
-const ORDEN_CAT: CategoriaGasto[] = ['insumos', 'gastos_generales'];
+const LABEL_CAT: Record<string, string> = Object.fromEntries(CATEGORIAS_GASTO.map((c) => [c.value, c.label]));
+const ORDEN_CAT: CategoriaGasto[] = CATEGORIAS_GASTO.map((c) => c.value);
 const HOY = new Date();
 const hoyISO = () => HOY.toISOString().split('T')[0];
 const fmtMoneda = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
@@ -145,8 +145,7 @@ export default function GastosManager({ gastos, usuario }: Props) {
           <div>
             <label>Categoría</label>
             <select value={categoria} onChange={(e) => setCategoria(e.target.value as CategoriaGasto)} disabled={guardando}>
-              <option value="gastos_generales">Gastos generales</option>
-              <option value="insumos">Insumos</option>
+              {CATEGORIAS_GASTO.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
             </select>
           </div>
           <div>

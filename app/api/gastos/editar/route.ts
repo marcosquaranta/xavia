@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, isAdmin } from '@/lib/auth';
 import { updateRow } from '@/lib/sheets';
+import { CATEGORIAS_GASTO } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest) {
 
     const ok = await updateRow('Gastos', 'id_gasto', id_gasto, {
       fecha, descripcion: String(descripcion || '').trim(),
-      categoria: categoria === 'insumos' ? 'insumos' : 'gastos_generales',
+      categoria: CATEGORIAS_GASTO.some((c) => c.value === categoria) ? categoria : 'gastos_generales',
       monto: montoNum, medio_pago,
     });
     if (!ok) return NextResponse.json({ error: 'gasto_no_encontrado' }, { status: 404 });

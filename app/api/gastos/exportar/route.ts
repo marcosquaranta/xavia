@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, isAdmin } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import type { Gasto } from '@/lib/types';
+import { CATEGORIAS_GASTO, type Gasto } from '@/lib/types';
 import * as XLSX from 'xlsx';
 
-const LABEL_CAT: Record<string, string> = { insumos: 'Insumos', gastos_generales: 'Gastos generales' };
-const ORDEN_CAT = ['insumos', 'gastos_generales'];
+const LABEL_CAT: Record<string, string> = Object.fromEntries(CATEGORIAS_GASTO.map((c) => [c.value, c.label]));
+const ORDEN_CAT = CATEGORIAS_GASTO.map((c) => c.value);
 const fmtFecha = (s: string) => { const [y, m, d] = String(s || '').split(/[T ]/)[0].split('-'); return d && m && y ? `${d}/${m}/${y}` : s; };
 
 export async function POST(req: NextRequest) {
