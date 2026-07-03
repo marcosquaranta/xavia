@@ -35,6 +35,7 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
     if (!esPorPaquete && plantas <= 0) { setError('Ingresá la cantidad de plantas cosechadas'); setLoading(false); return; }
     if (!esPorPaquete && pesoGr <= 0) { setError('Ingresá el pesaje testigo (peso del paquete en gramos)'); setLoading(false); return; }
     if (esPorPaquete && paquetes <= 0) { setError('Ingresá la cantidad de paquetes armados'); setLoading(false); return; }
+    if (esPorPaquete && pesoPaqGr <= 0) { setError('Ingresá el pesaje testigo (peso del paquete en gramos)'); setLoading(false); return; }
     if (parcial && (plantasQuedan <= 0 || plantasQuedan >= plantasEst)) { setError(`En cosecha parcial, las plantas que quedan deben ser entre 1 y ${plantasEst - 1}`); setLoading(false); return; }
     try {
       const res = await fetch('/api/lotes/cosecha', {
@@ -126,8 +127,8 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
             <div><label>Paquetes armados (real) *</label><NumberInput value={paquetes} onChange={setPaquetes} min={0} required disabled={loading} /></div>
             <div>
-              <label>Pesaje testigo — peso del paquete en gramos — opcional</label>
-              <NumberInput value={pesoPaqGr} onChange={setPesoPaqGr} min={0} disabled={loading} placeholder="Ej: 210" />
+              <label style={{ color: '#dc2626' }}>Pesaje testigo — peso del paquete en gramos *</label>
+              <NumberInput value={pesoPaqGr} onChange={setPesoPaqGr} min={0} required disabled={loading} placeholder="Ej: 210" />
             </div>
           </div>
           <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#6b7280' }}>Pesá el paquete armado directamente en la balanza — es el peso final, no se multiplica por la cantidad de plantas por paquete.</p>
