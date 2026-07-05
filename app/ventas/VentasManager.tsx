@@ -215,7 +215,11 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
       if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar ventas');}
       const r=await fetch('/api/ventas/cargar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha})});
       const j=await r.json();if(!r.ok)throw new Error(j.error);
-      setMsg({t:'ok',s:`${j.clientes} cliente(s) cargados a Facturación. Revisalos y emitilos desde la sección Facturación.`});
+      const nEmit=(j.emitidas||[]).length, nErr=(j.errores||[]).length;
+      const txt = nEmit>0
+        ? `${nEmit} factura(s) emitida(s) directo a Xubio.${nErr>0?` ${nErr} con error — revisalas en Facturación.`:''}`
+        : nErr>0 ? `No se pudo emitir ninguna (${nErr} con error) — revisá en Facturación.` : `${j.clientes} cliente(s) cargados.`;
+      setMsg({t: nErr>0 && nEmit===0 ? 'err' : 'ok', s: txt});
       setCtds({});setEsts({});setCtdsKg({});ctdsKgLive.current={};setFc({});
     }catch(err:any){setMsg({t:'err',s:err.message});}
     setExp(false);
