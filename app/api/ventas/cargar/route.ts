@@ -37,7 +37,9 @@ export async function POST(req: NextRequest) {
     try {
       const r = await emitirPendientes(idControls);
       emitidas = r.emitidas; errores = r.errores;
+      if (errores.length) console.error('[ventas/cargar] errores al emitir a Xubio:', JSON.stringify(errores));
     } catch (e: any) {
+      console.error('[ventas/cargar] excepción al emitir a Xubio:', e);
       errores = [{ cliente: 'Xubio', error: e?.message || 'Error al emitir' }];
     }
 

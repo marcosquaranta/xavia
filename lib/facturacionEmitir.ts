@@ -64,10 +64,23 @@ export async function emitirPendientes(idControls?: string[] | null): Promise<Re
         items.push({ codigo: PRODUCTO_CODIGO[key], cantidad: qty, precio, descripcion: l.sucursal || cliente.nombre_xubio });
       }
     }
-    if (!items.length) continue;
+    if (!items.length) {
+      // No debería pasar (ya se filtró por cantidad>0 antes de marcar PENDIENTE), pero
+      // si pasa no lo dejamos en silencio: sin esto, el cliente quedaba PENDIENTE para
+      // siempre sin ningún rastro de error ni de éxito.
+      errores.push({ cliente: nombre, error: 'sin productos con cantidad > 0 (revisar la carga de esta venta)' });
+      continue;
+    }
 
     const esA = cliente.tipo_factura === 'A';
-    const res = await emitirFactura({ clienteId, esA, fecha: lineas[0].fecha, items });
+    let res;
+    try {
+      res = await emitirFactura({ clienteId, esA, fecha: lineas[0].fecha, items });
+    } catch (e: any) {
+      console.error(`[facturacionEmitir] excepción emitiendo factura para ${nombre}:`, e);
+      errores.push({ cliente: nombre, error: e?.message || 'excepción al emitir' });
+      continue;
+    }
 
     if (res.ok) {
       emitidas.push({ cliente: nombre, numero: res.numeroDocumento, cae: res.cae });
@@ -76,6 +89,7 @@ export async function emitirPendientes(idControls?: string[] | null): Promise<Re
         updates: { exportado: res.numeroDocumento || 'FACTURADO' },
       })));
     } else {
+      console.error(`[facturacionEmitir] Xubio rechazó la factura de ${nombre}:`, res.error);
       errores.push({ cliente: nombre, error: res.error || 'Error desconocido' });
     }
   }
