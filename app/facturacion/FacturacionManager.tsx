@@ -71,7 +71,12 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
             {result.emitidas.map((e, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', padding: '5px 10px', background: '#f0fdf4', borderRadius: '6px', marginBottom: '4px' }}>
                 <span>{e.cliente}</span>
-                <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{e.numero}{e.cae ? ` · CAE ${e.cae}` : ''}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {e.emailCliente === 'enviado' && <span style={{ fontSize: '11px', color: '#059669' }} title="Detalle enviado al cliente por mail">📧 enviado</span>}
+                  {e.emailCliente === 'sin_email' && <span style={{ fontSize: '11px', color: '#d97706' }} title="Este cliente no tiene email cargado">📧 sin email</span>}
+                  {e.emailCliente === 'error' && <span style={{ fontSize: '11px', color: '#dc2626' }} title="Falló el envío del mail al cliente">📧 error al enviar</span>}
+                  <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{e.numero}{e.cae ? ` · CAE ${e.cae}` : ''}</span>
+                </span>
               </div>
             ))}
           </div>

@@ -123,6 +123,7 @@ export interface ClienteVenta {
   sucursales: string;  // separadas por |
   activo: string;
   unidad: 'paq' | 'kg' | '';  // 'kg' para clientes que compran por KG (cajón)
+  email: string;  // para enviarle el detalle de venta cuando es Factura B
 }
 
 export interface PrecioVenta {
