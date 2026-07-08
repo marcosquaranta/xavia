@@ -12,6 +12,28 @@ const PE = [
   { key:'albahaca',       xubio:'Albahaca Hidropónica',label:'Albahaca',color:'#047857' },
 ] as const;
 const ALL = [...PP,...PE];
+
+interface LineaCarga { id_control:string; nombre_cliente:string; rucula:number; lechuga_crespa:number; hoja_roble:number; bandeja_rucula:number; albahaca:number; rucula_kg:number; lechuga_kg:number }
+// Resumen de texto (cantidades por cliente y por producto) para el mensaje de "Cargar ventas".
+function resumenCarga(lineas: LineaCarga[]): string {
+  const claveProd = [...ALL.map(p=>({key:p.key as keyof LineaCarga & string, label:p.label, u:'u'})), {key:'rucula_kg' as const,label:'Rúcula',u:'kg'}, {key:'lechuga_kg' as const,label:'Lechuga',u:'kg'}];
+  const porCliente = new Map<string, number>();
+  const porProducto = new Map<string, number>();
+  for (const l of lineas) {
+    let totalLinea = 0;
+    for (const p of claveProd) {
+      const v = Number((l as any)[p.key]) || 0;
+      if (v <= 0) continue;
+      totalLinea += v;
+      porProducto.set(`${p.label} (${p.u})`, (porProducto.get(`${p.label} (${p.u})`) || 0) + v);
+    }
+    if (totalLinea > 0) porCliente.set(l.nombre_cliente, (porCliente.get(l.nombre_cliente) || 0) + totalLinea);
+  }
+  const fmt = (n:number) => n.toLocaleString('es-AR');
+  const lineasCliente = Array.from(porCliente.entries()).sort((a,b)=>b[1]-a[1]).map(([c,t])=>`· ${c}: ${fmt(t)} u`).join('\n');
+  const lineasProducto = Array.from(porProducto.entries()).sort((a,b)=>b[1]-a[1]).map(([p,t])=>`· ${p}: ${fmt(t)}`).join('\n');
+  return `\nPor cliente:\n${lineasCliente}\n\nPor producto:\n${lineasProducto}`;
+}
 type PK = 'rucula'|'lechuga_crespa'|'hoja_roble'|'bandeja_rucula'|'albahaca';
 type SV = { rucula:number; lechuga_crespa:number; hoja_roble:number };
 type SKG = { rucula_kg:number; lechuga_kg:number };
@@ -217,7 +239,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
       const j=await r.json();if(!r.ok)throw new Error(j.error);
       const nEmit=(j.emitidas||[]).length, nErr=(j.errores||[]).length;
       const txt = nEmit>0
-        ? `${nEmit} factura(s) emitida(s) directo a Xubio.${nErr>0?` ${nErr} con error — revisalas en Facturación.`:''}`
+        ? `✓ Facturas cargadas OK\n${resumenCarga(todasLineas)}${nErr>0?`\n\n⚠ ${nErr} con error — revisalas en Facturación.`:''}`
         : nErr>0 ? `No se pudo emitir ninguna (${nErr} con error) — revisá en Facturación.` : `${j.clientes} cliente(s) cargados.`;
       setMsg({t: nErr>0 && nEmit===0 ? 'err' : 'ok', s: txt});
       setCtds({});setEsts({});setCtdsKg({});ctdsKgLive.current={};setFc({});
@@ -545,7 +567,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
         </div>
       )}
 
-      {msg&&<div style={{padding:'9px 14px',borderRadius:'7px',marginBottom:'10px',fontSize:'12px',background:msg.t==='ok'?'#f0fdf4':'#fef2f2',border:`1px solid ${msg.t==='ok'?'#86efac':'#fca5a5'}`,color:msg.t==='ok'?'#166534':'#dc2626'}}>{msg.s}</div>}
+      {msg&&<div style={{padding:'9px 14px',borderRadius:'7px',marginBottom:'10px',fontSize:'12px',whiteSpace:'pre-line',background:msg.t==='ok'?'#f0fdf4':'#fef2f2',border:`1px solid ${msg.t==='ok'?'#86efac':'#fca5a5'}`,color:msg.t==='ok'?'#166534':'#dc2626'}}>{msg.s}</div>}
 
       {/* Tabla */}
       {loading?<div style={{textAlign:'center',padding:'24px',color:'#9ca3af'}}>Cargando…</div>:(
