@@ -2,9 +2,11 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import type { ClienteVenta, PrecioVenta, VentaDia } from '@/lib/types';
+import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionPrecioPromedio } from '@/lib/estadisticasVentas';
 import Header from '@/components/Header';
 import VentasManager from './VentasManager';
 import XubioResumen from './XubioResumen';
+import VentasEvolucionCharts from './VentasEvolucionCharts';
 export const dynamic = 'force-dynamic';
 
 function safeD(s: any): Date | null {
@@ -64,12 +66,17 @@ export default async function VentasPage() {
   const hoyStr2 = new Date().toISOString().split('T')[0];
   const hace7Str = (() => { const d = new Date(); d.setDate(d.getDate()-7); return d.toISOString().split('T')[0]; })();
   const ventas7 = ventas.filter(v => v.fecha === hace7Str);
+  const evolArticulo = evolucionVentaPorArticulo(ventas, 12);
+  const evolCliente = evolucionVentaPorCliente(ventas, clientes, 12, 6);
+  const evolPrecio = evolucionPrecioPromedio(ventas, precios, clientes, 12);
+
   return (
     <>
       <Header user={user} current="ventas" />
       <div className="container">
         <h1 className="page-title">Ventas</h1>
         <p className="page-subtitle">Carga diaria · Exportación Xubio</p>
+        <VentasEvolucionCharts articulo={evolArticulo} cliente={evolCliente} precio={evolPrecio} />
         <div className="card">
           <VentasManager clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} ventas7={ventas7} />
           <XubioResumen />
