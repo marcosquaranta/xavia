@@ -31,7 +31,11 @@ export async function POST(req: NextRequest) {
       updates: { exportado: 'PENDIENTE' },
     })));
 
-    const idControls = Array.from(new Set(aCargar.map(v => v.id_control)));
+    // readSheet convierte columnas "numéricas" (como id_control) de string a number
+    // automáticamente. emitirPendientes compara contra String(v.id_control), así que
+    // acá hay que forzar string también — si no, el Set nunca matchea y la emisión
+    // queda vacía en silencio (sin error, sin factura).
+    const idControls = Array.from(new Set(aCargar.map(v => String(v.id_control))));
     let emitidas: { cliente: string; numero?: string; cae?: string }[] = [];
     let errores: { cliente: string; error: string }[] = [];
     try {
