@@ -70,7 +70,7 @@ export default async function VentasPage() {
   const hace7Str = (() => { const d = new Date(); d.setDate(d.getDate()-7); return d.toISOString().split('T')[0]; })();
   const ventas7 = ventas.filter(v => v.fecha === hace7Str);
   const evolArticulo = evolucionVentaPorArticulo(ventas, 12);
-  const evolCliente = evolucionVentaPorClienteSemanal(ventas, clientes, 10, 6);
+  const evolCliente = evolucionVentaPorClienteSemanal(ventas, clientes, 5, 4);
   const evolPrecio = evolucionPrecioPromedio(ventas, precios, clientes, 12);
   const resumenMes = resumenMesActual(ventas, precios, clientes);
   const estimCosecha = estimacionCosechaHoyManana(lotes, movimientos);
