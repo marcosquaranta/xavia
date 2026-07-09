@@ -41,6 +41,36 @@ function ultimasNSemanas(ventas: VentaDia[], n: number): string[] {
   return claves.slice(-n);
 }
 
+// Lee un campo tolerando variantes de mayúsculas/acentos en el header de la planilla
+// (p. ej. "Rucula" o "Rúcula" en vez de "rucula").
+function campo(obj: Record<string, any>, ...nombres: string[]): any {
+  for (const n of nombres) if (obj[n] !== undefined && obj[n] !== '') return obj[n];
+  const keys = Object.keys(obj);
+  for (const n of nombres) {
+    const k = keys.find((kk) => kk.trim().toLowerCase() === n.toLowerCase());
+    if (k && obj[k] !== undefined && obj[k] !== '') return obj[k];
+  }
+  return undefined;
+}
+
+// Acepta "2026-06", "2026/6" o el mismo formato "jun-26" que se usa en las etiquetas
+// del gráfico (y que es lo más natural para tipear a mano en VentasHistoricas).
+function normalizarMesHistorico(raw: any): string | null {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (/^\d{4}-\d{2}$/.test(s)) return s;
+  const m1 = s.match(/^(\d{4})[-/](\d{1,2})$/);
+  if (m1) return `${m1[1]}-${m1[2].padStart(2, '0')}`;
+  const m2 = s.match(/^([a-záéíóúñ]+)[-/\s]+(\d{2,4})$/);
+  if (m2) {
+    const idx = MESES_CORTO.findIndex((mc) => mc.startsWith(m2[1]) || m2[1].startsWith(mc));
+    if (idx >= 0) {
+      const yy = m2[2].length === 4 ? m2[2].slice(2) : m2[2];
+      return `20${yy}-${String(idx + 1).padStart(2, '0')}`;
+    }
+  }
+  return null;
+}
+
 function getPrecio(precios: PrecioVenta[], id_control: string, sucursal: string, key: string, clienteSucursales?: string): number {
   let row = precios.find((p) => String(p.id_control) === String(id_control) && p.sucursal_obs === sucursal);
   if (!row && clienteSucursales) {
@@ -57,12 +87,20 @@ function getPrecio(precios: PrecioVenta[], id_control: string, sucursal: string,
 // ── Evolución de venta por artículo (unidades: paquetes de rúcula, plantas de lechuga/albahaca) ──
 export interface PuntoArticulo { mes: string; label: string; rucula: number; lechuga: number; albahaca: number }
 export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas: VentaHistorica[] = []): PuntoArticulo[] {
+  const historicasNorm = historicas
+    .map((h) => ({
+      mes: normalizarMesHistorico(campo(h as any, 'mes', 'Mes', 'MES')),
+      rucula: Number(campo(h as any, 'rucula', 'Rucula', 'Rúcula', 'RUCULA')) || 0,
+      lechuga: Number(campo(h as any, 'lechuga', 'Lechuga', 'Lechugas', 'LECHUGA')) || 0,
+    }))
+    .filter((h): h is { mes: string; rucula: number; lechuga: number } => !!h.mes);
+
   const claves = Array.from(new Set([
     ...ventas.map((v) => mesKey(v.fecha)).filter((k) => /^\d{4}-\d{2}$/.test(k)),
-    ...historicas.map((h) => h.mes).filter((k) => /^\d{4}-\d{2}$/.test(k)),
+    ...historicasNorm.map((h) => h.mes),
   ])).sort();
   const meses = claves.slice(-n);
-  const historicasPorMes = new Map(historicas.map((h) => [h.mes, h]));
+  const historicasPorMes = new Map(historicasNorm.map((h) => [h.mes, h]));
 
   return meses.map((mes) => {
     const historica = historicasPorMes.get(mes);
