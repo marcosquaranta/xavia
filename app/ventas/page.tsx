@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import type { ClienteVenta, PrecioVenta, VentaDia, Lote, Movimiento } from '@/lib/types';
+import type { ClienteVenta, PrecioVenta, VentaDia, Lote, Movimiento, VentaHistorica } from '@/lib/types';
 import { evolucionVentaPorArticulo, evolucionVentaPorClienteSemanal, evolucionPrecioPromedio, resumenMesActual } from '@/lib/estadisticasVentas';
 import { estimacionCosechaHoyManana } from '@/lib/planificacionServer';
 import Header from '@/components/Header';
@@ -53,12 +53,13 @@ export default async function VentasPage() {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
   let clientes: ClienteVenta[] = [], precios: PrecioVenta[] = [], ventas: VentaDia[] = [];
-  let lotes: Lote[] = [], movimientos: Movimiento[] = [];
+  let lotes: Lote[] = [], movimientos: Movimiento[] = [], historicas: VentaHistorica[] = [];
   let err: string | null = null;
   try {
-    [clientes, precios, ventas, lotes, movimientos] = await Promise.all([
+    [clientes, precios, ventas, lotes, movimientos, historicas] = await Promise.all([
       readSheet<ClienteVenta>('Clientes'), readSheet<PrecioVenta>('Precios'), readSheet<VentaDia>('Ventas'),
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
+      readSheet<VentaHistorica>('VentasHistoricas').catch(() => []),
     ]);
   } catch (e: any) { err = e?.message || 'Error'; }
   if (err) return (<><Header user={user} current="ventas" /><div className="container"><div className="alert-box error">{err}</div></div></>);
@@ -69,7 +70,7 @@ export default async function VentasPage() {
   const hoyStr2 = new Date().toISOString().split('T')[0];
   const hace7Str = (() => { const d = new Date(); d.setDate(d.getDate()-7); return d.toISOString().split('T')[0]; })();
   const ventas7 = ventas.filter(v => v.fecha === hace7Str);
-  const evolArticulo = evolucionVentaPorArticulo(ventas, 12);
+  const evolArticulo = evolucionVentaPorArticulo(ventas, 12, historicas);
   const evolCliente = evolucionVentaPorClienteSemanal(ventas, clientes, 5, 4);
   const evolPrecio = evolucionPrecioPromedio(ventas, precios, clientes, 12);
   const resumenMes = resumenMesActual(ventas, precios, clientes);

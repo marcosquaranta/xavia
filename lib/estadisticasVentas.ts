@@ -1,4 +1,10 @@
-import type { VentaDia, ClienteVenta, PrecioVenta } from './types';
+import type { VentaDia, ClienteVenta, PrecioVenta, VentaHistorica } from './types';
+
+// Gramos por paquete/planta — mismos defaults que /api/stocks/camara cuando no hay
+// pesaje testigo reciente. Se usan acá para poder sumar ventas por KG (cajón) al
+// mismo total en unidades que rucula/lechuga_crespa+hoja_roble.
+const GR_PAQ_RUCULA = 210;
+const GR_PAQ_LECHUGA = 330;
 
 const MESES_CORTO = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sept', 'oct', 'nov', 'dic'];
 const PROD_KEYS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg'] as const;
@@ -50,12 +56,24 @@ function getPrecio(precios: PrecioVenta[], id_control: string, sucursal: string,
 
 // ── Evolución de venta por artículo (unidades: paquetes de rúcula, plantas de lechuga/albahaca) ──
 export interface PuntoArticulo { mes: string; label: string; rucula: number; lechuga: number; albahaca: number }
-export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12): PuntoArticulo[] {
-  const meses = ultimosNMeses(ventas, n);
+export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas: VentaHistorica[] = []): PuntoArticulo[] {
+  const claves = Array.from(new Set([
+    ...ventas.map((v) => mesKey(v.fecha)).filter((k) => /^\d{4}-\d{2}$/.test(k)),
+    ...historicas.map((h) => h.mes).filter((k) => /^\d{4}-\d{2}$/.test(k)),
+  ])).sort();
+  const meses = claves.slice(-n);
+  const historicasPorMes = new Map(historicas.map((h) => [h.mes, h]));
+
   return meses.map((mes) => {
+    const historica = historicasPorMes.get(mes);
+    if (historica) {
+      return { mes, label: mesLabel(mes), rucula: Number(historica.rucula) || 0, lechuga: Number(historica.lechuga) || 0, albahaca: 0 };
+    }
     const delMes = ventas.filter((v) => mesKey(v.fecha) === mes);
-    const rucula = delMes.reduce((a, v) => a + (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0), 0);
-    const lechuga = delMes.reduce((a, v) => a + (Number(v.lechuga_crespa) || 0) + (Number(v.hoja_roble) || 0), 0);
+    const ruculaKgEnPaq = delMes.reduce((a, v) => a + (Number(v.rucula_kg) || 0), 0) * 1000 / GR_PAQ_RUCULA;
+    const lechugaKgEnPaq = delMes.reduce((a, v) => a + (Number(v.lechuga_kg) || 0), 0) * 1000 / GR_PAQ_LECHUGA;
+    const rucula = delMes.reduce((a, v) => a + (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0), 0) + Math.round(ruculaKgEnPaq);
+    const lechuga = delMes.reduce((a, v) => a + (Number(v.lechuga_crespa) || 0) + (Number(v.hoja_roble) || 0), 0) + Math.round(lechugaKgEnPaq);
     const albahaca = delMes.reduce((a, v) => a + (Number(v.albahaca) || 0), 0);
     return { mes, label: mesLabel(mes), rucula, lechuga, albahaca };
   });

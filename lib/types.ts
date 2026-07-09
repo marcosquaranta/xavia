@@ -162,6 +162,15 @@ export interface ConfigItem {
   valor: string | number;
 }
 
+// Totales mensuales de venta previos a llevar el detalle día a día en Xavia (o meses
+// incompletos) — en paquete/planta-equivalente, ya convertido. Pisan el cálculo real
+// para ese mes en la evolución por artículo.
+export interface VentaHistorica {
+  mes: string;   // YYYY-MM
+  rucula: string;
+  lechuga: string;
+}
+
 export interface StockCamara {
   id_registro: string;
   cultivo: 'rucula' | 'lechuga';
