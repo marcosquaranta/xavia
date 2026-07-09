@@ -114,6 +114,10 @@ export function GraficoVentaPorCliente({ datos }: { datos: EvolucionClientes }) 
 }
 
 export function GraficoPrecioPromedio({ datos }: { datos: PuntoPrecio[] }) {
+  const finalLabel = (dataKey: string) => ({ x, y, value, index }: any) =>
+    index === datos.length - 1
+      ? <text x={x} y={y - 10} textAnchor="middle" fontSize={11} fontWeight={700} fill="#111827">{fmtMoneda(value as number)}</text>
+      : null;
   return (
     <div style={cardStyle}>
       <p style={titleStyle}>Evolución del precio promedio <span style={{ fontWeight: 400, color: '#9ca3af' }}>· $ ARS, ponderado por unidades</span></p>
@@ -123,20 +127,20 @@ export function GraficoPrecioPromedio({ datos }: { datos: PuntoPrecio[] }) {
           <XAxis dataKey="label" tick={{ fontSize: 11, fill: INK_MUTED }} axisLine={{ stroke: '#c3c2b7' }} tickLine={false} />
           <YAxis tick={{ fontSize: 11, fill: INK_MUTED }} axisLine={false} tickLine={false} tickFormatter={fmtMoneda} width={56} domain={['dataMin - 100', 'dataMax + 100']} />
           <Tooltip content={<TooltipCard formatter={fmtMoneda} />} />
-          <Line type="monotone" dataKey="precioPromedio" name="Precio promedio" stroke={CATEGORICOS[0]} strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }}>
-            <LabelList dataKey="precioPromedio" position="top" content={({ x, y, value, index }: any) =>
-              index === datos.length - 1
-                ? <text x={x} y={y - 10} textAnchor="middle" fontSize={11} fontWeight={700} fill="#111827">{fmtMoneda(value as number)}</text>
-                : null
-            } />
+          <Legend wrapperStyle={{ fontSize: '12px', color: INK_SECUNDARIA }} iconType="circle" iconSize={8} />
+          <Line type="monotone" dataKey="precioRucula" name="Rúcula" stroke={CATEGORICOS[0]} strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }}>
+            <LabelList dataKey="precioRucula" position="top" content={finalLabel('precioRucula')} />
+          </Line>
+          <Line type="monotone" dataKey="precioLechuga" name="Lechuga" stroke={CATEGORICOS[1]} strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }}>
+            <LabelList dataKey="precioLechuga" position="top" content={finalLabel('precioLechuga')} />
           </Line>
         </LineChart>
       </ResponsiveContainer>
       <TablaToggle>
         {() => (
           <table style={{ fontSize: '12px', width: '100%' }}>
-            <thead><tr><th style={{ textAlign: 'left' }}>Mes</th><th style={{ textAlign: 'right' }}>Precio promedio</th></tr></thead>
-            <tbody>{datos.map((d) => <tr key={d.mes}><td>{d.label}</td><td style={{ textAlign: 'right' }}>{fmtMoneda(d.precioPromedio)}</td></tr>)}</tbody>
+            <thead><tr><th style={{ textAlign: 'left' }}>Mes</th><th style={{ textAlign: 'right' }}>Rúcula</th><th style={{ textAlign: 'right' }}>Lechuga</th></tr></thead>
+            <tbody>{datos.map((d) => <tr key={d.mes}><td>{d.label}</td><td style={{ textAlign: 'right' }}>{fmtMoneda(d.precioRucula)}</td><td style={{ textAlign: 'right' }}>{fmtMoneda(d.precioLechuga)}</td></tr>)}</tbody>
           </table>
         )}
       </TablaToggle>
