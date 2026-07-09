@@ -105,8 +105,11 @@ function construirEvolucionCliente(
 }
 
 // ── Evolución del precio promedio de venta (ARS, ponderado por unidades) — rúcula y lechuga por separado ──
-const KEYS_RUCULA = ['rucula', 'bandeja_rucula', 'rucula_kg'] as const;
-const KEYS_LECHUGA = ['lechuga_crespa', 'hoja_roble', 'lechuga_kg'] as const;
+// Solo se promedian ventas en la misma unidad (paquete/planta). Se excluyen bandeja_rucula,
+// rucula_kg y lechuga_kg: son otra unidad de venta (bandeja o kg) con precio no comparable
+// al de paquete/planta, y mezclarlos en el mismo promedio ponderado lo distorsiona hacia arriba.
+const KEYS_RUCULA = ['rucula'] as const;
+const KEYS_LECHUGA = ['lechuga_crespa', 'hoja_roble'] as const;
 export interface PuntoPrecio { mes: string; label: string; precioRucula: number; precioLechuga: number }
 export function evolucionPrecioPromedio(ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], n = 12): PuntoPrecio[] {
   const meses = ultimosNMeses(ventas, n);
@@ -145,20 +148,26 @@ export function resumenMesActual(ventas: VentaDia[], precios: PrecioVenta[], cli
   const delMes = ventas.filter((v) => mesKey(v.fecha) === mk);
   const clienteMap = new Map(clientes.map((c) => [c.id_control, c]));
 
-  let unidades = 0, ingresos = 0;
+  const PRICE_KEYS = [...KEYS_RUCULA, ...KEYS_LECHUGA, 'albahaca'] as const;
+  let unidades = 0, ingresosComparables = 0, unidadesComparables = 0;
   for (const v of delMes) {
     const cliente = clienteMap.get(v.id_control);
     for (const key of PROD_KEYS) {
       const qty = Number((v as any)[key]) || 0;
       if (qty <= 0) continue;
       unidades += qty;
-      ingresos += qty * getPrecio(precios, v.id_control, v.sucursal, key, cliente?.sucursales);
+      if ((PRICE_KEYS as readonly string[]).includes(key)) {
+        ingresosComparables += qty * getPrecio(precios, v.id_control, v.sucursal, key, cliente?.sucursales);
+        unidadesComparables += qty;
+      }
     }
   }
 
   const diaDelMes = hoy.getDate();
   const diasEnMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).getDate();
   const proyeccionMes = diaDelMes > 0 ? Math.round((unidades / diaDelMes) * diasEnMes) : 0;
-  const precioPromedioMes = unidades > 0 ? Math.round((ingresos / unidades) * 100) / 100 : 0;
+  // Precio promedio: solo ventas por paquete/planta (mismo criterio que evolucionPrecioPromedio) —
+  // mezclar bandeja/kg inflaba el promedio al combinar unidades de venta distintas.
+  const precioPromedioMes = unidadesComparables > 0 ? Math.round((ingresosComparables / unidadesComparables) * 100) / 100 : 0;
   return { unidadesMes: unidades, proyeccionMes, precioPromedioMes };
 }
