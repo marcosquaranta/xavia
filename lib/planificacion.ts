@@ -72,7 +72,7 @@ export function repartoHelpers(plan: Plan, reparto: Slot[]) {
   return { pctDia, cosDia, cosNaveDia, sumPct, cosechaEnDia, trasplanteEnDia, siembraRucPl, siembraLecPl };
 }
 
-export interface Tarea { icon: string; txt: string; color: string }
+export interface Tarea { icon: string; txt: string; color: string; href?: string }
 
 // jsDay: 0=Dom … 6=Sáb (Date.getDay())
 // Los trasplantes y cosechas reales se muestran aparte (agrupados por nave/mesada, ver
@@ -86,7 +86,7 @@ export function tareasDelDia(plan: Plan, reparto: Slot[], jsDay: number): Tarea[
   const t: Tarea[] = [];
   if (h.pctDia('lechuga', dia) > 0) t.push({ icon: '🥬', color: '#4d7c0f', txt: `Cosechar ~${fmt(h.cosDia('lechuga', dia))} plantas de lechuga — N1 ${fmt(h.cosNaveDia('lechuga', 1, dia))} · N2 ${fmt(h.cosNaveDia('lechuga', 2, dia))}` });
   if (h.pctDia('rucula', dia) > 0) t.push({ icon: '🌿', color: '#ca8a04', txt: `Cosechar ~${fmt(h.cosDia('rucula', dia))} paquetes de rúcula — N1 ${fmt(h.cosNaveDia('rucula', 1, dia))} · N2 ${fmt(h.cosNaveDia('rucula', 2, dia))}` });
-  if (dia === 5 || dia === 6) t.push({ icon: '📦', color: '#2563eb', txt: 'Hacer control de stock de rúculas y lechugas' });
+  if (dia === 6) t.push({ icon: '📦', color: '#2563eb', txt: 'Hacer control de stock de rúculas y lechugas', href: '/stocks' });
   return t;
 }
 

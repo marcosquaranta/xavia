@@ -68,7 +68,7 @@ export default async function PanelPage({ searchParams }: {
   } catch {}
 
   // ── Tareas de hoy (planificación) ──
-  let tareasHoy: { icon: string; txt: string; color: string }[] = [];
+  let tareasHoy: { icon: string; txt: string; color: string; href?: string }[] = [];
   let gruposTrasplante: GrupoLotes[] = [];
   let gruposCosecha: GrupoLotes[] = [];
   let siembraHoy: SiembraHoy | null = null;
@@ -303,11 +303,13 @@ export default async function PanelPage({ searchParams }: {
             )}
             {tareasHoy.length > 0 && (
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))', gap:'7px', marginBottom: (gruposTrasplante.length > 0 || gruposCosecha.length > 0) ? '10px' : 0 }}>
-                {tareasHoy.map((t,i) => (
-                  <div key={i} style={{ display:'flex', gap:'8px', alignItems:'flex-start', fontSize:'12.5px', lineHeight:1.4, background:'white', borderRadius:'7px', padding:'7px 10px', border:'1px solid #e5e7eb' }}>
-                    <span style={{ fontSize:'14px' }}>{t.icon}</span><span style={{ color:'#374151' }}>{t.txt}</span>
-                  </div>
-                ))}
+                {tareasHoy.map((t,i) => {
+                  const contenido = (<><span style={{ fontSize:'14px' }}>{t.icon}</span><span style={{ color:'#374151' }}>{t.txt}</span></>);
+                  const estilo: React.CSSProperties = { display:'flex', gap:'8px', alignItems:'flex-start', fontSize:'12.5px', lineHeight:1.4, background:'white', borderRadius:'7px', padding:'7px 10px', border:'1px solid #e5e7eb' };
+                  return t.href
+                    ? <Link key={i} href={t.href} style={{ ...estilo, textDecoration:'none' }}>{contenido}</Link>
+                    : <div key={i} style={estilo}>{contenido}</div>;
+                })}
               </div>
             )}
             {(gruposCosecha.length > 0 || gruposTrasplante.length > 0) && (

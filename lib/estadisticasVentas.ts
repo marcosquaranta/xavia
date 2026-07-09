@@ -13,6 +13,38 @@ function ultimosNMeses(ventas: VentaDia[], n: number): string[] {
   return claves.slice(-n);
 }
 
+// Semana = lunes de esa semana, como clave YYYY-MM-DD.
+function semanaKey(fecha: string): string {
+  const s = String(fecha || '').split(/[T ]/)[0];
+  const d = new Date(s + 'T12:00:00');
+  if (isNaN(d.getTime())) return '';
+  const dow = d.getDay(); // 0=dom..6=sáb
+  const diff = dow === 0 ? -6 : 1 - dow;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
+function semanaLabel(sk: string): string {
+  const [, m, d] = sk.split('-');
+  return `${d}/${m}`;
+}
+function ultimasNSemanas(ventas: VentaDia[], n: number): string[] {
+  const claves = Array.from(new Set(ventas.map((v) => semanaKey(v.fecha)).filter(Boolean))).sort();
+  return claves.slice(-n);
+}
+
+function getPrecio(precios: PrecioVenta[], id_control: string, sucursal: string, key: string, clienteSucursales?: string): number {
+  let row = precios.find((p) => String(p.id_control) === String(id_control) && p.sucursal_obs === sucursal);
+  if (!row && clienteSucursales) {
+    for (const s of clienteSucursales.split('|').map((x) => x.trim()).filter(Boolean)) {
+      row = precios.find((p) => String(p.id_control) === String(id_control) && p.sucursal_obs === s);
+      if (row) break;
+    }
+  }
+  if (!row) row = precios.find((p) => String(p.id_control) === String(id_control));
+  if (!row) return 0;
+  return Number((row as any)[key] || 0);
+}
+
 // ── Evolución de venta por artículo (unidades: paquetes de rúcula, plantas de lechuga/albahaca) ──
 export interface PuntoArticulo { mes: string; label: string; rucula: number; lechuga: number; albahaca: number }
 export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12): PuntoArticulo[] {
@@ -26,21 +58,33 @@ export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12): PuntoArti
   });
 }
 
-// ── Evolución de venta por cliente (unidades totales, top N + "Otros") ──
+// ── Evolución de venta por cliente (unidades totales, top N + "Otros") — mensual o semanal ──
 export interface SerieCliente { id_control: string; nombre: string; total: number }
 export interface EvolucionClientes { meses: { mes: string; label: string }[]; series: SerieCliente[]; puntos: Record<string, number>[] }
+
 export function evolucionVentaPorCliente(ventas: VentaDia[], clientes: ClienteVenta[], n = 12, topN = 6): EvolucionClientes {
   const mesesKeys = ultimosNMeses(ventas, n);
-  const meses = mesesKeys.map((mes) => ({ mes, label: mesLabel(mes) }));
+  return construirEvolucionCliente(ventas, clientes, mesesKeys, mesLabel, mesKey, topN);
+}
+
+export function evolucionVentaPorClienteSemanal(ventas: VentaDia[], clientes: ClienteVenta[], n = 10, topN = 6): EvolucionClientes {
+  const semanasKeys = ultimasNSemanas(ventas, n);
+  return construirEvolucionCliente(ventas, clientes, semanasKeys, semanaLabel, semanaKey, topN);
+}
+
+function construirEvolucionCliente(
+  ventas: VentaDia[], clientes: ClienteVenta[], claves: string[], etiqueta: (k: string) => string, keyFn: (fecha: string) => string, topN: number
+): EvolucionClientes {
+  const meses = claves.map((k) => ({ mes: k, label: etiqueta(k) }));
   const porCliente = new Map<string, Record<string, number>>();
   for (const v of ventas) {
-    const mk = mesKey(v.fecha);
-    if (!mesesKeys.includes(mk)) continue;
-    const total = PROD_KEYS.reduce((a, k) => a + (Number((v as any)[k]) || 0), 0);
+    const k = keyFn(v.fecha);
+    if (!claves.includes(k)) continue;
+    const total = PROD_KEYS.reduce((a, kk) => a + (Number((v as any)[kk]) || 0), 0);
     if (total <= 0) continue;
     if (!porCliente.has(v.id_control)) porCliente.set(v.id_control, {});
     const rec = porCliente.get(v.id_control)!;
-    rec[mk] = (rec[mk] || 0) + total;
+    rec[k] = (rec[k] || 0) + total;
   }
   const nombreMap = new Map(clientes.map((c) => [c.id_control, c.nombre_display || c.nombre_xubio || c.id_control]));
   let entradas = Array.from(porCliente.entries()).map(([id_control, valores]) => ({
@@ -52,15 +96,15 @@ export function evolucionVentaPorCliente(ventas: VentaDia[], clientes: ClienteVe
     const top = entradas.slice(0, topN);
     const resto = entradas.slice(topN);
     const otrosValores: Record<string, number> = {};
-    for (const e of resto) for (const [mk, v] of Object.entries(e.valores)) otrosValores[mk] = (otrosValores[mk] || 0) + v;
+    for (const e of resto) for (const [k, v] of Object.entries(e.valores)) otrosValores[k] = (otrosValores[k] || 0) + v;
     top.push({ id_control: '__otros__', nombre: 'Otros', valores: otrosValores, total: Object.values(otrosValores).reduce((a, b) => a + b, 0) });
     entradas = top;
   }
 
   const series = entradas.map((e) => ({ id_control: e.id_control, nombre: e.nombre, total: e.total }));
-  const puntos = mesesKeys.map((mk) => {
+  const puntos = claves.map((k) => {
     const punto: Record<string, number> = {};
-    for (const e of entradas) punto[e.id_control] = e.valores[mk] || 0;
+    for (const e of entradas) punto[e.id_control] = e.valores[k] || 0;
     return punto;
   });
   return { meses, series, puntos };
@@ -72,19 +116,6 @@ export function evolucionPrecioPromedio(ventas: VentaDia[], precios: PrecioVenta
   const meses = ultimosNMeses(ventas, n);
   const clienteMap = new Map(clientes.map((c) => [c.id_control, c]));
 
-  function getPrecio(id_control: string, sucursal: string, key: string, clienteSucursales?: string): number {
-    let row = precios.find((p) => String(p.id_control) === String(id_control) && p.sucursal_obs === sucursal);
-    if (!row && clienteSucursales) {
-      for (const s of clienteSucursales.split('|').map((x) => x.trim()).filter(Boolean)) {
-        row = precios.find((p) => String(p.id_control) === String(id_control) && p.sucursal_obs === s);
-        if (row) break;
-      }
-    }
-    if (!row) row = precios.find((p) => String(p.id_control) === String(id_control));
-    if (!row) return 0;
-    return Number((row as any)[key] || 0);
-  }
-
   return meses.map((mes) => {
     const delMes = ventas.filter((v) => mesKey(v.fecha) === mes);
     let ingresos = 0, unidades = 0;
@@ -93,10 +124,37 @@ export function evolucionPrecioPromedio(ventas: VentaDia[], precios: PrecioVenta
       for (const key of PROD_KEYS) {
         const qty = Number((v as any)[key]) || 0;
         if (qty <= 0) continue;
-        ingresos += qty * getPrecio(v.id_control, v.sucursal, key, cliente?.sucursales);
+        ingresos += qty * getPrecio(precios, v.id_control, v.sucursal, key, cliente?.sucursales);
         unidades += qty;
       }
     }
     return { mes, label: mesLabel(mes), precioPromedio: unidades > 0 ? Math.round((ingresos / unidades) * 100) / 100 : 0 };
   });
+}
+
+// ── Resumen del mes en curso: unidades vendidas, proyección (por proporción del mes
+// transcurrido) y precio promedio — para la tarjeta de Indicadores ──
+export interface ResumenMesActual { unidadesMes: number; proyeccionMes: number; precioPromedioMes: number }
+export function resumenMesActual(ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[]): ResumenMesActual {
+  const hoy = new Date();
+  const mk = mesKey(hoy.toISOString().slice(0, 10));
+  const delMes = ventas.filter((v) => mesKey(v.fecha) === mk);
+  const clienteMap = new Map(clientes.map((c) => [c.id_control, c]));
+
+  let unidades = 0, ingresos = 0;
+  for (const v of delMes) {
+    const cliente = clienteMap.get(v.id_control);
+    for (const key of PROD_KEYS) {
+      const qty = Number((v as any)[key]) || 0;
+      if (qty <= 0) continue;
+      unidades += qty;
+      ingresos += qty * getPrecio(precios, v.id_control, v.sucursal, key, cliente?.sucursales);
+    }
+  }
+
+  const diaDelMes = hoy.getDate();
+  const diasEnMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).getDate();
+  const proyeccionMes = diaDelMes > 0 ? Math.round((unidades / diaDelMes) * diasEnMes) : 0;
+  const precioPromedioMes = unidades > 0 ? Math.round((ingresos / unidades) * 100) / 100 : 0;
+  return { unidadesMes: unidades, proyeccionMes, precioPromedioMes };
 }

@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import {
   CUB, POSPAQ, CUBPOSRUC, CUBPLLEC, DIAS, DIA_SIEMBRA, REPARTO_DEFAULT,
   calcularPlan, repartoHelpers, tareasDelDia, siembraDelDia, planchas,
@@ -96,11 +97,13 @@ export default function PlanificacionManager({ naves, defaults, repartoInicial, 
             )}
             {tareasHoy.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', marginBottom: (gruposTrasplante.length > 0 || gruposCosecha.length > 0) ? '12px' : 0 }}>
-                {tareasHoy.map((t, i) => (
-                  <div key={i} style={{ display: 'flex', gap: '9px', alignItems: 'flex-start', fontSize: '13.5px', lineHeight: 1.4 }}>
-                    <span style={{ fontSize: '15px' }}>{t.icon}</span><span style={{ color: '#374151' }}>{t.txt}</span>
-                  </div>
-                ))}
+                {tareasHoy.map((t, i) => {
+                  const contenido = (<><span style={{ fontSize: '15px' }}>{t.icon}</span><span style={{ color: '#374151' }}>{t.txt}</span></>);
+                  const estilo: React.CSSProperties = { display: 'flex', gap: '9px', alignItems: 'flex-start', fontSize: '13.5px', lineHeight: 1.4 };
+                  return t.href
+                    ? <Link key={i} href={t.href} style={{ ...estilo, textDecoration: 'none' }}>{contenido}</Link>
+                    : <div key={i} style={estilo}>{contenido}</div>;
+                })}
               </div>
             )}
             {(gruposCosecha.length > 0 || gruposTrasplante.length > 0) && (

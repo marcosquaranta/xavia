@@ -1,7 +1,7 @@
 import type { Lote, Movimiento, Ubicacion } from './types';
 import { diasPromedioPorVariedad } from './estadisticas';
 import { calcularDiasPorFase } from './lotes';
-import type { Cap, NavesCap, Dias } from './planificacion';
+import { POSPAQ, type Cap, type NavesCap, type Dias } from './planificacion';
 
 const esRuculaVar = (v: string) => { const x = String(v).toLowerCase(); return x.includes('rucula') || x.includes('rúcula'); };
 const mesadaCorta = (s: string) => String(s || '').replace(/^Nave\s*\d+\s*-\s*/i, '').trim();
@@ -106,6 +106,30 @@ export function cosechasAgrupadas(lotes: Lote[], movimientos: Movimiento[]): Gru
     grupos.get(key)!.items.push({ id: l.id_lote, dias: diasF2, est: refF2 });
   }
   return ordenarGrupos(grupos);
+}
+
+// ── Estimación de cosecha que posiblemente caiga HOY o MAÑANA (para Ventas: "cuánto
+// puedo llegar a tener para vender"). Mismo criterio de referencia que cosechasAgrupadas
+// (F2 del último lote cosechado de ese cultivo), pero con un día de margen hacia
+// adelante. En unidades de venta: rúcula en paquetes (÷3, 3 posiciones/paquete),
+// lechuga en plantas — sin conversión, ya que 1 planta = 1 unidad de venta. ──
+export interface EstimacionCosechaCercana { rucula: number; lechuga: number }
+export function estimacionCosechaHoyManana(lotes: Lote[], movimientos: Movimiento[]): EstimacionCosechaCercana {
+  const ref = ultimoF2PorCultivo(lotes, movimientos);
+  const activos = lotes.filter(l => l.estado === 'activo' && l.fase_actual === 'fase_2');
+  let ruculaPlantas = 0, lechugaPlantas = 0;
+  for (const l of activos) {
+    let dias: any;
+    try { dias = calcularDiasPorFase(l, movimientos); } catch { continue; }
+    const esRucula = esRuculaVar(l.variedad);
+    const refF2 = esRucula ? ref.rucula : ref.lechuga;
+    if (refF2 === null) continue;
+    const diasF2 = dias.fase_2 || 0;
+    if (refF2 - diasF2 > 1) continue; // falta más de 1 día para el punto de cosecha esperado
+    const plantas = Number(l.plantas_estimadas_actual) || 0;
+    if (esRucula) ruculaPlantas += plantas; else lechugaPlantas += plantas;
+  }
+  return { rucula: Math.round(ruculaPlantas / POSPAQ), lechuga: Math.round(lechugaPlantas) };
 }
 
 // ── Capacidad por nave desde Ubicaciones ──

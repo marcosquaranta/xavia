@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, BarChart, Bar, Line, LineChart, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend, LabelList,
 } from 'recharts';
-import type { PuntoArticulo, EvolucionClientes, PuntoPrecio } from '@/lib/estadisticasVentas';
+import type { PuntoArticulo, EvolucionClientes, PuntoPrecio, ResumenMesActual } from '@/lib/estadisticasVentas';
 
 // Paleta categórica (orden fijo, validada — ver skill de dataviz). Los slots aqua/
 // amarillo/magenta quedan bajo 3:1 de contraste sobre blanco, por eso cada gráfico
@@ -85,7 +85,7 @@ export function GraficoVentaPorCliente({ datos }: { datos: EvolucionClientes }) 
   const data = datos.meses.map((m, i) => ({ label: m.label, ...datos.puntos[i] }));
   return (
     <div style={cardStyle}>
-      <p style={titleStyle}>Evolución de venta por cliente <span style={{ fontWeight: 400, color: '#9ca3af' }}>· top {datos.series.length} · unidades totales</span></p>
+      <p style={titleStyle}>Evolución de venta por cliente <span style={{ fontWeight: 400, color: '#9ca3af' }}>· por semana · top {datos.series.length} · unidades totales</span></p>
       <ResponsiveContainer width="100%" height={280}>
         <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid stroke={GRID} vertical={false} />
@@ -102,7 +102,7 @@ export function GraficoVentaPorCliente({ datos }: { datos: EvolucionClientes }) 
       <TablaToggle>
         {() => (
           <table style={{ fontSize: '12px', width: '100%' }}>
-            <thead><tr><th style={{ textAlign: 'left' }}>Mes</th>{datos.series.map((s) => <th key={s.id_control} style={{ textAlign: 'right' }}>{s.nombre}</th>)}</tr></thead>
+            <thead><tr><th style={{ textAlign: 'left' }}>Semana</th>{datos.series.map((s) => <th key={s.id_control} style={{ textAlign: 'right' }}>{s.nombre}</th>)}</tr></thead>
             <tbody>{datos.meses.map((m, i) => (
               <tr key={m.mes}><td>{m.label}</td>{datos.series.map((s) => <td key={s.id_control} style={{ textAlign: 'right' }}>{fmtEntero(datos.puntos[i][s.id_control] || 0)}</td>)}</tr>
             ))}</tbody>
@@ -114,10 +114,9 @@ export function GraficoVentaPorCliente({ datos }: { datos: EvolucionClientes }) 
 }
 
 export function GraficoPrecioPromedio({ datos }: { datos: PuntoPrecio[] }) {
-  const ultimo = datos[datos.length - 1];
   return (
     <div style={cardStyle}>
-      <p style={titleStyle}>Evolución del precio promedio de venta <span style={{ fontWeight: 400, color: '#9ca3af' }}>· $ ARS, ponderado por unidades</span></p>
+      <p style={titleStyle}>Evolución del precio promedio <span style={{ fontWeight: 400, color: '#9ca3af' }}>· $ ARS, ponderado por unidades</span></p>
       <ResponsiveContainer width="100%" height={220}>
         <LineChart data={datos} margin={{ top: 16, right: 40, left: 0, bottom: 0 }}>
           <CartesianGrid stroke={GRID} vertical={false} />
@@ -145,8 +144,29 @@ export function GraficoPrecioPromedio({ datos }: { datos: PuntoPrecio[] }) {
   );
 }
 
-export default function VentasEvolucionCharts({ articulo, cliente, precio }: {
-  articulo: PuntoArticulo[]; cliente: EvolucionClientes; precio: PuntoPrecio[];
+export function TarjetaIndicadores({ datos }: { datos: ResumenMesActual }) {
+  const items = [
+    { label: 'Unidades vendidas este mes', valor: fmtEntero(datos.unidadesMes) },
+    { label: 'Proyección del mes', valor: fmtEntero(datos.proyeccionMes) },
+    { label: 'Precio promedio', valor: fmtMoneda(datos.precioPromedioMes) },
+  ];
+  return (
+    <div style={cardStyle}>
+      <p style={titleStyle}>Indicadores <span style={{ fontWeight: 400, color: '#9ca3af' }}>· mes en curso</span></p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', height: '220px', justifyContent: 'center' }}>
+        {items.map((it) => (
+          <div key={it.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderBottom: '1px solid #f1f0eb', paddingBottom: '10px' }}>
+            <span style={{ fontSize: '12px', color: INK_SECUNDARIA }}>{it.label}</span>
+            <strong style={{ fontSize: '20px', color: '#111827' }}>{it.valor}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function VentasEvolucionCharts({ articulo, cliente, precio, resumenMes }: {
+  articulo: PuntoArticulo[]; cliente: EvolucionClientes; precio: PuntoPrecio[]; resumenMes: ResumenMesActual;
 }) {
   if (!articulo.length && !cliente.meses.length && !precio.length) return null;
   return (
@@ -155,7 +175,10 @@ export default function VentasEvolucionCharts({ articulo, cliente, precio }: {
         <GraficoVentaPorArticulo datos={articulo} />
         <GraficoVentaPorCliente datos={cliente} />
       </div>
-      <GraficoPrecioPromedio datos={precio} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+        <GraficoPrecioPromedio datos={precio} />
+        <TarjetaIndicadores datos={resumenMes} />
+      </div>
     </div>
   );
 }

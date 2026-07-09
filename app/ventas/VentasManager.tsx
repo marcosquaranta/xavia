@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import type { ClienteVenta, PrecioVenta, VentaDia } from '@/lib/types';
+import type { EstimacionCosechaCercana } from '@/lib/planificacionServer';
 
 const PP = [
   { key:'rucula',         xubio:'Rucula Hidropónica',                     label:'Rúcula',     color:'#166534' },
@@ -55,9 +56,8 @@ function mkFilas(cs: ClienteVenta[], freq: Record<string,number>): Fila[] {
   }
   return out.sort((a,b)=>(freq[b.id_control]||0)-(freq[a.id_control]||0));
 }
-function pct(a:number,b:number){if(!b)return null;return Math.round(((a-b)/b)*100);}
 
-export default function VentasManager({clientes,precios,frecuencias,stats,ventas7}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;ventas7:VentaDia[]}) {
+export default function VentasManager({clientes,precios,frecuencias,stats,ventas7,estimCosecha}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;ventas7:VentaDia[];estimCosecha:EstimacionCosechaCercana}) {
   const hoy = new Date().toISOString().split('T')[0];
   const [fecha,setFecha]=useState(hoy);
   const [showExpSelector,setShowExpSelector]=useState(false);
@@ -70,10 +70,6 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
   const [exp,setExp]=useState(false);
   const [msg,setMsg]=useState<{t:'ok'|'err';s:string}|null>(null);
   const [showP,setShowP]=useState(false);
-  const [corrEditA,setCorrEditA]=useState('');
-  const [corrEditB,setCorrEditB]=useState('');
-  const [savingCorr,setSavingCorr]=useState(false);
-  const [msgCorr,setMsgCorr]=useState('');
   const [showHistorial,setShowHistorial]=useState(false);
   const [showPreExport,setShowPreExport]=useState(false);
   const [correlaA,setCorrelaA]=useState<string>('');
@@ -84,7 +80,6 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
   const [currentExportId,setCurrentExportId]=useState<string|null>(null);
   const [limpiando,setLimpiando]=useState(false);
   const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number;diasPromedio:number};lechuga:{stockActual:number;diasPromedio:number};factorGrPaq:{rucula:number;lechuga:number}}|null>(null);
-  const [cosechaEst,setCosechaEst]=useState({rucula:'',lechuga:''});
   const [ctdsKg,setCtdsKg]=useState<CKG>({});
   const [fechaExportada,setFechaExportada]=useState(false);
   const ctdsKgLive=useRef<CKG>({});
@@ -112,8 +107,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
   // Cargar correlativo actual al iniciar
   useEffect(()=>{
     fetch('/api/ventas/historial').then(r=>r.json()).then(j=>{
-      if(j.lastA){ setCorrelaA(String(j.lastA+1)); setCorrEditA(String(j.lastA)); }
-      if(j.lastB){ setCorrelaB(String(j.lastB+1)); setCorrEditB(String(j.lastB)); }
+      if(j.lastA) setCorrelaA(String(j.lastA+1));
+      if(j.lastB) setCorrelaB(String(j.lastB+1));
     }).catch(()=>{});
   },[]);
 
@@ -127,19 +122,6 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
       setMsg({t:'ok',s:todo?'Hoja limpiada':'Día limpiado'});
     }catch(e:any){setMsg({t:'err',s:e.message});}
     setLimpiando(false);
-  }
-
-  async function guardarCorrelativo(){
-    setSavingCorr(true); setMsgCorr('');
-    try{
-      const r = await fetch('/api/ventas/correlativo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lastA:Number(corrEditA),lastB:Number(corrEditB)})});
-      if(!r.ok) throw new Error('Error');
-      setCorrelaA(String(Number(corrEditA)+1));
-      setCorrelaB(String(Number(corrEditB)+1));
-      setMsgCorr('✓ Guardado');
-      setTimeout(()=>setMsgCorr(''),3000);
-    }catch{ setMsgCorr('Error al guardar'); }
-    setSavingCorr(false);
   }
 
   function cargarHistorial(){
@@ -297,162 +279,23 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
 
   return (
     <div>
-      {/* Stats — consolidado por cultivo */}
-      {(()=>{
-        const fR = stockCamara?.factorGrPaq?.rucula  || 210;
-        const fL = stockCamara?.factorGrPaq?.lechuga || 330;
-        const CULTIVOS_ST = [
-          { cultivo:'rucula',  label:'Rúcula',  color:'#166534', top:'#166534',
-            paqA: stats.semanaActual.rucula,   paqAnt: stats.semanaAnterior.rucula,
-            paqM: stats.mesActual.rucula,       paqMAnt: stats.mesAnterior.rucula,
-            kgA:  stats.kg.semanaActual.rucula_kg,  kgAnt: stats.kg.semanaAnterior.rucula_kg,
-            kgM:  stats.kg.mesActual.rucula_kg,     kgMAnt: stats.kg.mesAnterior.rucula_kg,
-            factor: fR },
-          { cultivo:'lechuga', label:'Lechuga', color:'#4d7c0f', top:'#65a30d',
-            paqA: stats.semanaActual.lechuga_crespa+stats.semanaActual.hoja_roble,
-            paqAnt: stats.semanaAnterior.lechuga_crespa+stats.semanaAnterior.hoja_roble,
-            paqM: stats.mesActual.lechuga_crespa+stats.mesActual.hoja_roble,
-            paqMAnt: stats.mesAnterior.lechuga_crespa+stats.mesAnterior.hoja_roble,
-            kgA:  stats.kg.semanaActual.lechuga_kg,  kgAnt: stats.kg.semanaAnterior.lechuga_kg,
-            kgM:  stats.kg.mesActual.lechuga_kg,     kgMAnt: stats.kg.mesAnterior.lechuga_kg,
-            factor: fL },
-        ];
-        return (
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'8px'}}>
-            {CULTIVOS_ST.map(c=>{
-              // Todo en paquetes (unidades): los KG de clientes por cajón se convierten a paq equivalentes
-              const kgToPaq = (kg:number)=> c.factor>0 ? Math.round((kg||0)*1000/c.factor) : 0;
-              const totA   = c.paqA   + kgToPaq(c.kgA);
-              const totAnt = c.paqAnt + kgToPaq(c.kgAnt);
-              const totM   = c.paqM   + kgToPaq(c.kgM);
-              const totMAnt= c.paqMAnt+ kgToPaq(c.kgMAnt);
-              const ps = pct(totA, totAnt);
-              const pm = pct(totM, totMAnt);
-              return (
-                <div key={c.cultivo} style={{background:'white',border:'1px solid #e5e7eb',borderTop:`3px solid ${c.top}`,borderRadius:'8px',padding:'10px 12px'}}>
-                  <p style={{margin:'0 0 8px',fontSize:'11px',fontWeight:700,color:c.color,textTransform:'uppercase'}}>{c.label}</p>
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px'}}>
-                    {([
-                      {lbl:'Semana', tot:totA, totAnt:totAnt, pct:ps},
-                      {lbl:'Mes',    tot:totM, totAnt:totMAnt, pct:pm},
-                    ]).map(box=>(
-                      <div key={box.lbl} style={{background:'#f9fafb',borderRadius:'6px',padding:'7px 8px'}}>
-                        <p style={{margin:'0 0 1px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase'}}>{box.lbl}</p>
-                        {/* Headline: total en paquetes (unidades) */}
-                        <p style={{margin:'0 0 1px',fontSize:'18px',fontWeight:800,color:'#111827',lineHeight:1}}>{box.tot>0?box.tot:'0'} paq</p>
-                        <p style={{margin:'0 0 1px',fontSize:'10px',color:'#6b7280'}}>≈ {(box.tot*c.factor/1000).toFixed(1)} kg</p>
-                        <p style={{margin:'0 0 2px',fontSize:'9px',color:'#9ca3af'}}>ant: {box.totAnt>0?box.totAnt:'0'} paq</p>
-                        {box.pct!==null
-                          ? <p style={{margin:0,fontSize:'12px',fontWeight:800,color:box.pct>=0?'#059669':'#dc2626'}}>{box.pct>=0?'↑':'↓'} {Math.abs(box.pct)}%</p>
-                          : <p style={{margin:0,fontSize:'10px',color:'#9ca3af'}}>sin datos</p>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        );
-      })()}
-
-      {/* Correlativo editable siempre visible */}
-      <div style={{background:'#f8fafc',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'10px 14px',marginBottom:'12px',display:'flex',alignItems:'center',gap:'14px',flexWrap:'wrap'}}>
-        <span style={{fontSize:'12px',fontWeight:600,color:'#374151'}}>📋 Correlativo</span>
-        <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-          <label style={{fontSize:'11px',color:'#6b7280'}}>Últ. A:</label>
-          <input type="number" value={corrEditA} onChange={ev=>setCorrEditA(ev.target.value)}
-            style={{width:'70px',textAlign:'center',fontSize:'14px',fontWeight:700,border:'1px solid #d1d5db',borderRadius:'5px',padding:'3px 6px',color:'#1e40af'}}/>
-        </div>
-        <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-          <label style={{fontSize:'11px',color:'#6b7280'}}>Últ. B:</label>
-          <input type="number" value={corrEditB} onChange={ev=>setCorrEditB(ev.target.value)}
-            style={{width:'70px',textAlign:'center',fontSize:'14px',fontWeight:700,border:'1px solid #d1d5db',borderRadius:'5px',padding:'3px 6px',color:'#92400e'}}/>
-        </div>
-        <button onClick={guardarCorrelativo} disabled={savingCorr}
-          style={{background:'#374151',color:'white',border:'none',borderRadius:'6px',padding:'5px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>
-          {savingCorr?'Guardando…':'Guardar'}
-        </button>
-        {msgCorr && <span style={{fontSize:'11px',color:'#059669',fontWeight:600}}>{msgCorr}</span>}
-        <span style={{fontSize:'10px',color:'#9ca3af',marginLeft:'auto'}}>Próxima A: <strong>{corrEditA ? Number(corrEditA)+1 : '—'}</strong> · Próxima B: <strong>{corrEditB ? Number(corrEditB)+1 : '—'}</strong></span>
-      </div>
-
-      {/* Stock disponible unificado paq + KG */}
-      <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'8px',padding:'10px 14px',marginBottom:'12px'}}>
-        <p style={{margin:'0 0 10px',fontSize:'12px',fontWeight:700,color:'#166534'}}>🥬 Disponible para vender hoy</p>
+      {/* Stock disponible hoy (unidades) */}
+      <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'8px',padding:'8px 14px',marginBottom:'12px'}}>
+        <p style={{margin:'0 0 8px',fontSize:'12px',fontWeight:700,color:'#166534'}}>🥬 Disponible para vender hoy</p>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}}>
           {(['rucula','lechuga'] as const).map(cultivo=>{
-            const sc      = stockCamara?.[cultivo]?.stockActual ?? null;
-            const diasCam = stockCamara?.[cultivo]?.diasPromedio ?? null;
-            const factor  = stockCamara?.factorGrPaq?.[cultivo] || (cultivo==='rucula'?210:330);
-            const estPaq  = Number(cosechaEst[cultivo])||0;
-            const totalPaq= sc!==null ? sc+estPaq : estPaq;
-            const totalKg = totalPaq * factor / 1000;
-
-            // Consumo en paquetes
-            const paqVendidos = cultivo==='rucula' ? tots.rucula : (tots.lechuga_crespa+tots.hoja_roble);
-            // Consumo en KG → convertir a paquetes equivalentes
-            const kgVendidos  = cultivo==='rucula' ? totsKg.rucula_kg : totsKg.lechuga_kg;
-            const kgEnPaq     = factor>0 ? kgVendidos*1000/factor : 0;
-            const totalConsumidoPaq = paqVendidos + kgEnPaq;
-            const totalConsumidoKg  = totalConsumidoPaq * factor / 1000;
-
-            const restaPaq = totalPaq - totalConsumidoPaq;
-            const restaKg  = restaPaq * factor / 1000;
-            const colorR   = restaPaq<0?'#dc2626':restaPaq===0?'#6b7280':'#059669';
-
+            const sc = stockCamara?.[cultivo]?.stockActual ?? 0;
+            const estCosecha = estimCosecha?.[cultivo] ?? 0;
             const label  = cultivo==='rucula'?'Rúcula':'Lechuga';
             const color  = cultivo==='rucula'?'#b45309':'#166534';
             const bg     = cultivo==='rucula'?'#fffbeb':'#f0fdf4';
             const border = cultivo==='rucula'?'#fde68a':'#bbf7d0';
-
             return (
-              <div key={cultivo} style={{background:bg,border:`1px solid ${border}`,borderRadius:'8px',padding:'10px 12px'}}>
-                {/* Header */}
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'8px'}}>
-                  <span style={{fontSize:'12px',fontWeight:700,color}}>{label}</span>
-                  <span style={{fontSize:'10px',color:'#9ca3af'}}>{factor}g/paq</span>
-                </div>
-
-                {/* Disponible */}
-                <div style={{background:'white',borderRadius:'6px',padding:'6px 8px',marginBottom:'6px'}}>
-                  <p style={{margin:'0 0 3px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase',fontWeight:600}}>Disponible</p>
-                  {sc!==null
-                    ? <div style={{display:'flex',alignItems:'baseline',gap:'8px',flexWrap:'wrap'}}>
-                        <p style={{margin:'0 0 1px',fontSize:'13px',fontWeight:700,color:'#111827'}}>{sc} paq cámara{estPaq>0?` + ${estPaq} est.`:''}</p>
-                        {diasCam!==null&&diasCam>0&&<span style={{fontSize:'10px',color:diasCam>=5?'#dc2626':diasCam>=3?'#d97706':'#059669',fontWeight:600}}>⏱ {diasCam}d en cámara</span>}
-                      </div>
-                    : <p style={{margin:'0 0 1px',fontSize:'12px',color:'#9ca3af'}}>Sin stock cámara</p>}
-                  <div style={{display:'flex',gap:'6px',alignItems:'center'}}>
-                    <span style={{fontSize:'11px',color:'#6b7280'}}>+ Cosecha est.</span>
-                    <input type="number" min={0} placeholder="0" value={cosechaEst[cultivo]}
-                      onChange={ev=>setCosechaEst(prev=>({...prev,[cultivo]:ev.target.value}))}
-                      style={{width:'55px',fontSize:'12px',fontWeight:700,border:'1px solid #d1d5db',borderRadius:'5px',padding:'2px 5px',background:'white',color:'#111827',textAlign:'center'}}/>
-                    <span style={{fontSize:'10px',color:'#9ca3af'}}>paq</span>
-                  </div>
-                  <p style={{margin:'4px 0 0',fontSize:'12px',fontWeight:800,color}}>
-                    {totalPaq} paq <span style={{fontWeight:400,color:'#9ca3af'}}>= {totalKg.toFixed(1)} kg</span>
-                  </p>
-                </div>
-
-                {/* Consumido */}
-                {(paqVendidos>0||kgVendidos>0)&&(
-                  <div style={{background:'#fff7ed',borderRadius:'6px',padding:'6px 8px',marginBottom:'6px',border:'1px solid #fed7aa'}}>
-                    <p style={{margin:'0 0 3px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase',fontWeight:600}}>Pedido</p>
-                    {paqVendidos>0&&<p style={{margin:'0 0 1px',fontSize:'11px',color:'#92400e'}}>{paqVendidos} paq <span style={{color:'#9ca3af'}}>= {(paqVendidos*factor/1000).toFixed(1)} kg</span></p>}
-                    {kgVendidos>0&&<p style={{margin:'0 0 1px',fontSize:'11px',color:'#92400e'}}>{kgVendidos.toFixed(1)} kg <span style={{color:'#9ca3af'}}>≈ {kgEnPaq.toFixed(1)} paq</span></p>}
-                    <p style={{margin:'3px 0 0',fontSize:'11px',fontWeight:700,color:'#92400e',borderTop:'1px solid #fed7aa',paddingTop:'3px'}}>
-                      Total: {totalConsumidoPaq.toFixed(1)} paq = {totalConsumidoKg.toFixed(1)} kg
-                    </p>
-                  </div>
-                )}
-
-                {/* Queda */}
-                <div style={{background:restaPaq<0?'#fef2f2':restaPaq===0?'#f9fafb':'#f0fdf4',borderRadius:'6px',padding:'6px 8px',border:`1px solid ${restaPaq<0?'#fca5a5':restaPaq===0?'#e5e7eb':'#86efac'}`}}>
-                  <p style={{margin:'0 0 2px',fontSize:'9px',color:'#9ca3af',textTransform:'uppercase',fontWeight:600}}>Queda</p>
-                  <p style={{margin:0,fontSize:'16px',fontWeight:800,color:colorR,lineHeight:1}}>
-                    {restaPaq<0?restaPaq.toFixed(1):restaPaq>0?`+${restaPaq.toFixed(1)}`:0} paq
-                  </p>
-                  <p style={{margin:'2px 0 0',fontSize:'11px',color:colorR}}>= {restaKg.toFixed(1)} kg</p>
+              <div key={cultivo} style={{background:bg,border:`1px solid ${border}`,borderRadius:'8px',padding:'8px 12px',display:'flex',justifyContent:'space-between',alignItems:'center',gap:'8px'}}>
+                <span style={{fontSize:'12px',fontWeight:700,color}}>{label}</span>
+                <div style={{display:'flex',gap:'14px',alignItems:'baseline'}}>
+                  <span style={{fontSize:'11px',color:'#6b7280'}}>Stock al día: <strong style={{fontSize:'15px',color:'#111827'}}>{sc} u</strong></span>
+                  <span style={{fontSize:'11px',color:'#6b7280'}}>Cosecha hoy/mañana: <strong style={{fontSize:'15px',color:'#111827'}}>{estCosecha} u</strong></span>
                 </div>
               </div>
             );
