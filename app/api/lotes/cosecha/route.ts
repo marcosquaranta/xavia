@@ -33,6 +33,16 @@ export async function POST(req: NextRequest) {
     } = body;
     const modoFinal: 'planta' | 'paquete' | 'cajon' = modo || (es_por_paquete ? 'paquete' : 'planta');
 
+    // Pesaje testigo obligatorio — ya se valida en el cliente, pero se repite acá para
+    // que quede garantizado sin depender del formulario (llamadas directas, bundles
+    // viejos en caché, etc.).
+    if (modoFinal === 'planta' && !(Number(peso_muestra_gr) > 0)) {
+      return NextResponse.json({ error: 'El pesaje testigo (peso del paquete en gramos) es obligatorio' }, { status: 400 });
+    }
+    if (modoFinal === 'paquete' && !(Number(peso_muestra_paquete_gr) > 0)) {
+      return NextResponse.json({ error: 'El pesaje testigo (peso del paquete en gramos) es obligatorio' }, { status: 400 });
+    }
+
     const [lotes, movimientos] = await Promise.all([
       readSheet<Lote>('Lotes'),
       readSheet<Movimiento>('Movimientos'),
