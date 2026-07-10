@@ -84,24 +84,56 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
       lechuga: Array.from({ length: nBuckets }, () => [] as number[]),
       rucula: Array.from({ length: nBuckets }, () => [] as number[]),
     };
+    const accPeso = {
+      lechuga: Array.from({ length: nBuckets }, () => [] as number[]),
+      rucula: Array.from({ length: nBuckets }, () => [] as number[]),
+    };
     for (const l of lotes) {
       if (l.estado !== 'cosechado' || !l.fecha_cosecha) continue;
       const f = new Date(String(l.fecha_cosecha) + 'T12:00:00');
       if (isNaN(f.getTime())) continue;
       const b = bucketDe(f); if (b < 0) continue;
+      const esR = esRuculaV(l.variedad);
       let f2 = 0; try { f2 = calcularDiasPorFase(l, movimientos).fase_2; } catch {}
-      if (f2 <= 0) continue;
-      (esRuculaV(l.variedad) ? acc.rucula : acc.lechuga)[b].push(f2);
+      if (f2 > 0) (esR ? acc.rucula : acc.lechuga)[b].push(f2);
+      const gr = Number(l.peso_muestra_paquete_gr) > 0
+        ? Number(l.peso_muestra_paquete_gr)
+        : Number(l.peso_muestra_kg) > 0 ? Math.round(Number(l.peso_muestra_kg) * 1000) : 0;
+      if (gr > 0) (esR ? accPeso.rucula : accPeso.lechuga)[b].push(gr);
     }
     const avgArr = (a: number[][]) => a.map(xs => xs.length ? Math.round(xs.reduce((p, c) => p + c, 0) / xs.length) : 0);
     const lech = avgArr(acc.lechuga), ruc = avgArr(acc.rucula);
+    const lechP = avgArr(accPeso.lechuga), rucP = avgArr(accPeso.rucula);
     const series = [
       { nombre: 'Lechuga F2', color: '#4d7c0f', puntos: lech.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
       { nombre: 'Rúcula F2', color: '#166534', puntos: ruc.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
     ];
-    return { series, labels, hoyIdx };
+    const pesoSeries = [
+      { nombre: 'Lechuga peso', color: '#4d7c0f', puntos: lechP.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+      { nombre: 'Rúcula peso', color: '#166534', puntos: rucP.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+    ];
+    return { series, pesoSeries, labels, hoyIdx };
   }
   const evo = curvasEvo(evoModo);
+
+  // ── EVOLUCIÓN MENSUAL DE PLANTAS POR PAQUETE (rúcula) ──
+  const MESES_CORTO_ANIO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  const anioActual = hoy.getFullYear();
+  const accPlantasPaq: number[][] = Array.from({ length: 12 }, () => []);
+  for (const l of lotes) {
+    if (l.estado !== 'cosechado' || !l.fecha_cosecha || !esRuculaV(l.variedad)) continue;
+    const f = new Date(String(l.fecha_cosecha) + 'T12:00:00');
+    if (isNaN(f.getTime()) || f.getFullYear() !== anioActual) continue;
+    const ppu = Number(l.plantas_por_unidad_real);
+    if (!(ppu > 1)) continue; // 1 = sin dato real cargado
+    accPlantasPaq[f.getMonth()].push(ppu);
+  }
+  const plantasPaqSerie = accPlantasPaq.map(xs => xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : 0);
+  const evoPlantasPaq = {
+    series: [{ nombre: 'Rúcula', color: '#166534', puntos: plantasPaqSerie.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) }],
+    labels: MESES_CORTO_ANIO,
+    hoyIdx: hoy.getMonth(),
+  };
 
   // ── CICLOS POR MESADA ──
   // Para cada mesada: promedio de dias_f1, dias_f2 de cosechados cuyo historial de movimientos
@@ -157,15 +189,16 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     return porVariedad;
   }
 
-  // Peso promedio por lote cosechado (gr por paquete)
-  const pesoLoteMap = new Map<string, { gr: number; esRucula: boolean }>();
+  // Peso promedio y plantas/paquete por lote cosechado
+  const pesoLoteMap = new Map<string, { gr: number; ppu: number; esRucula: boolean }>();
   for (const l of cosechados) {
     const gr = Number(l.peso_muestra_paquete_gr) > 0
       ? Number(l.peso_muestra_paquete_gr)
       : Number(l.peso_muestra_kg) > 0 ? Math.round(Number(l.peso_muestra_kg) * 1000) : 0;
-    if (gr > 0) {
+    const ppu = Number(l.plantas_por_unidad_real) || 0;
+    if (gr > 0 || ppu > 0) {
       const v = String(l.variedad || '').toLowerCase();
-      pesoLoteMap.set(l.id_lote, { gr, esRucula: v.includes('rucula') || v.includes('rúcula') });
+      pesoLoteMap.set(l.id_lote, { gr, ppu, esRucula: v.includes('rucula') || v.includes('rúcula') });
     }
   }
 
@@ -188,6 +221,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     lechugaF1: number; lechugaF2: number; lechugaTotal: number; lechugaN: number;
     ruculaF2: number; ruculaTotal: number; ruculaN: number;
     pesoGrLechuga: number; pesoGrRucula: number;
+    plantasPaqLechuga: number; plantasPaqRucula: number;
   }
   const ciclosMesadas: CicloMesada[] = [];
   const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0;
@@ -210,6 +244,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
     const lF1: number[] = [], lF2: number[] = [], rF2: number[] = [];
     const pLech: number[] = [], pRuc: number[] = [];
+    const ppLech: number[] = [], ppRuc: number[] = [];
 
     // Ciclos: via movimientos (lotes que tuvieron destino = esta mesada, misma nave)
     for (const idLote of lotesEnMesada) {
@@ -221,12 +256,14 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
       else { if (d.f1 !== null && d.f1 > 0) lF1.push(d.f1); if (d.f2 > 0) lF2.push(d.f2); }
     }
 
-    // Peso: via ubicacion_actual (guarda la mesada donde estaba al cosechar), matching normalizado + nave
+    // Peso y plantas/paquete: via ubicacion_actual (guarda la mesada donde estaba al cosechar), matching normalizado + nave
     for (const l of cosechados) {
       if (normMes(l.ubicacion_actual) !== mesKey) continue;
       if (naveDe(l.ubicacion_actual) !== mesNave) continue;
       const p = pesoLoteMap.get(l.id_lote);
-      if (p) (p.esRucula ? pRuc : pLech).push(p.gr);
+      if (!p) continue;
+      if (p.gr > 0) (p.esRucula ? pRuc : pLech).push(p.gr);
+      if (p.ppu > 0) (p.esRucula ? ppRuc : ppLech).push(p.ppu);
     }
 
     ciclosMesadas.push({
@@ -237,6 +274,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
       lechugaN: Math.max(lF1.length, lF2.length),
       ruculaF2: avg(rF2), ruculaTotal: avg(rF2), ruculaN: rF2.length,
       pesoGrLechuga: avg(pLech), pesoGrRucula: avg(pRuc),
+      plantasPaqLechuga: avg(ppLech), plantasPaqRucula: avg(ppRuc),
     });
   }
 
@@ -250,11 +288,37 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
         cultivo: esRuc ? 'Rúcula' : 'Lechuga',
         cultivoOrden: esRuc ? 1 : 0, // lechuga primero
         f2: esRuc ? m.ruculaF2 : m.lechugaF2,
+        plantasPorPaq: esRuc ? m.plantasPaqRucula : m.plantasPaqLechuga,
         peso: esRuc ? m.pesoGrRucula : m.pesoGrLechuga,
         n: esRuc ? m.ruculaN : m.lechugaN,
       };
     })
     .sort((a, b) => a.cultivoOrden - b.cultivoOrden || a.nave - b.nave || a.nombre.localeCompare(b.nombre));
+
+  // Semáforo: compara cada mesada contra el promedio de mesadas del mismo cultivo
+  // (ciclo: menos días es mejor · peso: más gramos es mejor)
+  function promedioCultivo(cultivo: string, campo: 'f2' | 'peso'): number {
+    const vals = filasTabla.filter(f => f.cultivo === cultivo && f[campo] > 0).map(f => f[campo]);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+  }
+  const promedios: Record<string, { f2: number; peso: number }> = {
+    Lechuga: { f2: promedioCultivo('Lechuga', 'f2'), peso: promedioCultivo('Lechuga', 'peso') },
+    Rúcula: { f2: promedioCultivo('Rúcula', 'f2'), peso: promedioCultivo('Rúcula', 'peso') },
+  };
+  function semaforo(valor: number, promedio: number, masEsMejor: boolean): string {
+    if (valor <= 0 || promedio <= 0) return '#d1d5db';
+    const ratio = valor / promedio;
+    const mejor = masEsMejor ? ratio >= 1.05 : ratio <= 0.95;
+    const peor = masEsMejor ? ratio <= 0.95 : ratio >= 1.05;
+    return mejor ? '#059669' : peor ? '#dc2626' : '#d97706';
+  }
+  const filasConColor = filasTabla.map(f => ({
+    ...f,
+    colorF2: semaforo(f.f2, promedios[f.cultivo].f2, false),
+    colorPeso: semaforo(f.peso, promedios[f.cultivo].peso, true),
+  }));
+  const filasLechuga = filasConColor.filter(f => f.cultivo === 'Lechuga');
+  const filasRucula = filasConColor.filter(f => f.cultivo === 'Rúcula');
 
   const nombre = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
 
@@ -295,7 +359,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
               ))}
             </div>
           </div>
-          <GraficoEvolucion series={evo.series} labels={evo.labels} hoyIdx={evo.hoyIdx} />
+          <GraficoEvolucion series={evo.series} pesoSeries={evo.pesoSeries} labels={evo.labels} hoyIdx={evo.hoyIdx} />
         </div>
 
         {/* Tabla mes actual */}
@@ -345,6 +409,13 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
           <GraficoPesaje puntos={puntosPesaje} />
         </div>
 
+        {/* Plantas por paquete — rúcula */}
+        <div className="card">
+          <p className="card-title">Evolución de plantas por paquete — Rúcula</p>
+          <p className="card-sub">Promedio mensual · {anioActual}</p>
+          <GraficoEvolucion series={evoPlantasPaq.series} labels={evoPlantasPaq.labels} hoyIdx={evoPlantasPaq.hoyIdx} unidad=" pl/paq" />
+        </div>
+
         {/* Ciclos por mesada */}
         <div className="card">
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'10px', flexWrap:'wrap', gap:'8px' }}>
@@ -379,38 +450,49 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             : <GraficoCiclosMesadas datos={ciclosMesadas} />
           }
 
-          {/* Tabla detallada */}
+          {/* Tabla detallada, separada por cultivo */}
           {ciclosMesadas.length > 0 && (
-            <div style={{ marginTop:'16px', overflowX:'auto' }}>
-              <table style={{ fontSize:'12px' }}>
-                <thead>
-                  <tr>
-                    <th>Cultivo</th>
-                    <th>Mesada</th>
-                    <th style={{ textAlign:'center' }}>Nave</th>
-                    <th style={{ textAlign:'right' }}>Ciclo F2 prom.</th>
-                    <th style={{ textAlign:'right', color:'#ea580c' }}>Peso prom.</th>
-                    <th style={{ textAlign:'right', color:'#9ca3af', fontSize:'11px' }}>N cosechas</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filasTabla.map((m, i) => {
-                    const colCultivo = m.cultivo==='Rúcula' ? '#166534' : '#4d7c0f';
-                    return (
-                      <tr key={i} style={{ borderBottom:'1px solid #f3f4f6' }}>
-                        <td><span style={{ color:colCultivo, fontWeight:600 }}>{m.cultivo}</span></td>
-                        <td style={{ fontWeight:500 }}>{m.nombre}</td>
-                        <td style={{ textAlign:'center' }}>
-                          <span style={{ background:m.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 6px', borderRadius:'3px', fontSize:'10px', fontWeight:700 }}>N{m.nave}</span>
-                        </td>
-                        <td style={{ textAlign:'right', fontWeight:600, color:m.f2>0?colCultivo:'#d1d5db' }}>{m.f2>0?m.f2+'d':'—'}</td>
-                        <td style={{ textAlign:'right', fontWeight:600, color:m.peso>0?'#ea580c':'#d1d5db' }}>{m.peso>0?m.peso+'g':'—'}</td>
-                        <td style={{ textAlign:'right', color:'#9ca3af' }}>{m.n}</td>
+            <div style={{ marginTop:'16px' }}>
+              <div style={{ display:'flex', gap:'14px', marginBottom:'12px', fontSize:'11px', color:'#6b7280', flexWrap:'wrap' }}>
+                <span>Semáforo vs. promedio del mismo cultivo:</span>
+                <span style={{ display:'flex', alignItems:'center', gap:'4px' }}><span style={{ width:8, height:8, borderRadius:'50%', background:'#059669', display:'inline-block' }} />mejor</span>
+                <span style={{ display:'flex', alignItems:'center', gap:'4px' }}><span style={{ width:8, height:8, borderRadius:'50%', background:'#d97706', display:'inline-block' }} />similar</span>
+                <span style={{ display:'flex', alignItems:'center', gap:'4px' }}><span style={{ width:8, height:8, borderRadius:'50%', background:'#dc2626', display:'inline-block' }} />peor</span>
+              </div>
+              {[
+                { titulo: '🥬 Lechuga', color: '#4d7c0f', filas: filasLechuga },
+                { titulo: '🌿 Rúcula', color: '#166534', filas: filasRucula },
+              ].map(({ titulo, color, filas }) => filas.length > 0 && (
+                <div key={titulo} style={{ marginBottom:'18px', overflowX:'auto' }}>
+                  <p style={{ margin:'0 0 8px', fontSize:'13px', fontWeight:700, color }}>{titulo}</p>
+                  <table style={{ fontSize:'12px' }}>
+                    <thead>
+                      <tr>
+                        <th>Mesada</th>
+                        <th style={{ textAlign:'center' }}>Nave</th>
+                        <th style={{ textAlign:'right' }}>Ciclo F2 prom.</th>
+                        <th style={{ textAlign:'right' }}>Plantas/paquete</th>
+                        <th style={{ textAlign:'right', color:'#ea580c' }}>Peso prom.</th>
+                        <th style={{ textAlign:'right', color:'#9ca3af', fontSize:'11px' }}>N cosechas</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {filas.map((m, i) => (
+                        <tr key={i} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                          <td style={{ fontWeight:500 }}>{m.nombre}</td>
+                          <td style={{ textAlign:'center' }}>
+                            <span style={{ background:m.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 6px', borderRadius:'3px', fontSize:'10px', fontWeight:700 }}>N{m.nave}</span>
+                          </td>
+                          <td style={{ textAlign:'right', fontWeight:700, color:m.colorF2 }}>{m.f2>0?m.f2+'d':'—'}</td>
+                          <td style={{ textAlign:'right', color:'#374151' }}>{m.plantasPorPaq>0?m.plantasPorPaq:'—'}</td>
+                          <td style={{ textAlign:'right', fontWeight:700, color:m.colorPeso }}>{m.peso>0?m.peso+'g':'—'}</td>
+                          <td style={{ textAlign:'right', color:'#9ca3af' }}>{m.n}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
             </div>
           )}
         </div>
