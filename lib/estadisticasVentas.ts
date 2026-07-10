@@ -84,6 +84,15 @@ function getPrecio(precios: PrecioVenta[], id_control: string, sucursal: string,
   return Number((row as any)[key] || 0);
 }
 
+// Precio final que cobra el cliente (IVA incluido). En Factura A el precio cargado en
+// la planilla es neto (se le suma 10,5% de IVA); en Factura B el precio cargado ya es
+// el final, no se le suma nada.
+const IVA_FACTURA_A = 1.105;
+function precioFinal(precios: PrecioVenta[], id_control: string, sucursal: string, key: string, cliente?: ClienteVenta): number {
+  const base = getPrecio(precios, id_control, sucursal, key, cliente?.sucursales);
+  return cliente?.tipo_factura === 'A' ? base * IVA_FACTURA_A : base;
+}
+
 // ── Evolución de venta por artículo (unidades: paquetes de rúcula, plantas de lechuga/albahaca) ──
 export interface PuntoArticulo { mes: string; label: string; rucula: number; lechuga: number; albahaca: number }
 export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas: VentaHistorica[] = []): PuntoArticulo[] {
@@ -160,7 +169,7 @@ function construirEvolucionCliente(
   return { meses, series, puntos };
 }
 
-// ── Evolución del precio promedio de venta (ARS, ponderado por unidades) — rúcula y lechuga por separado ──
+// ── Evolución del precio promedio de venta (ARS final, IVA incluido, ponderado por unidades) — rúcula y lechuga por separado ──
 // Solo se promedian ventas en la misma unidad (paquete/planta). Se excluyen bandeja_rucula,
 // rucula_kg y lechuga_kg: son otra unidad de venta (bandeja o kg) con precio no comparable
 // al de paquete/planta, y mezclarlos en el mismo promedio ponderado lo distorsiona hacia arriba.
@@ -178,7 +187,7 @@ export function evolucionPrecioPromedio(ventas: VentaDia[], precios: PrecioVenta
       for (const key of keys) {
         const qty = Number((v as any)[key]) || 0;
         if (qty <= 0) continue;
-        ingresos += qty * getPrecio(precios, v.id_control, v.sucursal, key, cliente?.sucursales);
+        ingresos += qty * precioFinal(precios, v.id_control, v.sucursal, key, cliente);
         unidades += qty;
       }
     }
@@ -213,7 +222,7 @@ export function resumenMesActual(ventas: VentaDia[], precios: PrecioVenta[], cli
       if (qty <= 0) continue;
       unidades += qty;
       if ((PRICE_KEYS as readonly string[]).includes(key)) {
-        ingresosComparables += qty * getPrecio(precios, v.id_control, v.sucursal, key, cliente?.sucursales);
+        ingresosComparables += qty * precioFinal(precios, v.id_control, v.sucursal, key, cliente);
         unidadesComparables += qty;
       }
     }
@@ -222,8 +231,9 @@ export function resumenMesActual(ventas: VentaDia[], precios: PrecioVenta[], cli
   const diaDelMes = hoy.getDate();
   const diasEnMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).getDate();
   const proyeccionMes = diaDelMes > 0 ? Math.round((unidades / diaDelMes) * diasEnMes) : 0;
-  // Precio promedio: solo ventas por paquete/planta (mismo criterio que evolucionPrecioPromedio) —
-  // mezclar bandeja/kg inflaba el promedio al combinar unidades de venta distintas.
+  // Precio promedio final (IVA incluido): solo ventas por paquete/planta (mismo criterio
+  // que evolucionPrecioPromedio) — mezclar bandeja/kg inflaba el promedio al combinar
+  // unidades de venta distintas.
   const precioPromedioMes = unidadesComparables > 0 ? Math.round((ingresosComparables / unidadesComparables) * 100) / 100 : 0;
   return { unidadesMes: unidades, proyeccionMes, precioPromedioMes };
 }

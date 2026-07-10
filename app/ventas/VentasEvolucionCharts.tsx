@@ -120,7 +120,7 @@ export function GraficoPrecioPromedio({ datos }: { datos: PuntoPrecio[] }) {
       : null;
   return (
     <div style={cardStyle}>
-      <p style={titleStyle}>Evolución del precio promedio <span style={{ fontWeight: 400, color: '#9ca3af' }}>· $ ARS, ponderado por unidades</span></p>
+      <p style={titleStyle}>Evolución del precio promedio <span style={{ fontWeight: 400, color: '#9ca3af' }}>· $ ARS final (IVA incluido), ponderado por unidades</span></p>
       <ResponsiveContainer width="100%" height={220}>
         <LineChart data={datos} margin={{ top: 16, right: 40, left: 0, bottom: 0 }}>
           <CartesianGrid stroke={GRID} vertical={false} />
