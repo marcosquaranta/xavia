@@ -204,13 +204,22 @@ export function evolucionPrecioPromedio(ventas: VentaDia[], precios: PrecioVenta
   });
 }
 
-// ── Resumen del mes en curso: unidades vendidas, proyección (por proporción del mes
-// transcurrido) y precio promedio — para la tarjeta de Indicadores ──
+// ── Resumen de un mes: unidades vendidas, proyección (por proporción del mes
+// transcurrido) y precio promedio — para la tarjeta de Indicadores.
+// `fechaRef` fija el mes objetivo (por defecto hoy); `diaCorte` permite recortar ese mes
+// hasta un día puntual (para comparar "lo que va del mes" contra el mismo tramo del mes
+// pasado). Sin diaCorte usa el día de fechaRef (o el mes completo si fechaRef ya pasó).
 export interface ResumenMesActual { unidadesMes: number; proyeccionMes: number; precioPromedioMes: number }
-export function resumenMesActual(ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[]): ResumenMesActual {
-  const hoy = new Date();
-  const mk = mesKey(hoy.toISOString().slice(0, 10));
-  const delMes = ventas.filter((v) => mesKey(v.fecha) === mk);
+export function resumenMesActual(
+  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], fechaRef: Date = new Date(), diaCorte?: number
+): ResumenMesActual {
+  const mk = mesKey(fechaRef.toISOString().slice(0, 10));
+  const corte = diaCorte ?? fechaRef.getDate();
+  const delMes = ventas.filter((v) => {
+    if (mesKey(v.fecha) !== mk) return false;
+    const dia = Number(String(v.fecha).split(/[T ]/)[0].split('-')[2]);
+    return !dia || dia <= corte;
+  });
   const clienteMap = new Map(clientes.map((c) => [c.id_control, c]));
 
   const PRICE_KEYS = [...KEYS_RUCULA, ...KEYS_LECHUGA, 'albahaca'] as const;
@@ -228,9 +237,8 @@ export function resumenMesActual(ventas: VentaDia[], precios: PrecioVenta[], cli
     }
   }
 
-  const diaDelMes = hoy.getDate();
-  const diasEnMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).getDate();
-  const proyeccionMes = diaDelMes > 0 ? Math.round((unidades / diaDelMes) * diasEnMes) : 0;
+  const diasEnMes = new Date(fechaRef.getFullYear(), fechaRef.getMonth() + 1, 0).getDate();
+  const proyeccionMes = corte > 0 ? Math.round((unidades / corte) * diasEnMes) : 0;
   // Precio promedio final (IVA incluido): solo ventas por paquete/planta (mismo criterio
   // que evolucionPrecioPromedio) — mezclar bandeja/kg inflaba el promedio al combinar
   // unidades de venta distintas.

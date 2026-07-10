@@ -630,3 +630,25 @@ export function ciclosPorMesYAnioDetalle(
   } catch {}
   return result;
 }
+
+// ── Peso promedio de cosecha por cultivo (gr/paquete) en un mes, para la tarjeta de
+// Indicadores. `fechaRef` fija el mes objetivo; `diaCorte` recorta ese mes hasta un día
+// puntual (para comparar contra el mismo tramo del mes pasado). ──
+export interface PesoPromedioMes { rucula: number; lechuga: number }
+export function pesoPromedioMes(lotes: Lote[], fechaRef: Date = new Date(), diaCorte?: number): PesoPromedioMes {
+  const corte = diaCorte ?? fechaRef.getDate();
+  const acc = { rucula: [] as number[], lechuga: [] as number[] };
+  for (const l of lotes) {
+    if (l.estado !== 'cosechado' || !l.fecha_cosecha) continue;
+    const f = safeParseDate(l.fecha_cosecha);
+    if (!f || f.getFullYear() !== fechaRef.getFullYear() || f.getMonth() !== fechaRef.getMonth() || f.getDate() > corte) continue;
+    const gr = Number(l.peso_muestra_paquete_gr) > 0
+      ? Number(l.peso_muestra_paquete_gr)
+      : Number(l.peso_muestra_kg) > 0 ? Math.round(Number(l.peso_muestra_kg) * 1000) : 0;
+    if (gr <= 0) continue;
+    const v = String(l.variedad || '').toLowerCase();
+    (v.includes('rucula') || v.includes('rúcula') ? acc.rucula : acc.lechuga).push(gr);
+  }
+  const avg = (xs: number[]) => xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0;
+  return { rucula: avg(acc.rucula), lechuga: avg(acc.lechuga) };
+}

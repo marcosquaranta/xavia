@@ -3,6 +3,8 @@ import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { estadisticasDelMes } from '@/lib/estadisticas';
 import { calcularDiasPorFase } from '@/lib/lotes';
+import { calcularCapacidad, diasCicloDefault } from '@/lib/planificacionServer';
+import { calcularPlan, repartoHelpers, parseReparto, REPARTO_DEFAULT, DIA_SIEMBRA, CUB, CUBPOSRUC, planchas } from '@/lib/planificacion';
 import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
@@ -19,11 +21,13 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   const evoModo = (searchParams.evo === 'trimestre' ? 'trimestre' : 'anio') as 'anio' | 'trimestre';
 
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [];
+  let configRows: { clave: string; valor: any }[] = [];
   let err: string | null = null;
   try {
-    [lotes, movimientos, ubicaciones] = await Promise.all([
+    [lotes, movimientos, ubicaciones, configRows] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<Ubicacion>('Ubicaciones'),
+      readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
     ]);
   } catch (e: any) { err = e?.message || 'Error cargando datos'; }
 
@@ -134,6 +138,38 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     labels: MESES_CORTO_ANIO,
     hoyIdx: hoy.getMonth(),
   };
+
+  // ── SIEMBRA DEL MES: real (lotes sembrados) vs. lo que el plan indica ──
+  let siembraRealRucPl = 0, siembraRealLecPl = 0, siembraPlanRucPl = 0, siembraPlanLecPl = 0;
+  try {
+    const naves = calcularCapacidad(ubicaciones);
+    const plan = calcularPlan(naves, diasCicloDefault(lotes, movimientos));
+    const cfgRep = configRows.find(i => i.clave === 'plan_reparto');
+    const reparto = cfgRep ? parseReparto(cfgRep.valor) : REPARTO_DEFAULT;
+    const h = repartoHelpers(plan, reparto);
+    const plPorSiembraRuc = planchas(h.siembraRucPl);
+    const plPorSiembraLec = planchas(h.siembraLecPl);
+
+    // Miércoles (día de siembra) transcurridos este mes, hasta hoy inclusive
+    const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    let diasSiembraTranscurridos = 0;
+    for (let d = new Date(inicioMes); d <= hoy; d.setDate(d.getDate() + 1)) {
+      if (d.getDay() === DIA_SIEMBRA) diasSiembraTranscurridos++;
+    }
+    siembraPlanRucPl = plPorSiembraRuc * diasSiembraTranscurridos;
+    siembraPlanLecPl = plPorSiembraLec * diasSiembraTranscurridos;
+
+    // Real: lotes sembrados este mes, convertidos a planchas con el mismo criterio del plan
+    let sumPosRuc = 0, sumPlLec = 0;
+    for (const l of lotes) {
+      const f = new Date(String(l.fecha_siembra) + 'T12:00:00');
+      if (isNaN(f.getTime()) || f.getFullYear() !== hoy.getFullYear() || f.getMonth() !== hoy.getMonth()) continue;
+      const cant = Number(l.plantines_iniciales) || 0;
+      if (esRuculaV(l.variedad)) sumPosRuc += cant; else sumPlLec += cant;
+    }
+    siembraRealRucPl = planchas(sumPosRuc * CUBPOSRUC / CUB);
+    siembraRealLecPl = planchas(sumPlLec / CUB);
+  } catch {}
 
   // ── CICLOS POR MESADA ──
   // Para cada mesada: promedio de dias_f1, dias_f2 de cosechados cuyo historial de movimientos
@@ -495,6 +531,42 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
               ))}
             </div>
           )}
+        </div>
+
+        {/* Siembra del mes: real vs. lo que indica el plan */}
+        <div className="card">
+          <p className="card-title">Siembra — {nombre}</p>
+          <p className="card-sub">Planchas sembradas en lo que va del mes vs. lo que el plan de siembra indica a esta altura</p>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
+            {[
+              { label: 'Rúcula', color: '#166534', real: siembraRealRucPl, plan: siembraPlanRucPl },
+              { label: 'Lechuga', color: '#4d7c0f', real: siembraRealLecPl, plan: siembraPlanLecPl },
+            ].map(c => {
+              const dif = c.plan > 0 ? Math.round(((c.real - c.plan) / c.plan) * 100) : null;
+              return (
+                <div key={c.label} style={{ background:'white', border:'1px solid #e5e7eb', borderTop:`3px solid ${c.color}`, borderRadius:'8px', padding:'12px 14px' }}>
+                  <p style={{ margin:'0 0 8px', fontSize:'12px', fontWeight:700, color:c.color, textTransform:'uppercase' }}>{c.label}</p>
+                  <div style={{ display:'flex', gap:'20px' }}>
+                    <div>
+                      <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#9ca3af' }}>Sembrado</p>
+                      <p style={{ margin:0, fontSize:'22px', fontWeight:800, color:'#111827' }}>{c.real}</p>
+                    </div>
+                    <div>
+                      <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#9ca3af' }}>Plan indica</p>
+                      <p style={{ margin:0, fontSize:'22px', fontWeight:800, color:'#6b7280' }}>{c.plan}</p>
+                    </div>
+                  </div>
+                  {dif !== null ? (
+                    <p style={{ margin:'8px 0 0', fontSize:'13px', fontWeight:700, color:dif>=0?'#059669':'#dc2626' }}>
+                      {dif>=0?'↑':'↓'} {Math.abs(dif)}% vs. plan
+                    </p>
+                  ) : (
+                    <p style={{ margin:'8px 0 0', fontSize:'11px', color:'#9ca3af' }}>Sin referencia de plan para este mes.</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     </>

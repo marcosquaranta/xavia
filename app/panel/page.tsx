@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
-import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad } from '@/lib/estadisticas';
+import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes } from '@/lib/estadisticas';
 import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica } from '@/lib/types';
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
@@ -107,13 +107,26 @@ export default async function PanelPage({ searchParams }: {
 
   // ── Evolución de venta por artículo + indicadores del mes (mismo cálculo que Ventas) ──
   const evolArticuloPanel = evolucionVentaPorArticulo(ventasPanel, 12, historicasPanel);
-  const resumenMesPanel = resumenMesActual(ventasPanel, preciosPanel, clientesPanel);
+  const ahora = new Date();
+  const mesPasadoRef = new Date(ahora); mesPasadoRef.setMonth(mesPasadoRef.getMonth() - 1);
+  const resumenMesPanel = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, ahora);
+  // Comparable: mismo tramo (mismo día del mes) del mes pasado, para "venta al día" y precio.
+  const resumenMesPasadoComparable = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, mesPasadoRef, ahora.getDate());
+  // Mes pasado completo, para comparar contra la proyección (que estima un mes entero).
+  const resumenMesPasadoCompleto = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, mesPasadoRef);
+  const pesoMesPanel = pesoPromedioMes(lotes, ahora);
+  const pesoMesPasadoPanel = pesoPromedioMes(lotes, mesPasadoRef, ahora.getDate());
   const ocupNaves = tubosMesadas.map((n: any) => {
     const f2 = (n.mesadas || []).filter((m: any) => m.sector_fase !== 'fase_1');
     const tot = f2.reduce((s: number, m: any) => s + m.tubos_totales, 0);
     const ocu = f2.reduce((s: number, m: any) => s + m.tubos_ocupados, 0);
     return { nave: n.nave, pct: tot > 0 ? Math.round(ocu / tot * 100) : 0 };
   });
+  // % de variación vs. la referencia de "mes pasado" que corresponda a cada indicador.
+  function pctVs(actual: number, ref: number): number | null {
+    if (!ref) return null;
+    return Math.round(((actual - ref) / ref) * 100);
+  }
 
   // Ocupación solo F2
   const mesadasF2 = tubosMesadas.flatMap((n:any) => (n.mesadas||[]).filter((m:any) => m.sector_fase !== 'fase_1'));
@@ -348,20 +361,40 @@ export default async function PanelPage({ searchParams }: {
             <p style={{ margin:'0 0 12px', fontSize:'13px', fontWeight:700, color:'#111827' }}>Indicadores</p>
             <div style={{ display:'flex', flexDirection:'column', gap:'7px' }}>
               {[
-                { label: 'Venta total mes al día', valor: `${resumenMesPanel.unidadesMes.toLocaleString('es-AR')} u` },
-                { label: 'Venta total mes proyectada', valor: `${resumenMesPanel.proyeccionMes.toLocaleString('es-AR')} u` },
-                { label: 'Ciclo actual rúcula', valor: ultSem?.rucula ? `${ultSem.rucula}d` : '—' },
-                { label: 'Ciclo actual lechuga', valor: ultSem?.lechugaF2 ? `${ultSem.lechugaF2}d` : '—' },
-                { label: 'Precio promedio actual', valor: `$${Math.round(resumenMesPanel.precioPromedioMes).toLocaleString('es-AR')}` },
-                { label: 'Ocupación N1', valor: `${ocupNaves.find((n:any)=>n.nave===1)?.pct ?? 0}%` },
-                { label: 'Ocupación N2', valor: `${ocupNaves.find((n:any)=>n.nave===2)?.pct ?? 0}%` },
-              ].map((it) => (
-                <div key={it.label} style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', borderBottom:'1px solid #f1f0eb', paddingBottom:'6px' }}>
-                  <span style={{ fontSize:'11.5px', color:'#52514e' }}>{it.label}</span>
-                  <strong style={{ fontSize:'15px', color:'#111827' }}>{it.valor}</strong>
-                </div>
-              ))}
+                { label: 'Venta total mes al día', valor: `${resumenMesPanel.unidadesMes.toLocaleString('es-AR')} u`,
+                  pct: pctVs(resumenMesPanel.unidadesMes, resumenMesPasadoComparable.unidadesMes), mejorSiSube: true },
+                { label: 'Venta total mes proyectada', valor: `${resumenMesPanel.proyeccionMes.toLocaleString('es-AR')} u`,
+                  pct: pctVs(resumenMesPanel.proyeccionMes, resumenMesPasadoCompleto.unidadesMes), mejorSiSube: true },
+                { label: 'Ciclo actual rúcula', valor: ultSem?.rucula ? `${ultSem.rucula}d` : '—',
+                  pct: varPctSem(ultSem?.rucula, antSem?.rucula), mejorSiSube: false },
+                { label: 'Ciclo actual lechuga', valor: ultSem?.lechugaF2 ? `${ultSem.lechugaF2}d` : '—',
+                  pct: varPctSem(ultSem?.lechugaF2, antSem?.lechugaF2), mejorSiSube: false },
+                { label: 'Precio promedio actual', valor: `$${Math.round(resumenMesPanel.precioPromedioMes).toLocaleString('es-AR')}`,
+                  pct: pctVs(resumenMesPanel.precioPromedioMes, resumenMesPasadoCompleto.precioPromedioMes), mejorSiSube: true },
+                { label: 'Peso promedio rúcula (paq)', valor: pesoMesPanel.rucula > 0 ? `${pesoMesPanel.rucula}g` : '—',
+                  pct: pctVs(pesoMesPanel.rucula, pesoMesPasadoPanel.rucula), mejorSiSube: true },
+                { label: 'Peso promedio lechuga (paq)', valor: pesoMesPanel.lechuga > 0 ? `${pesoMesPanel.lechuga}g` : '—',
+                  pct: pctVs(pesoMesPanel.lechuga, pesoMesPasadoPanel.lechuga), mejorSiSube: true },
+                { label: 'Ocupación N1', valor: `${ocupNaves.find((n:any)=>n.nave===1)?.pct ?? 0}%`, pct: null, mejorSiSube: true },
+                { label: 'Ocupación N2', valor: `${ocupNaves.find((n:any)=>n.nave===2)?.pct ?? 0}%`, pct: null, mejorSiSube: true },
+              ].map((it) => {
+                const bueno = it.pct === null ? null : it.mejorSiSube ? it.pct > 0 : it.pct < 0;
+                return (
+                  <div key={it.label} style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', borderBottom:'1px solid #f1f0eb', paddingBottom:'6px' }}>
+                    <span style={{ fontSize:'11.5px', color:'#52514e' }}>{it.label}</span>
+                    <span style={{ display:'flex', alignItems:'baseline', gap:'6px' }}>
+                      <strong style={{ fontSize:'15px', color:'#111827' }}>{it.valor}</strong>
+                      {it.pct !== null && (
+                        <span style={{ fontSize:'10px', fontWeight:700, color: bueno===null?'#9ca3af':bueno?'#059669':'#dc2626' }}>
+                          {it.pct > 0 ? '↑' : it.pct < 0 ? '↓' : '·'} {Math.abs(it.pct)}%
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
+            <p style={{ margin:'10px 0 0', fontSize:'10px', color:'#9ca3af' }}>% vs. mes pasado (ocupación: sin histórico para comparar)</p>
           </div>
         </div>
 
