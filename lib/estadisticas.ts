@@ -169,115 +169,83 @@ export function variacionVsMesAnterior(lotes: Lote[], clave: keyof ResumenCultiv
   } catch { return null; }
 }
 
-// === DISTRIBUCIÓN DE LOTES POR SEMANA DE CICLO ===
+// === PROYECCIÓN DE COSECHA SEMANAL (calendario, desde la semana actual en adelante) ===
 
-export interface BarraSemana {
-  semana: number;
-  plantas_f1: number;
-  plantas_f2: number;
-  plantas_cosechadas?: number;
-  lotes: string[];
-}
+export interface PuntoProyeccionCosecha { semana: string; label: string; rucula: number; lechuga: number }
 
-export interface DatosCicloGrafico {
-  barras: BarraSemana[];
-  semanasCosecha: number;  // semana estimada de cosecha según la variedad
-  factorPaq: number;       // plantas por paquete promedio de las variedades del cultivo
+function lunesDe(d: Date): Date {
+  const r = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dow = r.getDay();
+  r.setDate(r.getDate() - (dow === 0 ? 6 : dow - 1));
+  return r;
 }
 
 /**
- * Agrupa los lotes activos en F1/F2 por semana de ciclo (días desde siembra ÷ 7).
- * Excluye plantinera porque no ocupa espacio en mesadas.
- * Usa el promedio de días estimados de las variedades del cultivo para marcar la línea de cosecha.
+ * Para cada lote activo, estima la fecha de cosecha (siembra + ciclo real de su variedad,
+ * o el estimado de la hoja Variedades) y suma los paquetes esperados en la semana
+ * calendario correspondiente — sin distinguir F1/F2. Los lotes vencidos (fecha estimada ya
+ * pasada) se cuentan en la semana actual. Devuelve `semanas` puntos, desde la semana
+ * actual en adelante, con fecha real de cada semana.
  */
-export function distribucionPorSemana(
-  lotes: Lote[],
-  variedades: import('./types').Variedad[],
-  cultivo: 'lechuga' | 'rucula'
-): DatosCicloGrafico {
-  const hoy = new Date();
-  const hace7dias = new Date(hoy);
-  hace7dias.setDate(hace7dias.getDate() - 7);
+export function proyeccionCosechaSemanal(
+  lotes: Lote[], variedades: import('./types').Variedad[], semanas = 8
+): PuntoProyeccionCosecha[] {
+  const lunesActual = lunesDe(new Date());
+  const ciclosMap = cicloRealPorVariedad(lotes, [], 5);
+  const variedadMap = new Map(variedades.map((v) => [v.variedad, v]));
 
-  function matchCultivo(v: string): boolean {
+  function cultivoDe(v: string): 'rucula' | 'lechuga' | null {
     const vl = String(v || '').toLowerCase();
-    if (cultivo === 'rucula') return vl.includes('rucula') || vl.includes('rúcula');
-    return !vl.includes('rucula') && !vl.includes('rúcula') && !vl.includes('albahaca');
+    if (vl.includes('rucula') || vl.includes('rúcula')) return 'rucula';
+    if (vl.includes('albahaca')) return null;
+    return 'lechuga';
+  }
+  function cicloEstimado(variedad: string, rucula: boolean): number {
+    const real = ciclosMap.get(variedad);
+    if (real && real > 0) return real;
+    const v = variedadMap.get(variedad);
+    if (v && Number(v.dias_estimados_cosecha) > 0) return Number(v.dias_estimados_cosecha);
+    return rucula ? 30 : 78;
+  }
+  function factorPaq(variedad: string, rucula: boolean): number {
+    const v = variedadMap.get(variedad);
+    const f = v ? Number(v.plantas_por_unidad_esperado) : 0;
+    return f > 0 ? f : (rucula ? 3 : 1);
   }
 
-  const mapa = new Map<number, BarraSemana>();
+  const semanasArr = Array.from({ length: semanas }, (_, i) => {
+    const d = new Date(lunesActual); d.setDate(d.getDate() + i * 7);
+    return d;
+  });
+  const claveDe = (d: Date) => d.toISOString().slice(0, 10);
+  const labelDe = (d: Date) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
 
-  // Lotes activos en F1/F2
-  const activos = lotes.filter((l) =>
-    l.estado === 'activo' &&
-    (l.fase_actual === 'fase_1' || l.fase_actual === 'fase_2') &&
-    matchCultivo(l.variedad)
-  );
+  const mapa = new Map<string, { rucula: number; lechuga: number }>();
+  for (const d of semanasArr) mapa.set(claveDe(d), { rucula: 0, lechuga: 0 });
 
-  for (const l of activos) {
+  for (const l of lotes.filter((l) => l.estado === 'activo')) {
+    const cultivo = cultivoDe(l.variedad);
+    if (!cultivo) continue;
     const siembra = safeParseDate2(l.fecha_siembra);
     if (!siembra) continue;
-    const diasVida = Math.max(0, Math.round((hoy.getTime() - siembra.getTime()) / 86400000));
-    const semana = Math.max(1, Math.ceil(diasVida / 7));
+    const rucula = cultivo === 'rucula';
+    const ciclo = cicloEstimado(l.variedad, rucula);
+    const fechaEst = new Date(siembra); fechaEst.setDate(fechaEst.getDate() + ciclo);
+    let lunesEst = lunesDe(fechaEst);
+    if (lunesEst < lunesActual) lunesEst = lunesActual; // vencido → cuenta en la semana actual
+    const key = claveDe(lunesEst);
+    if (!mapa.has(key)) continue; // más allá de la ventana visible
+
     const plantas = Number(l.plantas_estimadas_actual) || Number(l.plantines_iniciales) || 0;
-    if (!mapa.has(semana)) mapa.set(semana, { semana, plantas_f1: 0, plantas_f2: 0, plantas_cosechadas: 0, lotes: [] });
-    const b = mapa.get(semana)!;
-    if (l.fase_actual === 'fase_1') b.plantas_f1 += plantas;
-    else b.plantas_f2 += plantas;
-    b.lotes.push(l.id_lote);
+    const f = factorPaq(l.variedad, rucula);
+    const paquetes = f > 1 ? plantas / f : plantas;
+    mapa.get(key)![cultivo] += paquetes;
   }
 
-  // Lotes cosechados en los últimos 7 días
-  const recienCosechados = lotes.filter((l) => {
-    if (l.estado !== 'cosechado') return false;
-    if (!matchCultivo(l.variedad)) return false;
-    const fCosecha = safeParseDate2(l.fecha_cosecha);
-    return fCosecha && fCosecha >= hace7dias;
+  return semanasArr.map((d) => {
+    const v = mapa.get(claveDe(d))!;
+    return { semana: claveDe(d), label: labelDe(d), rucula: Math.round(v.rucula), lechuga: Math.round(v.lechuga) };
   });
-
-  for (const l of recienCosechados) {
-    const siembra = safeParseDate2(l.fecha_siembra);
-    const cosecha = safeParseDate2(l.fecha_cosecha);
-    if (!siembra || !cosecha) continue;
-    const diasVida = Math.max(0, Math.round((cosecha.getTime() - siembra.getTime()) / 86400000));
-    const semana = Math.max(1, Math.ceil(diasVida / 7));
-    const plantas = Number(l.plantas_estimadas_actual) || Number(l.unidades_cosechadas) || 0;
-    if (!mapa.has(semana)) mapa.set(semana, { semana, plantas_f1: 0, plantas_f2: 0, plantas_cosechadas: 0, lotes: [] });
-    const b = mapa.get(semana)!;
-    b.plantas_cosechadas = (b.plantas_cosechadas || 0) + plantas;
-    b.lotes.push(l.id_lote);
-  }
-
-  // Semana estimada de cosecha
-  // Usar ciclo real de cosechados en lugar del valor de la hoja Variedades
-  const ciclosMap = cicloRealPorVariedad(lotes, [], 5);
-  const varsCultivo = variedades.filter((v) => v.activo === 'SI' && matchCultivo(v.variedad));
-  
-  // Promedio de ciclos reales de las variedades de este cultivo
-  let diasProm = 0;
-  let countVars = 0;
-  for (const v of varsCultivo) {
-    const real = ciclosMap.get(v.variedad);
-    if (real && real > 0) { diasProm += real; countVars++; }
-  }
-  if (countVars === 0) {
-    // Fallback: valor de Variedades, o 78d lechuga / 30d rúcula
-    diasProm = varsCultivo.length > 0
-      ? varsCultivo.reduce((acc, v) => acc + (Number(v.dias_estimados_cosecha) || (cultivo === 'rucula' ? 30 : 78)), 0) / varsCultivo.length
-      : (cultivo === 'rucula' ? 30 : 78);
-  } else {
-    diasProm = diasProm / countVars;
-  }
-  const semanasCosecha = Math.ceil(diasProm / 7);
-
-  // Factor de conversión plantas→paquetes: promedio de plantas_por_unidad_esperado de variedades del cultivo
-  const varsConFactor = varsCultivo.filter(v => Number(v.plantas_por_unidad_esperado) > 0);
-  const factorPaq = varsConFactor.length > 0
-    ? Math.round(varsConFactor.reduce((acc, v) => acc + Number(v.plantas_por_unidad_esperado), 0) / varsConFactor.length)
-    : 1;
-
-  const barras = Array.from(mapa.values()).sort((a, b) => a.semana - b.semana);
-  return { barras, semanasCosecha, factorPaq };
 }
 
 function safeParseDate2(s: any): Date | null {

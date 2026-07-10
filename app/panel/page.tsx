@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
-import { plantasPorCultivo, distribucionPorSemana, ciclosPorSemana, cicloRealPorVariedad } from '@/lib/estadisticas';
+import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad } from '@/lib/estadisticas';
 import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica } from '@/lib/types';
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
@@ -92,8 +92,7 @@ export default async function PanelPage({ searchParams }: {
   // Datos del panel
   let navesOcup: any[] = [], tubosMesadas: any[] = [];
   let resumen = { lechuga: { plantinera:0,fase_1:0,fase_2:0,total:0 }, rucula: { plantinera:0,fase_1:0,fase_2:0,total:0 }, albahaca: { plantinera:0,fase_1:0,fase_2:0,total:0 } };
-  let ciclosLechuga: { barras: any[]; semanasCosecha: number; factorPaq: number } = { barras: [], semanasCosecha: 5, factorPaq: 1 };
-  let ciclosRucula:  { barras: any[]; semanasCosecha: number; factorPaq: number } = { barras: [], semanasCosecha: 3, factorPaq: 3 };
+  let proyeccionCosecha: any[] = [];
   let ciclosSemanas: any[] = [];
   let ciclosRealesMap = new Map<string,number>();
 
@@ -101,8 +100,7 @@ export default async function PanelPage({ searchParams }: {
     navesOcup     = ocupacionPorNave(ubicaciones, lotes);
     tubosMesadas  = tubosPorMesada(ubicaciones, lotes);
     resumen       = plantasPorCultivo(lotes);
-    ciclosLechuga = distribucionPorSemana(lotes, variedades, 'lechuga');
-    ciclosRucula  = distribucionPorSemana(lotes, variedades, 'rucula');
+    proyeccionCosecha = proyeccionCosechaSemanal(lotes, variedades, 8);
     ciclosSemanas  = ciclosPorSemana(lotes, movimientos);
     ciclosRealesMap = cicloRealPorVariedad(lotes, [], 5);
   } catch {}
@@ -428,14 +426,11 @@ export default async function PanelPage({ searchParams }: {
           </div>
         </div>
 
-        {/* ══ FILA 3: DISTRIBUCIÓN EN MESADAS ══ */}
+        {/* ══ FILA 3: PROYECCIÓN DE COSECHA SEMANAL ══ */}
         <div style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'14px', marginBottom:'14px' }}>
-          <p style={{ margin:'0 0 3px', fontSize:'11px', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.3px' }}>Distribución en mesadas</p>
-          <p style={{ margin:'0 0 10px', fontSize:'10px', color:'#9ca3af' }}>Semana de ciclo · en paquetes</p>
-          <GraficoDistribucionMesadas
-            barrasLechuga={ciclosLechuga.barras} barrasRucula={ciclosRucula.barras}
-            semanasCosechaLechuga={ciclosLechuga.semanasCosecha} semanasCosechaRucula={ciclosRucula.semanasCosecha}
-            factorLechuga={ciclosLechuga.factorPaq||1} factorRucula={ciclosRucula.factorPaq||3} />
+          <p style={{ margin:'0 0 3px', fontSize:'11px', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.3px' }}>Proyección de cosecha semanal</p>
+          <p style={{ margin:'0 0 10px', fontSize:'10px', color:'#9ca3af' }}>Paquetes esperados por semana · rúcula vs. lechuga</p>
+          <GraficoDistribucionMesadas datos={proyeccionCosecha} />
         </div>
 
         {/* ══ FILA 4: OCUPACIÓN POR MESADA ══ */}

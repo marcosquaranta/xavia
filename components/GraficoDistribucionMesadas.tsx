@@ -1,84 +1,43 @@
 'use client';
 
-export interface BarraSemana {
-  semana: number;
-  plantas_f1: number;
-  plantas_f2: number;
-  plantas_cosechadas?: number;
-  lotes: string[];
-}
+export interface PuntoProyeccionCosecha { semana: string; label: string; rucula: number; lechuga: number }
 
-interface Props {
-  barrasLechuga: BarraSemana[];
-  barrasRucula: BarraSemana[];
-  semanasCosechaLechuga: number;
-  semanasCosechaRucula: number;
-  factorLechuga?: number; // paq/planta lechuga (normalmente 1)
-  factorRucula?: number;  // paq/planta rúcula (normalmente 3)
-}
+interface Props { datos: PuntoProyeccionCosecha[] }
 
-const COLOR_LECHUGA_F1 = '#86efac';
-const COLOR_LECHUGA_F2 = '#4d7c0f';
-const COLOR_RUCULA_F2 = '#166534';
-const COLOR_COSECHADO = '#d1d5db';
+const COLOR_RUCULA = '#166534';
+const COLOR_LECHUGA = '#4d7c0f';
 
-export default function GraficoDistribucionMesadas({
-  barrasLechuga, barrasRucula, semanasCosechaLechuga, semanasCosechaRucula, factorLechuga = 1, factorRucula = 3,
-}: Props) {
-  const convL = (pl: number) => factorLechuga > 1 ? pl / factorLechuga : pl;
-  const convR = (pl: number) => factorRucula > 0 ? pl / factorRucula : pl;
-
-  const activasL = barrasLechuga.filter(b => b.plantas_f1 + b.plantas_f2 + (b.plantas_cosechadas || 0) > 0);
-  const activasR = barrasRucula.filter(b => b.plantas_f1 + b.plantas_f2 + (b.plantas_cosechadas || 0) > 0);
-
-  if (activasL.length === 0 && activasR.length === 0) {
+export default function GraficoDistribucionMesadas({ datos }: Props) {
+  if (!datos.length || datos.every((d) => d.rucula === 0 && d.lechuga === 0)) {
     return (
       <div style={{ background: '#fafafa', border: '1px solid #f3f4f6', borderRadius: '8px', padding: '24px', textAlign: 'center', color: '#9ca3af', fontSize: '12px' }}>
-        Sin lotes activos en mesadas
+        Sin cosechas estimadas en las próximas semanas
       </div>
     );
   }
 
-  const minSemana = 1;
-  const maxSemana = Math.max(
-    semanasCosechaLechuga + 1, semanasCosechaRucula + 1,
-    ...activasL.map(b => b.semana), ...activasR.map(b => b.semana), 1,
-  );
-  const semanas = Array.from({ length: maxSemana - minSemana + 1 }, (_, i) => i + minSemana);
-
-  const maxPaq = Math.max(
-    ...barrasLechuga.map(b => convL(b.plantas_f1 + b.plantas_f2 + (b.plantas_cosechadas || 0))),
-    ...barrasRucula.map(b => convR(b.plantas_f1 + b.plantas_f2 + (b.plantas_cosechadas || 0))),
-    1,
-  );
-
-  const W = 720, H = 200, PAD_L = 40, PAD_R = 16, PAD_T = 24, PAD_B = 28;
+  const maxVal = Math.max(...datos.flatMap((d) => [d.rucula, d.lechuga]), 1);
+  const W = 720, H = 210, PAD_L = 40, PAD_R = 16, PAD_T = 20, PAD_B = 32;
   const chartW = W - PAD_L - PAD_R, chartH = H - PAD_T - PAD_B;
-  const slotW = chartW / semanas.length;
-  const barW = Math.min(20, slotW * 0.32);
+  const slotW = chartW / datos.length;
+  const barW = Math.min(24, slotW * 0.34);
   const gap = barW * 0.25;
 
   function xL(i: number) { return PAD_L + i * slotW + slotW / 2 - gap / 2 - barW; }
   function xR(i: number) { return PAD_L + i * slotW + slotW / 2 + gap / 2; }
-  function yH(v: number) { return (v / maxPaq) * chartH; }
+  function yH(v: number) { return (v / maxVal) * chartH; }
   const baseY = PAD_T + chartH;
-  const yRef = [0, Math.round(maxPaq * 0.5), Math.round(maxPaq)];
-  const fmtVal = (v: number) => v > 999 ? Math.round(v / 100) / 10 + 'k' : Math.round(v * 10) / 10;
+  const yRef = [0, Math.round(maxVal * 0.5), Math.round(maxVal)];
+  const fmtVal = (v: number) => v > 999 ? Math.round(v / 100) / 10 + 'k' : Math.round(v);
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '8px', fontSize: '11px', color: '#6b7280', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: '14px', marginBottom: '8px', fontSize: '11px', color: '#6b7280', flexWrap: 'wrap' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span style={{ width: 10, height: 10, borderRadius: 2, background: COLOR_LECHUGA_F1, display: 'inline-block' }} />Lechuga F1
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: COLOR_RUCULA, display: 'inline-block' }} />Rúcula
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span style={{ width: 10, height: 10, borderRadius: 2, background: COLOR_LECHUGA_F2, display: 'inline-block' }} />Lechuga F2
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span style={{ width: 10, height: 10, borderRadius: 2, background: COLOR_RUCULA_F2, display: 'inline-block' }} />Rúcula F2
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span style={{ width: 10, height: 10, borderRadius: 2, background: COLOR_COSECHADO, display: 'inline-block' }} />Cosechado (7d)
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: COLOR_LECHUGA, display: 'inline-block' }} />Lechuga
         </span>
       </div>
 
@@ -90,33 +49,23 @@ export default function GraficoDistribucionMesadas({
           </g>
         ))}
 
-        {semanas.map((sem, i) => {
-          const bL = barrasLechuga.find(b => b.semana === sem);
-          const bR = barrasRucula.find(b => b.semana === sem);
-          const f1L = convL(bL?.plantas_f1 ?? 0), f2L = convL(bL?.plantas_f2 ?? 0), cosL = convL(bL?.plantas_cosechadas ?? 0);
-          const f2R = convR(bR?.plantas_f2 ?? 0), cosR = convR(bR?.plantas_cosechadas ?? 0);
-          const totalL = f1L + f2L + cosL, totalR = f2R + cosR;
-          const hF1L = yH(f1L), hF2L = yH(f2L), hCosL = yH(cosL);
-          const hF2R = yH(f2R), hCosR = yH(cosR);
+        {/* Fondo resaltando la semana actual (primera columna) */}
+        <rect x={PAD_L} y={PAD_T} width={slotW} height={chartH} fill="#f9fafb" />
+
+        {datos.map((d, i) => {
+          const hR = yH(d.rucula), hL = yH(d.lechuga);
           const xl = xL(i), xr = xR(i);
-
           return (
-            <g key={sem}>
-              {/* Lechuga: cosechado / F2 / F1 apilado */}
-              {cosL > 0 && <rect x={xl} y={baseY - hCosL} width={barW} height={hCosL} fill={COLOR_COSECHADO} rx={2} opacity={0.7} />}
-              {f2L > 0 && <rect x={xl} y={baseY - hCosL - hF2L} width={barW} height={hF2L} fill={COLOR_LECHUGA_F2} rx={2} />}
-              {f1L > 0 && <rect x={xl} y={baseY - hCosL - hF2L - hF1L} width={barW} height={hF1L} fill={COLOR_LECHUGA_F1} rx={2} />}
-              {totalL > 0 && <text x={xl + barW / 2} y={baseY - hCosL - hF2L - hF1L - 3} textAnchor="middle" fontSize={8.5} fill="#4b5563" fontWeight={500}>{fmtVal(totalL)}</text>}
+            <g key={d.semana}>
+              {d.rucula > 0 && <rect x={xl} y={baseY - hR} width={barW} height={hR} fill={COLOR_RUCULA} rx={2} />}
+              {d.rucula > 0 && <text x={xl + barW / 2} y={baseY - hR - 3} textAnchor="middle" fontSize={9} fill="#374151" fontWeight={500}>{fmtVal(d.rucula)}</text>}
 
-              {/* Rúcula: cosechado / F2 apilado */}
-              {cosR > 0 && <rect x={xr} y={baseY - hCosR} width={barW} height={hCosR} fill={COLOR_COSECHADO} rx={2} opacity={0.7} />}
-              {f2R > 0 && <rect x={xr} y={baseY - hCosR - hF2R} width={barW} height={hF2R} fill={COLOR_RUCULA_F2} rx={2} />}
-              {totalR > 0 && <text x={xr + barW / 2} y={baseY - hCosR - hF2R - 3} textAnchor="middle" fontSize={8.5} fill="#4b5563" fontWeight={500}>{fmtVal(totalR)}</text>}
+              {d.lechuga > 0 && <rect x={xr} y={baseY - hL} width={barW} height={hL} fill={COLOR_LECHUGA} rx={2} />}
+              {d.lechuga > 0 && <text x={xr + barW / 2} y={baseY - hL - 3} textAnchor="middle" fontSize={9} fill="#374151" fontWeight={500}>{fmtVal(d.lechuga)}</text>}
 
-              {/* Label semana — coloreado si coincide con la cosecha estimada de algún cultivo */}
               <text x={PAD_L + i * slotW + slotW / 2} y={baseY + 14} textAnchor="middle" fontSize={9}
-                fill={sem === semanasCosechaLechuga ? COLOR_LECHUGA_F2 : sem === semanasCosechaRucula ? COLOR_RUCULA_F2 : '#9ca3af'}>
-                S{sem}
+                fill={i === 0 ? '#111827' : '#9ca3af'} fontWeight={i === 0 ? 700 : 400}>
+                {d.label}
               </text>
             </g>
           );
