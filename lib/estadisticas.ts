@@ -17,6 +17,14 @@ function safeParseDate(s: any): Date | null {
 function som(d: Date): Date { return new Date(d.getFullYear(), d.getMonth(), 1); }
 function eom(d: Date): Date { return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59); }
 
+// Mes anterior al mismo día, con el día recortado si ese mes tiene menos días
+// (ej. 31 de marzo → 28/29 de febrero, no "rebota" a marzo de nuevo con setMonth(-1)).
+export function mesAnteriorClamp(fecha: Date): Date {
+  const y = fecha.getFullYear(), m = fecha.getMonth(), d = fecha.getDate();
+  const diasMesAnterior = new Date(y, m, 0).getDate();
+  return new Date(y, m - 1, Math.min(d, diasMesAnterior));
+}
+
 export interface EstadisticaMes { variedad: string; cosechado: number; ciclo_promedio: number; rendimiento_kg_por_unidad: number; }
 
 export function estadisticasDelMes(lotes: Lote[], movimientos: Movimiento[], mes: Date): EstadisticaMes[] {
@@ -637,11 +645,19 @@ export function ciclosPorMesYAnioDetalle(
 export interface PesoPromedioMes { rucula: number; lechuga: number }
 export function pesoPromedioMes(lotes: Lote[], fechaRef: Date = new Date(), diaCorte?: number): PesoPromedioMes {
   const corte = diaCorte ?? fechaRef.getDate();
+  const desde = new Date(fechaRef.getFullYear(), fechaRef.getMonth(), 1);
+  const hasta = new Date(fechaRef.getFullYear(), fechaRef.getMonth(), corte, 23, 59, 59);
+  return pesoPromedioRango(lotes, desde, hasta);
+}
+
+// Igual que pesoPromedioMes pero para un rango de fechas explícito (usado por el
+// reporte semanal para "peso promedio de esta semana").
+export function pesoPromedioRango(lotes: Lote[], desde: Date, hasta: Date): PesoPromedioMes {
   const acc = { rucula: [] as number[], lechuga: [] as number[] };
   for (const l of lotes) {
     if (l.estado !== 'cosechado' || !l.fecha_cosecha) continue;
     const f = safeParseDate(l.fecha_cosecha);
-    if (!f || f.getFullYear() !== fechaRef.getFullYear() || f.getMonth() !== fechaRef.getMonth() || f.getDate() > corte) continue;
+    if (!f || f < desde || f > hasta) continue;
     const gr = Number(l.peso_muestra_paquete_gr) > 0
       ? Number(l.peso_muestra_paquete_gr)
       : Number(l.peso_muestra_kg) > 0 ? Math.round(Number(l.peso_muestra_kg) * 1000) : 0;

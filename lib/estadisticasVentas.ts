@@ -3,8 +3,8 @@ import type { VentaDia, ClienteVenta, PrecioVenta, VentaHistorica } from './type
 // Gramos por paquete/planta — mismos defaults que /api/stocks/camara cuando no hay
 // pesaje testigo reciente. Se usan acá para poder sumar ventas por KG (cajón) al
 // mismo total en unidades que rucula/lechuga_crespa+hoja_roble.
-const GR_PAQ_RUCULA = 210;
-const GR_PAQ_LECHUGA = 330;
+export const GR_PAQ_RUCULA = 210;
+export const GR_PAQ_LECHUGA = 330;
 
 const MESES_CORTO = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sept', 'oct', 'nov', 'dic'];
 const PROD_KEYS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg'] as const;
@@ -88,7 +88,7 @@ function getPrecio(precios: PrecioVenta[], id_control: string, sucursal: string,
 // la planilla es neto (se le suma 10,5% de IVA); en Factura B el precio cargado ya es
 // el final, no se le suma nada.
 const IVA_FACTURA_A = 1.105;
-function precioFinal(precios: PrecioVenta[], id_control: string, sucursal: string, key: string, cliente?: ClienteVenta): number {
+export function precioFinal(precios: PrecioVenta[], id_control: string, sucursal: string, key: string, cliente?: ClienteVenta): number {
   const base = getPrecio(precios, id_control, sucursal, key, cliente?.sucursales);
   return cliente?.tipo_factura === 'A' ? base * IVA_FACTURA_A : base;
 }
@@ -244,4 +244,45 @@ export function resumenMesActual(
   // unidades de venta distintas.
   const precioPromedioMes = unidadesComparables > 0 ? Math.round((ingresosComparables / unidadesComparables) * 100) / 100 : 0;
   return { unidadesMes: unidades, proyeccionMes, precioPromedioMes };
+}
+
+// ── Ventas por cultivo (unidades y $ final IVA incluido) en un rango de fechas [desde,hasta]
+// inclusive (YYYY-MM-DD) — para el reporte semanal. Kg convertidos a paquete-equivalente. ──
+export interface VentasRangoCultivo { unidades: number; monto: number }
+export interface VentasRango { rucula: VentasRangoCultivo; lechuga: VentasRangoCultivo }
+export function ventasEnRango(ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], desde: string, hasta: string): VentasRango {
+  const clienteMap = new Map(clientes.map((c) => [c.id_control, c]));
+  const acc: VentasRango = { rucula: { unidades: 0, monto: 0 }, lechuga: { unidades: 0, monto: 0 } };
+  for (const v of ventas) {
+    const f = String(v.fecha || '').split(/[T ]/)[0];
+    if (!f || f < desde || f > hasta) continue;
+    const cliente = clienteMap.get(v.id_control);
+
+    for (const key of ['rucula', 'bandeja_rucula'] as const) {
+      const qty = Number((v as any)[key]) || 0;
+      if (qty <= 0) continue;
+      acc.rucula.unidades += qty;
+      acc.rucula.monto += qty * precioFinal(precios, v.id_control, v.sucursal, key, cliente);
+    }
+    const kgR = Number(v.rucula_kg) || 0;
+    if (kgR > 0) {
+      acc.rucula.unidades += Math.round((kgR * 1000) / GR_PAQ_RUCULA);
+      acc.rucula.monto += kgR * precioFinal(precios, v.id_control, v.sucursal, 'rucula_kg', cliente);
+    }
+
+    for (const key of ['lechuga_crespa', 'hoja_roble'] as const) {
+      const qty = Number((v as any)[key]) || 0;
+      if (qty <= 0) continue;
+      acc.lechuga.unidades += qty;
+      acc.lechuga.monto += qty * precioFinal(precios, v.id_control, v.sucursal, key, cliente);
+    }
+    const kgL = Number(v.lechuga_kg) || 0;
+    if (kgL > 0) {
+      acc.lechuga.unidades += Math.round((kgL * 1000) / GR_PAQ_LECHUGA);
+      acc.lechuga.monto += kgL * precioFinal(precios, v.id_control, v.sucursal, 'lechuga_kg', cliente);
+    }
+  }
+  acc.rucula.monto = Math.round(acc.rucula.monto);
+  acc.lechuga.monto = Math.round(acc.lechuga.monto);
+  return acc;
 }

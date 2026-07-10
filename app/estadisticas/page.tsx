@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import { estadisticasDelMes } from '@/lib/estadisticas';
+import { estadisticasDelMes, mesAnteriorClamp } from '@/lib/estadisticas';
 import { calcularDiasPorFase } from '@/lib/lotes';
 import { calcularCapacidad, diasCicloDefault } from '@/lib/planificacionServer';
 import { calcularPlan, repartoHelpers, parseReparto, REPARTO_DEFAULT, DIA_SIEMBRA, CUB, CUBPOSRUC, planchas } from '@/lib/planificacion';
@@ -60,7 +60,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   let statsActual: any[] = [], statsPasado: any[] = [];
   try { statsActual = estadisticasDelMes(lotes, movimientos, hoy); } catch {}
   try {
-    const mesPasado = new Date(hoy); mesPasado.setMonth(mesPasado.getMonth() - 1);
+    const mesPasado = mesAnteriorClamp(hoy);
     statsPasado = estadisticasDelMes(lotes, movimientos, mesPasado);
   } catch {}
 
@@ -185,7 +185,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     if (periodo === 'mes') {
       desde = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
     } else if (periodo === 'mes_ant') {
-      const mp = new Date(ahora); mp.setMonth(mp.getMonth() - 1);
+      const mp = mesAnteriorClamp(ahora);
       desde = new Date(mp.getFullYear(), mp.getMonth(), 1);
       const hasta = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
       return todos.filter(l => { const f = new Date(String(l.fecha_cosecha)+'T12:00:00'); return f >= desde && f < hasta; });
