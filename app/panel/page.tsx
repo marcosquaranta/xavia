@@ -3,23 +3,24 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
-import { cosechadoEsteMes, plantasPorCultivo, distribucionPorSemana, resumenCosechaPorCultivo, ciclosPorSemana, cicloRealPorVariedad } from '@/lib/estadisticas';
+import { plantasPorCultivo, distribucionPorSemana, ciclosPorSemana, cicloRealPorVariedad } from '@/lib/estadisticas';
 import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
-import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, StockCamara } from '@/lib/types';
-import { calcularCamara } from '@/lib/camara';
+import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica } from '@/lib/types';
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
 import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
+import { evolucionVentaPorArticulo, resumenMesActual } from '@/lib/estadisticasVentas';
 import Header from '@/components/Header';
 import FiltrosLotes from '@/components/FiltrosLotes';
 import LoteCard from '@/components/LoteCard';
-import GraficoCiclos from '@/components/GraficoCiclos';
 import GraficoCiclosSemanas from '@/components/GraficoCiclosSemanas';
+import GraficoDistribucionMesadas from '@/components/GraficoDistribucionMesadas';
 import BuscadorLote from '@/components/BuscadorLote';
 import GruposLotes from '@/components/GruposLotes';
+import { GraficoVentaPorArticulo } from '@/app/ventas/VentasEvolucionCharts';
 
 export const dynamic = 'force-dynamic';
 
-const LOTES_POR_PAGINA = 10;
+const LOTES_POR_PAGINA = 4;
 
 const TIPO_LABEL: Record<string, { label: string; color: string; bg: string }> = {
   siembra:    { label: 'Siembra',    color: '#92400e', bg: '#fef9c3' },
@@ -55,14 +56,16 @@ export default async function PanelPage({ searchParams }: {
   const pagina  = Math.max(1, parseInt(searchParams.p || '1'));
 
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [], variedades: Variedad[] = [];
-  let ventasPanel: VentaDia[] = [], registrosCamara: StockCamara[] = [];
+  let ventasPanel: VentaDia[] = [], clientesPanel: ClienteVenta[] = [], preciosPanel: PrecioVenta[] = [], historicasPanel: VentaHistorica[] = [];
   let configRows: { clave: string; valor: any }[] = [];
   try {
-    [lotes, movimientos, ubicaciones, variedades, ventasPanel, registrosCamara, configRows] = await Promise.all([
+    [lotes, movimientos, ubicaciones, variedades, ventasPanel, clientesPanel, preciosPanel, historicasPanel, configRows] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<Ubicacion>('Ubicaciones'), readSheet<Variedad>('Variedades'),
       readSheet<VentaDia>('Ventas'),
-      readSheet<StockCamara>('StockCamara').catch(() => []),
+      readSheet<ClienteVenta>('Clientes').catch(() => []),
+      readSheet<PrecioVenta>('Precios').catch(() => []),
+      readSheet<VentaHistorica>('VentasHistoricas').catch(() => []),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
     ]);
   } catch {}
@@ -87,30 +90,32 @@ export default async function PanelPage({ searchParams }: {
   } catch {}
 
   // Datos del panel
-  let cosechadoMes = 0, cosechadoMesPasado = 0, diaCorte = new Date().getDate();
   let navesOcup: any[] = [], tubosMesadas: any[] = [];
   let resumen = { lechuga: { plantinera:0,fase_1:0,fase_2:0,total:0 }, rucula: { plantinera:0,fase_1:0,fase_2:0,total:0 }, albahaca: { plantinera:0,fase_1:0,fase_2:0,total:0 } };
   let ciclosLechuga: { barras: any[]; semanasCosecha: number; factorPaq: number } = { barras: [], semanasCosecha: 5, factorPaq: 1 };
   let ciclosRucula:  { barras: any[]; semanasCosecha: number; factorPaq: number } = { barras: [], semanasCosecha: 3, factorPaq: 3 };
-  let resumenCosecha: any[] = [];
   let ciclosSemanas: any[] = [];
   let ciclosRealesMap = new Map<string,number>();
 
-  const camaraRucula  = calcularCamara('rucula',  registrosCamara, lotes, ventasPanel);
-  const camaraLechuga = calcularCamara('lechuga', registrosCamara, lotes, ventasPanel);
-
   try {
-    const mes = cosechadoEsteMes(lotes);
-    cosechadoMes = mes.actual; cosechadoMesPasado = mes.pasado; diaCorte = mes.diaCorte;
     navesOcup     = ocupacionPorNave(ubicaciones, lotes);
     tubosMesadas  = tubosPorMesada(ubicaciones, lotes);
     resumen       = plantasPorCultivo(lotes);
     ciclosLechuga = distribucionPorSemana(lotes, variedades, 'lechuga');
     ciclosRucula  = distribucionPorSemana(lotes, variedades, 'rucula');
-    resumenCosecha = resumenCosechaPorCultivo(lotes, variedades);
     ciclosSemanas  = ciclosPorSemana(lotes, movimientos);
     ciclosRealesMap = cicloRealPorVariedad(lotes, [], 5);
   } catch {}
+
+  // ── Evolución de venta por artículo + indicadores del mes (mismo cálculo que Ventas) ──
+  const evolArticuloPanel = evolucionVentaPorArticulo(ventasPanel, 12, historicasPanel);
+  const resumenMesPanel = resumenMesActual(ventasPanel, preciosPanel, clientesPanel);
+  const ocupNaves = tubosMesadas.map((n: any) => {
+    const f2 = (n.mesadas || []).filter((m: any) => m.sector_fase !== 'fase_1');
+    const tot = f2.reduce((s: number, m: any) => s + m.tubos_totales, 0);
+    const ocu = f2.reduce((s: number, m: any) => s + m.tubos_ocupados, 0);
+    return { nave: n.nave, pct: tot > 0 ? Math.round(ocu / tot * 100) : 0 };
+  });
 
   // Ocupación solo F2
   const mesadasF2 = tubosMesadas.flatMap((n:any) => (n.mesadas||[]).filter((m:any) => m.sector_fase !== 'fase_1'));
@@ -118,7 +123,6 @@ export default async function PanelPage({ searchParams }: {
     ? Math.round(mesadasF2.reduce((a:number,m:any)=>a+m.tubos_ocupados,0) /
       Math.max(1, mesadasF2.reduce((a:number,m:any)=>a+m.tubos_totales,0)) * 100)
     : 0;
-  const difPct = cosechadoMesPasado > 0 ? Math.round(((cosechadoMes-cosechadoMesPasado)/cosechadoMesPasado)*100) : 0;
 
   // ── ALERTAS ──
   const hoy = new Date();
@@ -146,14 +150,6 @@ export default async function PanelPage({ searchParams }: {
     const esR = varNorm.includes('rucula') || varNorm.includes('rúcula');
     const cicloEst = ciclosRealesMap.get(l.variedad) || (esR ? 35 : 80);
     const f2Est = esR ? 28 : 40; // días esperados en F2
-
-    // 🔴 Cosecha inminente (F2 próximos 3 días)
-    if (l.fase_actual === 'fase_2' && l.fecha_f2) {
-      const diasRestantes = cicloEst - diasSiembra;
-      if (diasRestantes >= 0 && diasRestantes <= 3) {
-        alertas.push({ tipo:'error', msg:`🌿 Cosechar en ~${diasRestantes}d — ${l.id_lote} (${String(l.variedad||'').split(' ')[0]})`, lote: l.id_lote });
-      }
-    }
 
     // 🔴 Lote pasado en F2 (> ciclo * 130%)
     if (diasSiembra > cicloEst * 1.3 && l.fase_actual === 'fase_2') {
@@ -215,20 +211,47 @@ export default async function PanelPage({ searchParams }: {
     return pa - pb;
   });
 
-  // ── ÚLTIMOS MOVIMIENTOS (últimos 8) ──
+  // ── ÚLTIMOS MOVIMIENTOS, separados por tipo ──
   const lotesMap = new Map(lotes.map(l => [l.id_lote, l]));
-  const ultimosMovs = [...movimientos]
+  const movsOrdenados = [...movimientos]
     .filter(m => m.fecha)
-    .sort((a,b) => String(b.fecha||'').localeCompare(String(a.fecha||'')))
-    .slice(0, 8);
+    .sort((a,b) => String(b.fecha||'').localeCompare(String(a.fecha||'')));
+  const ultimasCosechas = movsOrdenados.filter(m => m.tipo === 'cosecha').slice(0, 4);
+  const ultimosTrasplantes = movsOrdenados.filter(m => m.tipo === 'trasplante').slice(0, 4);
+  const ultimasSiembras = movsOrdenados.filter(m => m.tipo === 'siembra').slice(0, 4);
+
+  function filaMov(m: Movimiento) {
+    const lote = lotesMap.get(String(m.id_lote||''));
+    const t = TIPO_LABEL[String(m.tipo||'')] || TIPO_LABEL.descarte;
+    const varNorm = String(lote?.variedad||'').toLowerCase();
+    const esR = varNorm.includes('rucula')||varNorm.includes('rúcula');
+    const cantU = Number(m.unidades_cosechadas||0);
+    const cantP = Number(m.plantas_estimadas||0);
+    const unidadesStr = m.tipo==='cosecha' && esR && cantU>0
+      ? `${cantU.toLocaleString('es-AR')} paq. (${cantP.toLocaleString('es-AR')} pl)`
+      : m.tipo==='cosecha' && cantU>0 ? `${cantU.toLocaleString('es-AR')} pl`
+      : cantP>0 ? `${cantP.toLocaleString('es-AR')} pl` : '';
+    return (
+      <div key={m.id_movimiento} style={{ display:'flex', alignItems:'center', gap:'7px', padding:'6px 8px', background:'#fafafa', borderRadius:'6px', borderLeft:`3px solid ${t.color}` }}>
+        <span style={{ background:t.bg, color:t.color, fontSize:'9px', fontWeight:700, padding:'1px 5px', borderRadius:'3px', minWidth:'65px', textAlign:'center' }}>{t.label}</span>
+        <Link href={`/cultivos/${encodeURIComponent(String(m.id_lote||''))}`} style={{ textDecoration:'none' }}>
+          <span style={{ fontFamily:'monospace', fontWeight:700, fontSize:'11px', color:'#111827' }}>{m.id_lote}</span>
+        </Link>
+        {lote?.variedad && (
+          <span style={{ fontSize:'11px', color:esR?'#166534':'#4d7c0f', fontWeight:500 }}>
+            {String(lote.variedad).split(' ')[0]}
+          </span>
+        )}
+        {unidadesStr && <span style={{ fontSize:'11px', color:'#6b7280', marginLeft:'auto' }}>{unidadesStr}</span>}
+        <span style={{ fontSize:'10px', color:'#9ca3af', whiteSpace:'nowrap' }}>{diasAtras(m.fecha)}</span>
+      </div>
+    );
+  }
 
   // ── KPIs F2 ──
   const ultSem = ciclosSemanas.filter((s:any) => s.lechugaF2>0||s.rucula>0).slice(-1)[0];
   const antSem = ciclosSemanas.filter((s:any) => s.lechugaF2>0||s.rucula>0).slice(-2,-1)[0];
   function varPctSem(a:number,b:number){if(!b||!a)return null;return Math.round(((a-b)/b)*100);}
-
-  const rL = resumenCosecha.find((r:any) => r.cultivo==='lechuga');
-  const rR = resumenCosecha.find((r:any) => r.cultivo==='rucula');
 
   // ── LOTES FILTRADOS CON PAGINACIÓN ──
   const conteos = contarPorFiltro(lotes, nave, ubicaciones);
@@ -320,123 +343,32 @@ export default async function PanelPage({ searchParams }: {
             )}
         </div>
 
-        {/* ══ FILA 1: PROYECCIONES ══ */}
+        {/* ══ FILA 1: VENTAS + INDICADORES ══ */}
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'14px' }}>
-
-          {/* ── helper para card de proyección ── */}
-          {(() => {
-            const fmtDD = (iso: string) => { const [,m,d]=iso.split('-'); return `${d}/${m}`; };
-            const factorR = ciclosRucula.factorPaq || 3;
-            return [
-              { r: rL, label: 'LECHUGA', colorTop: '#4d7c0f', bgStock: '#f0fdf4',
-                subtitulo: null, unidad: 'pl est.',
-                boxes: rL ? [['Cosechado',rL.cosechadoMes,'#4d7c0f','#f7fee7'],['Prox 7d',rL.proyectadoEstaSemana,'#854d0e','#fefce8'],['Resto mes',rL.proyectadoRestoMes,'#059669','#f0fdf4']] : [],
-                reparto: rL ? { jue: rL.proyectadoJueves, lun: rL.proyectadoLunes, fechaJue: fmtDD(rL.fechaJueves), fechaLun: fmtDD(rL.fechaLunes), lotesJue: rL.lotesJueves, lotesLun: rL.lotesLunes } : null,
-                totalProyectado: rL ? rL.cosechadoMes+rL.proyectadoMesTotal : 0,
-                varPct: rL?.variacionPct ?? null,
-                camara: camaraLechuga,
-              },
-              { r: rR, label: 'RÚCULA', colorTop: '#166534', bgStock: '#dcfce7',
-                subtitulo: rR ? `~${((rR.cosechadoMes+rR.proyectadoMesTotal)*factorR).toLocaleString('es-AR')} plantas` : null,
-                unidad: 'paq. est.',
-                boxes: rR ? [['Cosechado',rR.cosechadoMes,'#166534','#dcfce7'],['Prox 7d',rR.proyectadoEstaSemana,'#854d0e','#fefce8'],['Resto mes',rR.proyectadoRestoMes,'#059669','#f0fdf4']] : [],
-                reparto: rR ? { jue: rR.proyectadoJueves, lun: rR.proyectadoLunes, fechaJue: fmtDD(rR.fechaJueves), fechaLun: fmtDD(rR.fechaLunes), lotesJue: rR.lotesJueves, lotesLun: rR.lotesLunes } : null,
-                totalProyectado: rR ? rR.cosechadoMes+rR.proyectadoMesTotal : 0,
-                varPct: rR?.variacionPct ?? null,
-                camara: camaraRucula,
-              },
-            ].map(({ r, label, colorTop, bgStock, subtitulo, unidad, boxes, reparto, totalProyectado, varPct, camara }) => r && (
-            <div key={label} style={{ background:'white', border:'1px solid #e5e7eb', borderTop:`4px solid ${colorTop}`, borderRadius:'10px', padding:'14px', display:'flex', flexDirection:'column' }}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
-                <span style={{ background:colorTop, color:'white', padding:'1px 8px', borderRadius:'4px', fontSize:'11px', fontWeight:800 }}>{label}</span>
-                <span style={{ fontSize:'10px', color:'#9ca3af' }}>Proyección mes</span>
-              </div>
-              <div style={{ display:'flex', alignItems:'baseline', gap:'6px', marginBottom:'2px' }}>
-                <span style={{ fontSize:'28px', fontWeight:800, color:'#14532d', lineHeight:1 }}>{totalProyectado.toLocaleString('es-AR')}</span>
-                <span style={{ fontSize:'11px', color:'#6b7280' }}>{unidad}</span>
-              </div>
-              <p style={{ margin:'0 0 3px', fontSize:'10px', color:'#9ca3af', minHeight:'14px' }}>{subtitulo || ''}</p>
-              {varPct !== null ? (
-                <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'8px' }}>
-                  <span style={{ fontSize:'16px', fontWeight:800, color:varPct>=0?'#059669':'#dc2626', background:varPct>=0?'#f0fdf4':'#fef2f2', borderRadius:'5px', padding:'1px 7px' }}>
-                    {varPct>=0?'↑':'↓'} {Math.abs(varPct)}%
-                  </span>
-                  <span style={{ fontSize:'10px', color:'#9ca3af' }}>vs mayo</span>
+          <GraficoVentaPorArticulo datos={evolArticuloPanel} />
+          <div style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'16px' }}>
+            <p style={{ margin:'0 0 12px', fontSize:'13px', fontWeight:700, color:'#111827' }}>Indicadores</p>
+            <div style={{ display:'flex', flexDirection:'column', gap:'7px' }}>
+              {[
+                { label: 'Venta total mes al día', valor: `${resumenMesPanel.unidadesMes.toLocaleString('es-AR')} u` },
+                { label: 'Venta total mes proyectada', valor: `${resumenMesPanel.proyeccionMes.toLocaleString('es-AR')} u` },
+                { label: 'Ciclo actual rúcula', valor: ultSem?.rucula ? `${ultSem.rucula}d` : '—' },
+                { label: 'Ciclo actual lechuga', valor: ultSem?.lechugaF2 ? `${ultSem.lechugaF2}d` : '—' },
+                { label: 'Precio promedio actual', valor: `$${Math.round(resumenMesPanel.precioPromedioMes).toLocaleString('es-AR')}` },
+                { label: 'Ocupación N1', valor: `${ocupNaves.find((n:any)=>n.nave===1)?.pct ?? 0}%` },
+                { label: 'Ocupación N2', valor: `${ocupNaves.find((n:any)=>n.nave===2)?.pct ?? 0}%` },
+              ].map((it) => (
+                <div key={it.label} style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', borderBottom:'1px solid #f1f0eb', paddingBottom:'6px' }}>
+                  <span style={{ fontSize:'11.5px', color:'#52514e' }}>{it.label}</span>
+                  <strong style={{ fontSize:'15px', color:'#111827' }}>{it.valor}</strong>
                 </div>
-              ) : <p style={{ fontSize:'10px', color:'#9ca3af', marginBottom:'8px' }}>Sin datos mayo</p>}
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'4px' }}>
-                {(boxes as any[]).map(([l,v,c,b]:any) => (
-                  <div key={l} style={{ background:v>0?b:'#f9fafb', borderRadius:'5px', padding:'5px', textAlign:'center' }}>
-                    <p style={{ margin:'0 0 1px', fontSize:'8px', color:v>0?c:'#9ca3af', fontWeight:700, textTransform:'uppercase' }}>{l}</p>
-                    <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:v>0?'#111827':'#d1d5db' }}>{v>0?v.toLocaleString('es-AR'):'—'}</p>
-                  </div>
-                ))}
-              </div>
-              {/* Reparto por día */}
-              {reparto && (reparto.jue > 0 || reparto.lun > 0) && (
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4px', marginTop:'6px' }}>
-                  <div style={{ background:'#faf5ff', border:'1px solid #e9d5ff', borderRadius:'5px', padding:'5px', textAlign:'center' }}>
-                    <p style={{ margin:'0 0 1px', fontSize:'8px', color:'#7c3aed', fontWeight:700, textTransform:'uppercase' }}>🚚 Jue {reparto.fechaJue}</p>
-                    <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:reparto.jue>0?'#111827':'#d1d5db' }}>{reparto.jue>0?reparto.jue.toLocaleString('es-AR'):'—'}</p>
-                  </div>
-                  <div style={{ background:'#faf5ff', border:'1px solid #e9d5ff', borderRadius:'5px', padding:'5px', textAlign:'center' }}>
-                    <p style={{ margin:'0 0 1px', fontSize:'8px', color:'#7c3aed', fontWeight:700, textTransform:'uppercase' }}>🚚 Lun {reparto.fechaLun}</p>
-                    <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:reparto.lun>0?'#111827':'#d1d5db' }}>{reparto.lun>0?reparto.lun.toLocaleString('es-AR'):'—'}</p>
-                  </div>
-                </div>
-              )}
-              {/* Lotes por día de reparto */}
-              {reparto && (() => {
-                const grupos = [
-                  { label: `🚚 Jue ${reparto.fechaJue}`, lotes: reparto.lotesJue, color: '#7c3aed', bg: '#faf5ff', border: '#e9d5ff' },
-                  { label: `🚚 Lun ${reparto.fechaLun}`, lotes: reparto.lotesLun, color: '#7c3aed', bg: '#faf5ff', border: '#e9d5ff' },
-                ];
-                return (
-                  <div style={{ marginTop:'8px', display:'flex', flexDirection:'column', gap:'5px' }}>
-                    {grupos.map(g => g.lotes.length > 0 && (
-                      <div key={g.label}>
-                        <p style={{ margin:'0 0 3px', fontSize:'9px', color:g.color, fontWeight:700, textTransform:'uppercase' }}>{g.label}</p>
-                        <div style={{ display:'flex', flexWrap:'wrap', gap:'4px' }}>
-                          {g.lotes.map((l: {id:string;variedad:string;plantas:number;unidades:number;fechaEst:string}) => (
-                            <Link key={l.id} href={`/cultivos/${encodeURIComponent(l.id)}`} style={{ textDecoration:'none' }}>
-                              <span style={{ display:'inline-flex', alignItems:'center', gap:'4px', background:g.bg, border:`1px solid ${g.border}`, borderRadius:'5px', padding:'2px 7px', fontSize:'10px', fontWeight:700, color:g.color, cursor:'pointer', whiteSpace:'nowrap' }}>
-                                <span style={{ fontFamily:'monospace' }}>{l.id}</span>
-                                <span style={{ fontWeight:400, color:'#9ca3af' }}>{l.variedad.split(' ')[0]}</span>
-                                <span style={{ color:g.color }}>{l.unidades > 0 ? l.unidades.toLocaleString('es-AR') : l.plantas.toLocaleString('es-AR')} {l.unidades > 0 ? 'paq' : 'pl'}</span>
-                              </span>
-                            </Link>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-              {camara.stockActual > 0 && (() => {
-                const dc = camara.diasPromedio;
-                const cc = dc > 7 ? '#dc2626' : dc > 4 ? '#d97706' : '#059669';
-                const bc = dc > 7 ? '#fef2f2' : dc > 4 ? '#fffbeb' : '#f0fdf4';
-                const cultivoKey = label === 'RÚCULA' ? 'rucula' : 'lechuga';
-                return (
-                  <Link href={`/stocks/${cultivoKey}`} title="Ver detalle del mes" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4px', marginTop:'7px', paddingTop:'7px', borderTop:'1px solid #f3f4f6', textDecoration:'none' }}>
-                    <div style={{ background:bgStock, borderRadius:'5px', padding:'5px', textAlign:'center' }}>
-                      <p style={{ margin:'0 0 1px', fontSize:'8px', color:colorTop, fontWeight:700, textTransform:'uppercase' }}>Stock cámara →</p>
-                      <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:'#111827' }}>{camara.stockActual.toLocaleString('es-AR')} paq.</p>
-                    </div>
-                    <div style={{ background:bc, borderRadius:'5px', padding:'5px', textAlign:'center' }}>
-                      <p style={{ margin:'0 0 1px', fontSize:'8px', color:cc, fontWeight:700, textTransform:'uppercase' }}>Días en cámara</p>
-                      <p style={{ margin:0, fontSize:'13px', fontWeight:700, color:cc }}>{dc}d {dc > 7 ? '🔴' : dc > 4 ? '🟡' : '🟢'}</p>
-                    </div>
-                  </Link>
-                );
-              })()}
+              ))}
             </div>
-          ))
-        })()}
+          </div>
         </div>
 
         {/* ══ FILA 2: CICLOS + ÚLTIMOS MOVIMIENTOS ══ */}
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'14px' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'14px', alignItems:'start' }}>
           <div className="card" style={{ margin:0 }}>
             <p className="card-title">Ciclos en mesadas — 8 semanas</p>
             <p className="card-sub">Días promedio F2 por semana · sin plantinera</p>
@@ -469,60 +401,41 @@ export default async function PanelPage({ searchParams }: {
             )}
           </div>
 
-          {/* Últimos movimientos */}
+          {/* Últimos movimientos, por tipo */}
           <div className="card" style={{ margin:0 }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
               <p className="card-title" style={{ margin:0 }}>Últimos movimientos</p>
               <Link href="/movimientos" style={{ fontSize:'11px', color:'#6b7280', textDecoration:'none' }}>Ver todos →</Link>
             </div>
-            <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
-              {ultimosMovs.length === 0
-                ? <p style={{ color:'#9ca3af', fontSize:'12px', textAlign:'center', padding:'20px' }}>Sin movimientos</p>
-                : ultimosMovs.map(m => {
-                    const lote = lotesMap.get(String(m.id_lote||''));
-                    const t = TIPO_LABEL[String(m.tipo||'')] || TIPO_LABEL.descarte;
-                    const varNorm = String(lote?.variedad||'').toLowerCase();
-                    const esR = varNorm.includes('rucula')||varNorm.includes('rúcula');
-                    const cantU = Number(m.unidades_cosechadas||0);
-                    const cantP = Number(m.plantas_estimadas||0);
-                    const unidadesStr = m.tipo==='cosecha' && esR && cantU>0
-                      ? `${cantU.toLocaleString('es-AR')} paq. (${cantP.toLocaleString('es-AR')} pl)`
-                      : m.tipo==='cosecha' && cantU>0 ? `${cantU.toLocaleString('es-AR')} pl`
-                      : cantP>0 ? `${cantP.toLocaleString('es-AR')} pl` : '';
-                    return (
-                      <div key={m.id_movimiento} style={{ display:'flex', alignItems:'center', gap:'7px', padding:'6px 8px', background:'#fafafa', borderRadius:'6px', borderLeft:`3px solid ${t.color}` }}>
-                        <span style={{ background:t.bg, color:t.color, fontSize:'9px', fontWeight:700, padding:'1px 5px', borderRadius:'3px', minWidth:'65px', textAlign:'center' }}>{t.label}</span>
-                        <Link href={`/cultivos/${encodeURIComponent(String(m.id_lote||''))}`} style={{ textDecoration:'none' }}>
-                          <span style={{ fontFamily:'monospace', fontWeight:700, fontSize:'11px', color:'#111827' }}>{m.id_lote}</span>
-                        </Link>
-                        {lote?.variedad && (
-                          <span style={{ fontSize:'11px', color:esR?'#166534':'#4d7c0f', fontWeight:500 }}>
-                            {String(lote.variedad).split(' ')[0]}
-                          </span>
-                        )}
-                        {unidadesStr && <span style={{ fontSize:'11px', color:'#6b7280', marginLeft:'auto' }}>{unidadesStr}</span>}
-                        <span style={{ fontSize:'10px', color:'#9ca3af', whiteSpace:'nowrap' }}>{diasAtras(m.fecha)}</span>
-                      </div>
-                    );
-                  })}
-            </div>
+            {ultimasCosechas.length===0 && ultimosTrasplantes.length===0 && ultimasSiembras.length===0 ? (
+              <p style={{ color:'#9ca3af', fontSize:'12px', textAlign:'center', padding:'20px' }}>Sin movimientos</p>
+            ) : (
+              <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
+                {[
+                  { titulo: '🌾 Últimas cosechas', movs: ultimasCosechas },
+                  { titulo: '🔄 Últimos trasplantes', movs: ultimosTrasplantes },
+                  { titulo: '🌱 Últimas siembras', movs: ultimasSiembras },
+                ].map(({ titulo, movs }) => movs.length > 0 && (
+                  <div key={titulo}>
+                    <p style={{ margin:'0 0 5px', fontSize:'10px', color:'#6b7280', fontWeight:700, textTransform:'uppercase' }}>{titulo}</p>
+                    <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
+                      {movs.map(filaMov)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
         {/* ══ FILA 3: DISTRIBUCIÓN EN MESADAS ══ */}
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'14px' }}>
-          <div style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'14px' }}>
-            <p style={{ margin:'0 0 3px', fontSize:'11px', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.3px' }}>Distribución en mesadas</p>
-            <p style={{ margin:'0 0 10px', fontSize:'10px', color:'#9ca3af' }}>Semana de ciclo · F1 y F2</p>
-            <GraficoCiclos titulo="Lechuga" color="#4d7c0f" colorF1="#86efac" colorF2="#16a34a"
-              barras={ciclosLechuga.barras} semanasCosecha={ciclosLechuga.semanasCosecha} semanaActual={0} />
-          </div>
-          <div style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'14px' }}>
-            <p style={{ margin:'0 0 3px', fontSize:'11px', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.3px' }}>Distribución en mesadas</p>
-            <p style={{ margin:'0 0 10px', fontSize:'10px', color:'#9ca3af' }}>Semana de ciclo · F2 · en paquetes</p>
-            <GraficoCiclos titulo="Rúcula" color="#166534" colorF1="#6ee7b7" colorF2="#047857"
-              barras={ciclosRucula.barras} semanasCosecha={ciclosRucula.semanasCosecha} semanaActual={0} sinF1 paqFactor={ciclosRucula.factorPaq||3} />
-          </div>
+        <div style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'14px', marginBottom:'14px' }}>
+          <p style={{ margin:'0 0 3px', fontSize:'11px', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.3px' }}>Distribución en mesadas</p>
+          <p style={{ margin:'0 0 10px', fontSize:'10px', color:'#9ca3af' }}>Semana de ciclo · en paquetes</p>
+          <GraficoDistribucionMesadas
+            barrasLechuga={ciclosLechuga.barras} barrasRucula={ciclosRucula.barras}
+            semanasCosechaLechuga={ciclosLechuga.semanasCosecha} semanasCosechaRucula={ciclosRucula.semanasCosecha}
+            factorLechuga={ciclosLechuga.factorPaq||1} factorRucula={ciclosRucula.factorPaq||3} />
         </div>
 
         {/* ══ FILA 4: OCUPACIÓN POR MESADA ══ */}

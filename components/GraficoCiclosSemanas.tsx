@@ -16,7 +16,7 @@ export default function GraficoCiclosSemanas({ datos }: Props) {
     </div>
   );
 
-  const maxDias = Math.max(...datos.flatMap(d => [d.lechugaF1 + d.lechugaF2, d.rucula]), 1);
+  const maxDias = Math.max(...datos.flatMap(d => [d.lechugaF2, d.rucula]), 1);
   const W = 560, H = 260, PL = 36, PR = 12, PT = 16, PB = 28;
   const chartW = W - PL - PR, chartH = H - PT - PB;
   const slotW = chartW / datos.length;
@@ -34,9 +34,6 @@ export default function GraficoCiclosSemanas({ datos }: Props) {
     <div>
       {/* Leyenda */}
       <div style={{ display: 'flex', gap: '14px', marginBottom: '8px', fontSize: '11px', flexWrap: 'wrap' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span style={{ width: 12, height: 12, background: '#86efac', borderRadius: 2, display: 'inline-block' }} />Lechuga F1
-        </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           <span style={{ width: 12, height: 12, background: '#4d7c0f', borderRadius: 2, display: 'inline-block' }} />Lechuga F2
         </span>
@@ -57,16 +54,13 @@ export default function GraficoCiclosSemanas({ datos }: Props) {
 
         {/* Barras */}
         {datos.map((d, i) => {
-          const hF1 = yH(d.lechugaF1);
           const hF2 = yH(d.lechugaF2);
           const hR  = yH(d.rucula);
-          const totalL = d.lechugaF1 + d.lechugaF2;
           return (
             <g key={i}>
-              {/* Lechuga: F2 abajo, F1 encima */}
+              {/* Lechuga F2 */}
               {hF2 > 0 && <rect x={xL(i)} y={baseY - hF2} width={barW} height={hF2} fill="#4d7c0f" rx={2} />}
-              {hF1 > 0 && <rect x={xL(i)} y={baseY - hF2 - hF1} width={barW} height={hF1} fill="#86efac" rx={2} />}
-              {totalL > 0 && <text x={xL(i) + barW / 2} y={baseY - hF2 - hF1 - 3} textAnchor="middle" fontSize={9} fill="#374151" fontWeight={500}>{totalL}d</text>}
+              {d.lechugaF2 > 0 && <text x={xL(i) + barW / 2} y={baseY - hF2 - 3} textAnchor="middle" fontSize={9} fill="#374151" fontWeight={500}>{d.lechugaF2}d</text>}
 
               {/* Rúcula */}
               {hR > 0 && <rect x={xR(i)} y={baseY - hR} width={barW} height={hR} fill="#166534" rx={2} />}
