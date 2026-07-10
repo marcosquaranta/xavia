@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet, batchUpdateRows } from '@/lib/sheets';
 import { enviarResumenPendientes } from '@/lib/resumenFacturacion';
-import { emitirPendientes } from '@/lib/facturacionEmitir';
+import { emitirPendientes, enviarAvisoCaePendiente } from '@/lib/facturacionEmitir';
 import type { VentaDia } from '@/lib/types';
 
 const QTY_KEYS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg'];
@@ -42,6 +42,10 @@ export async function POST(req: NextRequest) {
       const r = await emitirPendientes(idControls);
       emitidas = r.emitidas; errores = r.errores;
       if (errores.length) console.error('[ventas/cargar] errores al emitir a Xubio:', JSON.stringify(errores));
+      if (emitidas.length) {
+        try { await enviarAvisoCaePendiente(emitidas, fecha); }
+        catch (e: any) { console.error('[ventas/cargar] error enviando aviso de CAEs pendientes:', e); }
+      }
     } catch (e: any) {
       console.error('[ventas/cargar] excepción al emitir a Xubio:', e);
       errores = [{ cliente: 'Xubio', error: e?.message || 'Error al emitir' }];
