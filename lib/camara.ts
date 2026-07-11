@@ -13,6 +13,35 @@ function isRucula(variedad: string) {
   return v.includes('rucula') || v.includes('rúcula');
 }
 
+// Paquetes cosechados de `cultivo` con fecha en (desde, hasta] — mismo criterio que
+// calcularCamara, pero acotado a un rango (no siempre "hasta hoy").
+function cosechadoEntre(cultivo: 'rucula' | 'lechuga', lotes: Lote[], desde: Date, hasta: Date): number {
+  return lotes
+    .filter(l => {
+      if (l.estado !== 'cosechado') return false;
+      if (cultivo === 'rucula' ? !isRucula(l.variedad) : isRucula(l.variedad)) return false;
+      const f = parseDate(l.fecha_cosecha || l.fecha_ult_movimiento);
+      return f && f > desde && f <= hasta;
+    })
+    .reduce((a, l) => a + (Number(l.unidades_cosechadas) || 0), 0);
+}
+
+// Paquetes vendidos (exportados a Xubio) de `cultivo` con fecha en (desde, hasta].
+// El export marca `exportado` con el id de exportación (ej. "EXP-20260619-1430"),
+// NO con el literal 'SI'. Por eso se descuenta cualquier venta con exportado no vacío.
+function vendidoEntre(cultivo: 'rucula' | 'lechuga', ventas: VentaDia[], desde: Date, hasta: Date): number {
+  return ventas
+    .filter(v => {
+      if (!v.exportado || String(v.exportado).trim() === '') return false;
+      const f = parseDate(v.fecha);
+      return f && f > desde && f <= hasta;
+    })
+    .reduce((acc, v) => {
+      if (cultivo === 'rucula') return acc + (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0);
+      return acc + (Number(v.lechuga_crespa) || 0) + (Number(v.hoja_roble) || 0);
+    }, 0);
+}
+
 export interface ResultadoCamara {
   cultivo: 'rucula' | 'lechuga';
   stockActual: number;
@@ -52,20 +81,7 @@ export function calcularCamara(
     .map(l => ({ fecha: parseDate(l.fecha_cosecha || l.fecha_ult_movimiento)!, cantidad: Number(l.unidades_cosechadas) || 0 }))
     .filter(e => e.cantidad > 0);
 
-  // Ventas exportadas desde fechaBase (= producto que ya salió de cámara).
-  // El export marca `exportado` con el id de exportación (ej. "EXP-20260619-1430"),
-  // NO con el literal 'SI'. Por eso descontamos cualquier venta con exportado no vacío.
-  const totalVendido = ventas
-    .filter(v => {
-      if (!v.exportado || String(v.exportado).trim() === '') return false;
-      const f = parseDate(v.fecha);
-      return f && f > fechaBase;
-    })
-    .reduce((acc, v) => {
-      if (cultivo === 'rucula') return acc + (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0);
-      return acc + (Number(v.lechuga_crespa) || 0) + (Number(v.hoja_roble) || 0);
-    }, 0);
-
+  const totalVendido = vendidoEntre(cultivo, ventas, fechaBase, hoy);
   const totalCosechado = cosechas.reduce((a, c) => a + c.cantidad, 0);
   const stockActual = Math.max(0, cantidadBase + totalCosechado - totalVendido);
 
@@ -96,4 +112,61 @@ export function calcularCamara(
   }, 0) / totalRestante;
 
   return { cultivo, stockActual, diasPromedio: Math.round(diasProm), base };
+}
+
+// Diferencia entre una cantidad nueva (contada a mano) y lo que el sistema esperaba
+// tener en cámara a esa fecha (stock teórico según la última base + movimientos desde
+// entonces). Sirve tanto para avisar al cargar un ajuste como para el acumulado mensual.
+export function diferenciaAjuste(
+  cultivo: 'rucula' | 'lechuga',
+  registros: StockCamara[],
+  lotes: Lote[],
+  ventas: VentaDia[],
+  cantidadNueva: number,
+  fecha: Date = new Date()
+): number {
+  const anteriores = [...registros]
+    .filter(r => r.cultivo === cultivo)
+    .map(r => ({ ...r, _f: parseDate(r.fecha) }))
+    .filter((r): r is StockCamara & { _f: Date } => !!r._f && r._f <= fecha)
+    .sort((a, b) => a._f.getTime() - b._f.getTime());
+  const prev = anteriores[anteriores.length - 1];
+  if (!prev) return 0; // sin base previa, no hay con qué comparar
+
+  const cosechado = cosechadoEntre(cultivo, lotes, prev._f, fecha);
+  const vendido = vendidoEntre(cultivo, ventas, prev._f, fecha);
+  const teorico = Math.max(0, (Number(prev.cantidad_paq) || 0) + cosechado - vendido);
+  return Math.round(cantidadNueva - teorico);
+}
+
+export interface DiferenciaAjustesMes { acumulado: number; cantidadAjustes: number }
+
+// Suma las diferencias reveladas por cada ajuste cargado en el mes de `fechaRef`
+// (por defecto el mes en curso) — "cuánto se corrigió" acumulado ese mes.
+export function diferenciaAjustesMes(
+  cultivo: 'rucula' | 'lechuga',
+  registros: StockCamara[],
+  lotes: Lote[],
+  ventas: VentaDia[],
+  fechaRef: Date = new Date()
+): DiferenciaAjustesMes {
+  const ordenados = [...registros]
+    .filter(r => r.cultivo === cultivo)
+    .map(r => ({ ...r, _f: parseDate(r.fecha) }))
+    .filter((r): r is StockCamara & { _f: Date } => !!r._f)
+    .sort((a, b) => a._f.getTime() - b._f.getTime());
+
+  let acumulado = 0, cantidadAjustes = 0;
+  for (let i = 1; i < ordenados.length; i++) {
+    const curr = ordenados[i];
+    if (curr.tipo !== 'ajuste') continue;
+    if (curr._f.getFullYear() !== fechaRef.getFullYear() || curr._f.getMonth() !== fechaRef.getMonth()) continue;
+    const prev = ordenados[i - 1];
+    const cosechado = cosechadoEntre(cultivo, lotes, prev._f, curr._f);
+    const vendido = vendidoEntre(cultivo, ventas, prev._f, curr._f);
+    const teorico = Math.max(0, (Number(prev.cantidad_paq) || 0) + cosechado - vendido);
+    acumulado += Number(curr.cantidad_paq) - teorico;
+    cantidadAjustes++;
+  }
+  return { acumulado: Math.round(acumulado), cantidadAjustes };
 }

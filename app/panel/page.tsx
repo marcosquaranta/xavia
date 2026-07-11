@@ -5,11 +5,12 @@ import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
 import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp } from '@/lib/estadisticas';
 import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
-import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica } from '@/lib/types';
+import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara } from '@/lib/types';
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
 import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
 import { evolucionVentaPorArticulo, resumenMesActual } from '@/lib/estadisticasVentas';
 import { generarAlertas } from '@/lib/alertasPanel';
+import { calcularCamara, diferenciaAjustesMes } from '@/lib/camara';
 import Header from '@/components/Header';
 import FiltrosLotes from '@/components/FiltrosLotes';
 import LoteCard from '@/components/LoteCard';
@@ -17,6 +18,7 @@ import GraficoCiclosSemanas from '@/components/GraficoCiclosSemanas';
 import GraficoDistribucionMesadas from '@/components/GraficoDistribucionMesadas';
 import BuscadorLote from '@/components/BuscadorLote';
 import GruposLotes from '@/components/GruposLotes';
+import AjusteStockCard from '@/components/AjusteStockCard';
 import { GraficoVentaPorArticulo } from '@/app/ventas/VentasEvolucionCharts';
 
 export const dynamic = 'force-dynamic';
@@ -56,8 +58,9 @@ export default async function PanelPage({ searchParams }: {
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [], variedades: Variedad[] = [];
   let ventasPanel: VentaDia[] = [], clientesPanel: ClienteVenta[] = [], preciosPanel: PrecioVenta[] = [], historicasPanel: VentaHistorica[] = [];
   let configRows: { clave: string; valor: any }[] = [];
+  let registrosCamara: StockCamara[] = [];
   try {
-    [lotes, movimientos, ubicaciones, variedades, ventasPanel, clientesPanel, preciosPanel, historicasPanel, configRows] = await Promise.all([
+    [lotes, movimientos, ubicaciones, variedades, ventasPanel, clientesPanel, preciosPanel, historicasPanel, configRows, registrosCamara] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<Ubicacion>('Ubicaciones'), readSheet<Variedad>('Variedades'),
       readSheet<VentaDia>('Ventas'),
@@ -65,6 +68,7 @@ export default async function PanelPage({ searchParams }: {
       readSheet<PrecioVenta>('Precios').catch(() => []),
       readSheet<VentaHistorica>('VentasHistoricas').catch(() => []),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
+      readSheet<StockCamara>('StockCamara').catch(() => []),
     ]);
   } catch {}
 
@@ -114,6 +118,13 @@ export default async function PanelPage({ searchParams }: {
   const resumenMesPasadoCompleto = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, mesPasadoRef);
   const pesoMesPanel = pesoPromedioMes(lotes, ahora);
   const pesoMesPasadoPanel = pesoPromedioMes(lotes, mesPasadoRef, ahora.getDate());
+
+  // ── Stock en cámara + diferencia acumulada de ajustes del mes ──
+  const camaraRucula = calcularCamara('rucula', registrosCamara, lotes, ventasPanel);
+  const camaraLechuga = calcularCamara('lechuga', registrosCamara, lotes, ventasPanel);
+  const ajusteMesRucula = diferenciaAjustesMes('rucula', registrosCamara, lotes, ventasPanel, ahora);
+  const ajusteMesLechuga = diferenciaAjustesMes('lechuga', registrosCamara, lotes, ventasPanel, ahora);
+
   const ocupNaves = tubosMesadas.map((n: any) => {
     const f2 = (n.mesadas || []).filter((m: any) => m.sector_fase !== 'fase_1');
     const tot = f2.reduce((s: number, m: any) => s + m.tubos_totales, 0);
@@ -315,36 +326,44 @@ export default async function PanelPage({ searchParams }: {
 
         {/* ══ FILA 2: CICLOS + ÚLTIMOS MOVIMIENTOS ══ */}
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'14px', alignItems:'start' }}>
-          <div className="card" style={{ margin:0 }}>
-            <p className="card-title">Ciclos en mesadas — 8 semanas</p>
-            <p className="card-sub">Días promedio F2 por semana · sin plantinera</p>
-            <GraficoCiclosSemanas datos={ciclosSemanas} />
-            {ultSem && (
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginTop:'10px', paddingTop:'10px', borderTop:'1px solid #f3f4f6' }}>
-                {ultSem.lechugaF2>0 && (
-                  <div style={{ textAlign:'center', padding:'8px', background:'#f7fee7', borderRadius:'7px' }}>
-                    <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#4d7c0f', fontWeight:700 }}>Lechuga F2</p>
-                    <p style={{ margin:'0 0 1px', fontSize:'22px', fontWeight:800, color:'#14532d' }}>{ultSem.lechugaF2}d</p>
-                    {varPctSem(ultSem.lechugaF2, antSem?.lechugaF2) !== null && (
-                      <p style={{ margin:0, fontSize:'10px', fontWeight:600, color:varPctSem(ultSem.lechugaF2,antSem?.lechugaF2)!<=0?'#059669':'#dc2626' }}>
-                        {varPctSem(ultSem.lechugaF2,antSem?.lechugaF2)!<=0?'↓':'↑'} {Math.abs(varPctSem(ultSem.lechugaF2,antSem?.lechugaF2)!)}%
-                      </p>
-                    )}
-                  </div>
-                )}
-                {ultSem.rucula>0 && (
-                  <div style={{ textAlign:'center', padding:'8px', background:'#f0fdf4', borderRadius:'7px' }}>
-                    <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#166534', fontWeight:700 }}>Rúcula F2</p>
-                    <p style={{ margin:'0 0 1px', fontSize:'22px', fontWeight:800, color:'#14532d' }}>{ultSem.rucula}d</p>
-                    {varPctSem(ultSem.rucula, antSem?.rucula) !== null && (
-                      <p style={{ margin:0, fontSize:'10px', fontWeight:600, color:varPctSem(ultSem.rucula,antSem?.rucula)!<=0?'#059669':'#dc2626' }}>
-                        {varPctSem(ultSem.rucula,antSem?.rucula)!<=0?'↓':'↑'} {Math.abs(varPctSem(ultSem.rucula,antSem?.rucula)!)}%
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
+          <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
+            <div className="card" style={{ margin:0 }}>
+              <p className="card-title">Ciclos en mesadas — 8 semanas</p>
+              <p className="card-sub">Días promedio F2 por semana · sin plantinera</p>
+              <GraficoCiclosSemanas datos={ciclosSemanas} />
+              {ultSem && (
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginTop:'10px', paddingTop:'10px', borderTop:'1px solid #f3f4f6' }}>
+                  {ultSem.lechugaF2>0 && (
+                    <div style={{ textAlign:'center', padding:'8px', background:'#f7fee7', borderRadius:'7px' }}>
+                      <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#4d7c0f', fontWeight:700 }}>Lechuga F2</p>
+                      <p style={{ margin:'0 0 1px', fontSize:'22px', fontWeight:800, color:'#14532d' }}>{ultSem.lechugaF2}d</p>
+                      {varPctSem(ultSem.lechugaF2, antSem?.lechugaF2) !== null && (
+                        <p style={{ margin:0, fontSize:'10px', fontWeight:600, color:varPctSem(ultSem.lechugaF2,antSem?.lechugaF2)!<=0?'#059669':'#dc2626' }}>
+                          {varPctSem(ultSem.lechugaF2,antSem?.lechugaF2)!<=0?'↓':'↑'} {Math.abs(varPctSem(ultSem.lechugaF2,antSem?.lechugaF2)!)}%
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {ultSem.rucula>0 && (
+                    <div style={{ textAlign:'center', padding:'8px', background:'#f0fdf4', borderRadius:'7px' }}>
+                      <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#166534', fontWeight:700 }}>Rúcula F2</p>
+                      <p style={{ margin:'0 0 1px', fontSize:'22px', fontWeight:800, color:'#14532d' }}>{ultSem.rucula}d</p>
+                      {varPctSem(ultSem.rucula, antSem?.rucula) !== null && (
+                        <p style={{ margin:0, fontSize:'10px', fontWeight:600, color:varPctSem(ultSem.rucula,antSem?.rucula)!<=0?'#059669':'#dc2626' }}>
+                          {varPctSem(ultSem.rucula,antSem?.rucula)!<=0?'↓':'↑'} {Math.abs(varPctSem(ultSem.rucula,antSem?.rucula)!)}%
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <AjusteStockCard
+              rucula={{ actual: camaraRucula.stockActual, ajusteMes: ajusteMesRucula.acumulado }}
+              lechuga={{ actual: camaraLechuga.stockActual, ajusteMes: ajusteMesLechuga.acumulado }}
+              esAdmin={user.rol === 'admin'}
+            />
           </div>
 
           {/* Últimos movimientos, por tipo */}
