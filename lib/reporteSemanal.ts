@@ -1,10 +1,11 @@
 import { readSheet } from './sheets';
-import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, PrecioVenta, ClienteVenta, VentaHistorica } from './types';
+import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, PrecioVenta, ClienteVenta, VentaHistorica, StockCamara } from './types';
 import { tubosPorMesada } from './ocupacion';
 import { calcularCapacidad, diasCicloDefault } from './planificacionServer';
 import { calcularPlan, repartoHelpers, parseReparto, REPARTO_DEFAULT, DIA_SIEMBRA, CUB, CUBPOSRUC, planchas } from './planificacion';
 import { proyeccionCosechaSemanal, cicloRealPorVariedad, ciclosPorSemana, pesoPromedioRango, pesoPromedioMes, mesAnteriorClamp, type PesoPromedioMes } from './estadisticas';
 import { generarAlertas, type Alerta } from './alertasPanel';
+import { calcularCamara, diferenciaAjustesMes } from './camara';
 import { evolucionVentaPorArticulo, ventasEnRango, type PuntoArticulo, type VentasRango } from './estadisticasVentas';
 
 function lunesDe(d: Date): Date {
@@ -30,15 +31,19 @@ export interface ReporteSemanalData {
   siembra: { rucula: { real: number; plan: number }; lechuga: { real: number; plan: number } };
   alertas: Alerta[];
   evolArticulo: PuntoArticulo[];
+  stock: { rucula: number; lechuga: number };
+  faltanteMes: { rucula: number; lechuga: number; total: number };
+  faltanteMesAnterior: { rucula: number; lechuga: number; total: number };
 }
 
 export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> {
-  const [lotes, movimientos, ubicaciones, variedades, ventas, precios, clientes, historicas, configRows] = await Promise.all([
+  const [lotes, movimientos, ubicaciones, variedades, ventas, precios, clientes, historicas, configRows, registrosCamara] = await Promise.all([
     readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'), readSheet<Ubicacion>('Ubicaciones'),
     readSheet<Variedad>('Variedades'), readSheet<VentaDia>('Ventas'), readSheet<PrecioVenta>('Precios'),
     readSheet<ClienteVenta>('Clientes'),
     readSheet<VentaHistorica>('VentasHistoricas').catch(() => []),
     readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
+    readSheet<StockCamara>('StockCamara').catch(() => []),
   ]);
 
   const hoy = new Date();
@@ -131,6 +136,19 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   // ── Evolución de venta por artículo (últimos 6 meses) ──
   const evolArticulo = evolucionVentaPorArticulo(ventas, 6, historicas);
 
+  // ── Stock en cámara + faltante acumulado por ajustes (mes actual vs. mes pasado) ──
+  const mesPasadoRef = mesAnteriorClamp(hoy);
+  const stock = {
+    rucula: calcularCamara('rucula', registrosCamara, lotes, ventas).stockActual,
+    lechuga: calcularCamara('lechuga', registrosCamara, lotes, ventas).stockActual,
+  };
+  const ajusteRuc = diferenciaAjustesMes('rucula', registrosCamara, lotes, ventas, hoy);
+  const ajusteLec = diferenciaAjustesMes('lechuga', registrosCamara, lotes, ventas, hoy);
+  const ajusteRucAnt = diferenciaAjustesMes('rucula', registrosCamara, lotes, ventas, mesPasadoRef);
+  const ajusteLecAnt = diferenciaAjustesMes('lechuga', registrosCamara, lotes, ventas, mesPasadoRef);
+  const faltanteMes = { rucula: ajusteRuc.acumulado, lechuga: ajusteLec.acumulado, total: ajusteRuc.acumulado + ajusteLec.acumulado };
+  const faltanteMesAnterior = { rucula: ajusteRucAnt.acumulado, lechuga: ajusteLecAnt.acumulado, total: ajusteRucAnt.acumulado + ajusteLecAnt.acumulado };
+
   return {
     fechaGenerado: fmtISO(hoy),
     ventasSemana, ventasSemanaAnterior,
@@ -138,6 +156,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     cicloSemana, cicloSemanaAnterior,
     pesoSemana, pesoMesAnterior,
     ocupacion, siembra, alertas, evolArticulo,
+    stock, faltanteMes, faltanteMesAnterior,
   };
 }
 
@@ -152,6 +171,14 @@ function flechaHtml(p: number | null, mejorSiSube: boolean): string {
   const color = p === 0 ? '#9ca3af' : bueno ? '#059669' : '#dc2626';
   const flecha = p > 0 ? '↑' : p < 0 ? '↓' : '·';
   return `<span style="color:${color};font-weight:700">${flecha} ${Math.abs(p)}%</span>`;
+}
+// Igual que flechaHtml pero en paquetes en vez de %, para valores que pueden cruzar cero
+// (un % ahí no dice nada útil — ej. pasar de -10 a +3 no es "-130%").
+function flechaPaqHtml(delta: number, mejorSiSube: boolean): string {
+  const bueno = mejorSiSube ? delta > 0 : delta < 0;
+  const color = delta === 0 ? '#9ca3af' : bueno ? '#059669' : '#dc2626';
+  const flecha = delta > 0 ? '↑' : delta < 0 ? '↓' : '·';
+  return `<span style="color:${color};font-weight:700">${flecha} ${Math.abs(delta)} paq</span>`;
 }
 
 function filaVentas(label: string, actual: { unidades: number; monto: number }, ref: { unidades: number; monto: number }): string {
@@ -191,6 +218,23 @@ function construirHtml(d: ReporteSemanalData): string {
       <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${flechaHtml(pct(peso, pesoAnt), true)}</td>
     </tr>`;
   }).join('');
+
+  const stockFilas = (['rucula', 'lechuga'] as const).map((c) => {
+    const label = c === 'rucula' ? 'Rúcula' : 'Lechuga';
+    const falt = d.faltanteMes[c], faltAnt = d.faltanteMesAnterior[c];
+    return `<tr>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">${label}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${fmtN(d.stock[c])} paq</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${falt >= 0 ? '+' : ''}${falt} paq</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${flechaPaqHtml(falt - faltAnt, true)}</td>
+    </tr>`;
+  }).join('');
+  const stockTotalRow = `<tr style="background:#fafafa">
+    <td style="padding:6px 10px;font-weight:800">Total</td>
+    <td style="padding:6px 10px;text-align:right;font-weight:800">${fmtN(d.stock.rucula + d.stock.lechuga)} paq</td>
+    <td style="padding:6px 10px;text-align:right;font-weight:800">${d.faltanteMes.total >= 0 ? '+' : ''}${d.faltanteMes.total} paq</td>
+    <td style="padding:6px 10px;text-align:right">${flechaPaqHtml(d.faltanteMes.total - d.faltanteMesAnterior.total, true)}</td>
+  </tr>`;
 
   const siembraFilas = (['rucula', 'lechuga'] as const).map((c) => {
     const label = c === 'rucula' ? 'Rúcula' : 'Lechuga';
@@ -252,6 +296,12 @@ function construirHtml(d: ReporteSemanalData): string {
     <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
       <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Ciclo F2</th><th style="padding:6px 10px;text-align:right">vs. sem. ant.</th><th style="padding:6px 10px;text-align:right">Peso prom.</th><th style="padding:6px 10px;text-align:right">vs. mes ant.</th></tr></thead>
       <tbody>${ciclosPesoFilas}</tbody>
+    </table>
+
+    <h3 style="margin:0 0 8px;font-size:14px">Stock en cámara <span style="font-weight:400;color:#9ca3af">(faltante acumulado por ajustes este mes, vs. mes pasado)</span></h3>
+    <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
+      <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Stock actual</th><th style="padding:6px 10px;text-align:right">Faltante mes</th><th style="padding:6px 10px;text-align:right">vs. mes ant.</th></tr></thead>
+      <tbody>${stockFilas}${stockTotalRow}</tbody>
     </table>
 
     <h3 style="margin:0 0 8px;font-size:14px">Ocupación por nave</h3>
