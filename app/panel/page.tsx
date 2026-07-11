@@ -124,6 +124,10 @@ export default async function PanelPage({ searchParams }: {
   const camaraLechuga = calcularCamara('lechuga', registrosCamara, lotes, ventasPanel);
   const ajusteMesRucula = diferenciaAjustesMes('rucula', registrosCamara, lotes, ventasPanel, ahora);
   const ajusteMesLechuga = diferenciaAjustesMes('lechuga', registrosCamara, lotes, ventasPanel, ahora);
+  const ajusteMesRuculaPasado = diferenciaAjustesMes('rucula', registrosCamara, lotes, ventasPanel, mesPasadoRef);
+  const ajusteMesLechugaPasado = diferenciaAjustesMes('lechuga', registrosCamara, lotes, ventasPanel, mesPasadoRef);
+  const faltanteMesTotal = ajusteMesRucula.acumulado + ajusteMesLechuga.acumulado;
+  const faltanteMesTotalPasado = ajusteMesRuculaPasado.acumulado + ajusteMesLechugaPasado.acumulado;
 
   const ocupNaves = tubosMesadas.map((n: any) => {
     const f2 = (n.mesadas || []).filter((m: any) => m.sector_fase !== 'fase_1');
@@ -301,9 +305,11 @@ export default async function PanelPage({ searchParams }: {
                   pct: pctVs(pesoMesPanel.rucula, pesoMesPasadoPanel.rucula), mejorSiSube: true },
                 { label: 'Peso promedio lechuga (paq)', valor: pesoMesPanel.lechuga > 0 ? `${pesoMesPanel.lechuga}g` : '—',
                   pct: pctVs(pesoMesPanel.lechuga, pesoMesPasadoPanel.lechuga), mejorSiSube: true },
+                { label: 'Faltante de stock (mes)', valor: `${faltanteMesTotal>=0?'+':''}${faltanteMesTotal} paq`,
+                  pct: faltanteMesTotalPasado || faltanteMesTotal ? faltanteMesTotal - faltanteMesTotalPasado : null, mejorSiSube: true, sufijo: 'paq' as const },
                 { label: 'Ocupación N1', valor: `${ocupNaves.find((n:any)=>n.nave===1)?.pct ?? 0}%`, pct: null, mejorSiSube: true },
                 { label: 'Ocupación N2', valor: `${ocupNaves.find((n:any)=>n.nave===2)?.pct ?? 0}%`, pct: null, mejorSiSube: true },
-              ].map((it) => {
+              ].map((it: any) => {
                 const bueno = it.pct === null ? null : it.mejorSiSube ? it.pct > 0 : it.pct < 0;
                 return (
                   <div key={it.label} style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', borderBottom:'1px solid #f1f0eb', paddingBottom:'6px' }}>
@@ -312,7 +318,7 @@ export default async function PanelPage({ searchParams }: {
                       <strong style={{ fontSize:'15px', color:'#111827' }}>{it.valor}</strong>
                       {it.pct !== null && (
                         <span style={{ fontSize:'10px', fontWeight:700, color: bueno===null?'#9ca3af':bueno?'#059669':'#dc2626' }}>
-                          {it.pct > 0 ? '↑' : it.pct < 0 ? '↓' : '·'} {Math.abs(it.pct)}%
+                          {it.pct > 0 ? '↑' : it.pct < 0 ? '↓' : '·'} {Math.abs(it.pct)}{it.sufijo === 'paq' ? ' paq' : '%'}
                         </span>
                       )}
                     </span>
