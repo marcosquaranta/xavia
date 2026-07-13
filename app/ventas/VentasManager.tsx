@@ -57,7 +57,7 @@ function mkFilas(cs: ClienteVenta[], freq: Record<string,number>): Fila[] {
   return out.sort((a,b)=>(freq[b.id_control]||0)-(freq[a.id_control]||0));
 }
 
-export default function VentasManager({clientes,precios,frecuencias,stats,ventas7,estimCosecha}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;ventas7:VentaDia[];estimCosecha:EstimacionCosechaCercana}) {
+export default function VentasManager({clientes,precios,frecuencias,stats,estimCosecha}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;estimCosecha:EstimacionCosechaCercana}) {
   const hoy = new Date().toISOString().split('T')[0];
   const [fecha,setFecha]=useState(hoy);
   const [showExpSelector,setShowExpSelector]=useState(false);
@@ -82,6 +82,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
   const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number;diasPromedio:number};lechuga:{stockActual:number;diasPromedio:number};factorGrPaq:{rucula:number;lechuga:number}}|null>(null);
   const [ctdsKg,setCtdsKg]=useState<CKG>({});
   const [fechaExportada,setFechaExportada]=useState(false);
+  const [ventas7,setVentas7]=useState<VentaDia[]>([]);
+  const [facturadasHoy,setFacturadasHoy]=useState<VentaDia[]>([]);
   const ctdsKgLive=useRef<CKG>({});
   // Referencias directas a los inputs KG del DOM — fuente de verdad para saveKg
   const kgInputRefs=useRef<Record<string,{rucula_kg:HTMLInputElement|null;lechuga_kg:HTMLInputElement|null}>>({});
@@ -166,6 +168,21 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
       setCurrentExportId(null);
       setCtds(c); setCtdsKg(ckg); setEsts({}); setEstsKg({});
     }).catch(()=>{}).finally(()=>setLoading(false));
+  },[fecha]);
+
+  // Ventas del mismo día de la semana pasada (para la comparación por cliente) — se
+  // recalcula según la fecha seleccionada, no según "hoy" (si no, la comparación quedaba
+  // pegada a la semana pasada de hoy aunque estés viendo otro día).
+  useEffect(()=>{
+    const d=new Date(fecha+'T12:00:00'); d.setDate(d.getDate()-7);
+    const fecha7=d.toISOString().split('T')[0];
+    fetch(`/api/ventas/fecha?fecha=${fecha7}`).then(r=>r.json()).then(setVentas7).catch(()=>setVentas7([]));
+  },[fecha]);
+
+  // Ventas ya facturadas (exportadas) de la fecha seleccionada — para avisar de posibles
+  // duplicados, ya que el fetch de arriba solo trae lo NO facturado todavía.
+  useEffect(()=>{
+    fetch(`/api/ventas/fecha?fecha=${fecha}&facturadas=1`).then(r=>r.json()).then(setFacturadasHoy).catch(()=>setFacturadasHoy([]));
   },[fecha]);
 
   function onChange(f:Fila,k:PK,v:string){
@@ -276,6 +293,26 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
   }
   const totalHoyGlobal = filas.reduce((acc,f)=>acc+totalHoy(f.id_control,f.sucursal),0);
   const total7dGlobal = ventas7.reduce((acc,v)=>acc+(['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca'] as PK[]).reduce((a,k)=>a+Number((v as any)[k]||0),0),0);
+
+  // Lo ya facturado (exportado) hoy para un cliente — el fetch normal de la fecha solo
+  // trae lo NO facturado, así que esto es lo único que muestra que ya se cargó algo.
+  const PK_ALL: PK[] = ['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca'];
+  function facturadoDe(id_control:string, sucursal:string): { sum: Record<PK,number>; total: number } | null {
+    const rows = facturadasHoy.filter(v=>String(v.id_control)===String(id_control)&&v.sucursal===sucursal);
+    if(!rows.length) return null;
+    const sum = {rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0} as Record<PK,number>;
+    for(const r of rows) for(const k of PK_ALL) sum[k]+=Number((r as any)[k])||0;
+    const total = PK_ALL.reduce((a,k)=>a+sum[k],0);
+    return total>0 ? { sum, total } : null;
+  }
+  // ¿Lo que hay tipeado ahora coincide exactamente con lo que ya se facturó hoy para este cliente?
+  function esPosibleDuplicado(id_control:string, sucursal:string): boolean {
+    const fact = facturadoDe(id_control,sucursal);
+    if(!fact) return false;
+    const hoyT = totalHoy(id_control,sucursal);
+    if(hoyT<=0) return false;
+    return PK_ALL.every(k=>(Number(q(id_control,sucursal,k))||0)===fact.sum[k]);
+  }
 
   return (
     <div>
@@ -412,6 +449,34 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
 
       {msg&&<div style={{padding:'9px 14px',borderRadius:'7px',marginBottom:'10px',fontSize:'12px',whiteSpace:'pre-line',background:msg.t==='ok'?'#f0fdf4':'#fef2f2',border:`1px solid ${msg.t==='ok'?'#86efac':'#fca5a5'}`,color:msg.t==='ok'?'#166534':'#dc2626'}}>{msg.s}</div>}
 
+      {/* Ya facturado hoy — para no volver a cargarlo por duplicado */}
+      {(()=>{
+        const porCliente = new Map<string,{nombre:string;total:number}>();
+        for(const v of facturadasHoy){
+          const total = PK_ALL.reduce((a,k)=>a+(Number((v as any)[k])||0),0);
+          if(total<=0) continue;
+          const key = `${v.id_control}__${v.sucursal}`;
+          const fila = filas.find(f=>f.id_control===v.id_control&&f.sucursal===v.sucursal);
+          const nombre = fila?.nombre_display || v.nombre_cliente || v.id_control;
+          const prev = porCliente.get(key);
+          porCliente.set(key,{nombre,total:(prev?.total||0)+total});
+        }
+        const items = Array.from(porCliente.values()).sort((a,b)=>b.total-a.total);
+        if(!items.length) return null;
+        return (
+          <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'8px',padding:'8px 14px',marginBottom:'12px'}}>
+            <p style={{margin:'0 0 6px',fontSize:'12px',fontWeight:700,color:'#92400e'}}>⚠️ Ya facturado hoy — evitá cargarlo de nuevo</p>
+            <div style={{display:'flex',flexWrap:'wrap',gap:'6px'}}>
+              {items.map(it=>(
+                <span key={it.nombre} style={{fontSize:'11px',background:'white',border:'1px solid #fde68a',borderRadius:'5px',padding:'3px 8px',color:'#92400e'}}>
+                  {it.nombre}: <strong>{it.total}</strong> u
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Tabla */}
       {loading?<div style={{textAlign:'center',padding:'24px',color:'#9ca3af'}}>Cargando…</div>:(
         <div style={{overflowX:'auto',marginBottom:'4px'}}>
@@ -427,11 +492,17 @@ export default function VentasManager({clientes,precios,frecuencias,stats,ventas
             <tbody>
               {filasNormales.map((f,i)=>{
                 const act=(prods as any[]).some((p:any)=>Number(q(f.id_control,f.sucursal,p.key))>0);
+                const dup=esPosibleDuplicado(f.id_control,f.sucursal);
                 return(
-                  <tr key={`${f.id_control}__${f.sucursal}`} style={{background:act?'#f0fdf4':(i%2===0?'white':'#fafafa'),borderBottom:'1px solid #f3f4f6'}}>
+                  <tr key={`${f.id_control}__${f.sucursal}`} style={{background:dup?'#fef2f2':act?'#f0fdf4':(i%2===0?'white':'#fafafa'),borderBottom:'1px solid #f3f4f6'}}>
                     <td style={{padding:'6px 12px'}}>
                       <span style={{fontWeight:act?600:400}}>{f.nombre_display}</span>
                       <span style={{marginLeft:'4px',fontSize:'10px',background:f.tipo==='A'?'#dbeafe':'#fef9c3',color:f.tipo==='A'?'#1e40af':'#92400e',padding:'1px 4px',borderRadius:'3px',fontWeight:600}}>F{f.tipo}</span>
+                      {dup && (
+                        <span title="Estos mismos valores ya están facturados hoy para este cliente" style={{marginLeft:'6px',fontSize:'10px',background:'#fee2e2',color:'#dc2626',padding:'1px 6px',borderRadius:'3px',fontWeight:700}}>
+                          ⚠ posible duplicado
+                        </span>
+                      )}
                     </td>
                     {(prods as any[]).map((p:any)=>{
                       const est=e(f.id_control,f.sucursal,p.key);const val=q(f.id_control,f.sucursal,p.key);

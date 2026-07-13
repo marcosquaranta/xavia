@@ -66,10 +66,6 @@ export default async function VentasPage() {
   const frecuencias: Record<string,number> = {};
   for (const v of ventas) frecuencias[v.id_control] = (frecuencias[v.id_control]||0) + 1;
 
-  // Ventas de hace 7 días para comparación
-  const hoyStr2 = new Date().toISOString().split('T')[0];
-  const hace7Str = (() => { const d = new Date(); d.setDate(d.getDate()-7); return d.toISOString().split('T')[0]; })();
-  const ventas7 = ventas.filter(v => v.fecha === hace7Str);
   const evolArticulo = evolucionVentaPorArticulo(ventas, 12, historicas);
   const evolCliente = evolucionVentaPorClienteSemanal(ventas, clientes, 5, 4);
   const evolPrecio = evolucionPrecioPromedio(ventas, precios, clientes, 12);
@@ -84,7 +80,7 @@ export default async function VentasPage() {
         <p className="page-subtitle">Carga diaria · Exportación Xubio</p>
         <VentasEvolucionCharts articulo={evolArticulo} cliente={evolCliente} precio={evolPrecio} resumenMes={resumenMes} />
         <div className="card">
-          <VentasManager clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} ventas7={ventas7} estimCosecha={estimCosecha} />
+          <VentasManager clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} estimCosecha={estimCosecha} />
           <XubioResumen />
         </div>
       </div>

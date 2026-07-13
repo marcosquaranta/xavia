@@ -8,10 +8,15 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
   const fecha = req.nextUrl.searchParams.get('fecha') || '';
   const idExp = req.nextUrl.searchParams.get('id_exportacion') || '';
+  const facturadas = req.nextUrl.searchParams.get('facturadas') || '';
   const ventas = await readSheet<VentaDia>('Ventas');
   if (idExp) {
     // Cargar una exportación específica para re-editar
     return NextResponse.json(ventas.filter(v => v.exportado === idExp));
+  }
+  if (facturadas) {
+    // Ventas ya exportadas/facturadas de esa fecha (para avisar de posibles duplicados)
+    return NextResponse.json(ventas.filter(v => v.fecha === fecha && v.exportado && v.exportado !== ''));
   }
   // Solo filas no exportadas (sesión actual)
   return NextResponse.json(ventas.filter(v => v.fecha === fecha && (!v.exportado || v.exportado === '')));
