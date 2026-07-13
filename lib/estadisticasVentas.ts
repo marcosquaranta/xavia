@@ -126,6 +126,22 @@ export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas
   });
 }
 
+// Igual que evolucionVentaPorArticulo pero agrupado por semana (lunes de esa semana) en
+// vez de por mes — para el reporte semanal. No usa VentasHistoricas (son totales
+// mensuales, no tiene sentido repartirlos por semana).
+export function evolucionVentaPorArticuloSemanal(ventas: VentaDia[], n = 8): PuntoArticulo[] {
+  const semanas = ultimasNSemanas(ventas, n);
+  return semanas.map((sk) => {
+    const delSemana = ventas.filter((v) => semanaKey(v.fecha) === sk);
+    const ruculaKgEnPaq = delSemana.reduce((a, v) => a + (Number(v.rucula_kg) || 0), 0) * 1000 / GR_PAQ_RUCULA;
+    const lechugaKgEnPaq = delSemana.reduce((a, v) => a + (Number(v.lechuga_kg) || 0), 0) * 1000 / GR_PAQ_LECHUGA;
+    const rucula = delSemana.reduce((a, v) => a + (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0), 0) + Math.round(ruculaKgEnPaq);
+    const lechuga = delSemana.reduce((a, v) => a + (Number(v.lechuga_crespa) || 0) + (Number(v.hoja_roble) || 0), 0) + Math.round(lechugaKgEnPaq);
+    const albahaca = delSemana.reduce((a, v) => a + (Number(v.albahaca) || 0), 0);
+    return { mes: sk, label: semanaLabel(sk), rucula, lechuga, albahaca };
+  });
+}
+
 // ── Evolución de venta por cliente (unidades totales, top N) — mensual o semanal ──
 export interface SerieCliente { id_control: string; nombre: string; total: number }
 export interface EvolucionClientes { meses: { mes: string; label: string }[]; series: SerieCliente[]; puntos: Record<string, number>[] }
