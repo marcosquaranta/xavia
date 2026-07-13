@@ -35,6 +35,7 @@ export interface ReporteSemanalData {
   ventasSemana: VentasRango;
   ventasSemanaAnterior: VentasRango;
   ventasMesActual: ResumenMesActual;
+  ventasMesAnteriorTotal: number;
   proyeccionProximaSemana: { rucula: number; lechuga: number };
   proyeccionSemanas: { label: string; rucula: number; lechuga: number }[];
   cosechaRealSemanaAnterior: { rucula: number; lechuga: number };
@@ -61,6 +62,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   void historicas; // no se usa en la evolución semanal (los históricos son totales mensuales)
 
   const hoy = new Date();
+  const mesPasadoRef = mesAnteriorClamp(hoy);
 
   // ── Ventas: últimos 7 días vs los 7 días anteriores a esos ──
   const hastaHoy = fmtISO(hoy);
@@ -70,8 +72,10 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const ventasSemana = ventasEnRango(ventas, precios, clientes, desdeSemana, hastaHoy);
   const ventasSemanaAnterior = ventasEnRango(ventas, precios, clientes, desdeAnt, hastaAnt);
 
-  // ── Ventas del mes en curso: acumulado a hoy y proyección a fin de mes ──
+  // ── Ventas del mes en curso: acumulado a hoy, proyección a fin de mes y total real del mes pasado ──
   const ventasMesActual = resumenMesActual(ventas, precios, clientes, hoy);
+  const diasEnMesPasado = new Date(mesPasadoRef.getFullYear(), mesPasadoRef.getMonth() + 1, 0).getDate();
+  const ventasMesAnteriorTotal = resumenMesActual(ventas, precios, clientes, mesPasadoRef, diasEnMesPasado).unidadesMes;
 
   // ── Proyección de cosecha (calendario, próximas 6 semanas) vs. lo realmente cosechado la semana pasada ──
   const proyeccionRaw = proyeccionCosechaSemanal(lotes, variedades, 6);
@@ -100,7 +104,6 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const antSem = ciclosSemanas[ciclosSemanas.length - 2] || { rucula: 0, lechugaF2: 0 };
   const cicloSemana = { rucula: ultSem.rucula || 0, lechuga: ultSem.lechugaF2 || 0 };
   const cicloSemanaAnterior = { rucula: antSem.rucula || 0, lechuga: antSem.lechugaF2 || 0 };
-  const mesPasadoRef = mesAnteriorClamp(hoy);
   const cicloMesAnterior = cicloMesPromedio(lotes, movimientos, mesPasadoRef);
 
   // ── Peso promedio de esta semana vs. promedio del mes pasado completo ──
@@ -135,7 +138,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
 
   return {
     fechaGenerado: fmtISO(hoy),
-    ventasSemana, ventasSemanaAnterior, ventasMesActual,
+    ventasSemana, ventasSemanaAnterior, ventasMesActual, ventasMesAnteriorTotal,
     proyeccionProximaSemana, proyeccionSemanas, cosechaRealSemanaAnterior,
     cicloSemana, cicloSemanaAnterior, cicloMesAnterior,
     pesoSemana, pesoMesAnterior,
@@ -191,12 +194,44 @@ function graficoBarrasHtml(
         <div style="width:14px;height:${p.b > 0 ? hB : 0}px;background:${colorB};border-radius:2px 2px 0 0" title="${nombreB} ${p.b}"></div>
       </div>
       <div style="font-size:9px;color:#9ca3af;margin-top:3px;white-space:nowrap">${p.label}</div>
+      <div style="font-size:9px;color:${colorA};font-weight:700;white-space:nowrap">${fmtN(p.a)}</div>
+      <div style="font-size:9px;color:${colorB};font-weight:700;white-space:nowrap">${fmtN(p.b)}</div>
     </td>`;
   }).join('');
   return `<table style="border-collapse:collapse"><tr>${cols}</tr></table>
     <p style="font-size:11px;color:#9ca3af;margin:6px 0 0">
       <span style="color:${colorA}">■</span> ${nombreA} · <span style="color:${colorB}">■</span> ${nombreB}
     </p>`;
+}
+
+// Gráfico de líneas (SVG inline) con puntos y valores — para la evolución de venta por
+// artículo. Gmail (donde se lee este mail) soporta SVG inline en el body.
+function graficoLineasHtml(
+  puntos: { label: string; a: number; b: number }[],
+  colorA: string, colorB: string, nombreA: string, nombreB: string
+): string {
+  const max = Math.max(...puntos.flatMap(p => [p.a, p.b]), 1);
+  const n = puntos.length;
+  const W = 600, H = 190, PL = 8, PR = 8, T = 26, B = H - 24;
+  const px = (i: number) => n <= 1 ? (PL + (W - PR)) / 2 : PL + (i * (W - PR - PL)) / (n - 1);
+  const py = (v: number) => B - (v / max) * (B - T);
+  const pathDe = (key: 'a' | 'b') => puntos.map((p, i) => `${i === 0 ? 'M' : 'L'} ${px(i)} ${py(p[key])}`).join(' ');
+  const puntosDe = (key: 'a' | 'b', color: string) => puntos.map((p, i) => `
+    <circle cx="${px(i)}" cy="${py(p[key])}" r="4" fill="${color}" />
+    <text x="${px(i)}" y="${py(p[key]) - 8}" text-anchor="middle" font-size="10" fill="${color}" font-weight="700">${fmtN(p[key])}</text>
+  `).join('');
+  const labelsX = puntos.map((p, i) => `<text x="${px(i)}" y="${H - 6}" text-anchor="middle" font-size="10" fill="#9ca3af">${p.label}</text>`).join('');
+  return `
+  <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;height:auto">
+    <path d="${pathDe('a')}" fill="none" stroke="${colorA}" stroke-width="2.5" />
+    <path d="${pathDe('b')}" fill="none" stroke="${colorB}" stroke-width="2.5" />
+    ${puntosDe('a', colorA)}
+    ${puntosDe('b', colorB)}
+    ${labelsX}
+  </svg>
+  <p style="font-size:11px;color:#9ca3af;margin:4px 0 0">
+    <span style="color:${colorA}">●</span> ${nombreA} · <span style="color:${colorB}">●</span> ${nombreB}
+  </p>`;
 }
 
 export function construirHtml(d: ReporteSemanalData): string {
@@ -269,7 +304,7 @@ export function construirHtml(d: ReporteSemanalData): string {
         `<li style="margin-bottom:4px">N${m.nave} · ${m.nombre}: <strong style="color:${m.pct < 70 ? '#dc2626' : '#d97706'}">${m.pct}%</strong></li>`
       ).join('')}</ul>`;
 
-  const evolArticuloChart = graficoBarrasHtml(
+  const evolArticuloChart = graficoLineasHtml(
     d.evolArticuloSemanal.map(p => ({ label: p.label, a: p.rucula, b: p.lechuga })),
     '#166534', '#4d7c0f', 'Rúcula', 'Lechuga'
   );
@@ -291,10 +326,11 @@ export function construirHtml(d: ReporteSemanalData): string {
 
     <h3 style="margin:0 0 8px;font-size:14px">Ventas — mes en curso</h3>
     <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
-      <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">&nbsp;</th><th style="padding:6px 10px;text-align:right">Unidades</th></tr></thead>
+      <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">&nbsp;</th><th style="padding:6px 10px;text-align:right">Unidades</th><th style="padding:6px 10px;text-align:right">vs. mes ant.</th></tr></thead>
       <tbody>
-        <tr><td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">Acumulado al día de hoy</td><td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${fmtN(d.ventasMesActual.unidadesMes)} u</td></tr>
-        <tr><td style="padding:6px 10px;font-weight:600">Proyectado a fin de mes</td><td style="padding:6px 10px;text-align:right">${fmtN(d.ventasMesActual.proyeccionMes)} u</td></tr>
+        <tr><td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">Acumulado al día de hoy</td><td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${fmtN(d.ventasMesActual.unidadesMes)} u</td><td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">—</td></tr>
+        <tr><td style="padding:6px 10px;font-weight:600">Proyectado a fin de mes</td><td style="padding:6px 10px;text-align:right">${fmtN(d.ventasMesActual.proyeccionMes)} u</td><td style="padding:6px 10px;text-align:right">${flechaHtml(pct(d.ventasMesActual.proyeccionMes, d.ventasMesAnteriorTotal), true)}</td></tr>
+        <tr><td style="padding:6px 10px;color:#9ca3af;font-size:11px" colspan="3">Mes pasado (total real): ${fmtN(d.ventasMesAnteriorTotal)} u</td></tr>
       </tbody>
     </table>
 
