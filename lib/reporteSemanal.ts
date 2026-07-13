@@ -190,7 +190,7 @@ function filaVentas(label: string, actual: { unidades: number; monto: number }, 
   </tr>`;
 }
 
-function construirHtml(d: ReporteSemanalData): string {
+export function construirHtml(d: ReporteSemanalData): string {
   const ventasFilas = filaVentas('Rúcula', d.ventasSemana.rucula, d.ventasSemanaAnterior.rucula)
     + filaVentas('Lechuga', d.ventasSemana.lechuga, d.ventasSemanaAnterior.lechuga);
 
