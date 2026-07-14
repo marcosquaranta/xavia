@@ -31,10 +31,13 @@ export default function EditarLoteForm({
   const [tubos, setTubos]   = useState(Number(lote.tubos_ocupados_actual) || 0);
   const [notas, setNotas]   = useState(String(lote.notas || ''));
 
-  // Pesaje testigo — solo aplica a lotes cosechados por paquete o por planta (no cajón).
+  // Pesaje testigo — aplica a lotes cosechados por paquete o por planta (no cajón).
+  // Ojo: se calcula sobre el estado SELECCIONADO (no el original) — si acá se usara
+  // lote.estado, pasar un lote de "activo" a "cosechado" desde este mismo formulario
+  // nunca mostraba el campo, dejando cosechas sin pesaje testigo.
   // Es siempre el peso del PAQUETE pesado directamente en la balanza (en lechuga, 1
   // paquete = 1 planta) — nunca se multiplica por la cantidad de plantas por paquete.
-  const editaPesaje = lote.estado === 'cosechado' && lote.destino_cosecha !== 'cajon';
+  const editaPesaje = estado === 'cosechado' && lote.destino_cosecha !== 'cajon';
   const pesoActualGr = Number(lote.peso_muestra_paquete_gr) > 0
     ? Number(lote.peso_muestra_paquete_gr)
     : Number(lote.peso_muestra_kg) > 0 ? Math.round(Number(lote.peso_muestra_kg) * 1000) : 0;
@@ -49,6 +52,11 @@ export default function EditarLoteForm({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true); setError(null); setMensaje(null);
+    if (editaPesaje && pesoGr <= 0) {
+      setError('El pesaje testigo (peso del paquete en gramos) es obligatorio para un lote cosechado');
+      setLoading(false);
+      return;
+    }
     try {
       const res = await fetch('/api/lotes/editar', {
         method: 'POST',
