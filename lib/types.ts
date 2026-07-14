@@ -73,6 +73,8 @@ export interface Articulo {
   articulo: string;
   unidad_medida: string;
   activo: string;
+  formula_uso: string;   // clave de DriverKey (ver lib/usoTeorico.ts), vacío = sin fórmula configurada
+  factor_uso: number | string;  // uso teórico = driver(formula_uso) × factor_uso
 }
 
 export interface StockMes {
@@ -111,6 +113,7 @@ export interface Gasto {
   medio_pago: MedioPagoGasto | string;
   usuario: string;
   fecha_carga: string;
+  aplicado_stock: 'SI' | 'NO' | '';  // 'SI' = ya confirmado (o descartado) como compra de Stocks, no debe volver a sugerirse
 }
 
 export interface ClienteVenta {

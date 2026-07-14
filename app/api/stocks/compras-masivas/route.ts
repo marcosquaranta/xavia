@@ -3,16 +3,17 @@ import { getCurrentUser } from '@/lib/auth';
 import { readSheet, readRaw, batchUpdateRows, appendRows } from '@/lib/sheets';
 import type { Articulo, StockMes } from '@/lib/types';
 
-// Carga masiva de "Compras": REEMPLAZA el valor de compras del mes para cada
-// artículo recibido (no lo suma a lo que hubiera). Conserva stock_inicial y
-// stock_final existentes, y recalcula uso_calculado.
+// Carga masiva de "Compras" o "Stock final": REEMPLAZA el valor de esa columna del mes
+// para cada artículo recibido (no lo suma a lo que hubiera). Conserva el resto de las
+// columnas existentes, y recalcula uso_calculado.
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
 
   try {
     const body = await req.json();
-    const { anio, mes, items } = body as { anio: number; mes: number; items: { id_articulo: string; compras: number }[] };
+    const { anio, mes, items, campo } = body as { anio: number; mes: number; items: { id_articulo: string; compras: number }[]; campo?: 'compras' | 'stock_final' };
+    const columna: 'compras' | 'stock_final' = campo === 'stock_final' ? 'stock_final' : 'compras';
     if (!anio || !mes || !Array.isArray(items) || !items.length) {
       return NextResponse.json({ error: 'datos_incompletos' }, { status: 400 });
     }
@@ -45,10 +46,11 @@ export async function POST(req: NextRequest) {
 
       if (existente) {
         const ini = Number(existente.stock_inicial) || 0;
-        const fin = Number(existente.stock_final) || 0;
+        const otraCompras = columna === 'stock_final' ? Number(existente.compras) || 0 : comp;
+        const otroFin = columna === 'stock_final' ? comp : Number(existente.stock_final) || 0;
         actualizaciones.push({
           keyValue: existente.id_stock,
-          updates: { compras: comp, uso_calculado: ini + comp - fin, usuario: user.email, fecha_carga: fechaCarga },
+          updates: { [columna]: comp, uso_calculado: ini + otraCompras - otroFin, usuario: user.email, fecha_carga: fechaCarga },
         });
         actualizados++;
       } else {
@@ -56,9 +58,11 @@ export async function POST(req: NextRequest) {
         const idNuevo = `STK-${String(maxId).padStart(4, '0')}`;
         const obj: Record<string, any> = {
           id_stock: idNuevo, id_articulo: art.id_articulo, categoria: art.categoria, articulo: art.articulo,
-          unidad_medida: art.unidad_medida, anio, mes, stock_inicial: 0, compras: comp, stock_final: 0,
-          uso_calculado: comp, notas: '', usuario: user.email, fecha_carga: fechaCarga,
+          unidad_medida: art.unidad_medida, anio, mes, stock_inicial: 0, compras: 0, stock_final: 0,
+          uso_calculado: columna === 'stock_final' ? -comp : comp, notas: '', usuario: user.email, fecha_carga: fechaCarga,
         };
+        obj[columna] = comp;
+        obj.uso_calculado = (Number(obj.stock_inicial) || 0) + (Number(obj.compras) || 0) - (Number(obj.stock_final) || 0);
         nuevasFilas.push(headers.map((h) => (obj[h] !== undefined ? obj[h] : '')));
         creados++;
       }
