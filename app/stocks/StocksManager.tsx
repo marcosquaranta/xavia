@@ -207,10 +207,14 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
     const top = [...conFormula].filter((r) => r.pct !== null).sort((a, b) => Math.abs(b.pct!) - Math.abs(a.pct!)).slice(0, 3);
     const valorizacionTotal = resumenArticulos.reduce((acc, r) => acc + (r.valorizado ?? 0), 0);
     const sinPrecio = resumenArticulos.filter((r) => r.fin > 0 && r.precio === null).length;
+    const porCategoria = Array.from(new Set(resumenArticulos.map((r) => r.art.categoria)))
+      .map((cat) => ({ categoria: cat, valorizado: resumenArticulos.filter((r) => r.art.categoria === cat).reduce((acc, r) => acc + (r.valorizado ?? 0), 0) }))
+      .filter((c) => c.valorizado > 0)
+      .sort((a, b) => b.valorizado - a.valorizado);
     return {
       total: conFormula.length, rojos: rojos.length, verdes: verdes.length, top,
       sinConfigurar: artActivos.filter((a) => !a.formula_uso).length,
-      valorizacionTotal, sinPrecio,
+      valorizacionTotal, sinPrecio, porCategoria,
     };
   }, [resumenArticulos, artActivos]);
 
@@ -307,6 +311,19 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
               <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#9ca3af' }}>
                 {consolidado.sinPrecio} artículo(s) con stock final pero sin precio de compra cargado aún — no entran en la valorización.
               </p>
+            )}
+            {consolidado.porCategoria.length > 0 && (
+              <div style={{ marginTop: '10px', borderTop: '1px solid #f3f4f6', paddingTop: '8px' }}>
+                <p style={{ margin: '0 0 4px', fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase' }}>Valorizado por categoría</p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
+                  {consolidado.porCategoria.map((c) => (
+                    <p key={c.categoria} style={{ margin: '2px 0', fontSize: '12px' }}>
+                      <span style={{ color: '#6b7280' }}>{c.categoria}:</span>{' '}
+                      <span style={{ fontWeight: 700 }}>${fmt(c.valorizado, 0)}</span>
+                    </p>
+                  ))}
+                </div>
+              </div>
             )}
             {consolidado.top.length > 0 && (
               <div style={{ marginTop: '10px', borderTop: '1px solid #f3f4f6', paddingTop: '8px' }}>
@@ -535,6 +552,15 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                         </tr>
                       );
                     })}
+                    {artscat.some((a) => resumenArticulos.find((x) => x.art.id_articulo === a.id_articulo)?.valorizado) && (
+                      <tr style={{ borderTop: '2px solid #e5e7eb' }}>
+                        <td colSpan={9} style={{ textAlign: 'right', fontSize: '11px', color: '#6b7280', fontWeight: 700, padding: '6px 8px' }}>Subtotal valorizado {cat}</td>
+                        <td style={{ textAlign: 'right', fontSize: '12px', fontWeight: 800, padding: '6px 8px' }}>
+                          ${fmt(artscat.reduce((acc, a) => acc + (resumenArticulos.find((x) => x.art.id_articulo === a.id_articulo)?.valorizado ?? 0), 0), 0)}
+                        </td>
+                        <td></td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
                 </div>
