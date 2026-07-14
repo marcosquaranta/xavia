@@ -12,18 +12,17 @@ export function generarAlertas(lotes: Lote[], tubosMesadas: any[], ciclosRealesM
   const hoy = new Date();
   const alertas: Alerta[] = [];
 
-  // Promedio F1 por variedad (para detectar lotes lentos en F1)
-  const promedioF1Map = new Map<string, number>();
+  // F1 de la última cosecha por cultivo (para detectar lotes lentos en F1) — se compara
+  // contra la cosecha más reciente, no contra un promedio histórico: un promedio de
+  // todas las cosechas queda desactualizado y mezcla variedades con ritmos distintos.
+  const ultimoF1Map = new Map<string, number>();
   const cosechadosConF1 = lotes.filter(l => l.estado === 'cosechado' && Number(l.dias_f1) > 0);
   for (const vNorm of ['lechuga', 'rucula']) {
     const grupo = cosechadosConF1.filter(l => {
       const v = String(l.variedad || '').toLowerCase();
       return vNorm === 'rucula' ? v.includes('rucula') || v.includes('rúcula') : !v.includes('rucula') && !v.includes('rúcula');
-    });
-    if (grupo.length > 0) {
-      const prom = Math.round(grupo.reduce((a, l) => a + Number(l.dias_f1), 0) / grupo.length);
-      promedioF1Map.set(vNorm, prom);
-    }
+    }).sort((a, b) => String(b.fecha_cosecha || '').localeCompare(String(a.fecha_cosecha || '')));
+    if (grupo.length > 0) ultimoF1Map.set(vNorm, Number(grupo[0].dias_f1));
   }
 
   for (const l of lotes.filter(l => l.estado === 'activo')) {
@@ -45,10 +44,10 @@ export function generarAlertas(lotes: Lote[], tubosMesadas: any[], ciclosRealesM
       alertas.push({ tipo: 'error', msg: `${l.id_lote} lleva ${diasF2}d en F2 (est. ${f2Est}d) — revisar`, lote: l.id_lote });
     }
 
-    // 🟡 F1 muy extendida
-    const promF1 = promedioF1Map.get(esR ? 'rucula' : 'lechuga') || (esR ? 10 : 20);
-    if (l.fase_actual === 'fase_1' && diasF1 > promF1 * 1.5 && diasF1 > 15) {
-      alertas.push({ tipo: 'warn', msg: `${l.id_lote} lleva ${diasF1}d en F1 (prom ${promF1}d) — demorado`, lote: l.id_lote });
+    // 🟡 F1 muy extendida (vs. la última cosecha de ese cultivo)
+    const refF1 = ultimoF1Map.get(esR ? 'rucula' : 'lechuga') || (esR ? 10 : 20);
+    if (l.fase_actual === 'fase_1' && diasF1 > refF1 * 1.5 && diasF1 > 15) {
+      alertas.push({ tipo: 'warn', msg: `${l.id_lote} lleva ${diasF1}d en F1 (últ. cosecha: ${refF1}d) — demorado`, lote: l.id_lote });
     }
 
     // 🟡 Lote en plantinera > 30 días
