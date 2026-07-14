@@ -668,3 +668,23 @@ export function pesoPromedioRango(lotes: Lote[], desde: Date, hasta: Date): Peso
   const avg = (xs: number[]) => xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0;
   return { rucula: avg(acc.rucula), lechuga: avg(acc.lechuga) };
 }
+
+// Ciclo F2 promedio por cultivo de los lotes cosechados en el mes de `fechaRef` — se usa
+// como referencia de respaldo cuando la comparación semana a semana no tiene datos (p. ej.
+// lechuga, que al tener un ciclo mucho más largo puede no tener ninguna cosecha en una
+// semana puntual de comparación).
+export function cicloMesPromedio(lotes: Lote[], movimientos: Movimiento[], fechaRef: Date): { rucula: number; lechuga: number } {
+  const acc = { rucula: [] as number[], lechuga: [] as number[] };
+  for (const l of lotes) {
+    if (l.estado !== 'cosechado' || !l.fecha_cosecha) continue;
+    const f = safeParseDate(l.fecha_cosecha);
+    if (!f || f.getFullYear() !== fechaRef.getFullYear() || f.getMonth() !== fechaRef.getMonth()) continue;
+    let f2 = 0;
+    try { f2 = calcularDiasPorFase(l, movimientos).fase_2; } catch { continue; }
+    if (f2 <= 0) continue;
+    const v = String(l.variedad || '').toLowerCase();
+    (v.includes('rucula') || v.includes('rúcula') ? acc.rucula : acc.lechuga).push(f2);
+  }
+  const avg = (xs: number[]) => xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0;
+  return { rucula: avg(acc.rucula), lechuga: avg(acc.lechuga) };
+}

@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
-import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp } from '@/lib/estadisticas';
+import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio } from '@/lib/estadisticas';
 import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara } from '@/lib/types';
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
@@ -115,7 +115,11 @@ export default async function PanelPage({ searchParams }: {
   // Comparable: mismo tramo (mismo día del mes) del mes pasado, para "venta al día" y precio.
   const resumenMesPasadoComparable = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, mesPasadoRef, ahora.getDate());
   // Mes pasado completo, para comparar contra la proyección (que estima un mes entero).
-  const resumenMesPasadoCompleto = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, mesPasadoRef);
+  // OJO: sin el diaCorte explícito acá, resumenMesActual usa mesPasadoRef.getDate() como
+  // corte (el mismo día que hoy) en vez del mes completo — quedaba idéntico al
+  // "comparable" de arriba e inflaba la variación de la proyección.
+  const diasEnMesPasado = new Date(mesPasadoRef.getFullYear(), mesPasadoRef.getMonth() + 1, 0).getDate();
+  const resumenMesPasadoCompleto = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, mesPasadoRef, diasEnMesPasado);
   const pesoMesPanel = pesoPromedioMes(lotes, ahora);
   const pesoMesPasadoPanel = pesoPromedioMes(lotes, mesPasadoRef, ahora.getDate());
 
@@ -193,6 +197,10 @@ export default async function PanelPage({ searchParams }: {
   const ultSem = ciclosSemanas.filter((s:any) => s.lechugaF2>0||s.rucula>0).slice(-1)[0];
   const antSem = ciclosSemanas.filter((s:any) => s.lechugaF2>0||s.rucula>0).slice(-2,-1)[0];
   function varPctSem(a:number,b:number){if(!b||!a)return null;return Math.round(((a-b)/b)*100);}
+  // Respaldo cuando no hay comparación semana a semana (0 cosechas esa semana puntual —
+  // muy común en lechuga, que tiene un ciclo mucho más largo que rúcula): comparar contra
+  // el promedio del mes pasado en vez de dejar el indicador sin ningún %.
+  const cicloMesPasado = cicloMesPromedio(lotes, movimientos, mesPasadoRef);
 
   // ── LOTES FILTRADOS CON PAGINACIÓN ──
   const conteos = contarPorFiltro(lotes, nave, ubicaciones);
@@ -296,9 +304,9 @@ export default async function PanelPage({ searchParams }: {
                 { label: 'Venta total mes proyectada', valor: `${resumenMesPanel.proyeccionMes.toLocaleString('es-AR')} u`,
                   pct: pctVs(resumenMesPanel.proyeccionMes, resumenMesPasadoCompleto.unidadesMes), mejorSiSube: true },
                 { label: 'Ciclo actual rúcula', valor: ultSem?.rucula ? `${ultSem.rucula}d` : '—',
-                  pct: varPctSem(ultSem?.rucula, antSem?.rucula), mejorSiSube: false },
+                  pct: varPctSem(ultSem?.rucula, antSem?.rucula) ?? varPctSem(ultSem?.rucula, cicloMesPasado.rucula), mejorSiSube: false },
                 { label: 'Ciclo actual lechuga', valor: ultSem?.lechugaF2 ? `${ultSem.lechugaF2}d` : '—',
-                  pct: varPctSem(ultSem?.lechugaF2, antSem?.lechugaF2), mejorSiSube: false },
+                  pct: varPctSem(ultSem?.lechugaF2, antSem?.lechugaF2) ?? varPctSem(ultSem?.lechugaF2, cicloMesPasado.lechuga), mejorSiSube: false },
                 { label: 'Precio promedio actual', valor: `$${Math.round(resumenMesPanel.precioPromedioMes).toLocaleString('es-AR')}`,
                   pct: pctVs(resumenMesPanel.precioPromedioMes, resumenMesPasadoCompleto.precioPromedioMes), mejorSiSube: true },
                 { label: 'Peso promedio rúcula (paq)', valor: pesoMesPanel.rucula > 0 ? `${pesoMesPanel.rucula}g` : '—',

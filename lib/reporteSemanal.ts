@@ -1,8 +1,7 @@
 import { readSheet } from './sheets';
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, PrecioVenta, ClienteVenta, VentaHistorica, StockCamara } from './types';
 import { tubosPorMesada } from './ocupacion';
-import { calcularDiasPorFase } from './lotes';
-import { proyeccionCosechaSemanal, ciclosPorSemana, pesoPromedioRango, pesoPromedioMes, mesAnteriorClamp, type PesoPromedioMes } from './estadisticas';
+import { proyeccionCosechaSemanal, ciclosPorSemana, pesoPromedioRango, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, type PesoPromedioMes } from './estadisticas';
 import { calcularCamara, diferenciaAjustesMes } from './camara';
 import { evolucionVentaPorArticuloSemanal, resumenMesActual, ventasEnRango, type PuntoArticulo, type VentasRango, type ResumenMesActual } from './estadisticasVentas';
 
@@ -14,21 +13,6 @@ function lunesDe(d: Date): Date {
 }
 const fmtISO = (d: Date) => d.toISOString().slice(0, 10);
 const esRuculaV = (v: string) => { const x = String(v || '').toLowerCase(); return x.includes('rucula') || x.includes('rúcula'); };
-
-function cicloMesPromedio(lotes: Lote[], movimientos: Movimiento[], fechaRef: Date): { rucula: number; lechuga: number } {
-  const acc = { rucula: [] as number[], lechuga: [] as number[] };
-  for (const l of lotes) {
-    if (l.estado !== 'cosechado' || !l.fecha_cosecha) continue;
-    const f = new Date(String(l.fecha_cosecha) + 'T12:00:00');
-    if (isNaN(f.getTime()) || f.getFullYear() !== fechaRef.getFullYear() || f.getMonth() !== fechaRef.getMonth()) continue;
-    let f2 = 0;
-    try { f2 = calcularDiasPorFase(l, movimientos).fase_2; } catch { continue; }
-    if (f2 <= 0) continue;
-    (esRuculaV(l.variedad) ? acc.rucula : acc.lechuga).push(f2);
-  }
-  const avg = (xs: number[]) => xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0;
-  return { rucula: avg(acc.rucula), lechuga: avg(acc.lechuga) };
-}
 
 export interface ReporteSemanalData {
   fechaGenerado: string;
