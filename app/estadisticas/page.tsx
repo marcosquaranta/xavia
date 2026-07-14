@@ -18,7 +18,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
   const naveFilter = searchParams.nave || 'todas';
   const periodoMesada = (searchParams.periodo || 'anio') as 'mes' | 'mes_ant' | 'anio' | 'siempre';
-  const evoModo = (searchParams.evo === 'trimestre' ? 'trimestre' : 'anio') as 'anio' | 'trimestre';
+  const evoModo = (searchParams.evo === 'anio' ? 'anio' : 'trimestre') as 'anio' | 'trimestre';
 
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [];
   let configRows: { clave: string; valor: any }[] = [];
@@ -363,11 +363,11 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     const p: Record<string, string> = {};
     if (naveFilter !== 'todas') p.nave = naveFilter;
     if (periodoMesada !== 'anio') p.periodo = periodoMesada;
-    if (evoModo !== 'anio') p.evo = evoModo;
+    if (evoModo !== 'trimestre') p.evo = evoModo;
     Object.assign(p, overrides);
     if (p.nave === 'todas') delete p.nave;
     if (p.periodo === 'anio') delete p.periodo;
-    if (p.evo === 'anio') delete p.evo;
+    if (p.evo === 'trimestre') delete p.evo;
     const qs = new URLSearchParams(p).toString();
     return `/estadisticas${qs ? '?' + qs : ''}`;
   };
