@@ -53,7 +53,7 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
   const [mes, setMes] = useState(HOY.getMonth() + 1);
   const [vista, setVista] = useState<'carga' | 'informe'>('carga');
   const [saving, setSaving] = useState<string | null>(null);
-  const [editValues, setEditValues] = useState<Record<string, { ini: string; comp: string; fin: string; notas: string }>>({});
+  const [editValues, setEditValues] = useState<Record<string, { ini: string; comp: string; fin: string; precio: string; notas: string }>>({});
   const [mostrarUsos, setMostrarUsos] = useState(false);
 
   // Carga masiva de compras / stock final
@@ -114,13 +114,27 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
   function getEdit(id: string) {
     const s = getStock(id);
     if (editValues[id]) return editValues[id];
-    if (s) return { ini: String(num(s.stock_inicial)), comp: String(num(s.compras)), fin: String(num(s.stock_final)), notas: s.notas || '' };
+    if (s) return { ini: String(num(s.stock_inicial)), comp: String(num(s.compras)), fin: String(num(s.stock_final)), precio: num(s.precio_unitario) > 0 ? String(num(s.precio_unitario)) : '', notas: s.notas || '' };
     // Sin registro: pre-completar stock inicial = stock final del mes anterior
     let mesPrev = mes - 1, anioPrev = anio;
     if (mesPrev === 0) { mesPrev = 12; anioPrev--; }
     const sPrev = stocks.find((st) => st.id_articulo === id && String(st.anio) === String(anioPrev) && String(st.mes) === String(mesPrev));
     const iniAuto = sPrev && num(sPrev.stock_final) > 0 ? String(num(sPrev.stock_final)) : '';
-    return { ini: iniAuto, comp: '', fin: '', notas: '' };
+    return { ini: iniAuto, comp: '', fin: '', precio: '', notas: '' };
+  }
+
+  // Último precio de compra conocido de un artículo, a la fecha del mes visualizado
+  // (o antes) — usa el valor recién tipeado en pantalla si lo hay, si no busca hacia
+  // atrás en Stocks el registro más reciente con precio_unitario cargado.
+  function precioUltimoConocido(id_articulo: string, precioTipeado?: number): number | null {
+    if (precioTipeado && precioTipeado > 0) return precioTipeado;
+    const claveActual = anio * 12 + mes;
+    const candidatos = stocks.filter((s) =>
+      s.id_articulo === id_articulo && num(s.precio_unitario) > 0 && (Number(s.anio) * 12 + Number(s.mes)) <= claveActual
+    );
+    if (!candidatos.length) return null;
+    candidatos.sort((a, b) => (Number(a.anio) * 12 + Number(a.mes)) - (Number(b.anio) * 12 + Number(b.mes)));
+    return num(candidatos[candidatos.length - 1].precio_unitario);
   }
 
   function setField(id: string, field: string, val: string) {
@@ -138,7 +152,7 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
         body: JSON.stringify({
           id_articulo: art.id_articulo, anio, mes,
           stock_inicial: vals.ini, compras: vals.comp,
-          stock_final: vals.fin, notas: vals.notas,
+          stock_final: vals.fin, precio_unitario: vals.precio, notas: vals.notas,
         }),
       });
       setEditValues((prev) => { const n = { ...prev }; delete n[art.id_articulo]; return n; });
@@ -178,10 +192,12 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
       const usoTeorico = calcularUsoTeorico(art.formula_uso, Number(art.factor_uso) || 0, drivers);
       const diff = usoTeorico !== null ? usoReal - usoTeorico : null;
       const pct = usoTeorico !== null && usoTeorico !== 0 ? (diff! / usoTeorico) * 100 : null;
-      return { art, ini, comp, fin, usoReal, usoTeorico, diff, pct };
+      const precio = precioUltimoConocido(art.id_articulo, num(vals.precio));
+      const valorizado = precio !== null ? fin * precio : null;
+      return { art, ini, comp, fin, usoReal, usoTeorico, diff, pct, precio, valorizado };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [artActivos, editValues, stockMes, drivers]);
+  }, [artActivos, editValues, stockMes, drivers, stocks, anio, mes]);
 
   // Vista consolidada del mes
   const consolidado = useMemo(() => {
@@ -189,7 +205,13 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
     const rojos = conFormula.filter((r) => (r.diff ?? 0) > 0);
     const verdes = conFormula.filter((r) => (r.diff ?? 0) <= 0);
     const top = [...conFormula].filter((r) => r.pct !== null).sort((a, b) => Math.abs(b.pct!) - Math.abs(a.pct!)).slice(0, 3);
-    return { total: conFormula.length, rojos: rojos.length, verdes: verdes.length, top, sinConfigurar: artActivos.filter((a) => !a.formula_uso).length };
+    const valorizacionTotal = resumenArticulos.reduce((acc, r) => acc + (r.valorizado ?? 0), 0);
+    const sinPrecio = resumenArticulos.filter((r) => r.fin > 0 && r.precio === null).length;
+    return {
+      total: conFormula.length, rojos: rojos.length, verdes: verdes.length, top,
+      sinConfigurar: artActivos.filter((a) => !a.formula_uso).length,
+      valorizacionTotal, sinPrecio,
+    };
   }, [resumenArticulos, artActivos]);
 
   // Gastos "insumos" del mes seleccionado, aún no aplicados — sugerencia de compra.
@@ -271,12 +293,21 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                 <span style={{ fontSize: '22px', fontWeight: 800, color: '#059669' }}>{consolidado.verdes}</span>
                 <span style={{ fontSize: '11px', color: '#6b7280', marginLeft: '6px' }}>en línea o por debajo</span>
               </div>
+              <div>
+                <span style={{ fontSize: '22px', fontWeight: 800, color: '#111827' }}>${fmt(consolidado.valorizacionTotal, 0)}</span>
+                <span style={{ fontSize: '11px', color: '#6b7280', marginLeft: '6px' }}>stock final valorizado</span>
+              </div>
               {consolidado.sinConfigurar > 0 && (
                 <div>
                   <span style={{ fontSize: '13px', color: '#9ca3af' }}>{consolidado.sinConfigurar} artículo(s) sin fórmula configurada</span>
                 </div>
               )}
             </div>
+            {consolidado.sinPrecio > 0 && (
+              <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#9ca3af' }}>
+                {consolidado.sinPrecio} artículo(s) con stock final pero sin precio de compra cargado aún — no entran en la valorización.
+              </p>
+            )}
             {consolidado.top.length > 0 && (
               <div style={{ marginTop: '10px', borderTop: '1px solid #f3f4f6', paddingTop: '8px' }}>
                 <p style={{ margin: '0 0 4px', fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase' }}>Mayores desvíos</p>
@@ -429,17 +460,19 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
               <div key={cat} className="card" style={{ marginBottom: '12px' }}>
                 <p style={{ margin: '0 0 10px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{cat}</p>
                 <div style={{ overflowX: 'auto' }}>
-                <table style={{ fontSize: '12px', minWidth: '760px' }}>
+                <table style={{ fontSize: '12px', minWidth: '940px' }}>
                   <thead>
                     <tr>
                       <th>Artículo</th>
                       <th style={{ textAlign: 'center', width: '50px' }}>U.</th>
                       <th style={{ textAlign: 'right', width: '100px' }}>Stock inicial</th>
                       <th style={{ textAlign: 'right', width: '100px' }}>Compras</th>
+                      <th style={{ textAlign: 'right', width: '90px' }}>Precio compra</th>
                       <th style={{ textAlign: 'right', width: '100px' }}>Stock final</th>
                       <th style={{ textAlign: 'right', width: '80px', color: '#059669', fontWeight: 700 }}>Uso real</th>
                       <th style={{ textAlign: 'right', width: '80px', color: '#6b7280', fontWeight: 700 }}>Uso teórico</th>
                       <th style={{ textAlign: 'right', width: '100px', fontWeight: 700 }}>Dif. real vs teórico</th>
+                      <th style={{ textAlign: 'right', width: '100px', fontWeight: 700 }}>Stock final valorizado</th>
                       <th style={{ width: '50px' }}></th>
                     </tr>
                   </thead>
@@ -465,6 +498,11 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                               min={0} step={0.001} />
                           </td>
                           <td style={{ padding: '2px 4px' }}>
+                            <input type="number" value={vals.precio} onChange={(e) => setField(art.id_articulo, 'precio', e.target.value)}
+                              style={{ width: '100%', textAlign: 'right', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '3px 6px' }}
+                              min={0} step={0.01} placeholder={r.precio !== null ? fmt(r.precio, 2) : '—'} />
+                          </td>
+                          <td style={{ padding: '2px 4px' }}>
                             <input type="number" value={vals.fin} onChange={(e) => setField(art.id_articulo, 'fin', e.target.value)}
                               style={{ width: '100%', textAlign: 'right', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '3px 6px' }}
                               min={0} step={0.001} />
@@ -479,6 +517,9 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                             {r.diff !== null && (r.ini || r.comp || r.fin)
                               ? `${r.diff > 0 ? '+' : ''}${fmt(r.diff)}${r.pct !== null ? ` (${r.pct > 0 ? '+' : ''}${fmt(r.pct, 0)}%)` : ''}`
                               : '—'}
+                          </td>
+                          <td style={{ textAlign: 'right', fontSize: '12px', color: r.valorizado !== null ? '#111827' : '#d1d5db' }}>
+                            {r.valorizado !== null ? `$${fmt(r.valorizado, 0)}` : '—'}
                           </td>
                           <td style={{ textAlign: 'center' }}>
                             {modificado && (

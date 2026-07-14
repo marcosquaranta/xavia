@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { appendRow, readSheet, updateRow } from '@/lib/sheets';
+import { appendRowObj, readSheet, updateRow } from '@/lib/sheets';
 import type { Articulo, Gasto, StockMes } from '@/lib/types';
 
 // Confirma (o descarta) una sugerencia de compra detectada en Gastos: si se confirma,
@@ -26,14 +26,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'datos_incompletos' }, { status: 400 });
     }
 
-    const [articulos, stocks] = await Promise.all([
+    const [articulos, stocks, gastos] = await Promise.all([
       readSheet<Articulo>('Articulos'),
       readSheet<StockMes>('Stocks'),
+      readSheet<Gasto>('Gastos'),
     ]);
     const art = articulos.find((a) => a.id_articulo === id_articulo);
     if (!art) return NextResponse.json({ error: 'articulo_no_encontrado' }, { status: 404 });
 
     const cant = Number(cantidad);
+    // El precio de este gasto queda como "último precio de compra" del artículo — se usa
+    // para valorizar el stock final mientras no haya uno más nuevo.
+    const gasto = gastos.find((g) => String(g.id_gasto) === String(id_gasto));
+    const precioUnitario = gasto && cant > 0 ? (Number(gasto.monto) || 0) / cant : 0;
     const fechaCarga = new Date().toISOString().split('T')[0];
     const existente = stocks.find((s) =>
       s.id_articulo === id_articulo && String(s.anio) === String(anio) && String(s.mes) === String(mes)
@@ -43,20 +48,23 @@ export async function POST(req: NextRequest) {
       const ini = Number(existente.stock_inicial) || 0;
       const fin = Number(existente.stock_final) || 0;
       const nuevaCompras = (Number(existente.compras) || 0) + cant;
-      await updateRow('Stocks', 'id_stock', existente.id_stock, {
+      const updates: Record<string, any> = {
         compras: nuevaCompras, uso_calculado: ini + nuevaCompras - fin,
         usuario: user.email, fecha_carga: fechaCarga,
-      });
+      };
+      if (precioUnitario > 0) updates.precio_unitario = precioUnitario;
+      await updateRow('Stocks', 'id_stock', existente.id_stock, updates);
     } else {
       const maxId = stocks
         .map((s) => parseInt(String(s.id_stock).replace('STK-', '') || '0'))
         .filter((n) => !isNaN(n))
         .reduce((m, n) => Math.max(m, n), 0);
       const idNuevo = `STK-${String(maxId + 1).padStart(4, '0')}`;
-      await appendRow('Stocks', [
-        idNuevo, id_articulo, art.categoria, art.articulo, art.unidad_medida,
-        anio, mes, 0, cant, 0, cant, '', user.email, fechaCarga,
-      ]);
+      await appendRowObj('Stocks', {
+        id_stock: idNuevo, id_articulo, categoria: art.categoria, articulo: art.articulo, unidad_medida: art.unidad_medida,
+        anio, mes, stock_inicial: 0, compras: cant, stock_final: 0, uso_calculado: cant,
+        precio_unitario: precioUnitario || '', notas: '', usuario: user.email, fecha_carga: fechaCarga,
+      });
     }
 
     await updateRow('Gastos', 'id_gasto', String(id_gasto), { aplicado_stock: 'SI' });

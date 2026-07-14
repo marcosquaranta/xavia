@@ -89,6 +89,7 @@ export interface StockMes {
   compras: number | string;
   stock_final: number | string;
   uso_calculado: number | string;
+  precio_unitario: number | string;  // precio de la última compra registrada de ese artículo, para valorizar stock final
   notas: string;
   usuario: string;
   fecha_carga: string;
