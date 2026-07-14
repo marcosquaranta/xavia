@@ -4,7 +4,7 @@ import { readSheet } from '@/lib/sheets';
 import { estadisticasDelMes, mesAnteriorClamp } from '@/lib/estadisticas';
 import { calcularDiasPorFase } from '@/lib/lotes';
 import { calcularCapacidad, diasCicloDefault } from '@/lib/planificacionServer';
-import { calcularPlan, repartoHelpers, parseReparto, REPARTO_DEFAULT, DIA_SIEMBRA, CUB, CUBPOSRUC, planchas } from '@/lib/planificacion';
+import { calcularPlan, repartoHelpers, parseReparto, REPARTO_DEFAULT, DIA_SIEMBRA, CUB, planchas } from '@/lib/planificacion';
 import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
@@ -159,15 +159,21 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     siembraPlanRucPl = plPorSiembraRuc * diasSiembraTranscurridos;
     siembraPlanLecPl = plPorSiembraLec * diasSiembraTranscurridos;
 
-    // Real: lotes sembrados este mes, convertidos a planchas con el mismo criterio del plan
+    // Real: lotes sembrados este mes. plantines_iniciales ya está en plantines/cubitos
+    // (no en posiciones) tanto para lechuga como para rúcula — el factor CUBPOSRUC es
+    // para convertir posiciones de capacidad (Ubicaciones), no para esto; usarlo acá
+    // duplicaba la conversión. También se excluyen los lotes derivados de una cosecha
+    // parcial (lote_origen no vacío): comparten fecha_siembra con el lote original y ya
+    // están contados en su plantines_iniciales, así que sumarlos de nuevo inflaba el total.
     let sumPosRuc = 0, sumPlLec = 0;
     for (const l of lotes) {
+      if (l.lote_origen) continue;
       const f = new Date(String(l.fecha_siembra) + 'T12:00:00');
       if (isNaN(f.getTime()) || f.getFullYear() !== hoy.getFullYear() || f.getMonth() !== hoy.getMonth()) continue;
       const cant = Number(l.plantines_iniciales) || 0;
       if (esRuculaV(l.variedad)) sumPosRuc += cant; else sumPlLec += cant;
     }
-    siembraRealRucPl = planchas(sumPosRuc * CUBPOSRUC / CUB);
+    siembraRealRucPl = planchas(sumPosRuc / CUB);
     siembraRealLecPl = planchas(sumPlLec / CUB);
   } catch {}
 
