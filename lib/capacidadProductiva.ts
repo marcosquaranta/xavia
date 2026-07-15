@@ -1,8 +1,7 @@
 import type { Lote, Movimiento, Ubicacion } from './types';
 import { calcularDiasPorFase } from './lotes';
-import { mesAnteriorClamp } from './estadisticas';
 
-export type PeriodoCapacidad = 'mes' | 'mes_ant' | 'trimestre' | 'anio' | 'siempre';
+export type PeriodoCapacidad = 'd90' | 'd180' | 'anio';
 
 export interface CicloMesada {
   nombre: string; nave: number;
@@ -42,19 +41,12 @@ export interface CapacidadProductiva {
 
 export function cosechadosEnPeriodo(lotes: Lote[], periodo: PeriodoCapacidad): Lote[] {
   const todos = lotes.filter(l => l.estado === 'cosechado');
-  if (periodo === 'siempre') return todos;
   const ahora = new Date();
   let desde: Date;
-  if (periodo === 'mes') {
-    desde = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
-  } else if (periodo === 'mes_ant') {
-    const mp = mesAnteriorClamp(ahora);
-    desde = new Date(mp.getFullYear(), mp.getMonth(), 1);
-    const hasta = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
-    return todos.filter(l => { const f = new Date(String(l.fecha_cosecha) + 'T12:00:00'); return f >= desde && f < hasta; });
-  } else if (periodo === 'trimestre') {
-    const inicioTrimestre = Math.floor(ahora.getMonth() / 3) * 3;
-    desde = new Date(ahora.getFullYear(), inicioTrimestre, 1);
+  if (periodo === 'd90') {
+    desde = new Date(ahora); desde.setDate(desde.getDate() - 90);
+  } else if (periodo === 'd180') {
+    desde = new Date(ahora); desde.setDate(desde.getDate() - 180);
   } else { // anio
     desde = new Date(ahora.getFullYear(), 0, 1);
   }
@@ -64,27 +56,16 @@ export function cosechadosEnPeriodo(lotes: Lote[], periodo: PeriodoCapacidad): L
 // Cuántos meses (equivalentes en días/30) abarca el período filtrado — para "mensualizar"
 // la producción real y poder compararla contra la teórica (que siempre es una tasa
 // mensual), sin importar qué período haya elegido el usuario.
-function mesesEnPeriodo(periodo: PeriodoCapacidad, cosechados: Lote[]): number {
+function mesesEnPeriodo(periodo: PeriodoCapacidad): number {
   const ahora = new Date();
   let dias: number;
-  if (periodo === 'mes') {
-    dias = ahora.getDate();
-  } else if (periodo === 'mes_ant') {
-    const mp = mesAnteriorClamp(ahora);
-    dias = new Date(mp.getFullYear(), mp.getMonth() + 1, 0).getDate();
-  } else if (periodo === 'trimestre') {
-    const inicioTrimestre = Math.floor(ahora.getMonth() / 3) * 3;
-    const inicio = new Date(ahora.getFullYear(), inicioTrimestre, 1);
-    dias = Math.floor((ahora.getTime() - inicio.getTime()) / 86400000) + 1;
-  } else if (periodo === 'anio') {
+  if (periodo === 'd90') {
+    dias = 90;
+  } else if (periodo === 'd180') {
+    dias = 180;
+  } else { // anio
     const inicio = new Date(ahora.getFullYear(), 0, 1);
     dias = Math.floor((ahora.getTime() - inicio.getTime()) / 86400000) + 1;
-  } else { // siempre: desde la cosecha más vieja del set filtrado hasta hoy
-    const fechas = cosechados
-      .map(l => new Date(String(l.fecha_cosecha) + 'T12:00:00').getTime())
-      .filter(t => !isNaN(t));
-    const minFecha = fechas.length ? Math.min(...fechas) : ahora.getTime();
-    dias = Math.floor((ahora.getTime() - minFecha) / 86400000) + 1;
   }
   return Math.max(dias, 1) / 30;
 }
@@ -218,7 +199,7 @@ export function calcularCapacidadProductiva(
     return sumaN > 0 ? sumaPonderada / sumaN : 0;
   }
 
-  const meses = mesesEnPeriodo(periodo, cosechados);
+  const meses = mesesEnPeriodo(periodo);
 
   const filasCapacidad: FilaCapacidadProd[] = ciclosMesadas
     .filter(m => {

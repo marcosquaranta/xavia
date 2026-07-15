@@ -17,7 +17,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   if (!user) redirect('/login');
 
   const naveFilter = searchParams.nave || 'todas';
-  const periodoMesada = (searchParams.periodo || 'anio') as 'mes' | 'mes_ant' | 'trimestre' | 'anio' | 'siempre';
+  const periodoMesada = (searchParams.periodo === 'd90' || searchParams.periodo === 'd180' ? searchParams.periodo : 'anio') as 'd90' | 'd180' | 'anio';
   const evoModo = (searchParams.evo === 'anio' ? 'anio' : 'trimestre') as 'anio' | 'trimestre';
 
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [];
@@ -247,36 +247,36 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   const filasLechugaConProm = conPromedios(filasLechuga, 'Lechuga');
   const filasRuculaConProm = conPromedios(filasRucula, 'Rúcula');
 
-  // Capacidad productiva: una sola tabla ordenada cultivo → nave → mesada, con filas de
-  // TOTAL (no promedio: posiciones/producción son cantidades que se suman) por nave y por cultivo.
+  // Capacidad productiva: agrupada cultivo → nave → mesada, para mostrar un resumen
+  // abreviado por cultivo/nave y poder expandir cada nave para ver el detalle por mesada.
   type FilaCap = typeof filasCapacidad[number];
   function totalDeFilas(filas: FilaCap[], campo: 'posiciones' | 'produccionTeorica' | 'produccionReal'): number {
     return filas.reduce((a, f) => a + f[campo], 0);
   }
-  function filaTotalCap(filas: FilaCap[], etiqueta: string, esTotalCultivo: boolean) {
+  function totalCap(filas: FilaCap[]) {
     return {
-      nombre: etiqueta, nave: 0, cultivo: filas[0]?.cultivo || 'Lechuga', esTotal: true, esTotalCultivo,
-      cicloActual: 0, posiciones: totalDeFilas(filas, 'posiciones'),
-      produccionTeorica: totalDeFilas(filas, 'produccionTeorica'), produccionReal: totalDeFilas(filas, 'produccionReal'),
+      posiciones: totalDeFilas(filas, 'posiciones'),
+      produccionTeorica: totalDeFilas(filas, 'produccionTeorica'),
+      produccionReal: totalDeFilas(filas, 'produccionReal'),
       n: filas.reduce((a, f) => a + f.n, 0),
     };
   }
-  function conTotalesCap(filas: FilaCap[]) {
+  function agruparCapacidad(filas: FilaCap[]) {
     const cultivos = Array.from(new Set(filas.map(f => f.cultivo)));
-    const filasFinal: any[] = [];
-    for (const cul of cultivos) {
+    return cultivos.map((cul) => {
       const deCultivo = filas.filter(f => f.cultivo === cul);
       const naves = Array.from(new Set(deCultivo.map(f => f.nave))).sort((a, b) => a - b);
-      for (const nv of naves) {
-        const deNave = deCultivo.filter(f => f.nave === nv);
-        filasFinal.push(...deNave);
-        if (naves.length > 1) filasFinal.push({ ...filaTotalCap(deNave, `N${nv} — Total`, false), nave: nv, cultivo: cul });
-      }
-      filasFinal.push({ ...filaTotalCap(deCultivo, `Total ${cul}`, true), cultivo: cul });
-    }
-    return filasFinal;
+      return {
+        cultivo: cul,
+        total: totalCap(deCultivo),
+        naves: naves.map((nv) => {
+          const deNave = deCultivo.filter(f => f.nave === nv);
+          return { nave: nv, total: totalCap(deNave), mesadas: deNave };
+        }),
+      };
+    });
   }
-  const filasCapacidadConTotales = conTotalesCap(filasCapacidad);
+  const capacidadAgrupada = agruparCapacidad(filasCapacidad);
 
   const nombre = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
 
@@ -344,7 +344,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             <div style={{ display:'flex', flexDirection:'column', gap:'6px', alignItems:'flex-end' }}>
               {/* Filtro período */}
               <div style={{ display:'flex', gap:'4px' }}>
-                {([['mes','Este mes'],['mes_ant','Mes ant.'],['trimestre','Trimestre actual'],['anio','Este año'],['siempre','Siempre']] as const).map(([v,l]) => (
+                {([['d90','Últimos 90 días'],['d180','Últimos 180 días'],['anio','Año actual']] as const).map(([v,l]) => (
                   <a key={v} href={buildUrl({ periodo:v })}
                     style={{ padding:'3px 8px', borderRadius:'5px', fontSize:'11px', fontWeight:periodoMesada===v?700:400, background:periodoMesada===v?'#374151':'#f3f4f6', color:periodoMesada===v?'white':'#6b7280', textDecoration:'none' }}>
                     {l}
@@ -432,7 +432,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
               </p>
             </div>
             <div style={{ display:'flex', gap:'4px' }}>
-              {([['mes','Este mes'],['trimestre','Trimestre actual'],['anio','Este año']] as const).map(([v,l]) => (
+              {([['d90','Últimos 90 días'],['d180','Últimos 180 días'],['anio','Año actual']] as const).map(([v,l]) => (
                 <a key={v} href={buildUrl({ periodo:v })}
                   style={{ padding:'3px 8px', borderRadius:'5px', fontSize:'11px', fontWeight:periodoMesada===v?700:400, background:periodoMesada===v?'#374151':'#f3f4f6', color:periodoMesada===v?'white':'#6b7280', textDecoration:'none', whiteSpace:'nowrap' }}>
                   {l}
@@ -474,61 +474,70 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                 )}
               </div>
 
-              {/* Tabla única: cultivo → nave → mesada, con totales por nave y por cultivo */}
-              <div style={{ overflowX:'auto' }}>
-                <table style={{ fontSize:'12px' }}>
-                  <thead>
-                    <tr>
-                      <th style={{ textAlign:'center' }}>Cultivo</th>
-                      <th>Mesada</th>
-                      <th style={{ textAlign:'center' }}>Nave</th>
-                      <th style={{ textAlign:'right' }}>Ciclo actual</th>
-                      <th style={{ textAlign:'right' }}>Posiciones</th>
-                      <th style={{ textAlign:'right' }}>Producción teórica</th>
-                      <th style={{ textAlign:'right' }}>Producción real</th>
-                      <th style={{ textAlign:'right', color:'#9ca3af', fontSize:'11px' }}>N cosechas</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filasCapacidadConTotales.map((f: any, i) => {
-                      const bgTotalCultivo = f.cultivo === 'Lechuga' ? '#f0fdf4' : '#ecfdf5';
-                      const colorTotalCultivo = f.cultivo === 'Lechuga' ? '#166534' : '#065f46';
-                      return (
-                        <tr key={i} style={{
-                          borderBottom: f.esTotalCultivo ? '2px solid #d1d5db' : '1px solid #f3f4f6',
-                          background: f.esTotalCultivo ? bgTotalCultivo : f.esTotal ? '#f8fafc' : 'transparent',
-                        }}>
-                          <td style={{ textAlign:'center', fontSize:'11px', color: f.esTotalCultivo ? colorTotalCultivo : (f.cultivo==='Lechuga'?'#4d7c0f':'#166534'), fontWeight:600 }}>
-                            {!f.esTotal || f.esTotalCultivo ? f.cultivo : ''}
-                          </td>
-                          <td style={{ fontWeight: f.esTotalCultivo ? 800 : f.esTotal ? 700 : 500, color: f.esTotalCultivo ? colorTotalCultivo : (f.esTotal ? '#374151' : undefined), fontSize: f.esTotalCultivo ? '13px' : undefined }}>{f.nombre}</td>
-                          <td style={{ textAlign:'center' }}>
-                            {!f.esTotal && (
-                              <span style={{ background:f.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 6px', borderRadius:'3px', fontSize:'10px', fontWeight:700 }}>N{f.nave}</span>
-                            )}
-                          </td>
-                          <td style={{ textAlign:'right', fontWeight:700 }}>{f.cicloActual>0 ? f.cicloActual+'d' : '—'}</td>
-                          <td style={{ textAlign:'right', fontWeight: f.esTotal ? 700 : 400, color: f.esTotalCultivo ? colorTotalCultivo : '#374151' }}>{f.posiciones>0?f.posiciones.toLocaleString('es-AR'):'—'}</td>
-                          <td style={{ textAlign:'right', fontWeight: f.esTotalCultivo ? 800 : 700, color: f.esTotalCultivo ? colorTotalCultivo : '#111827', fontSize: f.esTotalCultivo ? '13px' : undefined }}>
-                            {f.produccionTeorica.toLocaleString('es-AR')}
-                          </td>
-                          <td style={{ textAlign:'right', fontWeight: f.esTotalCultivo ? 800 : 700, color: f.esTotalCultivo ? colorTotalCultivo : '#059669', fontSize: f.esTotalCultivo ? '13px' : undefined }}>
-                            {f.produccionReal.toLocaleString('es-AR')}
-                          </td>
-                          <td style={{ textAlign:'right' }}>
-                            {!f.esTotal && (
-                              <span style={{ color: f.n <= 1 ? '#dc2626' : '#9ca3af', fontWeight: f.n <= 1 ? 700 : 400 }}>
-                                {f.n <= 1 && '⚠ '}{f.n}
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                <p style={{ margin:'8px 0 0', fontSize:'11px', color:'#9ca3af' }}>⚠ N cosechas ≤ 1: promedio poco confiable, muestra chica.</p>
-              </div>
+              {/* Resumen colapsable: cultivo (total siempre visible) → nave (expandible) → mesada (detalle) */}
+              {capacidadAgrupada.map((g) => {
+                const esLechuga = g.cultivo === 'Lechuga';
+                const bg = esLechuga ? '#f0fdf4' : '#ecfdf5';
+                const border = esLechuga ? '#bbf7d0' : '#a7f3d0';
+                const color = esLechuga ? '#166534' : '#065f46';
+                return (
+                  <div key={g.cultivo} style={{ marginBottom:'16px' }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'8px', background:bg, border:`2px solid ${border}`, borderRadius:'8px', padding:'10px 14px', marginBottom:'8px' }}>
+                      <span style={{ fontWeight:800, fontSize:'14px', color }}>{esLechuga?'🥬':'🌿'} Total {g.cultivo}</span>
+                      <div style={{ display:'flex', gap:'18px', fontSize:'12px', flexWrap:'wrap' }}>
+                        <span style={{ color:'#6b7280' }}>Posiciones: <strong style={{ color }}>{g.total.posiciones.toLocaleString('es-AR')}</strong></span>
+                        <span style={{ color:'#6b7280' }}>Teórica: <strong style={{ color:'#111827', fontSize:'13px' }}>{g.total.produccionTeorica.toLocaleString('es-AR')}</strong></span>
+                        <span style={{ color:'#6b7280' }}>Real: <strong style={{ color:'#059669', fontSize:'13px' }}>{g.total.produccionReal.toLocaleString('es-AR')}</strong></span>
+                      </div>
+                    </div>
+
+                    {g.naves.map((n) => (
+                      <details key={n.nave} style={{ border:'1px solid #e5e7eb', borderRadius:'7px', marginBottom:'6px', overflow:'hidden' }}>
+                        <summary style={{ cursor:'pointer', padding:'8px 12px', background:'#f9fafb', display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap', fontSize:'12px' }}>
+                          <span style={{ background:n.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 7px', borderRadius:'4px', fontSize:'10px', fontWeight:700 }}>N{n.nave}</span>
+                          <span style={{ color:'#9ca3af' }}>{n.mesadas.length} mesada{n.mesadas.length!==1?'s':''}</span>
+                          <span style={{ marginLeft:'auto', display:'flex', gap:'16px' }}>
+                            <span style={{ color:'#6b7280' }}>Posiciones: <strong style={{ color:'#374151' }}>{n.total.posiciones.toLocaleString('es-AR')}</strong></span>
+                            <span style={{ color:'#6b7280' }}>Teórica: <strong style={{ color:'#111827' }}>{n.total.produccionTeorica.toLocaleString('es-AR')}</strong></span>
+                            <span style={{ color:'#6b7280' }}>Real: <strong style={{ color:'#059669' }}>{n.total.produccionReal.toLocaleString('es-AR')}</strong></span>
+                          </span>
+                        </summary>
+                        <div style={{ overflowX:'auto' }}>
+                          <table style={{ fontSize:'12px', width:'100%' }}>
+                            <thead>
+                              <tr>
+                                <th>Mesada</th>
+                                <th style={{ textAlign:'right' }}>Ciclo actual</th>
+                                <th style={{ textAlign:'right' }}>Posiciones</th>
+                                <th style={{ textAlign:'right' }}>Producción teórica</th>
+                                <th style={{ textAlign:'right' }}>Producción real</th>
+                                <th style={{ textAlign:'right', color:'#9ca3af', fontSize:'11px' }}>N cosechas</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {n.mesadas.map((m, i) => (
+                                <tr key={i} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                                  <td style={{ fontWeight:500 }}>{m.nombre}</td>
+                                  <td style={{ textAlign:'right', fontWeight:700 }}>{m.cicloActual>0 ? m.cicloActual+'d' : '—'}</td>
+                                  <td style={{ textAlign:'right', color:'#374151' }}>{m.posiciones>0?m.posiciones.toLocaleString('es-AR'):'—'}</td>
+                                  <td style={{ textAlign:'right', fontWeight:700, color:'#111827' }}>{m.produccionTeorica.toLocaleString('es-AR')}</td>
+                                  <td style={{ textAlign:'right', fontWeight:700, color:'#059669' }}>{m.produccionReal.toLocaleString('es-AR')}</td>
+                                  <td style={{ textAlign:'right' }}>
+                                    <span style={{ color: m.n <= 1 ? '#dc2626' : '#9ca3af', fontWeight: m.n <= 1 ? 700 : 400 }}>
+                                      {m.n <= 1 && '⚠ '}{m.n}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </details>
+                    ))}
+                  </div>
+                );
+              })}
+              <p style={{ margin:'8px 0 0', fontSize:'11px', color:'#9ca3af' }}>⚠ N cosechas ≤ 1: promedio poco confiable, muestra chica. Click en una nave para ver el detalle por mesada.</p>
             </>
           )}
         </div>
