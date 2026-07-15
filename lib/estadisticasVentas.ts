@@ -239,28 +239,27 @@ export function resumenMesActual(
   const clienteMap = new Map(clientes.map((c) => [c.id_control, c]));
 
   const PRICE_KEYS = [...KEYS_RUCULA, ...KEYS_LECHUGA, 'albahaca'] as const;
+  // rucula_kg/lechuga_kg (ventas por cajón) quedan afuera de "unidades": no solo es otra
+  // unidad de venta (mismo motivo por el que ya se excluían del precio promedio), sino que
+  // esos clientes suelen cargarse en uno o dos lotes grandes en vez de a diario. Si entran
+  // a la suma, un cajón grande caído del lado equivocado del corte (día 15, fin de mes...)
+  // dispara el % de "venta al día"/"proyectada" de forma completamente errática, aunque la
+  // conversión a paquete-equivalente sea matemáticamente correcta — el problema no es la
+  // conversión, es que ese volumen no se reparte día a día como el resto.
+  const KEYS_EXCLUIDAS_UNIDADES = ['rucula_kg', 'lechuga_kg'] as const;
   let unidades = 0, ingresosComparables = 0, unidadesComparables = 0;
   for (const v of delMes) {
     const cliente = clienteMap.get(v.id_control);
     for (const key of PROD_KEYS) {
       const qty = Number((v as any)[key]) || 0;
       if (qty <= 0) continue;
-      // rucula_kg/lechuga_kg están en KG (ventas por cajón), no en paquetes/plantas —
-      // sumarlos crudos a "unidades" mezclaba dos unidades de medida distintas y hacía
-      // que el % mes a mes saltara de forma errática según cuánto se vendiera por cajón
-      // en cada tramo comparado. Convertir a paquete-equivalente, mismo criterio que
-      // ventasEnRango/evolucionVentaPorArticulo.
-      const qtyEnUnidades = key === 'rucula_kg' ? (qty * 1000) / GR_PAQ_RUCULA
-        : key === 'lechuga_kg' ? (qty * 1000) / GR_PAQ_LECHUGA
-        : qty;
-      unidades += qtyEnUnidades;
+      if (!(KEYS_EXCLUIDAS_UNIDADES as readonly string[]).includes(key)) unidades += qty;
       if ((PRICE_KEYS as readonly string[]).includes(key)) {
         ingresosComparables += qty * precioFinal(precios, v.id_control, v.sucursal, key, cliente);
         unidadesComparables += qty;
       }
     }
   }
-  unidades = Math.round(unidades);
 
   const diasEnMes = new Date(fechaRef.getFullYear(), fechaRef.getMonth() + 1, 0).getDate();
   const proyeccionMes = corte > 0 ? Math.round((unidades / corte) * diasEnMes) : 0;
