@@ -214,6 +214,11 @@ export default async function PanelPage({ searchParams }: {
   // muy común en lechuga, que tiene un ciclo mucho más largo que rúcula): comparar contra
   // el promedio del mes pasado en vez de dejar el indicador sin ningún %.
   const cicloMesPasado = cicloMesPromedio(lotes, movimientos, mesPasadoRef);
+  // Última semana CON cosechas de cada cultivo (puede no ser "esta semana" — 0 cosechas
+  // puntuales de lechuga esa semana es normal por su ciclo largo). Evita que la tarjeta
+  // de "Lechuga F2"/"Rúcula F2" desaparezca entera cuando esta semana puntual da 0.
+  const ultimoLechugaF2 = ciclosSemanas.filter((s:any) => s.lechugaF2 > 0).slice(-1)[0]?.lechugaF2;
+  const ultimoRuculaF2  = ciclosSemanas.filter((s:any) => s.rucula > 0).slice(-1)[0]?.rucula;
 
   // ── LOTES FILTRADOS CON PAGINACIÓN ──
   const conteos = contarPorFiltro(lotes, nave, ubicaciones);
@@ -384,32 +389,48 @@ export default async function PanelPage({ searchParams }: {
               <p className="card-title">Ciclos en mesadas — 8 semanas</p>
               <p className="card-sub">Días promedio F2 por semana · sin plantinera</p>
               <GraficoCiclosSemanas datos={ciclosSemanas} />
-              {ultSem && (
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginTop:'10px', paddingTop:'10px', borderTop:'1px solid #f3f4f6' }}>
-                  {ultSem.lechugaF2>0 && (
-                    <div style={{ textAlign:'center', padding:'8px', background:'#f7fee7', borderRadius:'7px' }}>
-                      <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#4d7c0f', fontWeight:700 }}>Lechuga F2</p>
-                      <p style={{ margin:'0 0 1px', fontSize:'22px', fontWeight:800, color:'#14532d' }}>{ultSem.lechugaF2}d</p>
-                      {varPctSem(ultSem.lechugaF2, antSem?.lechugaF2) !== null && (
-                        <p style={{ margin:0, fontSize:'10px', fontWeight:600, color:varPctSem(ultSem.lechugaF2,antSem?.lechugaF2)!<=0?'#059669':'#dc2626' }}>
-                          {varPctSem(ultSem.lechugaF2,antSem?.lechugaF2)!<=0?'↓':'↑'} {Math.abs(varPctSem(ultSem.lechugaF2,antSem?.lechugaF2)!)}%
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  {ultSem.rucula>0 && (
-                    <div style={{ textAlign:'center', padding:'8px', background:'#f0fdf4', borderRadius:'7px' }}>
-                      <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#166534', fontWeight:700 }}>Rúcula F2</p>
-                      <p style={{ margin:'0 0 1px', fontSize:'22px', fontWeight:800, color:'#14532d' }}>{ultSem.rucula}d</p>
-                      {varPctSem(ultSem.rucula, antSem?.rucula) !== null && (
-                        <p style={{ margin:0, fontSize:'10px', fontWeight:600, color:varPctSem(ultSem.rucula,antSem?.rucula)!<=0?'#059669':'#dc2626' }}>
-                          {varPctSem(ultSem.rucula,antSem?.rucula)!<=0?'↓':'↑'} {Math.abs(varPctSem(ultSem.rucula,antSem?.rucula)!)}%
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
+              {ultSem && (() => {
+                const lechugaEsEstaSem = ultSem.lechugaF2 > 0;
+                const lechugaVal = lechugaEsEstaSem ? ultSem.lechugaF2 : ultimoLechugaF2;
+                const lechugaPct = lechugaEsEstaSem
+                  ? (varPctSem(ultSem.lechugaF2, antSem?.lechugaF2) ?? varPctSem(ultSem.lechugaF2, cicloMesPasado.lechuga))
+                  : null;
+                const ruculaEsEstaSem = ultSem.rucula > 0;
+                const ruculaVal = ruculaEsEstaSem ? ultSem.rucula : ultimoRuculaF2;
+                const ruculaPct = ruculaEsEstaSem
+                  ? (varPctSem(ultSem.rucula, antSem?.rucula) ?? varPctSem(ultSem.rucula, cicloMesPasado.rucula))
+                  : null;
+                return (
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginTop:'10px', paddingTop:'10px', borderTop:'1px solid #f3f4f6' }}>
+                    {lechugaVal > 0 && (
+                      <div style={{ textAlign:'center', padding:'8px', background:'#f7fee7', borderRadius:'7px' }}>
+                        <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#4d7c0f', fontWeight:700 }}>Lechuga F2</p>
+                        <p style={{ margin:'0 0 1px', fontSize:'22px', fontWeight:800, color:'#14532d' }}>{lechugaVal}d</p>
+                        {lechugaPct !== null ? (
+                          <p style={{ margin:0, fontSize:'10px', fontWeight:600, color:lechugaPct<=0?'#059669':'#dc2626' }}>
+                            {lechugaPct<=0?'↓':'↑'} {Math.abs(lechugaPct)}%
+                          </p>
+                        ) : (
+                          <p style={{ margin:0, fontSize:'10px', color:'#9ca3af' }}>sin cosecha esta sem.</p>
+                        )}
+                      </div>
+                    )}
+                    {ruculaVal > 0 && (
+                      <div style={{ textAlign:'center', padding:'8px', background:'#f0fdf4', borderRadius:'7px' }}>
+                        <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#166534', fontWeight:700 }}>Rúcula F2</p>
+                        <p style={{ margin:'0 0 1px', fontSize:'22px', fontWeight:800, color:'#14532d' }}>{ruculaVal}d</p>
+                        {ruculaPct !== null ? (
+                          <p style={{ margin:0, fontSize:'10px', fontWeight:600, color:ruculaPct<=0?'#059669':'#dc2626' }}>
+                            {ruculaPct<=0?'↓':'↑'} {Math.abs(ruculaPct)}%
+                          </p>
+                        ) : (
+                          <p style={{ margin:0, fontSize:'10px', color:'#9ca3af' }}>sin cosecha esta sem.</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             <AjusteStockCard
