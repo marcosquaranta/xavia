@@ -329,7 +329,9 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
         nave: m.nave,
         cultivo: esRuc ? 'Rúcula' : 'Lechuga',
         cultivoOrden: esRuc ? 1 : 0, // lechuga primero
+        f1: esRuc ? 0 : m.lechugaF1,
         f2: esRuc ? m.ruculaF2 : m.lechugaF2,
+        total: esRuc ? m.ruculaTotal : m.lechugaTotal,
         plantasPorPaq: esRuc ? m.plantasPaqRucula : m.plantasPaqLechuga,
         peso: esRuc ? m.pesoGrRucula : m.pesoGrLechuga,
         n: esRuc ? m.ruculaN : m.lechugaN,
@@ -339,13 +341,13 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
   // Semáforo: compara cada mesada contra el promedio de mesadas del mismo cultivo
   // (ciclo: menos días es mejor · peso: más gramos es mejor)
-  function promedioCultivo(cultivo: string, campo: 'f2' | 'peso'): number {
+  function promedioCultivo(cultivo: string, campo: 'f2' | 'peso' | 'total'): number {
     const vals = filasTabla.filter(f => f.cultivo === cultivo && f[campo] > 0).map(f => f[campo]);
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
   }
-  const promedios: Record<string, { f2: number; peso: number }> = {
-    Lechuga: { f2: promedioCultivo('Lechuga', 'f2'), peso: promedioCultivo('Lechuga', 'peso') },
-    Rúcula: { f2: promedioCultivo('Rúcula', 'f2'), peso: promedioCultivo('Rúcula', 'peso') },
+  const promedios: Record<string, { f2: number; peso: number; total: number }> = {
+    Lechuga: { f2: promedioCultivo('Lechuga', 'f2'), peso: promedioCultivo('Lechuga', 'peso'), total: promedioCultivo('Lechuga', 'total') },
+    Rúcula: { f2: promedioCultivo('Rúcula', 'f2'), peso: promedioCultivo('Rúcula', 'peso'), total: promedioCultivo('Rúcula', 'total') },
   };
   function semaforo(valor: number, promedio: number, masEsMejor: boolean): string {
     if (valor <= 0 || promedio <= 0) return '#d1d5db';
@@ -357,10 +359,39 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   const filasConColor = filasTabla.map(f => ({
     ...f,
     colorF2: semaforo(f.f2, promedios[f.cultivo].f2, false),
+    colorTotal: semaforo(f.total, promedios[f.cultivo].total, false),
     colorPeso: semaforo(f.peso, promedios[f.cultivo].peso, true),
   }));
   const filasLechuga = filasConColor.filter(f => f.cultivo === 'Lechuga');
   const filasRucula = filasConColor.filter(f => f.cultivo === 'Rúcula');
+
+  // Filas de PROMEDIO por nave y por cultivo total, al pie de cada tabla.
+  type FilaCiclo = typeof filasConColor[number];
+  function promedioDeFilas(filas: FilaCiclo[], campo: 'f1' | 'f2' | 'total' | 'peso' | 'plantasPorPaq'): number {
+    const vals = filas.filter(f => f[campo] > 0).map(f => f[campo]);
+    return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+  }
+  function filaPromedio(filas: FilaCiclo[], etiqueta: string) {
+    return {
+      nombre: etiqueta, nave: 0, esPromedio: true,
+      f1: promedioDeFilas(filas, 'f1'), f2: promedioDeFilas(filas, 'f2'), total: promedioDeFilas(filas, 'total'),
+      plantasPorPaq: promedioDeFilas(filas, 'plantasPorPaq'), peso: promedioDeFilas(filas, 'peso'),
+      n: filas.reduce((a, f) => a + f.n, 0),
+    };
+  }
+  function conPromedios(filas: FilaCiclo[], cultivo: string) {
+    const naves = Array.from(new Set(filas.map(f => f.nave))).sort((a, b) => a - b);
+    const filasConNave: any[] = [];
+    for (const nv of naves) {
+      const deNave = filas.filter(f => f.nave === nv);
+      filasConNave.push(...deNave);
+      if (naves.length > 1) filasConNave.push({ ...filaPromedio(deNave, `N${nv} — Promedio`), nave: nv });
+    }
+    filasConNave.push(filaPromedio(filas, `Promedio ${cultivo}`));
+    return filasConNave;
+  }
+  const filasLechugaConProm = conPromedios(filasLechuga, 'Lechuga');
+  const filasRuculaConProm = conPromedios(filasRucula, 'Rúcula');
 
   const nombre = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
 
@@ -502,9 +533,9 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                 <span style={{ display:'flex', alignItems:'center', gap:'4px' }}><span style={{ width:8, height:8, borderRadius:'50%', background:'#dc2626', display:'inline-block' }} />peor</span>
               </div>
               {[
-                { titulo: '🥬 Lechuga', color: '#4d7c0f', filas: filasLechuga },
-                { titulo: '🌿 Rúcula', color: '#166534', filas: filasRucula },
-              ].map(({ titulo, color, filas }) => filas.length > 0 && (
+                { titulo: '🥬 Lechuga', color: '#4d7c0f', filas: filasLechugaConProm, mostrarF1: true },
+                { titulo: '🌿 Rúcula', color: '#166534', filas: filasRuculaConProm, mostrarF1: false },
+              ].map(({ titulo, color, filas, mostrarF1 }) => filas.length > 0 && (
                 <div key={titulo} style={{ marginBottom:'18px', overflowX:'auto' }}>
                   <p style={{ margin:'0 0 8px', fontSize:'13px', fontWeight:700, color }}>{titulo}</p>
                   <table style={{ fontSize:'12px' }}>
@@ -512,23 +543,29 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                       <tr>
                         <th>Mesada</th>
                         <th style={{ textAlign:'center' }}>Nave</th>
+                        {mostrarF1 && <th style={{ textAlign:'right' }}>F1 prom.</th>}
                         <th style={{ textAlign:'right' }}>Ciclo F2 prom.</th>
+                        <th style={{ textAlign:'right' }}>Días totales</th>
                         <th style={{ textAlign:'right' }}>Plantas/paquete</th>
                         <th style={{ textAlign:'right', color:'#ea580c' }}>Peso prom.</th>
                         <th style={{ textAlign:'right', color:'#9ca3af', fontSize:'11px' }}>N cosechas</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filas.map((m, i) => (
-                        <tr key={i} style={{ borderBottom:'1px solid #f3f4f6' }}>
-                          <td style={{ fontWeight:500 }}>{m.nombre}</td>
+                      {filas.map((m: any, i) => (
+                        <tr key={i} style={{ borderBottom:'1px solid #f3f4f6', background: m.esPromedio ? '#f8fafc' : 'transparent' }}>
+                          <td style={{ fontWeight: m.esPromedio ? 700 : 500, color: m.esPromedio ? '#374151' : undefined }}>{m.nombre}</td>
                           <td style={{ textAlign:'center' }}>
-                            <span style={{ background:m.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 6px', borderRadius:'3px', fontSize:'10px', fontWeight:700 }}>N{m.nave}</span>
+                            {!m.esPromedio && (
+                              <span style={{ background:m.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 6px', borderRadius:'3px', fontSize:'10px', fontWeight:700 }}>N{m.nave}</span>
+                            )}
                           </td>
-                          <td style={{ textAlign:'right', fontWeight:700, color:m.colorF2 }}>{m.f2>0?m.f2+'d':'—'}</td>
-                          <td style={{ textAlign:'right', color:'#374151' }}>{m.plantasPorPaq>0?m.plantasPorPaq:'—'}</td>
-                          <td style={{ textAlign:'right', fontWeight:700, color:m.colorPeso }}>{m.peso>0?m.peso+'g':'—'}</td>
-                          <td style={{ textAlign:'right', color:'#9ca3af' }}>{m.n}</td>
+                          {mostrarF1 && <td style={{ textAlign:'right', color:'#374151', fontWeight: m.esPromedio ? 700 : 400 }}>{m.f1>0?m.f1+'d':'—'}</td>}
+                          <td style={{ textAlign:'right', fontWeight:700, color:m.esPromedio?'#374151':m.colorF2 }}>{m.f2>0?m.f2+'d':'—'}</td>
+                          <td style={{ textAlign:'right', fontWeight: m.esPromedio ? 700 : 400, color:m.esPromedio?'#374151':m.colorTotal }}>{m.total>0?m.total+'d':'—'}</td>
+                          <td style={{ textAlign:'right', color:'#374151', fontWeight: m.esPromedio ? 700 : 400 }}>{m.plantasPorPaq>0?m.plantasPorPaq:'—'}</td>
+                          <td style={{ textAlign:'right', fontWeight:700, color:m.esPromedio?'#374151':m.colorPeso }}>{m.peso>0?m.peso+'g':'—'}</td>
+                          <td style={{ textAlign:'right', color:'#9ca3af', fontWeight: m.esPromedio ? 700 : 400 }}>{m.n}</td>
                         </tr>
                       ))}
                     </tbody>
