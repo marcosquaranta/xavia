@@ -9,12 +9,10 @@ export default function Header({ user, current }: { user: UsuarioPublico; curren
     { href: '/estadisticas', label: 'Estadísticas', key: 'estadisticas' },
   ];
   items.push({ href: '/ventas', label: 'Ventas', key: 'ventas' });
-  items.push({ href: '/facturacion', label: 'Facturación', key: 'facturacion' });
   items.push({ href: '/movimientos', label: 'Actividad', key: 'movimientos' });
   items.push({ href: '/stocks', label: 'Stocks', key: 'stocks' });
   items.push({ href: '/planificacion', label: 'Planificación', key: 'planificacion' });
   if (isAdmin) {
-    items.push({ href: '/alertas', label: 'Alertas', key: 'alertas' });
     items.push({ href: '/gastos', label: 'Gastos', key: 'gastos' });
     items.push({ href: '/admin', label: 'Admin', key: 'admin' });
   }

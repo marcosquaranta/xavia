@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
@@ -52,7 +53,7 @@ export default async function FacturacionPage() {
     ]);
   } catch (e: any) { err = e?.message || 'Error'; }
 
-  if (err) return (<><Header user={user} current="facturacion" /><div className="container"><div className="alert-box error">{err}</div></div></>);
+  if (err) return (<><Header user={user} current="ventas" /><div className="container"><div className="alert-box error">{err}</div></div></>);
 
   const pendientes = ventas.filter(v => v.exportado === 'PENDIENTE');
   const porControl = new Map<string, VentaDia[]>();
@@ -85,8 +86,9 @@ export default async function FacturacionPage() {
 
   return (
     <>
-      <Header user={user} current="facturacion" />
+      <Header user={user} current="ventas" />
       <div className="container">
+        <Link href="/ventas" style={{ fontSize: '13px', display: 'inline-block', marginBottom: '14px' }}>← Volver a Ventas</Link>
         <h1 className="page-title">Facturación</h1>
         <p className="page-subtitle">Ventas cargadas pendientes de facturar en Xubio</p>
         <div className="card">

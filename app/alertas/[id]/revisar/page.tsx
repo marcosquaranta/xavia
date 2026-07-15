@@ -15,9 +15,9 @@ export default async function RevisarAlertaPage({ params }: { params: { id: stri
   function fmt(f: string) { if (!f) return '-'; try { const [,m,d] = String(f).split('-'); return d+'/'+m; } catch { return f; } }
   return (
     <>
-      <Header user={user} current="alertas" />
+      <Header user={user} current="panel" />
       <div className="container">
-        <Link href="/alertas" style={{ fontSize: '13px', display: 'inline-block', marginBottom: '14px' }}>← Volver a Alertas</Link>
+        <Link href="/panel" style={{ fontSize: '13px', display: 'inline-block', marginBottom: '14px' }}>← Volver al panel</Link>
         <h1 className="page-title">Revisar alerta · Lote <span className="lote-id" style={{ fontSize: '14px' }}>{mov.id_lote}</span></h1>
         <p className="page-subtitle">Cosecha del {fmt(String(mov.fecha || ''))}</p>
         <div className="card">
@@ -36,7 +36,7 @@ export default async function RevisarAlertaPage({ params }: { params: { id: stri
           <textarea name="comentario" rows={4} required placeholder="Ej: Lote con plantas chicas, compensación legítima" style={{ resize: 'vertical' }} />
           <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
             <button type="submit" className="btn">Marcar como revisada</button>
-            <Link href="/alertas" className="btn secondary">Cancelar</Link>
+            <Link href="/panel" className="btn secondary">Cancelar</Link>
           </div>
         </form>
       </div>

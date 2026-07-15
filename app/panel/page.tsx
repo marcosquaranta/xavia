@@ -156,6 +156,19 @@ export default async function PanelPage({ searchParams }: {
   const hoy = new Date();
   const alertas = generarAlertas(lotes, tubosMesadas, ciclosRealesMap, ocGlobal);
 
+  // Desvíos de cosecha (antes en la sección "Alertas" propia, ahora solo en el home) —
+  // solo admin, últimos 30 días, sin revisar primero.
+  const cosechasConAlerta = movimientos.filter((m) => {
+    if (m.tipo !== 'cosecha') return false;
+    if (m.nivel_alerta !== 'amarillo' && m.nivel_alerta !== 'rojo') return false;
+    try { const f = new Date(String(m.fecha)); return (hoy.getTime() - f.getTime()) / 86400000 <= 30; } catch { return true; }
+  }).sort((a, b) => {
+    const aRev = a.alerta_revisada === 'SI', bRev = b.alerta_revisada === 'SI';
+    if (aRev !== bRev) return aRev ? 1 : -1;
+    if (a.nivel_alerta !== b.nivel_alerta) return a.nivel_alerta === 'rojo' ? -1 : 1;
+    return String(b.fecha || '').localeCompare(String(a.fecha || ''));
+  });
+
   // ── ÚLTIMOS MOVIMIENTOS, separados por tipo ──
   const lotesMap = new Map(lotes.map(l => [l.id_lote, l]));
   const movsOrdenados = [...movimientos]
@@ -258,6 +271,32 @@ export default async function PanelPage({ searchParams }: {
                   {tubosMesadas.map((n:any) => { const f2=(n.mesadas||[]).filter((m:any)=>m.sector_fase!=='fase_1'); const tot=f2.reduce((s:number,m:any)=>s+m.tubos_totales,0); const ocu=f2.reduce((s:number,m:any)=>s+m.tubos_ocupados,0); const pct=tot>0?Math.round(ocu/tot*100):0; return <span key={n.nave}> · N{n.nave}: <strong>{pct}%</strong></span>; })}
                 </div>
             </div>
+            {user.rol === 'admin' && cosechasConAlerta.length > 0 && (
+              <div style={{ background:'white', borderRadius:'7px', padding:'10px 12px', border:'1px solid #e5e7eb', marginBottom:'10px' }}>
+                <p style={{ margin:'0 0 8px', fontSize:'13px', fontWeight:700 }}>⚠️ Desvíos de cosecha <span style={{ fontWeight:400, fontSize:'11px', color:'#9ca3af' }}>(30 días)</span></p>
+                <div style={{ display:'flex', flexDirection:'column', gap:'6px', maxHeight:'220px', overflowY:'auto' }}>
+                  {cosechasConAlerta.map((m) => {
+                    const esRoja = m.nivel_alerta === 'rojo';
+                    const esRev = m.alerta_revisada === 'SI';
+                    return (
+                      <div key={m.id_movimiento} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'6px 8px', borderRadius:'6px', background: esRev ? '#f9fafb' : esRoja ? '#fef2f2' : '#fffbeb', opacity: esRev ? 0.7 : 1 }}>
+                        <span style={{ background: esRev ? '#e5e7eb' : esRoja ? '#dc2626' : '#d97706', color: esRev ? '#6b7280' : 'white', padding:'1px 7px', borderRadius:'8px', fontSize:'10px', fontWeight:700, flexShrink:0 }}>
+                          +{Math.round(Number(m.desvio_porcentaje) || 0)}%
+                        </span>
+                        <Link href={`/cultivos/${encodeURIComponent(String(m.id_lote||''))}`} style={{ textDecoration:'none', fontFamily:'monospace', fontWeight:700, fontSize:'11px', color:'#111827' }}>
+                          {m.id_lote}
+                        </Link>
+                        <span style={{ fontSize:'11px', color:'#6b7280', flex:1 }}>
+                          {fmtFecha(String(m.fecha||''))} · {Number(m.unidades_cosechadas)||0}u · {Number(m.descarte_calculado)||0} s/id
+                          {esRev && <span style={{ color:'#059669', marginLeft:'6px' }}>✓ Revisada</span>}
+                        </span>
+                        {!esRev && <Link href={'/alertas/' + m.id_movimiento + '/revisar'} className="btn secondary small" style={{ flexShrink:0 }}>Revisar</Link>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             {siembraHoy && (
               <div style={{ background:'white', borderRadius:'7px', padding:'10px 12px', border:'1px solid #e5e7eb', marginBottom:'10px' }}>
                 <p style={{ margin:'0 0 8px', fontSize:'13px', fontWeight:700 }}>🌱 Sembrar hoy</p>

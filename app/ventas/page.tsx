@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
@@ -76,8 +77,15 @@ export default async function VentasPage() {
     <>
       <Header user={user} current="ventas" />
       <div className="container">
-        <h1 className="page-title">Ventas</h1>
-        <p className="page-subtitle">Carga diaria · Exportación Xubio</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+          <div>
+            <h1 className="page-title">Ventas</h1>
+            <p className="page-subtitle">Carga diaria · Exportación Xubio</p>
+          </div>
+          <Link href="/facturacion" className="btn secondary" style={{ fontSize: '13px', marginTop: '2px' }}>
+            📄 Facturación →
+          </Link>
+        </div>
         <VentasEvolucionCharts articulo={evolArticulo} cliente={evolCliente} precio={evolPrecio} resumenMes={resumenMes} />
         <div className="card">
           <VentasManager clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} estimCosecha={estimCosecha} />
