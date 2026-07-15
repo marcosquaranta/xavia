@@ -20,11 +20,13 @@ export interface CicloMesada {
 // ciclo F2 (cuánto tarda en liberarse una posición ahí), no el ciclo total F1+F2. La
 // "producción teórica" usa el ciclo F2 promedio PONDERADO de toda la nave+cultivo (no el
 // de cada mesada individual, que puede estar basado en 1 sola cosecha y ser poco
-// confiable) — la "producción real" es lo efectivamente cosechado en el período, sin
-// estimar nada. Las mesadas F1 de lechuga quedan como buffer (0 producción), mostrando su
-// propio ciclo F1 solo a modo de diagnóstico de si el traspaso F1→F2 está balanceado.
+// confiable) — la "producción real" es lo efectivamente cosechado en el período,
+// MENSUALIZADO (dividido por los meses que abarca el período filtrado) para que sea
+// comparable en la misma unidad que la teórica (paquetes/MES), no un total crudo del
+// período. Las mesadas F1 de lechuga son buffer puro (no cosechan directo) y no entran
+// en esta tabla — su ciclo F1 se sigue viendo en "Ciclos por mesada" arriba.
 export interface FilaCapacidadProd {
-  nombre: string; nave: number; cultivo: 'Lechuga' | 'Rúcula'; esBuffer: boolean;
+  nombre: string; nave: number; cultivo: 'Lechuga' | 'Rúcula';
   cicloActual: number; posiciones: number;
   produccionTeorica: number; produccionReal: number; n: number;
 }
@@ -57,6 +59,34 @@ export function cosechadosEnPeriodo(lotes: Lote[], periodo: PeriodoCapacidad): L
     desde = new Date(ahora.getFullYear(), 0, 1);
   }
   return todos.filter(l => new Date(String(l.fecha_cosecha) + 'T12:00:00') >= desde);
+}
+
+// Cuántos meses (equivalentes en días/30) abarca el período filtrado — para "mensualizar"
+// la producción real y poder compararla contra la teórica (que siempre es una tasa
+// mensual), sin importar qué período haya elegido el usuario.
+function mesesEnPeriodo(periodo: PeriodoCapacidad, cosechados: Lote[]): number {
+  const ahora = new Date();
+  let dias: number;
+  if (periodo === 'mes') {
+    dias = ahora.getDate();
+  } else if (periodo === 'mes_ant') {
+    const mp = mesAnteriorClamp(ahora);
+    dias = new Date(mp.getFullYear(), mp.getMonth() + 1, 0).getDate();
+  } else if (periodo === 'trimestre') {
+    const inicioTrimestre = Math.floor(ahora.getMonth() / 3) * 3;
+    const inicio = new Date(ahora.getFullYear(), inicioTrimestre, 1);
+    dias = Math.floor((ahora.getTime() - inicio.getTime()) / 86400000) + 1;
+  } else if (periodo === 'anio') {
+    const inicio = new Date(ahora.getFullYear(), 0, 1);
+    dias = Math.floor((ahora.getTime() - inicio.getTime()) / 86400000) + 1;
+  } else { // siempre: desde la cosecha más vieja del set filtrado hasta hoy
+    const fechas = cosechados
+      .map(l => new Date(String(l.fecha_cosecha) + 'T12:00:00').getTime())
+      .filter(t => !isNaN(t));
+    const minFecha = fechas.length ? Math.min(...fechas) : ahora.getTime();
+    dias = Math.floor((ahora.getTime() - minFecha) / 86400000) + 1;
+  }
+  return Math.max(dias, 1) / 30;
 }
 
 export function calcularCapacidadProductiva(
@@ -188,26 +218,34 @@ export function calcularCapacidadProductiva(
     return sumaN > 0 ? sumaPonderada / sumaN : 0;
   }
 
-  const filasCapacidad: FilaCapacidadProd[] = ciclosMesadas.map((m) => {
-    const esRuc = m.tipo === 'rucula' || (m.tipo === 'mixta' && m.ruculaN > 0 && m.lechugaN === 0);
-    const esBuffer = !esRuc && m.sectorFase === 'fase_1'; // rúcula no tiene buffer F1
-    const cicloActual = esRuc ? m.ruculaF2 : (esBuffer ? m.lechugaF1 : m.lechugaF2);
-    const n = esRuc ? m.ruculaN : (esBuffer ? m.lechugaF1N : m.lechugaN);
-    const cicloNave = esBuffer ? 0 : cicloPromedioNaveCultivo(m.nave, esRuc);
-    const ciclosPorMes = !esBuffer && cicloNave > 0 ? (30 / cicloNave) : 0;
-    const plantasPorMes = !esBuffer ? Math.round(m.posiciones * ciclosPorMes) : 0;
-    const plantasPorPaq = esRuc ? (m.plantasPaqRucula > 0 ? m.plantasPaqRucula : 3) : 1;
-    const produccionTeorica = esRuc ? Math.round(plantasPorMes / plantasPorPaq) : plantasPorMes;
-    const produccionReal = esRuc ? m.produccionRealRucula : m.produccionRealLechuga;
-    return {
-      nombre: m.nombre, nave: m.nave, cultivo: (esRuc ? 'Rúcula' : 'Lechuga') as 'Lechuga' | 'Rúcula', esBuffer,
-      cicloActual, posiciones: m.posiciones, produccionTeorica, produccionReal, n,
-    };
-  }).sort((a, b) => (a.cultivo === b.cultivo ? 0 : a.cultivo === 'Lechuga' ? -1 : 1) || a.nave - b.nave || a.nombre.localeCompare(b.nombre));
+  const meses = mesesEnPeriodo(periodo, cosechados);
+
+  const filasCapacidad: FilaCapacidadProd[] = ciclosMesadas
+    .filter(m => {
+      // Las mesadas F1 de lechuga son buffer puro (no cosechan directo) — no entran en esta tabla.
+      const esRuc = m.tipo === 'rucula' || (m.tipo === 'mixta' && m.ruculaN > 0 && m.lechugaN === 0);
+      return esRuc || m.sectorFase !== 'fase_1';
+    })
+    .map((m) => {
+      const esRuc = m.tipo === 'rucula' || (m.tipo === 'mixta' && m.ruculaN > 0 && m.lechugaN === 0);
+      const cicloActual = esRuc ? m.ruculaF2 : m.lechugaF2;
+      const n = esRuc ? m.ruculaN : m.lechugaN;
+      const cicloNave = cicloPromedioNaveCultivo(m.nave, esRuc);
+      const ciclosPorMes = cicloNave > 0 ? (30 / cicloNave) : 0;
+      const plantasPorMes = Math.round(m.posiciones * ciclosPorMes);
+      const plantasPorPaq = esRuc ? (m.plantasPaqRucula > 0 ? m.plantasPaqRucula : 3) : 1;
+      const produccionTeorica = esRuc ? Math.round(plantasPorMes / plantasPorPaq) : plantasPorMes;
+      const produccionRealBruta = esRuc ? m.produccionRealRucula : m.produccionRealLechuga;
+      const produccionReal = Math.round(produccionRealBruta / meses);
+      return {
+        nombre: m.nombre, nave: m.nave, cultivo: (esRuc ? 'Rúcula' : 'Lechuga') as 'Lechuga' | 'Rúcula',
+        cicloActual, posiciones: m.posiciones, produccionTeorica, produccionReal, n,
+      };
+    }).sort((a, b) => (a.cultivo === b.cultivo ? 0 : a.cultivo === 'Lechuga' ? -1 : 1) || a.nave - b.nave || a.nombre.localeCompare(b.nombre));
 
   const navesConCapacidad = Array.from(new Set(filasCapacidad.map(f => f.nave))).sort((a, b) => a - b);
   const kpiPorNave: KpiNave[] = navesConCapacidad.map((nv) => {
-    const deNave = filasCapacidad.filter(f => f.nave === nv && !f.esBuffer);
+    const deNave = filasCapacidad.filter(f => f.nave === nv);
     const lechuga = deNave.filter(f => f.cultivo === 'Lechuga').reduce((a, f) => a + f.produccionTeorica, 0);
     const rucula = deNave.filter(f => f.cultivo === 'Rúcula').reduce((a, f) => a + f.produccionTeorica, 0);
     return { nave: nv, lechuga, rucula, total: lechuga + rucula };

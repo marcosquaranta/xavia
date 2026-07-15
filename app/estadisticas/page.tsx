@@ -253,9 +253,9 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   function totalDeFilas(filas: FilaCap[], campo: 'posiciones' | 'produccionTeorica' | 'produccionReal'): number {
     return filas.reduce((a, f) => a + f[campo], 0);
   }
-  function filaTotalCap(filas: FilaCap[], etiqueta: string) {
+  function filaTotalCap(filas: FilaCap[], etiqueta: string, esTotalCultivo: boolean) {
     return {
-      nombre: etiqueta, nave: 0, cultivo: filas[0]?.cultivo || 'Lechuga', esBuffer: false, esTotal: true,
+      nombre: etiqueta, nave: 0, cultivo: filas[0]?.cultivo || 'Lechuga', esTotal: true, esTotalCultivo,
       cicloActual: 0, posiciones: totalDeFilas(filas, 'posiciones'),
       produccionTeorica: totalDeFilas(filas, 'produccionTeorica'), produccionReal: totalDeFilas(filas, 'produccionReal'),
       n: filas.reduce((a, f) => a + f.n, 0),
@@ -270,9 +270,9 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
       for (const nv of naves) {
         const deNave = deCultivo.filter(f => f.nave === nv);
         filasFinal.push(...deNave);
-        if (naves.length > 1) filasFinal.push({ ...filaTotalCap(deNave, `N${nv} — Total`), nave: nv, cultivo: cul });
+        if (naves.length > 1) filasFinal.push({ ...filaTotalCap(deNave, `N${nv} — Total`, false), nave: nv, cultivo: cul });
       }
-      filasFinal.push({ ...filaTotalCap(deCultivo, `Total ${cul}`), cultivo: cul });
+      filasFinal.push({ ...filaTotalCap(deCultivo, `Total ${cul}`, true), cultivo: cul });
     }
     return filasFinal;
   }
@@ -423,11 +423,23 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
         {/* Capacidad productiva mensual */}
         <div className="card">
-          <p className="card-title" style={{ margin:'0 0 2px' }}>Capacidad productiva mensual</p>
-          <p className="card-sub" style={{ margin:0 }}>
-            Producción teórica = posiciones × (30 / ciclo F2 promedio de la nave+cultivo) — F1 y F2 son etapas secuenciales, no se suman.
-            Producción real = paquetes efectivamente cosechados en el período. Mismo filtro de nave/período que "Ciclos por mesada" arriba.
-          </p>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'6px', flexWrap:'wrap', gap:'8px' }}>
+            <div>
+              <p className="card-title" style={{ margin:'0 0 2px' }}>Capacidad productiva mensual</p>
+              <p className="card-sub" style={{ margin:0 }}>
+                Producción teórica = posiciones × (30 / ciclo F2 promedio de la nave+cultivo). Producción real = paquetes
+                cosechados en el período, mensualizados (÷ meses del período) para ser comparables. Mismo filtro de nave que arriba.
+              </p>
+            </div>
+            <div style={{ display:'flex', gap:'4px' }}>
+              {([['mes','Este mes'],['trimestre','Trimestre actual'],['anio','Este año']] as const).map(([v,l]) => (
+                <a key={v} href={buildUrl({ periodo:v })}
+                  style={{ padding:'3px 8px', borderRadius:'5px', fontSize:'11px', fontWeight:periodoMesada===v?700:400, background:periodoMesada===v?'#374151':'#f3f4f6', color:periodoMesada===v?'white':'#6b7280', textDecoration:'none', whiteSpace:'nowrap' }}>
+                  {l}
+                </a>
+              ))}
+            </div>
+          </div>
 
           {filasCapacidad.length === 0 ? (
             <p style={{ color:'#9ca3af', fontSize:'13px', textAlign:'center', padding:'20px' }}>Sin datos para el filtro seleccionado.</p>
@@ -478,37 +490,41 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                     </tr>
                   </thead>
                   <tbody>
-                    {filasCapacidadConTotales.map((f: any, i) => (
-                      <tr key={i} style={{ borderBottom:'1px solid #f3f4f6', background: f.esTotal ? '#f8fafc' : 'transparent', opacity: f.esBuffer ? 0.65 : 1 }}>
-                        <td style={{ textAlign:'center', fontSize:'11px', color:f.cultivo==='Lechuga'?'#4d7c0f':'#166534', fontWeight:600 }}>
-                          {!f.esTotal || f.nombre.startsWith('Total') ? f.cultivo : ''}
-                        </td>
-                        <td style={{ fontWeight: f.esTotal ? 700 : 500, color: f.esTotal ? '#374151' : undefined }}>{f.nombre}</td>
-                        <td style={{ textAlign:'center' }}>
-                          {!f.esTotal && (
-                            <span style={{ background:f.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 6px', borderRadius:'3px', fontSize:'10px', fontWeight:700 }}>N{f.nave}</span>
-                          )}
-                        </td>
-                        <td style={{ textAlign:'right', fontWeight: f.esBuffer ? 400 : 700 }}>
-                          {f.cicloActual>0 ? f.cicloActual+'d' : '—'}
-                          {f.esBuffer && <span style={{ marginLeft:'4px', fontSize:'9px', color:'#9ca3af', fontWeight:600, textTransform:'uppercase' }}>F1 buffer</span>}
-                        </td>
-                        <td style={{ textAlign:'right', fontWeight: f.esTotal ? 700 : 400, color:'#374151' }}>{f.posiciones>0?f.posiciones.toLocaleString('es-AR'):'—'}</td>
-                        <td style={{ textAlign:'right', fontWeight:700, color:f.esBuffer?'#9ca3af':'#111827' }}>
-                          {f.esBuffer ? '— (buffer)' : f.produccionTeorica.toLocaleString('es-AR')}
-                        </td>
-                        <td style={{ textAlign:'right', fontWeight:700, color:f.esBuffer?'#9ca3af':'#059669' }}>
-                          {f.esBuffer ? '—' : f.produccionReal.toLocaleString('es-AR')}
-                        </td>
-                        <td style={{ textAlign:'right' }}>
-                          {!f.esTotal && (
-                            <span style={{ color: f.n <= 1 ? '#dc2626' : '#9ca3af', fontWeight: f.n <= 1 ? 700 : 400 }}>
-                              {f.n <= 1 && '⚠ '}{f.n}
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                    {filasCapacidadConTotales.map((f: any, i) => {
+                      const bgTotalCultivo = f.cultivo === 'Lechuga' ? '#f0fdf4' : '#ecfdf5';
+                      const colorTotalCultivo = f.cultivo === 'Lechuga' ? '#166534' : '#065f46';
+                      return (
+                        <tr key={i} style={{
+                          borderBottom: f.esTotalCultivo ? '2px solid #d1d5db' : '1px solid #f3f4f6',
+                          background: f.esTotalCultivo ? bgTotalCultivo : f.esTotal ? '#f8fafc' : 'transparent',
+                        }}>
+                          <td style={{ textAlign:'center', fontSize:'11px', color: f.esTotalCultivo ? colorTotalCultivo : (f.cultivo==='Lechuga'?'#4d7c0f':'#166534'), fontWeight:600 }}>
+                            {!f.esTotal || f.esTotalCultivo ? f.cultivo : ''}
+                          </td>
+                          <td style={{ fontWeight: f.esTotalCultivo ? 800 : f.esTotal ? 700 : 500, color: f.esTotalCultivo ? colorTotalCultivo : (f.esTotal ? '#374151' : undefined), fontSize: f.esTotalCultivo ? '13px' : undefined }}>{f.nombre}</td>
+                          <td style={{ textAlign:'center' }}>
+                            {!f.esTotal && (
+                              <span style={{ background:f.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 6px', borderRadius:'3px', fontSize:'10px', fontWeight:700 }}>N{f.nave}</span>
+                            )}
+                          </td>
+                          <td style={{ textAlign:'right', fontWeight:700 }}>{f.cicloActual>0 ? f.cicloActual+'d' : '—'}</td>
+                          <td style={{ textAlign:'right', fontWeight: f.esTotal ? 700 : 400, color: f.esTotalCultivo ? colorTotalCultivo : '#374151' }}>{f.posiciones>0?f.posiciones.toLocaleString('es-AR'):'—'}</td>
+                          <td style={{ textAlign:'right', fontWeight: f.esTotalCultivo ? 800 : 700, color: f.esTotalCultivo ? colorTotalCultivo : '#111827', fontSize: f.esTotalCultivo ? '13px' : undefined }}>
+                            {f.produccionTeorica.toLocaleString('es-AR')}
+                          </td>
+                          <td style={{ textAlign:'right', fontWeight: f.esTotalCultivo ? 800 : 700, color: f.esTotalCultivo ? colorTotalCultivo : '#059669', fontSize: f.esTotalCultivo ? '13px' : undefined }}>
+                            {f.produccionReal.toLocaleString('es-AR')}
+                          </td>
+                          <td style={{ textAlign:'right' }}>
+                            {!f.esTotal && (
+                              <span style={{ color: f.n <= 1 ? '#dc2626' : '#9ca3af', fontWeight: f.n <= 1 ? 700 : 400 }}>
+                                {f.n <= 1 && '⚠ '}{f.n}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
                 <p style={{ margin:'8px 0 0', fontSize:'11px', color:'#9ca3af' }}>⚠ N cosechas ≤ 1: promedio poco confiable, muestra chica.</p>
