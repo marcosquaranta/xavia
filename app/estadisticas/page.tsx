@@ -1,10 +1,10 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import { estadisticasDelMes, mesAnteriorClamp } from '@/lib/estadisticas';
 import { calcularDiasPorFase } from '@/lib/lotes';
 import { calcularCapacidad, diasCicloDefault } from '@/lib/planificacionServer';
 import { calcularPlan, repartoHelpers, parseReparto, REPARTO_DEFAULT, DIA_SIEMBRA, CUB, planchas } from '@/lib/planificacion';
+import { calcularCapacidadProductiva } from '@/lib/capacidadProductiva';
 import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
@@ -56,13 +56,6 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
       paquetes: Number(l.unidades_cosechadas) || 0,
     }))
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
-
-  let statsActual: any[] = [], statsPasado: any[] = [];
-  try { statsActual = estadisticasDelMes(lotes, movimientos, hoy); } catch {}
-  try {
-    const mesPasado = mesAnteriorClamp(hoy);
-    statsPasado = estadisticasDelMes(lotes, movimientos, mesPasado);
-  } catch {}
 
   // ── EVOLUCIÓN DE CICLOS (F2 promedio) ──
   // Una línea de lechuga (promedio de todas las variedades) y una de rúcula.
@@ -177,161 +170,9 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     siembraRealLecPl = planchas(sumPlLec / CUB);
   } catch {}
 
-  // ── CICLOS POR MESADA ──
-  // Para cada mesada: promedio de dias_f1, dias_f2 de cosechados cuyo historial de movimientos
-  // incluye esa mesada como ubicacion_destino
-  const mesadas = ubicaciones.filter(u => u.tipo === 'mesada' && u.activo === 'SI');
-
-  // Filtro de período para ciclos por mesada
-  function cosechadosEnPeriodo(periodo: typeof periodoMesada) {
-    const todos = lotes.filter(l => l.estado === 'cosechado');
-    if (periodo === 'siempre') return todos;
-    const ahora = new Date();
-    let desde: Date;
-    if (periodo === 'mes') {
-      desde = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
-    } else if (periodo === 'mes_ant') {
-      const mp = mesAnteriorClamp(ahora);
-      desde = new Date(mp.getFullYear(), mp.getMonth(), 1);
-      const hasta = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
-      return todos.filter(l => { const f = new Date(String(l.fecha_cosecha)+'T12:00:00'); return f >= desde && f < hasta; });
-    } else if (periodo === 'trimestre') {
-      const inicioTrimestre = Math.floor(ahora.getMonth() / 3) * 3;
-      desde = new Date(ahora.getFullYear(), inicioTrimestre, 1);
-    } else { // anio
-      desde = new Date(ahora.getFullYear(), 0, 1);
-    }
-    return todos.filter(l => new Date(String(l.fecha_cosecha)+'T12:00:00') >= desde);
-  }
-  const cosechados = cosechadosEnPeriodo(periodoMesada);
-
-  // Mapear id_lote → dias por fase
-  const diasPorLote = new Map<string, { f1: number|null; f2: number; total: number; variedad: string; nave: number }>();
-  for (const l of cosechados) {
-    try {
-      const dias = calcularDiasPorFase(l, movimientos);
-      if (dias.total < 20) continue;
-      // Determinar nave del lote
-      const nav = String(l.ubicacion_actual || l.id_lote || '').toLowerCase().includes('n1') ||
-                  String(l.ubicacion_actual || '').toLowerCase().includes('nave 1') ? 1 : 2;
-      diasPorLote.set(l.id_lote, { f1: dias.fase_1, f2: dias.fase_2, total: dias.total, variedad: l.variedad, nave: nav });
-    } catch {}
-  }
-
-  // Ciclos por nave (para el gráfico de mesadas usamos los lotes históricos agrupados por nave)
-  function ciclosPorNave(naveNum: number | null) {
-    const filtrados = [...diasPorLote.values()].filter(d => naveNum === null || d.nave === naveNum);
-    const porVariedad = new Map<string, { f1s: number[]; f2s: number[]; totals: number[] }>();
-    for (const d of filtrados) {
-      const vNorm = String(d.variedad).toLowerCase();
-      const key = vNorm.includes('rucula') || vNorm.includes('rúcula') ? 'rucula' : 'lechuga';
-      const prev = porVariedad.get(key) || { f1s: [], f2s: [], totals: [] };
-      if (d.f1 !== null && d.f1 > 0) prev.f1s.push(d.f1);
-      if (d.f2 > 0) prev.f2s.push(d.f2);
-      if (d.total > 0) prev.totals.push(d.total);
-      porVariedad.set(key, prev);
-    }
-    return porVariedad;
-  }
-
-  // Peso promedio y plantas/paquete por lote cosechado
-  const pesoLoteMap = new Map<string, { gr: number; ppu: number; esRucula: boolean }>();
-  for (const l of cosechados) {
-    const gr = Number(l.peso_muestra_paquete_gr) > 0
-      ? Number(l.peso_muestra_paquete_gr)
-      : Number(l.peso_muestra_kg) > 0 ? Math.round(Number(l.peso_muestra_kg) * 1000) : 0;
-    const ppu = Number(l.plantas_por_unidad_real) || 0;
-    if (gr > 0 || ppu > 0) {
-      const v = String(l.variedad || '').toLowerCase();
-      pesoLoteMap.set(l.id_lote, { gr, ppu, esRucula: v.includes('rucula') || v.includes('rúcula') });
-    }
-  }
-
-  // Normaliza nombres de mesada: quita prefijo "Nave X -", acentos, sufijos "(...)", minúsculas
-  const normMes = (s: string) => String(s || '')
-    .replace(/^Nave\s*\d+\s*-\s*/i, '')
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .replace(/\([^)]*\)/g, '')
-    .toLowerCase().replace(/\s+/g, ' ').trim();
-  const naveDe = (ubic: string) => {
-    const m = String(ubic || '').match(/nave\s*(\d+)/i);
-    if (m) return Number(m[1]);
-    return String(ubic || '').toLowerCase().includes('n1') ? 1 : 2;
-  };
-
-  // Ciclos por mesada: usar movimientos de trasplante para saber qué lotes pasaron por cada mesada
-  interface CicloMesada {
-    nombre: string; nave: number;
-    tipo: 'lechuga' | 'rucula' | 'mixta';
-    lechugaF1: number; lechugaF2: number; lechugaTotal: number; lechugaN: number; lechugaF1N: number;
-    ruculaF2: number; ruculaTotal: number; ruculaN: number;
-    pesoGrLechuga: number; pesoGrRucula: number;
-    plantasPaqLechuga: number; plantasPaqRucula: number;
-    posiciones: number; sectorFase: string;
-  }
-  const ciclosMesadas: CicloMesada[] = [];
-  const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0;
-
-  for (const mes of mesadas) {
-    if (naveFilter !== 'todas' && String(mes.nave) !== naveFilter) continue;
-
-    const mesKey = normMes(mes.nombre);
-    const mesNave = Number(mes.nave);
-    const esRuculaMesada = mesKey.includes('rucula');
-    const esLechugaMesada = mesKey.includes('lechuga');
-    const tipo: CicloMesada['tipo'] = esRuculaMesada ? 'rucula' : esLechugaMesada ? 'lechuga' : 'mixta';
-
-    // Lotes cosechados que pasaron por esta mesada (matching normalizado: sin acentos/sufijos/prefijo)
-    const lotesEnMesada = new Set(
-      movimientos
-        .filter(m => normMes(m.ubicacion_destino) === mesKey)
-        .map(m => m.id_lote)
-    );
-
-    const lF1: number[] = [], lF2: number[] = [], rF2: number[] = [];
-    const pLech: number[] = [], pRuc: number[] = [];
-    const ppLech: number[] = [], ppRuc: number[] = [];
-
-    // Ciclos: via movimientos (lotes que tuvieron destino = esta mesada, misma nave)
-    for (const idLote of lotesEnMesada) {
-      const d = diasPorLote.get(String(idLote));
-      if (!d || d.nave !== mesNave) continue;
-      const vNorm = d.variedad.toLowerCase();
-      const esR = vNorm.includes('rucula') || vNorm.includes('rúcula');
-      if (esR) { if (d.f2 > 0) rF2.push(d.f2); }
-      else { if (d.f1 !== null && d.f1 > 0) lF1.push(d.f1); if (d.f2 > 0) lF2.push(d.f2); }
-    }
-
-    // Peso y plantas/paquete: via ubicacion_actual (guarda la mesada donde estaba al cosechar), matching normalizado + nave
-    for (const l of cosechados) {
-      if (normMes(l.ubicacion_actual) !== mesKey) continue;
-      if (naveDe(l.ubicacion_actual) !== mesNave) continue;
-      const p = pesoLoteMap.get(l.id_lote);
-      if (!p) continue;
-      if (p.gr > 0) (p.esRucula ? pRuc : pLech).push(p.gr);
-      if (p.ppu > 0) (p.esRucula ? ppRuc : ppLech).push(p.ppu);
-    }
-
-    // Posiciones instaladas de ESTA mesada puntual (misma fórmula que lib/capacidad.ts):
-    // módulos × perfiles/módulo × orificios/perfil. Cada fila de Ubicaciones (F1 y F2 del
-    // mismo número de mesada son filas distintas) tiene su propia capacidad instalada.
-    const modulosMes = Number(mes.modulos) || 1;
-    const perfilesMes = modulosMes * (Number(mes.perfiles_por_modulo) || 0);
-    const orifPerfMes = Number(mes.orificios_por_perfil) || 0;
-    const posicionesMes = perfilesMes * orifPerfMes;
-
-    ciclosMesadas.push({
-      nombre: mes.nombre.replace(/^Nave \d+ - /, ''),
-      nave: Number(mes.nave), tipo,
-      lechugaF1: avg(lF1), lechugaF2: avg(lF2),
-      lechugaTotal: avg(lF1.map((f,i) => f + (lF2[i]||0))),
-      lechugaN: Math.max(lF1.length, lF2.length), lechugaF1N: lF1.length,
-      ruculaF2: avg(rF2), ruculaTotal: avg(rF2), ruculaN: rF2.length,
-      pesoGrLechuga: avg(pLech), pesoGrRucula: avg(pRuc),
-      plantasPaqLechuga: avg(ppLech), plantasPaqRucula: avg(ppRuc),
-      posiciones: posicionesMes, sectorFase: String(mes.sector_fase || ''),
-    });
-  }
+  // ── CICLOS POR MESADA + CAPACIDAD PRODUCTIVA ── (lógica compartida en lib/capacidadProductiva.ts)
+  const capProd = calcularCapacidadProductiva(lotes, movimientos, ubicaciones, periodoMesada, naveFilter);
+  const { ciclosMesadas, filasCapacidad, kpiPorNave, kpiTotalGeneral, kpiTotalLechuga, kpiTotalRucula } = capProd;
 
   // Filas de la tabla: un ciclo F2 por cultivo, ordenadas por cultivo y luego nave
   const filasTabla = ciclosMesadas
@@ -406,51 +247,36 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   const filasLechugaConProm = conPromedios(filasLechuga, 'Lechuga');
   const filasRuculaConProm = conPromedios(filasRucula, 'Rúcula');
 
-  // ── CAPACIDAD PRODUCTIVA MENSUAL ──
-  // F1 y F2 son etapas SECUENCIALES, no simultáneas: una planta ocupa primero F1 y recién
-  // después F2. Lo que determina cuántas plantas/mes puede dar una mesada de F2 es SU
-  // propio ciclo F2 (cuánto tarda en liberarse una posición ahí), no el ciclo total
-  // F1+F2 — sumar F1 subestima la producción real porque F1 y F2 son mesadas físicas
-  // distintas, no la misma posición ocupada todo el ciclo. Las mesadas F1 de lechuga
-  // quedan como buffer (0 producción), mostrando su propio ciclo F1 solo a modo de
-  // diagnóstico de si el traspaso F1→F2 está balanceado.
-  interface FilaCapacidadProd {
-    nombre: string; nave: number; cultivo: 'Lechuga' | 'Rúcula'; esBuffer: boolean;
-    dias: number; posiciones: number; ciclosPorMes: number; plantasPorMes: number;
-    paquetesPorMes: number; n: number;
+  // Capacidad productiva: una sola tabla ordenada cultivo → nave → mesada, con filas de
+  // TOTAL (no promedio: posiciones/producción son cantidades que se suman) por nave y por cultivo.
+  type FilaCap = typeof filasCapacidad[number];
+  function totalDeFilas(filas: FilaCap[], campo: 'posiciones' | 'produccionTeorica' | 'produccionReal'): number {
+    return filas.reduce((a, f) => a + f[campo], 0);
   }
-  const filasCapacidad: FilaCapacidadProd[] = ciclosMesadas.map((m) => {
-    const esRuc = m.tipo === 'rucula' || (m.tipo === 'mixta' && m.ruculaN > 0 && m.lechugaN === 0);
-    const esBuffer = !esRuc && m.sectorFase === 'fase_1'; // rúcula no tiene buffer F1
-    const dias = esRuc ? m.ruculaF2 : (esBuffer ? m.lechugaF1 : m.lechugaF2);
-    const n = esRuc ? m.ruculaN : (esBuffer ? m.lechugaF1N : m.lechugaN);
-    const ciclosPorMes = !esBuffer && dias > 0 ? Math.round((30 / dias) * 100) / 100 : 0;
-    const plantasPorMes = !esBuffer ? Math.round(m.posiciones * ciclosPorMes) : 0;
-    const plantasPorPaq = esRuc ? (m.plantasPaqRucula > 0 ? m.plantasPaqRucula : 3) : 1;
-    const paquetesPorMes = esRuc ? Math.round(plantasPorMes / plantasPorPaq) : plantasPorMes;
+  function filaTotalCap(filas: FilaCap[], etiqueta: string) {
     return {
-      nombre: m.nombre, nave: m.nave, cultivo: (esRuc ? 'Rúcula' : 'Lechuga') as 'Lechuga' | 'Rúcula', esBuffer,
-      dias, posiciones: m.posiciones, ciclosPorMes, plantasPorMes, paquetesPorMes, n,
+      nombre: etiqueta, nave: 0, cultivo: filas[0]?.cultivo || 'Lechuga', esBuffer: false, esTotal: true,
+      cicloActual: 0, posiciones: totalDeFilas(filas, 'posiciones'),
+      produccionTeorica: totalDeFilas(filas, 'produccionTeorica'), produccionReal: totalDeFilas(filas, 'produccionReal'),
+      n: filas.reduce((a, f) => a + f.n, 0),
     };
-  }).sort((a, b) => (a.cultivo === b.cultivo ? 0 : a.cultivo === 'Lechuga' ? -1 : 1) || a.nave - b.nave || a.nombre.localeCompare(b.nombre));
-
-  // KPI 1: paquetes/mes por nave, con el mix lechuga/rúcula
-  const navesConCapacidad = Array.from(new Set(filasCapacidad.map(f => f.nave))).sort((a, b) => a - b);
-  const kpiPorNave = navesConCapacidad.map((nv) => {
-    const deNave = filasCapacidad.filter(f => f.nave === nv && !f.esBuffer);
-    const lechuga = deNave.filter(f => f.cultivo === 'Lechuga').reduce((a, f) => a + f.paquetesPorMes, 0);
-    const rucula = deNave.filter(f => f.cultivo === 'Rúcula').reduce((a, f) => a + f.paquetesPorMes, 0);
-    return { nave: nv, lechuga, rucula, total: lechuga + rucula };
-  });
-  const kpiTotalGeneral = kpiPorNave.reduce((a, k) => a + k.total, 0);
-  const kpiTotalLechuga = kpiPorNave.reduce((a, k) => a + k.lechuga, 0);
-  const kpiTotalRucula = kpiPorNave.reduce((a, k) => a + k.rucula, 0);
-
-  // KPI 2: rendimiento por mesada (paquetes/posición/mes) — solo mesadas con producción directa
-  const rendimientoPorMesada = filasCapacidad
-    .filter(f => !f.esBuffer && f.posiciones > 0)
-    .map(f => ({ ...f, rendimiento: Math.round((f.paquetesPorMes / f.posiciones) * 1000) / 1000 }))
-    .sort((a, b) => b.rendimiento - a.rendimiento);
+  }
+  function conTotalesCap(filas: FilaCap[]) {
+    const cultivos = Array.from(new Set(filas.map(f => f.cultivo)));
+    const filasFinal: any[] = [];
+    for (const cul of cultivos) {
+      const deCultivo = filas.filter(f => f.cultivo === cul);
+      const naves = Array.from(new Set(deCultivo.map(f => f.nave))).sort((a, b) => a - b);
+      for (const nv of naves) {
+        const deNave = deCultivo.filter(f => f.nave === nv);
+        filasFinal.push(...deNave);
+        if (naves.length > 1) filasFinal.push({ ...filaTotalCap(deNave, `N${nv} — Total`), nave: nv, cultivo: cul });
+      }
+      filasFinal.push({ ...filaTotalCap(deCultivo, `Total ${cul}`), cultivo: cul });
+    }
+    return filasFinal;
+  }
+  const filasCapacidadConTotales = conTotalesCap(filasCapacidad);
 
   const nombre = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
 
@@ -475,77 +301,37 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
         <h1 className="page-title">Estadísticas</h1>
         <p className="page-subtitle">{nombre}</p>
 
-        {/* Evolución de ciclos */}
-        <div className="card">
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'10px', flexWrap:'wrap', gap:'8px' }}>
-            <div>
-              <p className="card-title" style={{ margin:'0 0 2px' }}>Evolución de ciclos</p>
-              <p className="card-sub" style={{ margin:0 }}>Días F2 promedio de lechuga y rúcula por {evoModo==='trimestre' ? 'semana (últimas 13)' : 'mes'}.</p>
+        {/* Evolución de ciclos / pesaje / plantas por paquete — 2 por fila */}
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(380px, 1fr))', gap:'12px', marginBottom:'16px' }}>
+          <div className="card" style={{ margin:0 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'10px', flexWrap:'wrap', gap:'8px' }}>
+              <div>
+                <p className="card-title" style={{ margin:'0 0 2px' }}>Evolución de ciclos</p>
+                <p className="card-sub" style={{ margin:0 }}>Días F2 promedio · {evoModo==='trimestre' ? 'semana (últimas 13)' : 'mes'}.</p>
+              </div>
+              <div style={{ display:'flex', gap:'4px' }}>
+                {([['anio','Año'],['trimestre','Trimestre']] as const).map(([v,l]) => (
+                  <a key={v} href={buildUrl({ evo:v })}
+                    style={{ padding:'3px 10px', borderRadius:'5px', fontSize:'11px', fontWeight:evoModo===v?700:400, background:evoModo===v?'#374151':'#f3f4f6', color:evoModo===v?'white':'#6b7280', textDecoration:'none' }}>
+                    {l}
+                  </a>
+                ))}
+              </div>
             </div>
-            <div style={{ display:'flex', gap:'4px' }}>
-              {([['anio','Año (meses)'],['trimestre','Trimestre (semanas)']] as const).map(([v,l]) => (
-                <a key={v} href={buildUrl({ evo:v })}
-                  style={{ padding:'3px 10px', borderRadius:'5px', fontSize:'11px', fontWeight:evoModo===v?700:400, background:evoModo===v?'#374151':'#f3f4f6', color:evoModo===v?'white':'#6b7280', textDecoration:'none' }}>
-                  {l}
-                </a>
-              ))}
-            </div>
+            <GraficoEvolucion series={evo.series} pesoSeries={evo.pesoSeries} labels={evo.labels} hoyIdx={evo.hoyIdx} />
           </div>
-          <GraficoEvolucion series={evo.series} pesoSeries={evo.pesoSeries} labels={evo.labels} hoyIdx={evo.hoyIdx} />
-        </div>
 
-        {/* Tabla mes actual */}
-        <div className="card">
-          <p className="card-title">Producción por variedad — mes actual vs anterior</p>
-          {statsActual.length === 0
-            ? <p style={{ color:'#9ca3af', fontSize:'13px', textAlign:'center', padding:'20px' }}>Sin cosechas este mes.</p>
-            : (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Variedad</th>
-                    <th style={{ textAlign:'right' }}>Cosechado</th>
-                    <th style={{ textAlign:'right' }}>vs mes ant.</th>
-                    <th style={{ textAlign:'right' }}>Ciclo prom.</th>
-                    <th style={{ textAlign:'right' }}>vs mes ant.</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {statsActual.map((s: any) => {
-                    const ant = statsPasado.find((x:any) => x.variedad === s.variedad);
-                    const dU = ant ? s.cosechado - ant.cosechado : null;
-                    const dC = ant ? s.ciclo_promedio - ant.ciclo_promedio : null;
-                    return (
-                      <tr key={s.variedad}>
-                        <td>{s.variedad}</td>
-                        <td style={{ textAlign:'right', fontWeight:500 }}>{s.cosechado?.toLocaleString?.('es-AR')} paq.</td>
-                        <td style={{ textAlign:'right', color:dU===null?'#9ca3af':dU>=0?'#059669':'#dc2626' }}>
-                          {dU===null?'—':(dU>=0?'+':'')+dU}
-                        </td>
-                        <td style={{ textAlign:'right' }}>{s.ciclo_promedio>0?s.ciclo_promedio+'d':'—'}</td>
-                        <td style={{ textAlign:'right', color:dC===null?'#9ca3af':dC<=0?'#059669':'#dc2626' }}>
-                          {dC===null?'—':(dC>0?'+':'')+dC+'d'}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-        </div>
+          <div className="card" style={{ margin:0 }}>
+            <p className="card-title">Evolución de pesaje testigo</p>
+            <p className="card-sub">Gramos por paquete · base para conversión KG↔paquetes</p>
+            <GraficoPesaje puntos={puntosPesaje} />
+          </div>
 
-        {/* Pesaje testigo */}
-        <div className="card">
-          <p className="card-title">Evolución de pesaje testigo</p>
-          <p className="card-sub">Gramos por paquete en cada cosecha · base para conversión KG↔paquetes</p>
-          <GraficoPesaje puntos={puntosPesaje} />
-        </div>
-
-        {/* Plantas por paquete — rúcula */}
-        <div className="card">
-          <p className="card-title">Evolución de plantas por paquete — Rúcula</p>
-          <p className="card-sub">Promedio mensual · {anioActual}</p>
-          <GraficoEvolucion series={evoPlantasPaq.series} labels={evoPlantasPaq.labels} hoyIdx={evoPlantasPaq.hoyIdx} unidad=" pl/paq" />
+          <div className="card" style={{ margin:0 }}>
+            <p className="card-title">Plantas por paquete — Rúcula</p>
+            <p className="card-sub">Promedio mensual · {anioActual}</p>
+            <GraficoEvolucion series={evoPlantasPaq.series} labels={evoPlantasPaq.labels} hoyIdx={evoPlantasPaq.hoyIdx} unidad=" pl/paq" />
+          </div>
         </div>
 
         {/* Ciclos por mesada */}
@@ -639,21 +425,21 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
         <div className="card">
           <p className="card-title" style={{ margin:'0 0 2px' }}>Capacidad productiva mensual</p>
           <p className="card-sub" style={{ margin:0 }}>
-            Paquetes/mes estimados = posiciones instaladas × (30 / días de ciclo F2) — F1 y F2 son etapas secuenciales, no se suman.
-            Mismo filtro de nave/período que "Ciclos por mesada" arriba.
+            Producción teórica = posiciones × (30 / ciclo F2 promedio de la nave+cultivo) — F1 y F2 son etapas secuenciales, no se suman.
+            Producción real = paquetes efectivamente cosechados en el período. Mismo filtro de nave/período que "Ciclos por mesada" arriba.
           </p>
 
           {filasCapacidad.length === 0 ? (
             <p style={{ color:'#9ca3af', fontSize:'13px', textAlign:'center', padding:'20px' }}>Sin datos para el filtro seleccionado.</p>
           ) : (
             <>
-              {/* KPI 1: paquetes/mes por nave */}
+              {/* KPI: paquetes/mes (teórica) por nave */}
               <div style={{ display:'grid', gridTemplateColumns: kpiPorNave.length > 1 ? `repeat(${kpiPorNave.length}, 1fr) 1fr` : '1fr', gap:'10px', marginTop:'14px', marginBottom:'18px' }}>
                 {kpiPorNave.map(k => (
                   <div key={k.nave} style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'14px' }}>
                     <p style={{ margin:'0 0 6px', fontSize:'11px', fontWeight:700, color:'#6b7280', textTransform:'uppercase' }}>
                       <span style={{ background:k.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 7px', borderRadius:'4px', fontSize:'10px', marginRight:'6px' }}>N{k.nave}</span>
-                      Paquetes/mes
+                      Paquetes/mes (teórica)
                     </p>
                     <p style={{ margin:'0 0 4px', fontSize:'26px', fontWeight:800, color:'#111827' }}>{k.total.toLocaleString('es-AR')}</p>
                     <p style={{ margin:0, fontSize:'11px', color:'#6b7280' }}>
@@ -676,72 +462,50 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                 )}
               </div>
 
-              {/* KPI 2: rendimiento por mesada */}
-              <div style={{ marginBottom:'20px', overflowX:'auto' }}>
-                <p style={{ margin:'0 0 8px', fontSize:'13px', fontWeight:700, color:'#111827' }}>Rendimiento por mesada (paquetes/posición/mes)</p>
-                <table style={{ fontSize:'12px' }}>
-                  <thead>
-                    <tr>
-                      <th>Mesada</th>
-                      <th style={{ textAlign:'center' }}>Nave</th>
-                      <th style={{ textAlign:'center' }}>Cultivo</th>
-                      <th style={{ textAlign:'right' }}>Paquetes/mes</th>
-                      <th style={{ textAlign:'right' }}>Posiciones</th>
-                      <th style={{ textAlign:'right', fontWeight:700 }}>Rendimiento</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rendimientoPorMesada.map((f, i) => (
-                      <tr key={i} style={{ borderBottom:'1px solid #f3f4f6' }}>
-                        <td style={{ fontWeight:500 }}>{f.nombre}</td>
-                        <td style={{ textAlign:'center' }}>
-                          <span style={{ background:f.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 6px', borderRadius:'3px', fontSize:'10px', fontWeight:700 }}>N{f.nave}</span>
-                        </td>
-                        <td style={{ textAlign:'center', fontSize:'11px', color:f.cultivo==='Lechuga'?'#4d7c0f':'#166534', fontWeight:600 }}>{f.cultivo}</td>
-                        <td style={{ textAlign:'right' }}>{f.paquetesPorMes.toLocaleString('es-AR')}</td>
-                        <td style={{ textAlign:'right', color:'#9ca3af' }}>{f.posiciones.toLocaleString('es-AR')}</td>
-                        <td style={{ textAlign:'right', fontWeight:800, color:'#111827' }}>{f.rendimiento.toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Detalle por mesada */}
+              {/* Tabla única: cultivo → nave → mesada, con totales por nave y por cultivo */}
               <div style={{ overflowX:'auto' }}>
-                <p style={{ margin:'0 0 8px', fontSize:'13px', fontWeight:700, color:'#111827' }}>Detalle por mesada</p>
                 <table style={{ fontSize:'12px' }}>
                   <thead>
                     <tr>
+                      <th style={{ textAlign:'center' }}>Cultivo</th>
                       <th>Mesada</th>
                       <th style={{ textAlign:'center' }}>Nave</th>
-                      <th style={{ textAlign:'center' }}>Cultivo</th>
-                      <th style={{ textAlign:'right' }}>Días F2</th>
+                      <th style={{ textAlign:'right' }}>Ciclo actual</th>
                       <th style={{ textAlign:'right' }}>Posiciones</th>
-                      <th style={{ textAlign:'right' }}>Ciclos/mes</th>
-                      <th style={{ textAlign:'right' }}>Paquetes/mes</th>
+                      <th style={{ textAlign:'right' }}>Producción teórica</th>
+                      <th style={{ textAlign:'right' }}>Producción real</th>
                       <th style={{ textAlign:'right', color:'#9ca3af', fontSize:'11px' }}>N cosechas</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filasCapacidad.map((f, i) => (
-                      <tr key={i} style={{ borderBottom:'1px solid #f3f4f6', opacity: f.esBuffer ? 0.65 : 1 }}>
-                        <td style={{ fontWeight:500 }}>{f.nombre}</td>
-                        <td style={{ textAlign:'center' }}>
-                          <span style={{ background:f.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 6px', borderRadius:'3px', fontSize:'10px', fontWeight:700 }}>N{f.nave}</span>
+                    {filasCapacidadConTotales.map((f: any, i) => (
+                      <tr key={i} style={{ borderBottom:'1px solid #f3f4f6', background: f.esTotal ? '#f8fafc' : 'transparent', opacity: f.esBuffer ? 0.65 : 1 }}>
+                        <td style={{ textAlign:'center', fontSize:'11px', color:f.cultivo==='Lechuga'?'#4d7c0f':'#166534', fontWeight:600 }}>
+                          {!f.esTotal || f.nombre.startsWith('Total') ? f.cultivo : ''}
                         </td>
-                        <td style={{ textAlign:'center', fontSize:'11px', color:f.cultivo==='Lechuga'?'#4d7c0f':'#166534', fontWeight:600 }}>{f.cultivo}</td>
+                        <td style={{ fontWeight: f.esTotal ? 700 : 500, color: f.esTotal ? '#374151' : undefined }}>{f.nombre}</td>
+                        <td style={{ textAlign:'center' }}>
+                          {!f.esTotal && (
+                            <span style={{ background:f.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 6px', borderRadius:'3px', fontSize:'10px', fontWeight:700 }}>N{f.nave}</span>
+                          )}
+                        </td>
                         <td style={{ textAlign:'right', fontWeight: f.esBuffer ? 400 : 700 }}>
-                          {f.dias>0?f.dias+'d':'—'}
+                          {f.cicloActual>0 ? f.cicloActual+'d' : '—'}
                           {f.esBuffer && <span style={{ marginLeft:'4px', fontSize:'9px', color:'#9ca3af', fontWeight:600, textTransform:'uppercase' }}>F1 buffer</span>}
                         </td>
-                        <td style={{ textAlign:'right', color:'#374151' }}>{f.posiciones>0?f.posiciones.toLocaleString('es-AR'):'—'}</td>
-                        <td style={{ textAlign:'right', color:'#374151' }}>{!f.esBuffer && f.ciclosPorMes>0?f.ciclosPorMes:'—'}</td>
-                        <td style={{ textAlign:'right', fontWeight:700, color:f.esBuffer?'#9ca3af':'#111827' }}>{!f.esBuffer?f.paquetesPorMes.toLocaleString('es-AR'):'— (buffer, no cosecha)'}</td>
+                        <td style={{ textAlign:'right', fontWeight: f.esTotal ? 700 : 400, color:'#374151' }}>{f.posiciones>0?f.posiciones.toLocaleString('es-AR'):'—'}</td>
+                        <td style={{ textAlign:'right', fontWeight:700, color:f.esBuffer?'#9ca3af':'#111827' }}>
+                          {f.esBuffer ? '— (buffer)' : f.produccionTeorica.toLocaleString('es-AR')}
+                        </td>
+                        <td style={{ textAlign:'right', fontWeight:700, color:f.esBuffer?'#9ca3af':'#059669' }}>
+                          {f.esBuffer ? '—' : f.produccionReal.toLocaleString('es-AR')}
+                        </td>
                         <td style={{ textAlign:'right' }}>
-                          <span style={{ color: f.n <= 1 ? '#dc2626' : '#9ca3af', fontWeight: f.n <= 1 ? 700 : 400 }}>
-                            {f.n <= 1 && '⚠ '}{f.n}
-                          </span>
+                          {!f.esTotal && (
+                            <span style={{ color: f.n <= 1 ? '#dc2626' : '#9ca3af', fontWeight: f.n <= 1 ? 700 : 400 }}>
+                              {f.n <= 1 && '⚠ '}{f.n}
+                            </span>
+                          )}
                         </td>
                       </tr>
                     ))}

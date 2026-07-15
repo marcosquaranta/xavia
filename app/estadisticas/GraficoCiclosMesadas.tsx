@@ -141,20 +141,22 @@ export default function GraficoCiclosMesadas({ datos }: { datos: CicloMesada[] }
         </span>
       </div>
 
-      <SubGrafico
-        titulo="Lechuga — ciclos por mesada (F2)"
-        datos={lechuga}
-        f2Color="#4d7c0f"
-        pesoKey="pesoGrLechuga"
-        f2Key="lechugaF2"
-      />
-      <SubGrafico
-        titulo="Rúcula — ciclos por mesada"
-        datos={rucula}
-        f2Color="#166534"
-        pesoKey="pesoGrRucula"
-        f2Key="ruculaF2"
-      />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
+        <SubGrafico
+          titulo="Lechuga — ciclos por mesada (F2)"
+          datos={lechuga}
+          f2Color="#4d7c0f"
+          pesoKey="pesoGrLechuga"
+          f2Key="lechugaF2"
+        />
+        <SubGrafico
+          titulo="Rúcula — ciclos por mesada"
+          datos={rucula}
+          f2Color="#166534"
+          pesoKey="pesoGrRucula"
+          f2Key="ruculaF2"
+        />
+      </div>
     </div>
   );
 }
