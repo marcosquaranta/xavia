@@ -17,7 +17,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   if (!user) redirect('/login');
 
   const naveFilter = searchParams.nave || 'todas';
-  const periodoMesada = (searchParams.periodo || 'anio') as 'mes' | 'mes_ant' | 'anio' | 'siempre';
+  const periodoMesada = (searchParams.periodo || 'anio') as 'mes' | 'mes_ant' | 'trimestre' | 'anio' | 'siempre';
   const evoModo = (searchParams.evo === 'anio' ? 'anio' : 'trimestre') as 'anio' | 'trimestre';
 
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [];
@@ -195,6 +195,9 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
       desde = new Date(mp.getFullYear(), mp.getMonth(), 1);
       const hasta = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
       return todos.filter(l => { const f = new Date(String(l.fecha_cosecha)+'T12:00:00'); return f >= desde && f < hasta; });
+    } else if (periodo === 'trimestre') {
+      const inicioTrimestre = Math.floor(ahora.getMonth() / 3) * 3;
+      desde = new Date(ahora.getFullYear(), inicioTrimestre, 1);
     } else { // anio
       desde = new Date(ahora.getFullYear(), 0, 1);
     }
@@ -260,10 +263,11 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   interface CicloMesada {
     nombre: string; nave: number;
     tipo: 'lechuga' | 'rucula' | 'mixta';
-    lechugaF1: number; lechugaF2: number; lechugaTotal: number; lechugaN: number;
+    lechugaF1: number; lechugaF2: number; lechugaTotal: number; lechugaN: number; lechugaF1N: number;
     ruculaF2: number; ruculaTotal: number; ruculaN: number;
     pesoGrLechuga: number; pesoGrRucula: number;
     plantasPaqLechuga: number; plantasPaqRucula: number;
+    posiciones: number; sectorFase: string;
   }
   const ciclosMesadas: CicloMesada[] = [];
   const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0;
@@ -308,15 +312,24 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
       if (p.ppu > 0) (p.esRucula ? ppRuc : ppLech).push(p.ppu);
     }
 
+    // Posiciones instaladas de ESTA mesada puntual (misma fórmula que lib/capacidad.ts):
+    // módulos × perfiles/módulo × orificios/perfil. Cada fila de Ubicaciones (F1 y F2 del
+    // mismo número de mesada son filas distintas) tiene su propia capacidad instalada.
+    const modulosMes = Number(mes.modulos) || 1;
+    const perfilesMes = modulosMes * (Number(mes.perfiles_por_modulo) || 0);
+    const orifPerfMes = Number(mes.orificios_por_perfil) || 0;
+    const posicionesMes = perfilesMes * orifPerfMes;
+
     ciclosMesadas.push({
       nombre: mes.nombre.replace(/^Nave \d+ - /, ''),
       nave: Number(mes.nave), tipo,
       lechugaF1: avg(lF1), lechugaF2: avg(lF2),
       lechugaTotal: avg(lF1.map((f,i) => f + (lF2[i]||0))),
-      lechugaN: Math.max(lF1.length, lF2.length),
+      lechugaN: Math.max(lF1.length, lF2.length), lechugaF1N: lF1.length,
       ruculaF2: avg(rF2), ruculaTotal: avg(rF2), ruculaN: rF2.length,
       pesoGrLechuga: avg(pLech), pesoGrRucula: avg(pRuc),
       plantasPaqLechuga: avg(ppLech), plantasPaqRucula: avg(ppRuc),
+      posiciones: posicionesMes, sectorFase: String(mes.sector_fase || ''),
     });
   }
 
@@ -392,6 +405,52 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   }
   const filasLechugaConProm = conPromedios(filasLechuga, 'Lechuga');
   const filasRuculaConProm = conPromedios(filasRucula, 'Rúcula');
+
+  // ── CAPACIDAD PRODUCTIVA MENSUAL ──
+  // F1 y F2 son etapas SECUENCIALES, no simultáneas: una planta ocupa primero F1 y recién
+  // después F2. Lo que determina cuántas plantas/mes puede dar una mesada de F2 es SU
+  // propio ciclo F2 (cuánto tarda en liberarse una posición ahí), no el ciclo total
+  // F1+F2 — sumar F1 subestima la producción real porque F1 y F2 son mesadas físicas
+  // distintas, no la misma posición ocupada todo el ciclo. Las mesadas F1 de lechuga
+  // quedan como buffer (0 producción), mostrando su propio ciclo F1 solo a modo de
+  // diagnóstico de si el traspaso F1→F2 está balanceado.
+  interface FilaCapacidadProd {
+    nombre: string; nave: number; cultivo: 'Lechuga' | 'Rúcula'; esBuffer: boolean;
+    dias: number; posiciones: number; ciclosPorMes: number; plantasPorMes: number;
+    paquetesPorMes: number; n: number;
+  }
+  const filasCapacidad: FilaCapacidadProd[] = ciclosMesadas.map((m) => {
+    const esRuc = m.tipo === 'rucula' || (m.tipo === 'mixta' && m.ruculaN > 0 && m.lechugaN === 0);
+    const esBuffer = !esRuc && m.sectorFase === 'fase_1'; // rúcula no tiene buffer F1
+    const dias = esRuc ? m.ruculaF2 : (esBuffer ? m.lechugaF1 : m.lechugaF2);
+    const n = esRuc ? m.ruculaN : (esBuffer ? m.lechugaF1N : m.lechugaN);
+    const ciclosPorMes = !esBuffer && dias > 0 ? Math.round((30 / dias) * 100) / 100 : 0;
+    const plantasPorMes = !esBuffer ? Math.round(m.posiciones * ciclosPorMes) : 0;
+    const plantasPorPaq = esRuc ? (m.plantasPaqRucula > 0 ? m.plantasPaqRucula : 3) : 1;
+    const paquetesPorMes = esRuc ? Math.round(plantasPorMes / plantasPorPaq) : plantasPorMes;
+    return {
+      nombre: m.nombre, nave: m.nave, cultivo: (esRuc ? 'Rúcula' : 'Lechuga') as 'Lechuga' | 'Rúcula', esBuffer,
+      dias, posiciones: m.posiciones, ciclosPorMes, plantasPorMes, paquetesPorMes, n,
+    };
+  }).sort((a, b) => (a.cultivo === b.cultivo ? 0 : a.cultivo === 'Lechuga' ? -1 : 1) || a.nave - b.nave || a.nombre.localeCompare(b.nombre));
+
+  // KPI 1: paquetes/mes por nave, con el mix lechuga/rúcula
+  const navesConCapacidad = Array.from(new Set(filasCapacidad.map(f => f.nave))).sort((a, b) => a - b);
+  const kpiPorNave = navesConCapacidad.map((nv) => {
+    const deNave = filasCapacidad.filter(f => f.nave === nv && !f.esBuffer);
+    const lechuga = deNave.filter(f => f.cultivo === 'Lechuga').reduce((a, f) => a + f.paquetesPorMes, 0);
+    const rucula = deNave.filter(f => f.cultivo === 'Rúcula').reduce((a, f) => a + f.paquetesPorMes, 0);
+    return { nave: nv, lechuga, rucula, total: lechuga + rucula };
+  });
+  const kpiTotalGeneral = kpiPorNave.reduce((a, k) => a + k.total, 0);
+  const kpiTotalLechuga = kpiPorNave.reduce((a, k) => a + k.lechuga, 0);
+  const kpiTotalRucula = kpiPorNave.reduce((a, k) => a + k.rucula, 0);
+
+  // KPI 2: rendimiento por mesada (paquetes/posición/mes) — solo mesadas con producción directa
+  const rendimientoPorMesada = filasCapacidad
+    .filter(f => !f.esBuffer && f.posiciones > 0)
+    .map(f => ({ ...f, rendimiento: Math.round((f.paquetesPorMes / f.posiciones) * 1000) / 1000 }))
+    .sort((a, b) => b.rendimiento - a.rendimiento);
 
   const nombre = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
 
@@ -499,7 +558,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             <div style={{ display:'flex', flexDirection:'column', gap:'6px', alignItems:'flex-end' }}>
               {/* Filtro período */}
               <div style={{ display:'flex', gap:'4px' }}>
-                {([['mes','Este mes'],['mes_ant','Mes ant.'],['anio','Este año'],['siempre','Siempre']] as const).map(([v,l]) => (
+                {([['mes','Este mes'],['mes_ant','Mes ant.'],['trimestre','Trimestre actual'],['anio','Este año'],['siempre','Siempre']] as const).map(([v,l]) => (
                   <a key={v} href={buildUrl({ periodo:v })}
                     style={{ padding:'3px 8px', borderRadius:'5px', fontSize:'11px', fontWeight:periodoMesada===v?700:400, background:periodoMesada===v?'#374151':'#f3f4f6', color:periodoMesada===v?'white':'#6b7280', textDecoration:'none' }}>
                     {l}
@@ -573,6 +632,124 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                 </div>
               ))}
             </div>
+          )}
+        </div>
+
+        {/* Capacidad productiva mensual */}
+        <div className="card">
+          <p className="card-title" style={{ margin:'0 0 2px' }}>Capacidad productiva mensual</p>
+          <p className="card-sub" style={{ margin:0 }}>
+            Paquetes/mes estimados = posiciones instaladas × (30 / días de ciclo F2) — F1 y F2 son etapas secuenciales, no se suman.
+            Mismo filtro de nave/período que "Ciclos por mesada" arriba.
+          </p>
+
+          {filasCapacidad.length === 0 ? (
+            <p style={{ color:'#9ca3af', fontSize:'13px', textAlign:'center', padding:'20px' }}>Sin datos para el filtro seleccionado.</p>
+          ) : (
+            <>
+              {/* KPI 1: paquetes/mes por nave */}
+              <div style={{ display:'grid', gridTemplateColumns: kpiPorNave.length > 1 ? `repeat(${kpiPorNave.length}, 1fr) 1fr` : '1fr', gap:'10px', marginTop:'14px', marginBottom:'18px' }}>
+                {kpiPorNave.map(k => (
+                  <div key={k.nave} style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'14px' }}>
+                    <p style={{ margin:'0 0 6px', fontSize:'11px', fontWeight:700, color:'#6b7280', textTransform:'uppercase' }}>
+                      <span style={{ background:k.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 7px', borderRadius:'4px', fontSize:'10px', marginRight:'6px' }}>N{k.nave}</span>
+                      Paquetes/mes
+                    </p>
+                    <p style={{ margin:'0 0 4px', fontSize:'26px', fontWeight:800, color:'#111827' }}>{k.total.toLocaleString('es-AR')}</p>
+                    <p style={{ margin:0, fontSize:'11px', color:'#6b7280' }}>
+                      <span style={{ color:'#4d7c0f', fontWeight:600 }}>{k.lechuga.toLocaleString('es-AR')} lechuga</span>
+                      {' · '}
+                      <span style={{ color:'#166534', fontWeight:600 }}>{k.rucula.toLocaleString('es-AR')} rúcula</span>
+                    </p>
+                  </div>
+                ))}
+                {kpiPorNave.length > 1 && (
+                  <div style={{ background:'#111827', borderRadius:'10px', padding:'14px' }}>
+                    <p style={{ margin:'0 0 6px', fontSize:'11px', fontWeight:700, color:'#9ca3af', textTransform:'uppercase' }}>Total general</p>
+                    <p style={{ margin:'0 0 4px', fontSize:'26px', fontWeight:800, color:'white' }}>{kpiTotalGeneral.toLocaleString('es-AR')}</p>
+                    <p style={{ margin:0, fontSize:'11px', color:'#d1d5db' }}>
+                      <span style={{ color:'#a3e635', fontWeight:600 }}>{kpiTotalLechuga.toLocaleString('es-AR')} lechuga</span>
+                      {' · '}
+                      <span style={{ color:'#86efac', fontWeight:600 }}>{kpiTotalRucula.toLocaleString('es-AR')} rúcula</span>
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* KPI 2: rendimiento por mesada */}
+              <div style={{ marginBottom:'20px', overflowX:'auto' }}>
+                <p style={{ margin:'0 0 8px', fontSize:'13px', fontWeight:700, color:'#111827' }}>Rendimiento por mesada (paquetes/posición/mes)</p>
+                <table style={{ fontSize:'12px' }}>
+                  <thead>
+                    <tr>
+                      <th>Mesada</th>
+                      <th style={{ textAlign:'center' }}>Nave</th>
+                      <th style={{ textAlign:'center' }}>Cultivo</th>
+                      <th style={{ textAlign:'right' }}>Paquetes/mes</th>
+                      <th style={{ textAlign:'right' }}>Posiciones</th>
+                      <th style={{ textAlign:'right', fontWeight:700 }}>Rendimiento</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rendimientoPorMesada.map((f, i) => (
+                      <tr key={i} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                        <td style={{ fontWeight:500 }}>{f.nombre}</td>
+                        <td style={{ textAlign:'center' }}>
+                          <span style={{ background:f.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 6px', borderRadius:'3px', fontSize:'10px', fontWeight:700 }}>N{f.nave}</span>
+                        </td>
+                        <td style={{ textAlign:'center', fontSize:'11px', color:f.cultivo==='Lechuga'?'#4d7c0f':'#166534', fontWeight:600 }}>{f.cultivo}</td>
+                        <td style={{ textAlign:'right' }}>{f.paquetesPorMes.toLocaleString('es-AR')}</td>
+                        <td style={{ textAlign:'right', color:'#9ca3af' }}>{f.posiciones.toLocaleString('es-AR')}</td>
+                        <td style={{ textAlign:'right', fontWeight:800, color:'#111827' }}>{f.rendimiento.toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Detalle por mesada */}
+              <div style={{ overflowX:'auto' }}>
+                <p style={{ margin:'0 0 8px', fontSize:'13px', fontWeight:700, color:'#111827' }}>Detalle por mesada</p>
+                <table style={{ fontSize:'12px' }}>
+                  <thead>
+                    <tr>
+                      <th>Mesada</th>
+                      <th style={{ textAlign:'center' }}>Nave</th>
+                      <th style={{ textAlign:'center' }}>Cultivo</th>
+                      <th style={{ textAlign:'right' }}>Días F2</th>
+                      <th style={{ textAlign:'right' }}>Posiciones</th>
+                      <th style={{ textAlign:'right' }}>Ciclos/mes</th>
+                      <th style={{ textAlign:'right' }}>Paquetes/mes</th>
+                      <th style={{ textAlign:'right', color:'#9ca3af', fontSize:'11px' }}>N cosechas</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filasCapacidad.map((f, i) => (
+                      <tr key={i} style={{ borderBottom:'1px solid #f3f4f6', opacity: f.esBuffer ? 0.65 : 1 }}>
+                        <td style={{ fontWeight:500 }}>{f.nombre}</td>
+                        <td style={{ textAlign:'center' }}>
+                          <span style={{ background:f.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 6px', borderRadius:'3px', fontSize:'10px', fontWeight:700 }}>N{f.nave}</span>
+                        </td>
+                        <td style={{ textAlign:'center', fontSize:'11px', color:f.cultivo==='Lechuga'?'#4d7c0f':'#166534', fontWeight:600 }}>{f.cultivo}</td>
+                        <td style={{ textAlign:'right', fontWeight: f.esBuffer ? 400 : 700 }}>
+                          {f.dias>0?f.dias+'d':'—'}
+                          {f.esBuffer && <span style={{ marginLeft:'4px', fontSize:'9px', color:'#9ca3af', fontWeight:600, textTransform:'uppercase' }}>F1 buffer</span>}
+                        </td>
+                        <td style={{ textAlign:'right', color:'#374151' }}>{f.posiciones>0?f.posiciones.toLocaleString('es-AR'):'—'}</td>
+                        <td style={{ textAlign:'right', color:'#374151' }}>{!f.esBuffer && f.ciclosPorMes>0?f.ciclosPorMes:'—'}</td>
+                        <td style={{ textAlign:'right', fontWeight:700, color:f.esBuffer?'#9ca3af':'#111827' }}>{!f.esBuffer?f.paquetesPorMes.toLocaleString('es-AR'):'— (buffer, no cosecha)'}</td>
+                        <td style={{ textAlign:'right' }}>
+                          <span style={{ color: f.n <= 1 ? '#dc2626' : '#9ca3af', fontWeight: f.n <= 1 ? 700 : 400 }}>
+                            {f.n <= 1 && '⚠ '}{f.n}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p style={{ margin:'8px 0 0', fontSize:'11px', color:'#9ca3af' }}>⚠ N cosechas ≤ 1: promedio poco confiable, muestra chica.</p>
+              </div>
+            </>
           )}
         </div>
 
