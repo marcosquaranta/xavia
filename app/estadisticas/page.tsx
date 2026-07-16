@@ -172,10 +172,11 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
   // ── CICLOS POR MESADA + CAPACIDAD PRODUCTIVA ── (lógica compartida en lib/capacidadProductiva.ts)
   const capProd = calcularCapacidadProductiva(lotes, movimientos, ubicaciones, periodoMesada, naveFilter);
-  const { ciclosMesadas, filasCapacidad, kpiPorCultivo, kpiTotalTeorica, kpiTotalReal, kpiTotalDifPct, resumenGrupos } = capProd;
+  const { ciclosMesadas, filasCapacidad, kpiPorCultivo, kpiTotalTeorica, kpiTotalReal, kpiTotalRealTotalPeriodo, kpiTotalDifPct, resumenGrupos } = capProd;
+  // Negativo = se sub-produjo vs. lo teórico; positivo = se superó.
   function colorDif(dif: number | null): string {
     if (dif === null) return '#9ca3af';
-    return dif > 30 ? '#dc2626' : dif > 10 ? '#d97706' : '#059669';
+    return dif < -30 ? '#dc2626' : dif < -10 ? '#d97706' : '#059669';
   }
   function fmtDif(dif: number | null): string {
     return dif === null ? '—' : `${dif > 0 ? '+' : ''}${dif}%`;
@@ -479,7 +480,9 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                           <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:colorDif(k.difPct) }}>{fmtDif(k.difPct)}</p>
                         </div>
                       </div>
-                      <p style={{ margin:'6px 0 0', fontSize:'11px', color:'#9ca3af' }}>{k.posiciones.toLocaleString('es-AR')} posiciones</p>
+                      <p style={{ margin:'6px 0 0', fontSize:'11px', color:'#9ca3af' }}>
+                        {k.posiciones.toLocaleString('es-AR')} posiciones · {k.realTotalPeriodo.toLocaleString('es-AR')} paq. cosechados en total ({PERIODO_LABEL[periodoMesada].toLowerCase()})
+                      </p>
                     </div>
                   );
                 })}
@@ -499,6 +502,9 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                       <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:colorDif(kpiTotalDifPct) }}>{fmtDif(kpiTotalDifPct)}</p>
                     </div>
                   </div>
+                  <p style={{ margin:'6px 0 0', fontSize:'11px', color:'#d1d5db' }}>
+                    {kpiTotalRealTotalPeriodo.toLocaleString('es-AR')} paq. cosechados en total ({PERIODO_LABEL[periodoMesada].toLowerCase()})
+                  </p>
                 </div>
               </div>
 
