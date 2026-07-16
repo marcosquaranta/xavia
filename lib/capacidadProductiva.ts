@@ -31,12 +31,18 @@ export interface FilaCapacidadProd {
 }
 
 export interface KpiNave { nave: number; lechuga: number; rucula: number; total: number }
+export interface KpiCultivo { cultivo: 'Lechuga' | 'Rúcula'; posiciones: number; teorica: number; real: number }
+// La cuenta que arma cada número de producción, para poder mostrarla explícita en la UI
+// y que se pueda auditar de dónde sale (posiciones → plantas → paquetes).
+export interface ResumenGrupo { cultivo: 'Lechuga' | 'Rúcula'; nave: number; ciclo: number; plantasPorPosicion: number; plantasPorPaq: number }
 
 export interface CapacidadProductiva {
   ciclosMesadas: CicloMesada[];
   filasCapacidad: FilaCapacidadProd[];
   kpiPorNave: KpiNave[];
-  kpiTotalGeneral: number; kpiTotalLechuga: number; kpiTotalRucula: number;
+  kpiPorCultivo: KpiCultivo[];
+  kpiTotalTeorica: number; kpiTotalReal: number;
+  resumenGrupos: ResumenGrupo[];
 }
 
 export function cosechadosEnPeriodo(lotes: Lote[], periodo: PeriodoCapacidad): Lote[] {
@@ -231,9 +237,39 @@ export function calcularCapacidadProductiva(
     const rucula = deNave.filter(f => f.cultivo === 'Rúcula').reduce((a, f) => a + f.produccionTeorica, 0);
     return { nave: nv, lechuga, rucula, total: lechuga + rucula };
   });
-  const kpiTotalGeneral = kpiPorNave.reduce((a, k) => a + k.total, 0);
-  const kpiTotalLechuga = kpiPorNave.reduce((a, k) => a + k.lechuga, 0);
-  const kpiTotalRucula = kpiPorNave.reduce((a, k) => a + k.rucula, 0);
 
-  return { ciclosMesadas, filasCapacidad, kpiPorNave, kpiTotalGeneral, kpiTotalLechuga, kpiTotalRucula };
+  const cultivosConCapacidad = Array.from(new Set(filasCapacidad.map(f => f.cultivo))) as ('Lechuga' | 'Rúcula')[];
+  const kpiPorCultivo: KpiCultivo[] = cultivosConCapacidad.map((cul) => {
+    const deCultivo = filasCapacidad.filter(f => f.cultivo === cul);
+    return {
+      cultivo: cul,
+      posiciones: deCultivo.reduce((a, f) => a + f.posiciones, 0),
+      teorica: deCultivo.reduce((a, f) => a + f.produccionTeorica, 0),
+      real: deCultivo.reduce((a, f) => a + f.produccionReal, 0),
+    };
+  });
+  const kpiTotalTeorica = kpiPorCultivo.reduce((a, k) => a + k.teorica, 0);
+  const kpiTotalReal = kpiPorCultivo.reduce((a, k) => a + k.real, 0);
+
+  // Resumen de la cuenta (ciclo + factores) por cada combinación nave+cultivo presente,
+  // para mostrar de forma transparente cómo se llega a la producción teórica.
+  const gruposUnicos = Array.from(new Set(filasCapacidad.map(f => `${f.nave}|${f.cultivo}`)));
+  const resumenGrupos: ResumenGrupo[] = gruposUnicos.map((key) => {
+    const [naveStr, cultivo] = key.split('|') as [string, 'Lechuga' | 'Rúcula'];
+    const nave = Number(naveStr);
+    const esRuc = cultivo === 'Rúcula';
+    const ciclo = Math.round(cicloPromedioNaveCultivo(nave, esRuc));
+    const deGrupo = ciclosMesadas.filter(m => {
+      if (m.nave !== nave) return false;
+      const mEsRuc = m.tipo === 'rucula' || (m.tipo === 'mixta' && m.ruculaN > 0 && m.lechugaN === 0);
+      return mEsRuc === esRuc;
+    });
+    const medidos = esRuc ? deGrupo.map(m => m.plantasPaqRucula).filter(v => v > 0) : [];
+    const plantasPorPaq = esRuc
+      ? (medidos.length ? Math.round((medidos.reduce((a, b) => a + b, 0) / medidos.length) * 10) / 10 : 3)
+      : 1;
+    return { cultivo, nave, ciclo, plantasPorPosicion: 1, plantasPorPaq };
+  });
+
+  return { ciclosMesadas, filasCapacidad, kpiPorNave, kpiPorCultivo, kpiTotalTeorica, kpiTotalReal, resumenGrupos };
 }

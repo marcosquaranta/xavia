@@ -172,7 +172,8 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
   // ── CICLOS POR MESADA + CAPACIDAD PRODUCTIVA ── (lógica compartida en lib/capacidadProductiva.ts)
   const capProd = calcularCapacidadProductiva(lotes, movimientos, ubicaciones, periodoMesada, naveFilter);
-  const { ciclosMesadas, filasCapacidad, kpiPorNave, kpiTotalGeneral, kpiTotalLechuga, kpiTotalRucula } = capProd;
+  const { ciclosMesadas, filasCapacidad, kpiPorCultivo, kpiTotalTeorica, kpiTotalReal, resumenGrupos } = capProd;
+  const PERIODO_LABEL: Record<typeof periodoMesada, string> = { d90: 'Últimos 90 días', d180: 'Últimos 180 días', anio: 'Año actual' };
 
   // Filas de la tabla: un ciclo F2 por cultivo, ordenadas por cultivo y luego nave
   const filasTabla = ciclosMesadas
@@ -445,33 +446,45 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             <p style={{ color:'#9ca3af', fontSize:'13px', textAlign:'center', padding:'20px' }}>Sin datos para el filtro seleccionado.</p>
           ) : (
             <>
-              {/* KPI: paquetes/mes (teórica) por nave */}
-              <div style={{ display:'grid', gridTemplateColumns: kpiPorNave.length > 1 ? `repeat(${kpiPorNave.length}, 1fr) 1fr` : '1fr', gap:'10px', marginTop:'14px', marginBottom:'18px' }}>
-                {kpiPorNave.map(k => (
-                  <div key={k.nave} style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'14px' }}>
-                    <p style={{ margin:'0 0 6px', fontSize:'11px', fontWeight:700, color:'#6b7280', textTransform:'uppercase' }}>
-                      <span style={{ background:k.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 7px', borderRadius:'4px', fontSize:'10px', marginRight:'6px' }}>N{k.nave}</span>
-                      Paquetes/mes (teórica)
-                    </p>
-                    <p style={{ margin:'0 0 4px', fontSize:'26px', fontWeight:800, color:'#111827' }}>{k.total.toLocaleString('es-AR')}</p>
-                    <p style={{ margin:0, fontSize:'11px', color:'#6b7280' }}>
-                      <span style={{ color:'#4d7c0f', fontWeight:600 }}>{k.lechuga.toLocaleString('es-AR')} lechuga</span>
-                      {' · '}
-                      <span style={{ color:'#166534', fontWeight:600 }}>{k.rucula.toLocaleString('es-AR')} rúcula</span>
-                    </p>
+              {/* KPI: paquetes/mes (promedio) por cultivo — teórica y real lado a lado */}
+              <p style={{ margin:'14px 0 8px', fontSize:'11px', color:'#9ca3af' }}>
+                Promedio mensual · {PERIODO_LABEL[periodoMesada]}
+              </p>
+              <div style={{ display:'grid', gridTemplateColumns: `repeat(${kpiPorCultivo.length}, 1fr) 1fr`, gap:'10px', marginBottom:'18px' }}>
+                {kpiPorCultivo.map(k => {
+                  const esLechuga = k.cultivo === 'Lechuga';
+                  return (
+                    <div key={k.cultivo} style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'14px' }}>
+                      <p style={{ margin:'0 0 6px', fontSize:'11px', fontWeight:700, color: esLechuga?'#4d7c0f':'#166534', textTransform:'uppercase' }}>
+                        {esLechuga?'🥬':'🌿'} {k.cultivo} — paquetes/mes
+                      </p>
+                      <div style={{ display:'flex', gap:'20px' }}>
+                        <div>
+                          <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#9ca3af' }}>Teórica</p>
+                          <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:'#111827' }}>{k.teorica.toLocaleString('es-AR')}</p>
+                        </div>
+                        <div>
+                          <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#9ca3af' }}>Real</p>
+                          <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:'#059669' }}>{k.real.toLocaleString('es-AR')}</p>
+                        </div>
+                      </div>
+                      <p style={{ margin:'6px 0 0', fontSize:'11px', color:'#9ca3af' }}>{k.posiciones.toLocaleString('es-AR')} posiciones</p>
+                    </div>
+                  );
+                })}
+                <div style={{ background:'#111827', borderRadius:'10px', padding:'14px' }}>
+                  <p style={{ margin:'0 0 6px', fontSize:'11px', fontWeight:700, color:'#9ca3af', textTransform:'uppercase' }}>Total — paquetes/mes</p>
+                  <div style={{ display:'flex', gap:'20px' }}>
+                    <div>
+                      <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#9ca3af' }}>Teórica</p>
+                      <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:'white' }}>{kpiTotalTeorica.toLocaleString('es-AR')}</p>
+                    </div>
+                    <div>
+                      <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#9ca3af' }}>Real</p>
+                      <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:'#86efac' }}>{kpiTotalReal.toLocaleString('es-AR')}</p>
+                    </div>
                   </div>
-                ))}
-                {kpiPorNave.length > 1 && (
-                  <div style={{ background:'#111827', borderRadius:'10px', padding:'14px' }}>
-                    <p style={{ margin:'0 0 6px', fontSize:'11px', fontWeight:700, color:'#9ca3af', textTransform:'uppercase' }}>Total general</p>
-                    <p style={{ margin:'0 0 4px', fontSize:'26px', fontWeight:800, color:'white' }}>{kpiTotalGeneral.toLocaleString('es-AR')}</p>
-                    <p style={{ margin:0, fontSize:'11px', color:'#d1d5db' }}>
-                      <span style={{ color:'#a3e635', fontWeight:600 }}>{kpiTotalLechuga.toLocaleString('es-AR')} lechuga</span>
-                      {' · '}
-                      <span style={{ color:'#86efac', fontWeight:600 }}>{kpiTotalRucula.toLocaleString('es-AR')} rúcula</span>
-                    </p>
-                  </div>
-                )}
+                </div>
               </div>
 
               {/* Resumen colapsable: cultivo (total siempre visible) → nave (expandible) → mesada (detalle) */}
@@ -491,7 +504,9 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                       </div>
                     </div>
 
-                    {g.naves.map((n) => (
+                    {g.naves.map((n) => {
+                      const rg = resumenGrupos.find(r => r.nave === n.nave && r.cultivo === g.cultivo);
+                      return (
                       <details key={n.nave} style={{ border:'1px solid #e5e7eb', borderRadius:'7px', marginBottom:'6px', overflow:'hidden' }}>
                         <summary style={{ cursor:'pointer', padding:'8px 12px', background:'#f9fafb', display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap', fontSize:'12px' }}>
                           <span style={{ background:n.nave===1?'#881337':'#7c3aed', color:'white', padding:'1px 7px', borderRadius:'4px', fontSize:'10px', fontWeight:700 }}>N{n.nave}</span>
@@ -502,6 +517,11 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                             <span style={{ color:'#6b7280' }}>Real: <strong style={{ color:'#059669' }}>{n.total.produccionReal.toLocaleString('es-AR')}</strong></span>
                           </span>
                         </summary>
+                        {rg && (
+                          <p style={{ margin:0, padding:'6px 12px', fontSize:'11px', color:'#92400e', background:'#fffbeb', borderTop:'1px solid #fde68a', borderBottom:'1px solid #fde68a' }}>
+                            Cuenta: {n.total.posiciones.toLocaleString('es-AR')} posiciones × {rg.plantasPorPosicion} planta/posición × (30 / {rg.ciclo}d de ciclo){rg.plantasPorPaq !== 1 && <> ÷ {rg.plantasPorPaq} plantas/paquete</>} = <strong>{n.total.produccionTeorica.toLocaleString('es-AR')} paquetes/mes (teórica)</strong>
+                          </p>
+                        )}
                         <div style={{ overflowX:'auto' }}>
                           <table style={{ fontSize:'12px', width:'100%' }}>
                             <thead>
@@ -533,7 +553,8 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                           </table>
                         </div>
                       </details>
-                    ))}
+                      );
+                    })}
                   </div>
                 );
               })}
