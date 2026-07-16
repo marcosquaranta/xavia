@@ -455,25 +455,28 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
           ) : (
             <>
               {/* KPI: paquetes/mes (promedio) por cultivo — teórica y real lado a lado */}
-              <p style={{ margin:'14px 0 8px', fontSize:'11px', color:'#9ca3af' }}>
-                Promedio mensual · {PERIODO_LABEL[periodoMesada]}
-              </p>
+              <div style={{ display:'flex', alignItems:'center', gap:'8px', margin:'14px 0 10px', background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:'7px', padding:'8px 12px' }}>
+                <span style={{ fontSize:'16px' }}>ℹ️</span>
+                <p style={{ margin:0, fontSize:'12px', fontWeight:700, color:'#1e40af' }}>
+                  Todos los números de acá abajo son PROMEDIOS POR MES (no un acumulado) — calculados sobre {PERIODO_LABEL[periodoMesada].toLowerCase()}.
+                </p>
+              </div>
               <div style={{ display:'grid', gridTemplateColumns: `repeat(${kpiPorCultivo.length}, 1fr) 1fr`, gap:'10px', marginBottom:'18px' }}>
                 {kpiPorCultivo.map(k => {
                   const esLechuga = k.cultivo === 'Lechuga';
                   return (
                     <div key={k.cultivo} style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'14px' }}>
                       <p style={{ margin:'0 0 6px', fontSize:'11px', fontWeight:700, color: esLechuga?'#4d7c0f':'#166534', textTransform:'uppercase' }}>
-                        {esLechuga?'🥬':'🌿'} {k.cultivo} — paquetes/mes
+                        {esLechuga?'🥬':'🌿'} {k.cultivo}
                       </p>
                       <div style={{ display:'flex', gap:'20px' }}>
                         <div>
                           <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#9ca3af' }}>Teórica</p>
-                          <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:'#111827' }}>{k.teorica.toLocaleString('es-AR')}</p>
+                          <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:'#111827' }}>{k.teorica.toLocaleString('es-AR')}<span style={{ fontSize:'12px', fontWeight:600, color:'#9ca3af' }}>/mes</span></p>
                         </div>
                         <div>
                           <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#9ca3af' }}>Real</p>
-                          <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:'#059669' }}>{k.real.toLocaleString('es-AR')}</p>
+                          <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:'#059669' }}>{k.real.toLocaleString('es-AR')}<span style={{ fontSize:'12px', fontWeight:600, color:'#9ca3af' }}>/mes</span></p>
                         </div>
                         <div>
                           <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#9ca3af' }}>Dif.</p>
@@ -481,21 +484,21 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                         </div>
                       </div>
                       <p style={{ margin:'6px 0 0', fontSize:'11px', color:'#9ca3af' }}>
-                        {k.posiciones.toLocaleString('es-AR')} posiciones · {k.realTotalPeriodo.toLocaleString('es-AR')} paq. cosechados en total ({PERIODO_LABEL[periodoMesada].toLowerCase()})
+                        {k.posiciones.toLocaleString('es-AR')} posiciones · {k.realTotalPeriodo.toLocaleString('es-AR')} paq. cosechados EN TOTAL en {PERIODO_LABEL[periodoMesada].toLowerCase()}
                       </p>
                     </div>
                   );
                 })}
                 <div style={{ background:'#111827', borderRadius:'10px', padding:'14px' }}>
-                  <p style={{ margin:'0 0 6px', fontSize:'11px', fontWeight:700, color:'#9ca3af', textTransform:'uppercase' }}>Total — paquetes/mes</p>
+                  <p style={{ margin:'0 0 6px', fontSize:'11px', fontWeight:700, color:'#9ca3af', textTransform:'uppercase' }}>Total</p>
                   <div style={{ display:'flex', gap:'20px' }}>
                     <div>
                       <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#9ca3af' }}>Teórica</p>
-                      <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:'white' }}>{kpiTotalTeorica.toLocaleString('es-AR')}</p>
+                      <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:'white' }}>{kpiTotalTeorica.toLocaleString('es-AR')}<span style={{ fontSize:'12px', fontWeight:600, color:'#9ca3af' }}>/mes</span></p>
                     </div>
                     <div>
                       <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#9ca3af' }}>Real</p>
-                      <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:'#86efac' }}>{kpiTotalReal.toLocaleString('es-AR')}</p>
+                      <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:'#86efac' }}>{kpiTotalReal.toLocaleString('es-AR')}<span style={{ fontSize:'12px', fontWeight:600, color:'#9ca3af' }}>/mes</span></p>
                     </div>
                     <div>
                       <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#9ca3af' }}>Dif.</p>
@@ -503,7 +506,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                     </div>
                   </div>
                   <p style={{ margin:'6px 0 0', fontSize:'11px', color:'#d1d5db' }}>
-                    {kpiTotalRealTotalPeriodo.toLocaleString('es-AR')} paq. cosechados en total ({PERIODO_LABEL[periodoMesada].toLowerCase()})
+                    {kpiTotalRealTotalPeriodo.toLocaleString('es-AR')} paq. cosechados EN TOTAL en {PERIODO_LABEL[periodoMesada].toLowerCase()}
                   </p>
                 </div>
               </div>
@@ -520,8 +523,8 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                       <span style={{ fontWeight:800, fontSize:'14px', color }}>{esLechuga?'🥬':'🌿'} Total {g.cultivo}</span>
                       <div style={{ display:'flex', gap:'18px', fontSize:'12px', flexWrap:'wrap' }}>
                         <span style={{ color:'#6b7280' }}>Posiciones: <strong style={{ color }}>{g.total.posiciones.toLocaleString('es-AR')}</strong></span>
-                        <span style={{ color:'#6b7280' }}>Teórica: <strong style={{ color:'#111827', fontSize:'13px' }}>{g.total.produccionTeorica.toLocaleString('es-AR')}</strong></span>
-                        <span style={{ color:'#6b7280' }}>Real: <strong style={{ color:'#059669', fontSize:'13px' }}>{g.total.produccionReal.toLocaleString('es-AR')}</strong></span>
+                        <span style={{ color:'#6b7280' }}>Teórica/mes: <strong style={{ color:'#111827', fontSize:'13px' }}>{g.total.produccionTeorica.toLocaleString('es-AR')}</strong></span>
+                        <span style={{ color:'#6b7280' }}>Real/mes: <strong style={{ color:'#059669', fontSize:'13px' }}>{g.total.produccionReal.toLocaleString('es-AR')}</strong></span>
                       </div>
                     </div>
 
@@ -534,8 +537,8 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                           <span style={{ color:'#9ca3af' }}>{n.mesadas.length} mesada{n.mesadas.length!==1?'s':''}</span>
                           <span style={{ marginLeft:'auto', display:'flex', gap:'16px' }}>
                             <span style={{ color:'#6b7280' }}>Posiciones: <strong style={{ color:'#374151' }}>{n.total.posiciones.toLocaleString('es-AR')}</strong></span>
-                            <span style={{ color:'#6b7280' }}>Teórica: <strong style={{ color:'#111827' }}>{n.total.produccionTeorica.toLocaleString('es-AR')}</strong></span>
-                            <span style={{ color:'#6b7280' }}>Real: <strong style={{ color:'#059669' }}>{n.total.produccionReal.toLocaleString('es-AR')}</strong></span>
+                            <span style={{ color:'#6b7280' }}>Teórica/mes: <strong style={{ color:'#111827' }}>{n.total.produccionTeorica.toLocaleString('es-AR')}</strong></span>
+                            <span style={{ color:'#6b7280' }}>Real/mes: <strong style={{ color:'#059669' }}>{n.total.produccionReal.toLocaleString('es-AR')}</strong></span>
                           </span>
                         </summary>
                         {rg && (
@@ -550,8 +553,8 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                                 <th>Mesada</th>
                                 <th style={{ textAlign:'right' }}>Ciclo actual</th>
                                 <th style={{ textAlign:'right' }}>Posiciones</th>
-                                <th style={{ textAlign:'right' }}>Producción teórica</th>
-                                <th style={{ textAlign:'right' }}>Producción real</th>
+                                <th style={{ textAlign:'right' }}>Teórica/mes</th>
+                                <th style={{ textAlign:'right' }}>Real/mes</th>
                                 <th style={{ textAlign:'right' }}>Dif. %</th>
                                 <th style={{ textAlign:'right', color:'#9ca3af', fontSize:'11px' }}>N cosechas</th>
                               </tr>
