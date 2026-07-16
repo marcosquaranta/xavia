@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
   if (!(await isAdmin())) return NextResponse.json({ error: 'solo_admin' }, { status: 403 });
 
   try {
-    const { fecha, descripcion, categoria, monto, medio_pago } = await req.json();
+    const { fecha, descripcion, categoria, monto, medio_pago, id_articulo, cantidad } = await req.json();
     if (!fecha || !descripcion || !medio_pago || monto === undefined) {
       return NextResponse.json({ error: 'datos_incompletos' }, { status: 400 });
     }
@@ -17,6 +17,7 @@ export async function POST(req: NextRequest) {
     if (!isFinite(montoNum) || montoNum <= 0) {
       return NextResponse.json({ error: 'monto_invalido' }, { status: 400 });
     }
+    const cantidadNum = Number(cantidad) || 0;
 
     const gastos = await readSheet<Gasto>('Gastos');
     const maxId = gastos
@@ -33,6 +34,8 @@ export async function POST(req: NextRequest) {
       medio_pago,
       usuario: user.email,
       fecha_carga: new Date().toISOString().split('T')[0],
+      id_articulo: id_articulo || '',
+      cantidad: cantidadNum > 0 ? cantidadNum : '',
     });
 
     return NextResponse.json({ ok: true, id_gasto });

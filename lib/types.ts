@@ -115,6 +115,8 @@ export interface Gasto {
   usuario: string;
   fecha_carga: string;
   aplicado_stock: 'SI' | 'NO' | '';  // 'SI' = ya confirmado (o descartado) como compra de Stocks, no debe volver a sugerirse
+  id_articulo: string;   // artículo vinculado directo (si se cargó como insumo detallado) — vacío si no aplica
+  cantidad: number | string;  // cantidad física comprada — junto con monto define el precio unitario (monto/cantidad)
 }
 
 export interface ClienteVenta {

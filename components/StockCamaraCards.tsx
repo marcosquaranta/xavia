@@ -9,6 +9,7 @@ interface Props {
   rucula: ResultadoCamara;
   lechuga: ResultadoCamara;
   isAdmin: boolean;
+  valorizacionActual: number;
 }
 
 function SemaforoDias({ dias }: { dias: number }) {
@@ -54,36 +55,36 @@ function CardCamara({ datos, cultivo, cultivoKey, isAdmin, onSaved }: {
   const colorTop = datos.cultivo === 'rucula' ? '#166534' : '#4d7c0f';
 
   return (
-    <div style={{ background: 'white', border: '1px solid #e5e7eb', borderTop: `4px solid ${colorTop}`, borderRadius: '10px', padding: '16px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-        <span style={{ background: colorTop, color: 'white', padding: '2px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 800 }}>
+    <div style={{ background: 'white', border: '1px solid #e5e7eb', borderTop: `3px solid ${colorTop}`, borderRadius: '10px', padding: '12px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+        <span style={{ background: colorTop, color: 'white', padding: '1px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 800 }}>
           {cultivo.toUpperCase()}
         </span>
-        <span style={{ fontSize: '10px', color: '#9ca3af' }}>Stock en cámara</span>
+        <span style={{ fontSize: '9px', color: '#9ca3af' }}>Stock en cámara</span>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginBottom: '6px' }}>
-        <span style={{ fontSize: '36px', fontWeight: 800, color: '#111827', lineHeight: 1 }}>{datos.stockActual.toLocaleString('es-AR')}</span>
-        <span style={{ fontSize: '13px', color: '#6b7280' }}>paq.</span>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px', marginBottom: '4px' }}>
+        <span style={{ fontSize: '26px', fontWeight: 800, color: '#111827', lineHeight: 1 }}>{datos.stockActual.toLocaleString('es-AR')}</span>
+        <span style={{ fontSize: '11px', color: '#6b7280' }}>paq.</span>
       </div>
 
       {datos.stockActual > 0 && <SemaforoDias dias={datos.diasPromedio} />}
-      {datos.stockActual === 0 && <span style={{ fontSize: '12px', color: '#9ca3af' }}>Sin stock registrado</span>}
+      {datos.stockActual === 0 && <span style={{ fontSize: '11px', color: '#9ca3af' }}>Sin stock registrado</span>}
 
-      <div style={{ marginTop: '8px' }}>
-        <Link href={`/stocks/${cultivoKey}`} style={{ fontSize: '12px', color: '#2563eb', textDecoration: 'none', fontWeight: 600 }}>
+      <div style={{ marginTop: '6px' }}>
+        <Link href={`/stocks/${cultivoKey}`} style={{ fontSize: '11px', color: '#2563eb', textDecoration: 'none', fontWeight: 600 }}>
           Ver detalle del mes →
         </Link>
       </div>
 
       {datos.base && (
-        <p style={{ margin: '8px 0 0', fontSize: '10px', color: '#9ca3af' }}>
+        <p style={{ margin: '6px 0 0', fontSize: '9px', color: '#9ca3af' }}>
           Base: {datos.base.tipo} del {String(datos.base.fecha).split('T')[0]} · {Number(datos.base.cantidad_paq).toLocaleString('es-AR')} paq.
         </p>
       )}
 
       {isAdmin && !mostrarForm && (
-        <button type="button" className="btn secondary" style={{ marginTop: '10px', fontSize: '11px', padding: '4px 10px' }}
+        <button type="button" className="btn secondary" style={{ marginTop: '8px', fontSize: '10px', padding: '3px 8px' }}
           onClick={() => setMostrarForm(true)}>
           {datos.base ? 'Registrar ajuste' : 'Cargar stock inicial'}
         </button>
@@ -126,12 +127,24 @@ function CardCamara({ datos, cultivo, cultivoKey, isAdmin, onSaved }: {
   );
 }
 
-export default function StockCamaraCards({ rucula, lechuga, isAdmin }: Props) {
+export default function StockCamaraCards({ rucula, lechuga, isAdmin, valorizacionActual }: Props) {
   const router = useRouter();
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '20px' }}>
       <CardCamara datos={rucula} cultivo="Rúcula" cultivoKey="rucula" isAdmin={isAdmin} onSaved={() => router.refresh()} />
       <CardCamara datos={lechuga} cultivo="Lechuga" cultivoKey="lechuga" isAdmin={isAdmin} onSaved={() => router.refresh()} />
+      <div style={{ background: '#111827', borderRadius: '10px', padding: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+          <span style={{ fontSize: '10px', fontWeight: 800, color: '#d1d5db', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Stock valorizado</span>
+          <span style={{ fontSize: '9px', color: '#9ca3af' }}>mes actual</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px', marginBottom: '4px' }}>
+          <span style={{ fontSize: '26px', fontWeight: 800, color: 'white', lineHeight: 1 }}>${valorizacionActual.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</span>
+        </div>
+        <Link href="/stocks#resumen-mes" style={{ fontSize: '11px', color: '#93c5fd', textDecoration: 'none', fontWeight: 600 }}>
+          Ver por categoría/artículo →
+        </Link>
+      </div>
     </div>
   );
 }

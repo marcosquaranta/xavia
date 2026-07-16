@@ -6,6 +6,7 @@ import Header from '@/components/Header';
 import StocksManager from './StocksManager';
 import StockCamaraCards from '@/components/StockCamaraCards';
 import { calcularCamara } from '@/lib/camara';
+import { calcularValorizacionMes } from '@/lib/valorizacionStock';
 export const dynamic = 'force-dynamic';
 
 export default async function StocksPage() {
@@ -30,6 +31,8 @@ export default async function StocksPage() {
 
   const camaraRucula  = calcularCamara('rucula',  registrosCamara, lotes, ventas);
   const camaraLechuga = calcularCamara('lechuga', registrosCamara, lotes, ventas);
+  const hoy = new Date();
+  const valorizacionActual = calcularValorizacionMes(articulos, stocks, hoy.getFullYear(), hoy.getMonth() + 1);
 
   if (err) return (
     <>
@@ -49,7 +52,7 @@ export default async function StocksPage() {
         <h1 className="page-title">Stocks</h1>
         <p className="page-subtitle">Control de insumos · carga mensual · informe comparativo</p>
 
-        <StockCamaraCards rucula={camaraRucula} lechuga={camaraLechuga} isAdmin={user.rol === 'admin'} />
+        <StockCamaraCards rucula={camaraRucula} lechuga={camaraLechuga} isAdmin={user.rol === 'admin'} valorizacionActual={valorizacionActual.total} />
 
         <StocksManager
           articulos={articulos.filter((a) => a.activo === 'SI')}

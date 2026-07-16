@@ -1,7 +1,7 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { CATEGORIAS_GASTO, type Gasto, type CategoriaGasto } from '@/lib/types';
+import { CATEGORIAS_GASTO, type Gasto, type CategoriaGasto, type Articulo } from '@/lib/types';
 import NumberInput from '@/components/NumberInput';
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -13,9 +13,9 @@ const hoyISO = () => HOY.toISOString().split('T')[0];
 const fmtMoneda = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 const fmtFecha = (s: string) => { const [y, m, d] = String(s || '').split(/[T ]/)[0].split('-'); return d && m ? `${d}/${m}` : s; };
 
-interface Props { gastos: Gasto[]; usuario: string }
+interface Props { gastos: Gasto[]; articulos: Articulo[]; usuario: string }
 
-export default function GastosManager({ gastos, usuario }: Props) {
+export default function GastosManager({ gastos, articulos, usuario }: Props) {
   const router = useRouter();
   const [anio, setAnio] = useState(HOY.getFullYear());
   const [mes, setMes] = useState(HOY.getMonth() + 1);
@@ -26,8 +26,13 @@ export default function GastosManager({ gastos, usuario }: Props) {
   const [categoria, setCategoria] = useState<CategoriaGasto>('gastos_generales');
   const [monto, setMonto] = useState(0);
   const [medioPago, setMedioPago] = useState<string>(MEDIOS[0]);
+  const [idArticulo, setIdArticulo] = useState('');
+  const [cantidad, setCantidad] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const categoriasArticulo = useMemo(() => Array.from(new Set(articulos.map((a) => a.categoria))).sort(), [articulos]);
+  const precioUnitarioCalc = monto > 0 && Number(cantidad) > 0 ? monto / Number(cantidad) : null;
 
   // Edición inline
   const [editId, setEditId] = useState<string | null>(null);
@@ -65,11 +70,15 @@ export default function GastosManager({ gastos, usuario }: Props) {
     try {
       const res = await fetch('/api/gastos/nuevo', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fecha, descripcion, categoria, monto, medio_pago: medioPago }),
+        body: JSON.stringify({
+          fecha, descripcion, categoria, monto, medio_pago: medioPago,
+          ...(categoria === 'insumos' ? { id_articulo: idArticulo, cantidad } : {}),
+        }),
       });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || 'Error al guardar');
       setDescripcion(''); setMonto(0); setFecha(hoyISO()); setCategoria('gastos_generales'); setMedioPago(MEDIOS[0]);
+      setIdArticulo(''); setCantidad('');
       router.refresh();
     } catch (err: any) {
       setError(err.message || 'Error al guardar');
@@ -159,6 +168,43 @@ export default function GastosManager({ gastos, usuario }: Props) {
             </select>
           </div>
         </div>
+
+        {categoria === 'insumos' && (
+          <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px', marginBottom: '12px' }}>
+            <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' }}>
+              Detalle del insumo (opcional, pero acelera la carga en Stocks)
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px' }}>
+              <div>
+                <label>Artículo</label>
+                <select value={idArticulo} onChange={(e) => setIdArticulo(e.target.value)} disabled={guardando}>
+                  <option value="">— sin especificar —</option>
+                  {categoriasArticulo.map((cat) => (
+                    <optgroup key={cat} label={cat}>
+                      {articulos.filter((a) => a.categoria === cat).map((a) => (
+                        <option key={a.id_articulo} value={a.id_articulo}>{a.articulo}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label>Cantidad comprada</label>
+                <input type="number" value={cantidad} onChange={(e) => setCantidad(e.target.value)} min={0} step={0.001} disabled={guardando} placeholder="Ej: 50" />
+              </div>
+              <div>
+                <label style={{ color: '#9ca3af' }}>Precio unitario (calculado)</label>
+                <p style={{ margin: 0, padding: '7px 0', fontSize: '14px', fontWeight: 700, color: precioUnitarioCalc !== null ? '#111827' : '#d1d5db' }}>
+                  {precioUnitarioCalc !== null ? fmtMoneda(precioUnitarioCalc) : '—'}
+                </p>
+              </div>
+            </div>
+            <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#9ca3af' }}>
+              Si completás artículo y cantidad, la sugerencia de compra en Stocks queda pre-cargada y lista para confirmar en un click.
+            </p>
+          </div>
+        )}
+
         <button type="submit" className="btn" disabled={guardando}>{guardando ? 'Guardando…' : '+ Agregar gasto'}</button>
       </form>
 

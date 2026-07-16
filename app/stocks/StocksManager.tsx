@@ -1,9 +1,15 @@
 'use client';
-import { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import type { Articulo, StockMes, Lote, VentaDia, PrecioVenta, ClienteVenta, Gasto } from '@/lib/types';
 import { calcularDriversMes, calcularUsoTeorico, DRIVERS } from '@/lib/usoTeorico';
 import { matchArticuloPorTexto } from '@/lib/matchArticulo';
+
+function copiarTSV(filas: (string | number)[][]) {
+  const texto = filas.map((f) => f.join('\t')).join('\n');
+  if (navigator.clipboard) navigator.clipboard.writeText(texto).catch(() => {});
+}
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const HOY = new Date();
@@ -55,6 +61,17 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
   const [saving, setSaving] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, { ini: string; comp: string; fin: string; precio: string; notas: string }>>({});
   const [mostrarUsos, setMostrarUsos] = useState(false);
+  const [copiado, setCopiado] = useState<string | null>(null);
+  function copiarConAviso(filas: (string | number)[][], aviso: string) {
+    copiarTSV(filas);
+    setCopiado(aviso);
+    setTimeout(() => setCopiado(null), 2000);
+  }
+
+  // Crear artículo nuevo desde la sugerencia de compra (Gastos), cuando no está en la lista
+  const [creandoArticuloPara, setCreandoArticuloPara] = useState<string | null>(null);
+  const [nuevoArt, setNuevoArt] = useState({ articulo: '', categoria: '', unidad_medida: '' });
+  const [guardandoArt, setGuardandoArt] = useState(false);
 
   // Carga masiva de compras / stock final
   const [mostrarCarga, setMostrarCarga] = useState(false);
@@ -230,9 +247,9 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
     });
   }, [gastosSugeridos, anio, mes]);
 
-  async function confirmarGasto(g: Gasto, idArticulo: string) {
-    const cant = Number(cantidadGasto[g.id_gasto]);
-    if (!idArticulo || !(cant > 0)) return;
+  async function confirmarGasto(g: Gasto, idArticulo: string, cantidadStr: string) {
+    const cant = Number(cantidadStr);
+    if (!idArticulo || idArticulo === '__nuevo__' || !(cant > 0)) return;
     setProcesandoGasto(g.id_gasto);
     try {
       await fetch('/api/stocks/gastos-aplicar', {
@@ -253,6 +270,24 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
       router.refresh();
     } catch {}
     setProcesandoGasto(null);
+  }
+
+  async function crearArticuloYAsignar(idGasto: string) {
+    if (!nuevoArt.articulo.trim() || !nuevoArt.categoria.trim() || !nuevoArt.unidad_medida.trim()) return;
+    setGuardandoArt(true);
+    try {
+      const res = await fetch('/api/admin/articulos', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(nuevoArt),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || 'Error');
+      setMatchOverride((p) => ({ ...p, [idGasto]: j.id_articulo }));
+      setCreandoArticuloPara(null);
+      setNuevoArt({ articulo: '', categoria: '', unidad_medida: '' });
+      router.refresh();
+    } catch {}
+    setGuardandoArt(false);
   }
 
   return (
@@ -284,7 +319,7 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
       {vista === 'carga' && (
         <div>
           {/* Vista consolidada del mes */}
-          <div className="card" style={{ marginBottom: '12px' }}>
+          <div id="resumen-mes" className="card" style={{ marginBottom: '12px', scrollMarginTop: '16px' }}>
             <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
               Resumen del mes — {MESES[mes - 1]} {anio}
             </p>
@@ -307,6 +342,12 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                 </div>
               )}
             </div>
+            {consolidado.sinConfigurar > 0 && (
+              <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '6px 10px' }}>
+                El "Uso teórico" de cada artículo se calcula con los números de "Usos del sistema" de abajo (planchas sembradas, paquetes vendidos, etc.) — pero necesita que le asignes una fórmula y un factor en{' '}
+                <Link href="/admin/articulos" style={{ color: '#92400e', fontWeight: 700, textDecoration: 'underline' }}>Admin → Artículos</Link>. Sin eso, el artículo queda sin uso teórico (muestra "—").
+              </p>
+            )}
             {consolidado.sinPrecio > 0 && (
               <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#9ca3af' }}>
                 {consolidado.sinPrecio} artículo(s) con stock final pero sin precio de compra cargado aún — no entran en la valorización.
@@ -314,15 +355,34 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
             )}
             {consolidado.porCategoria.length > 0 && (
               <div style={{ marginTop: '10px', borderTop: '1px solid #f3f4f6', paddingTop: '8px' }}>
-                <p style={{ margin: '0 0 4px', fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase' }}>Valorizado por categoría</p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
-                  {consolidado.porCategoria.map((c) => (
-                    <p key={c.categoria} style={{ margin: '2px 0', fontSize: '12px' }}>
-                      <span style={{ color: '#6b7280' }}>{c.categoria}:</span>{' '}
-                      <span style={{ fontWeight: 700 }}>${fmt(c.valorizado, 0)}</span>
-                    </p>
-                  ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <p style={{ margin: 0, fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase' }}>Stock valorizado por categoría — {MESES[mes - 1]} {anio}</p>
+                  <button
+                    onClick={() => copiarConAviso(
+                      [['Categoría', 'Valorizado'], ...consolidado.porCategoria.map((c) => [c.categoria, Math.round(c.valorizado)]),
+                        ['TOTAL', Math.round(consolidado.valorizacionTotal)]],
+                      'Categorías copiadas — pegalo en Excel'
+                    )}
+                    className="btn secondary" style={{ fontSize: '11px', padding: '3px 8px' }}
+                  >
+                    📋 Copiar
+                  </button>
                 </div>
+                <table style={{ fontSize: '12px', width: '100%', maxWidth: '360px' }}>
+                  <tbody>
+                    {consolidado.porCategoria.map((c) => (
+                      <tr key={c.categoria}>
+                        <td style={{ color: '#6b7280', padding: '2px 0' }}>{c.categoria}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, padding: '2px 0' }}>${fmt(c.valorizado, 0)}</td>
+                      </tr>
+                    ))}
+                    <tr style={{ borderTop: '1px solid #e5e7eb' }}>
+                      <td style={{ fontWeight: 700, padding: '4px 0' }}>Total</td>
+                      <td style={{ textAlign: 'right', fontWeight: 800, padding: '4px 0' }}>${fmt(consolidado.valorizacionTotal, 0)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                {copiado && <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#059669', fontWeight: 600 }}>✓ {copiado}</p>}
               </div>
             )}
             {consolidado.top.length > 0 && (
@@ -357,42 +417,85 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                 </thead>
                 <tbody>
                   {gastosDelMes.map((g) => {
+                    // Preferir el vínculo directo cargado en Gastos (detalle de insumo); si no
+                    // hay, caer al match difuso por descripción como antes.
                     const matchAuto = matchArticuloPorTexto(g.descripcion, artActivos);
-                    const idSel = matchOverride[g.id_gasto] ?? (matchAuto?.id_articulo || '');
+                    const idSel = matchOverride[g.id_gasto] ?? (g.id_articulo || matchAuto?.id_articulo || '');
+                    const cantidadDefault = cantidadGasto[g.id_gasto] ?? (num(g.cantidad) > 0 ? String(num(g.cantidad)) : '');
+                    const creandoAqui = creandoArticuloPara === g.id_gasto;
                     return (
-                      <tr key={g.id_gasto}>
-                        <td style={{ color: '#6b7280' }}>{String(g.fecha).split(/[T ]/)[0]}</td>
-                        <td>{g.descripcion}</td>
-                        <td style={{ textAlign: 'right' }}>${fmt(num(g.monto), 0)}</td>
-                        <td style={{ padding: '2px 4px' }}>
-                          <select value={idSel} onChange={(e) => setMatchOverride((p) => ({ ...p, [g.id_gasto]: e.target.value }))}
-                            style={{ width: '100%', fontSize: '12px', color: idSel ? '#111827' : '#dc2626' }}>
-                            <option value="">— sin coincidencia —</option>
-                            {artActivos.map((a) => <option key={a.id_articulo} value={a.id_articulo}>{a.articulo}</option>)}
-                          </select>
-                        </td>
-                        <td style={{ padding: '2px 4px' }}>
-                          <input type="number" min={0} step={0.001} value={cantidadGasto[g.id_gasto] || ''}
-                            onChange={(e) => setCantidadGasto((p) => ({ ...p, [g.id_gasto]: e.target.value }))}
-                            style={{ width: '100%', textAlign: 'right', fontSize: '12px' }} placeholder="cant." />
-                        </td>
-                        <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                          <button onClick={() => confirmarGasto(g, idSel)} disabled={procesandoGasto === g.id_gasto || !idSel || !(Number(cantidadGasto[g.id_gasto]) > 0)}
-                            className="btn" style={{ fontSize: '11px', padding: '3px 8px', marginRight: '4px' }}>
-                            {procesandoGasto === g.id_gasto ? '…' : 'Confirmar'}
-                          </button>
-                          <button onClick={() => descartarGasto(g)} disabled={procesandoGasto === g.id_gasto}
-                            className="btn secondary" style={{ fontSize: '11px', padding: '3px 8px' }}>
-                            Descartar
-                          </button>
-                        </td>
-                      </tr>
+                      <React.Fragment key={g.id_gasto}>
+                        <tr key={g.id_gasto}>
+                          <td style={{ color: '#6b7280' }}>{String(g.fecha).split(/[T ]/)[0]}</td>
+                          <td>{g.descripcion}</td>
+                          <td style={{ textAlign: 'right' }}>${fmt(num(g.monto), 0)}</td>
+                          <td style={{ padding: '2px 4px' }}>
+                            <select value={idSel === '__nuevo__' ? '__nuevo__' : idSel}
+                              onChange={(e) => {
+                                if (e.target.value === '__nuevo__') { setCreandoArticuloPara(g.id_gasto); setNuevoArt({ articulo: '', categoria: '', unidad_medida: '' }); }
+                                else setMatchOverride((p) => ({ ...p, [g.id_gasto]: e.target.value }));
+                              }}
+                              style={{ width: '100%', fontSize: '12px', color: idSel ? '#111827' : '#dc2626' }}>
+                              <option value="">— sin coincidencia —</option>
+                              <option value="__nuevo__">+ Crear artículo nuevo…</option>
+                              {artActivos.map((a) => <option key={a.id_articulo} value={a.id_articulo}>{a.articulo}</option>)}
+                            </select>
+                          </td>
+                          <td style={{ padding: '2px 4px' }}>
+                            <input type="number" min={0} step={0.001} value={cantidadDefault}
+                              onChange={(e) => setCantidadGasto((p) => ({ ...p, [g.id_gasto]: e.target.value }))}
+                              style={{ width: '100%', textAlign: 'right', fontSize: '12px' }} placeholder="cant." />
+                          </td>
+                          <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                            <button onClick={() => confirmarGasto(g, idSel, cantidadDefault)} disabled={procesandoGasto === g.id_gasto || !idSel || idSel === '__nuevo__' || !(Number(cantidadDefault) > 0)}
+                              className="btn" style={{ fontSize: '11px', padding: '3px 8px', marginRight: '4px' }}>
+                              {procesandoGasto === g.id_gasto ? '…' : 'Confirmar'}
+                            </button>
+                            <button onClick={() => descartarGasto(g)} disabled={procesandoGasto === g.id_gasto}
+                              className="btn secondary" style={{ fontSize: '11px', padding: '3px 8px' }}>
+                              Descartar
+                            </button>
+                          </td>
+                        </tr>
+                        {creandoAqui && (
+                          <tr>
+                            <td colSpan={6} style={{ background: '#eff6ff', padding: '8px', borderRadius: '6px' }}>
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                                <div>
+                                  <label style={{ fontSize: '10px' }}>Nombre</label>
+                                  <input type="text" value={nuevoArt.articulo} onChange={(e) => setNuevoArt((p) => ({ ...p, articulo: e.target.value }))}
+                                    style={{ fontSize: '12px', padding: '4px 6px' }} placeholder="Ej: Cubos Oasis" disabled={guardandoArt} />
+                                </div>
+                                <div>
+                                  <label style={{ fontSize: '10px' }}>Categoría</label>
+                                  <input type="text" value={nuevoArt.categoria} onChange={(e) => setNuevoArt((p) => ({ ...p, categoria: e.target.value }))}
+                                    style={{ fontSize: '12px', padding: '4px 6px' }} placeholder="Ej: Sustratos" disabled={guardandoArt} list="categorias-existentes" />
+                                  <datalist id="categorias-existentes">{categorias.map((c) => <option key={c} value={c} />)}</datalist>
+                                </div>
+                                <div>
+                                  <label style={{ fontSize: '10px' }}>Unidad</label>
+                                  <input type="text" value={nuevoArt.unidad_medida} onChange={(e) => setNuevoArt((p) => ({ ...p, unidad_medida: e.target.value }))}
+                                    style={{ fontSize: '12px', padding: '4px 6px', width: '80px' }} placeholder="unidad" disabled={guardandoArt} />
+                                </div>
+                                <button onClick={() => crearArticuloYAsignar(g.id_gasto)} className="btn" style={{ fontSize: '11px', padding: '5px 10px' }}
+                                  disabled={guardandoArt || !nuevoArt.articulo.trim() || !nuevoArt.categoria.trim() || !nuevoArt.unidad_medida.trim()}>
+                                  {guardandoArt ? 'Creando…' : 'Crear y asignar'}
+                                </button>
+                                <button onClick={() => setCreandoArticuloPara(null)} className="btn secondary" style={{ fontSize: '11px', padding: '5px 10px' }} disabled={guardandoArt}>
+                                  Cancelar
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
               </table>
               <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#92400e' }}>
                 Confirmar suma la cantidad indicada a "Compras" del artículo para este mes. Descartar la oculta sin tocar el stock (ej: gastos que no son insumos físicos).
+                Si el gasto ya trae artículo y cantidad cargados (Gastos → detalle de insumo), quedan pre-completados acá.
               </p>
             </div>
           )}
@@ -473,9 +576,28 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
 
           {categorias.map((cat) => {
             const artscat = artActivos.filter((a) => a.categoria === cat);
+            const valorizadoCat = artscat.reduce((acc, a) => acc + (resumenArticulos.find((x) => x.art.id_articulo === a.id_articulo)?.valorizado ?? 0), 0);
             return (
               <div key={cat} className="card" style={{ marginBottom: '12px' }}>
-                <p style={{ margin: '0 0 10px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{cat}</p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <p style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{cat}</p>
+                  {valorizadoCat > 0 && (
+                    <button
+                      onClick={() => copiarConAviso(
+                        [['Artículo', 'Stock final', 'Valorizado'],
+                          ...artscat.map((a) => {
+                            const r = resumenArticulos.find((x) => x.art.id_articulo === a.id_articulo);
+                            return [a.articulo, r?.fin ?? 0, Math.round(r?.valorizado ?? 0)];
+                          }),
+                          ['TOTAL', '', Math.round(valorizadoCat)]],
+                        `Detalle de ${cat} copiado — pegalo en Excel`
+                      )}
+                      className="btn secondary" style={{ fontSize: '11px', padding: '3px 8px' }}
+                    >
+                      📋 Copiar detalle
+                    </button>
+                  )}
+                </div>
                 <div style={{ overflowX: 'auto' }}>
                 <table style={{ fontSize: '12px', minWidth: '940px' }}>
                   <thead>
@@ -577,13 +699,19 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
               <span style={{ fontSize: '11px', color: '#9ca3af' }}>{mostrarUsos ? '▲' : '▼'}</span>
             </div>
             {mostrarUsos && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '8px', marginTop: '10px' }}>
+              <div style={{ marginTop: '10px' }}>
+                <p style={{ margin: '0 0 8px', fontSize: '11px', color: '#6b7280' }}>
+                  Estos son los mismos números que alimentan el "Uso teórico" de cada artículo (asigná fórmula y factor en{' '}
+                  <Link href="/admin/articulos" style={{ color: '#2563eb', fontWeight: 600 }}>Admin → Artículos</Link>).
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '8px' }}>
                 {DRIVERS.map((d) => (
                   <div key={d.key} style={{ background: '#f9fafb', borderRadius: '6px', padding: '10px 12px' }}>
                     <p style={{ margin: '0 0 2px', fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{d.label}</p>
                     <p style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#111827' }}>{fmt((drivers as any)[d.key] || 0)}</p>
                   </div>
                 ))}
+                </div>
               </div>
             )}
           </div>
