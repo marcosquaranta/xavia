@@ -172,7 +172,14 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
   // ── CICLOS POR MESADA + CAPACIDAD PRODUCTIVA ── (lógica compartida en lib/capacidadProductiva.ts)
   const capProd = calcularCapacidadProductiva(lotes, movimientos, ubicaciones, periodoMesada, naveFilter);
-  const { ciclosMesadas, filasCapacidad, kpiPorCultivo, kpiTotalTeorica, kpiTotalReal, resumenGrupos } = capProd;
+  const { ciclosMesadas, filasCapacidad, kpiPorCultivo, kpiTotalTeorica, kpiTotalReal, kpiTotalDifPct, resumenGrupos } = capProd;
+  function colorDif(dif: number | null): string {
+    if (dif === null) return '#9ca3af';
+    return dif > 30 ? '#dc2626' : dif > 10 ? '#d97706' : '#059669';
+  }
+  function fmtDif(dif: number | null): string {
+    return dif === null ? '—' : `${dif > 0 ? '+' : ''}${dif}%`;
+  }
   const PERIODO_LABEL: Record<typeof periodoMesada, string> = { d90: 'Últimos 90 días', d180: 'Últimos 180 días', anio: 'Año actual' };
 
   // Filas de la tabla: un ciclo F2 por cultivo, ordenadas por cultivo y luego nave
@@ -467,6 +474,10 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                           <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#9ca3af' }}>Real</p>
                           <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:'#059669' }}>{k.real.toLocaleString('es-AR')}</p>
                         </div>
+                        <div>
+                          <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#9ca3af' }}>Dif.</p>
+                          <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:colorDif(k.difPct) }}>{fmtDif(k.difPct)}</p>
+                        </div>
                       </div>
                       <p style={{ margin:'6px 0 0', fontSize:'11px', color:'#9ca3af' }}>{k.posiciones.toLocaleString('es-AR')} posiciones</p>
                     </div>
@@ -482,6 +493,10 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                     <div>
                       <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#9ca3af' }}>Real</p>
                       <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:'#86efac' }}>{kpiTotalReal.toLocaleString('es-AR')}</p>
+                    </div>
+                    <div>
+                      <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#9ca3af' }}>Dif.</p>
+                      <p style={{ margin:0, fontSize:'24px', fontWeight:800, color:colorDif(kpiTotalDifPct) }}>{fmtDif(kpiTotalDifPct)}</p>
                     </div>
                   </div>
                 </div>
@@ -531,6 +546,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                                 <th style={{ textAlign:'right' }}>Posiciones</th>
                                 <th style={{ textAlign:'right' }}>Producción teórica</th>
                                 <th style={{ textAlign:'right' }}>Producción real</th>
+                                <th style={{ textAlign:'right' }}>Dif. %</th>
                                 <th style={{ textAlign:'right', color:'#9ca3af', fontSize:'11px' }}>N cosechas</th>
                               </tr>
                             </thead>
@@ -542,6 +558,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                                   <td style={{ textAlign:'right', color:'#374151' }}>{m.posiciones>0?m.posiciones.toLocaleString('es-AR'):'—'}</td>
                                   <td style={{ textAlign:'right', fontWeight:700, color:'#111827' }}>{m.produccionTeorica.toLocaleString('es-AR')}</td>
                                   <td style={{ textAlign:'right', fontWeight:700, color:'#059669' }}>{m.produccionReal.toLocaleString('es-AR')}</td>
+                                  <td style={{ textAlign:'right', fontWeight:700, color:colorDif(m.difPct) }}>{fmtDif(m.difPct)}</td>
                                   <td style={{ textAlign:'right' }}>
                                     <span style={{ color: m.n <= 1 ? '#dc2626' : '#9ca3af', fontWeight: m.n <= 1 ? 700 : 400 }}>
                                       {m.n <= 1 && '⚠ '}{m.n}

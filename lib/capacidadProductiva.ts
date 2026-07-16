@@ -27,11 +27,18 @@ export interface CicloMesada {
 export interface FilaCapacidadProd {
   nombre: string; nave: number; cultivo: 'Lechuga' | 'Rúcula';
   cicloActual: number; posiciones: number;
-  produccionTeorica: number; produccionReal: number; n: number;
+  produccionTeorica: number; produccionReal: number; n: number; difPct: number | null;
 }
 
 export interface KpiNave { nave: number; lechuga: number; rucula: number; total: number }
-export interface KpiCultivo { cultivo: 'Lechuga' | 'Rúcula'; posiciones: number; teorica: number; real: number }
+export interface KpiCultivo { cultivo: 'Lechuga' | 'Rúcula'; posiciones: number; teorica: number; real: number; difPct: number | null }
+
+// % de la producción teórica que NO se cumplió: (teórica - real) / teórica × 100.
+// Positivo = por debajo de lo teórico (shortfall); negativo = por encima.
+export function calcularDifPct(teorica: number, real: number): number | null {
+  if (!(teorica > 0)) return null;
+  return Math.round(((teorica - real) / teorica) * 1000) / 10;
+}
 // La cuenta que arma cada número de producción, para poder mostrarla explícita en la UI
 // y que se pueda auditar de dónde sale (posiciones → plantas → paquetes).
 export interface ResumenGrupo { cultivo: 'Lechuga' | 'Rúcula'; nave: number; ciclo: number; plantasPorPosicion: number; plantasPorPaq: number }
@@ -41,7 +48,7 @@ export interface CapacidadProductiva {
   filasCapacidad: FilaCapacidadProd[];
   kpiPorNave: KpiNave[];
   kpiPorCultivo: KpiCultivo[];
-  kpiTotalTeorica: number; kpiTotalReal: number;
+  kpiTotalTeorica: number; kpiTotalReal: number; kpiTotalDifPct: number | null;
   resumenGrupos: ResumenGrupo[];
 }
 
@@ -227,6 +234,7 @@ export function calcularCapacidadProductiva(
       return {
         nombre: m.nombre, nave: m.nave, cultivo: (esRuc ? 'Rúcula' : 'Lechuga') as 'Lechuga' | 'Rúcula',
         cicloActual, posiciones: m.posiciones, produccionTeorica, produccionReal, n,
+        difPct: calcularDifPct(produccionTeorica, produccionReal),
       };
     }).sort((a, b) => (a.cultivo === b.cultivo ? 0 : a.cultivo === 'Lechuga' ? -1 : 1) || a.nave - b.nave || a.nombre.localeCompare(b.nombre));
 
@@ -241,15 +249,17 @@ export function calcularCapacidadProductiva(
   const cultivosConCapacidad = Array.from(new Set(filasCapacidad.map(f => f.cultivo))) as ('Lechuga' | 'Rúcula')[];
   const kpiPorCultivo: KpiCultivo[] = cultivosConCapacidad.map((cul) => {
     const deCultivo = filasCapacidad.filter(f => f.cultivo === cul);
+    const teorica = deCultivo.reduce((a, f) => a + f.produccionTeorica, 0);
+    const real = deCultivo.reduce((a, f) => a + f.produccionReal, 0);
     return {
       cultivo: cul,
       posiciones: deCultivo.reduce((a, f) => a + f.posiciones, 0),
-      teorica: deCultivo.reduce((a, f) => a + f.produccionTeorica, 0),
-      real: deCultivo.reduce((a, f) => a + f.produccionReal, 0),
+      teorica, real, difPct: calcularDifPct(teorica, real),
     };
   });
   const kpiTotalTeorica = kpiPorCultivo.reduce((a, k) => a + k.teorica, 0);
   const kpiTotalReal = kpiPorCultivo.reduce((a, k) => a + k.real, 0);
+  const kpiTotalDifPct = calcularDifPct(kpiTotalTeorica, kpiTotalReal);
 
   // Resumen de la cuenta (ciclo + factores) por cada combinación nave+cultivo presente,
   // para mostrar de forma transparente cómo se llega a la producción teórica.
@@ -271,5 +281,5 @@ export function calcularCapacidadProductiva(
     return { cultivo, nave, ciclo, plantasPorPosicion: 1, plantasPorPaq };
   });
 
-  return { ciclosMesadas, filasCapacidad, kpiPorNave, kpiPorCultivo, kpiTotalTeorica, kpiTotalReal, resumenGrupos };
+  return { ciclosMesadas, filasCapacidad, kpiPorNave, kpiPorCultivo, kpiTotalTeorica, kpiTotalReal, kpiTotalDifPct, resumenGrupos };
 }
