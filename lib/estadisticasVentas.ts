@@ -126,22 +126,6 @@ export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas
   });
 }
 
-// Igual que evolucionVentaPorArticulo pero agrupado por semana (lunes de esa semana) en
-// vez de por mes — para el reporte semanal. No usa VentasHistoricas (son totales
-// mensuales, no tiene sentido repartirlos por semana).
-export function evolucionVentaPorArticuloSemanal(ventas: VentaDia[], n = 8): PuntoArticulo[] {
-  const semanas = ultimasNSemanas(ventas, n);
-  return semanas.map((sk) => {
-    const delSemana = ventas.filter((v) => semanaKey(v.fecha) === sk);
-    const ruculaKgEnPaq = delSemana.reduce((a, v) => a + (Number(v.rucula_kg) || 0), 0) * 1000 / GR_PAQ_RUCULA;
-    const lechugaKgEnPaq = delSemana.reduce((a, v) => a + (Number(v.lechuga_kg) || 0), 0) * 1000 / GR_PAQ_LECHUGA;
-    const rucula = delSemana.reduce((a, v) => a + (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0), 0) + Math.round(ruculaKgEnPaq);
-    const lechuga = delSemana.reduce((a, v) => a + (Number(v.lechuga_crespa) || 0) + (Number(v.hoja_roble) || 0), 0) + Math.round(lechugaKgEnPaq);
-    const albahaca = delSemana.reduce((a, v) => a + (Number(v.albahaca) || 0), 0);
-    return { mes: sk, label: semanaLabel(sk), rucula, lechuga, albahaca };
-  });
-}
-
 // ── Evolución de venta por cliente (unidades totales, top N) — mensual o semanal ──
 export interface SerieCliente { id_control: string; nombre: string; total: number }
 export interface EvolucionClientes { meses: { mes: string; label: string }[]; series: SerieCliente[]; puntos: Record<string, number>[] }
@@ -309,4 +293,37 @@ export function ventasEnRango(ventas: VentaDia[], precios: PrecioVenta[], client
   acc.rucula.monto = Math.round(acc.rucula.monto);
   acc.lechuga.monto = Math.round(acc.lechuga.monto);
   return acc;
+}
+
+function lunesDeSemana(d: Date): Date {
+  const r = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dow = r.getDay();
+  r.setDate(r.getDate() - (dow === 0 ? 6 : dow - 1));
+  return r;
+}
+const fmtISOLocal = (d: Date) => {
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+// ── Ventas por cultivo (unidades), últimas N semanas CALENDARIO completas (lunes a
+// domingo, terminando el domingo pasado — la semana en curso queda afuera por estar
+// incompleta). A diferencia de evolucionVentaPorArticuloSemanal, no depende de qué
+// semanas tengan ventas cargadas: si hubo un hueco de carga, esa semana simplemente
+// aparece en 0 en vez de saltarse silenciosamente a semanas más viejas para completar N,
+// lo que corría las etiquetas y hacía parecer "actual" un dato de varios meses atrás. ──
+export interface PuntoVentaCultivoSemana { semana: string; label: string; rucula: number; lechuga: number }
+export function ventasPorCultivoUltimasSemanas(
+  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], n = 4
+): PuntoVentaCultivoSemana[] {
+  const lunesActual = lunesDeSemana(new Date());
+  const puntos: PuntoVentaCultivoSemana[] = [];
+  for (let i = n; i >= 1; i--) {
+    const lunes = new Date(lunesActual); lunes.setDate(lunes.getDate() - i * 7);
+    const domingo = new Date(lunes); domingo.setDate(domingo.getDate() + 6);
+    const desde = fmtISOLocal(lunes), hasta = fmtISOLocal(domingo);
+    const r = ventasEnRango(ventas, precios, clientes, desde, hasta);
+    puntos.push({ semana: desde, label: `${String(lunes.getDate()).padStart(2, '0')}/${String(lunes.getMonth() + 1).padStart(2, '0')}`, rucula: r.rucula.unidades, lechuga: r.lechuga.unidades });
+  }
+  return puntos;
 }

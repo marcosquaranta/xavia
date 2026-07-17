@@ -188,19 +188,49 @@ function lunesDe(d: Date): Date {
   return r;
 }
 
+// Días reales promedio EN FASE 2 (de las últimas N cosechas de esa variedad) — para
+// anclar la estimación de lotes que YA están en F2 a su fecha_f2 real, en vez de
+// re-derivar todo desde la siembra (que no refleja cuánto varió el tiempo en F1 para
+// ESTE lote puntual). Mismo criterio que usa "Cosechar" en el panel/home
+// (cosechasAgrupadas, lib/planificacionServer.ts) para decidir si un lote está listo.
+function f2RealPorVariedad(lotes: Lote[], ultimos: number = 5): Map<string, number> {
+  const resultado = new Map<string, number>();
+  const normVar = (s: string) => s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const cosechadosTodos = lotes.filter((l) => l.estado === 'cosechado' && Number(l.dias_f2) >= 5);
+  const varNorms = Array.from(new Set(cosechadosTodos.map((l) => normVar(l.variedad))));
+  for (const varNorm of varNorms) {
+    const cosechados = cosechadosTodos
+      .filter((l) => normVar(l.variedad) === varNorm)
+      .sort((a, b) => String(b.fecha_cosecha || '').localeCompare(String(a.fecha_cosecha || '')))
+      .slice(0, ultimos);
+    const dias = cosechados.map((l) => Number(l.dias_f2)).filter((d) => d >= 5);
+    if (dias.length === 0) continue;
+    const promedio = Math.round(dias.reduce((a, b) => a + b, 0) / dias.length);
+    for (const l of cosechados) resultado.set(l.variedad, promedio);
+    resultado.set(varNorm, promedio);
+  }
+  return resultado;
+}
+
 /**
- * Para cada lote activo, estima la fecha de cosecha (siembra + ciclo real de su variedad,
- * o el estimado de la hoja Variedades) y suma los paquetes esperados en la semana
- * calendario correspondiente — sin distinguir F1/F2. Los lotes vencidos (fecha estimada ya
- * pasada) se cuentan en la semana actual. Devuelve `semanas` puntos, desde la semana
- * actual en adelante, con fecha real de cada semana.
+ * Para cada lote activo, estima la fecha de cosecha y suma los paquetes esperados en la
+ * semana calendario correspondiente. Si el lote YA está en Fase 2 (con fecha_f2
+ * registrada), ancla la estimación ahí: fecha_f2 + días reales promedio en F2 — mucho
+ * más preciso que recalcular desde la siembra, porque no depende de cuánto varió el
+ * tiempo en F1 para este lote en particular (un lote con F1 más corto/largo que el
+ * promedio quedaba mal ubicado si se estimaba solo desde la siembra). Si no está en F2
+ * (o no tiene fecha_f2), usa siembra + ciclo total real/estimado como antes. Los lotes
+ * vencidos (fecha estimada ya pasada) se cuentan en la semana actual. Devuelve `semanas`
+ * puntos, desde la semana actual en adelante, con fecha real de cada semana.
  */
 export function proyeccionCosechaSemanal(
   lotes: Lote[], variedades: import('./types').Variedad[], semanas = 8
 ): PuntoProyeccionCosecha[] {
   const lunesActual = lunesDe(new Date());
   const ciclosMap = cicloRealPorVariedad(lotes, [], 5);
+  const f2Map = f2RealPorVariedad(lotes, 5);
   const variedadMap = new Map(variedades.map((v) => [v.variedad, v]));
+  const normVarLocal = (s: string) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
   function cultivoDe(v: string): 'rucula' | 'lechuga' | null {
     const vl = String(v || '').toLowerCase();
@@ -214,6 +244,11 @@ export function proyeccionCosechaSemanal(
     const v = variedadMap.get(variedad);
     if (v && Number(v.dias_estimados_cosecha) > 0) return Number(v.dias_estimados_cosecha);
     return rucula ? 30 : 78;
+  }
+  function f2Estimado(variedad: string, rucula: boolean): number {
+    const real = f2Map.get(variedad) ?? f2Map.get(normVarLocal(variedad));
+    if (real && real > 0) return real;
+    return rucula ? 34 : 40;
   }
   function factorPaq(variedad: string, rucula: boolean): number {
     const v = variedadMap.get(variedad);
@@ -234,11 +269,23 @@ export function proyeccionCosechaSemanal(
   for (const l of lotes.filter((l) => l.estado === 'activo')) {
     const cultivo = cultivoDe(l.variedad);
     if (!cultivo) continue;
-    const siembra = safeParseDate2(l.fecha_siembra);
-    if (!siembra) continue;
     const rucula = cultivo === 'rucula';
-    const ciclo = cicloEstimado(l.variedad, rucula);
-    const fechaEst = new Date(siembra); fechaEst.setDate(fechaEst.getDate() + ciclo);
+
+    let fechaEst: Date | null = null;
+    if (l.fase_actual === 'fase_2' && l.fecha_f2) {
+      const f2inicio = safeParseDate2(l.fecha_f2);
+      if (f2inicio) {
+        fechaEst = new Date(f2inicio);
+        fechaEst.setDate(fechaEst.getDate() + f2Estimado(l.variedad, rucula));
+      }
+    }
+    if (!fechaEst) {
+      const siembra = safeParseDate2(l.fecha_siembra);
+      if (!siembra) continue;
+      const ciclo = cicloEstimado(l.variedad, rucula);
+      fechaEst = new Date(siembra); fechaEst.setDate(fechaEst.getDate() + ciclo);
+    }
+
     let lunesEst = lunesDe(fechaEst);
     if (lunesEst < lunesActual) lunesEst = lunesActual; // vencido → cuenta en la semana actual
     const key = claveDe(lunesEst);

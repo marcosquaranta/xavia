@@ -3,7 +3,7 @@ import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, PrecioVenta, Clie
 import { tubosPorMesada } from './ocupacion';
 import { proyeccionCosechaSemanal, ciclosPorSemana, pesoPromedioRango, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, type PesoPromedioMes } from './estadisticas';
 import { calcularCamara, diferenciaAjustesMes } from './camara';
-import { evolucionVentaPorArticuloSemanal, resumenMesActual, ventasEnRango, type PuntoArticulo, type VentasRango, type ResumenMesActual } from './estadisticasVentas';
+import { ventasPorCultivoUltimasSemanas, resumenMesActual, ventasEnRango, type PuntoVentaCultivoSemana, type VentasRango, type ResumenMesActual } from './estadisticasVentas';
 
 function lunesDe(d: Date): Date {
   const r = new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -30,7 +30,7 @@ export interface ReporteSemanalData {
   pesoMesAnterior: PesoPromedioMes;
   ocupacion: { nave: number; pct: number }[];
   mesadasBajas: { nombre: string; nave: number; pct: number }[];
-  evolArticuloSemanal: PuntoArticulo[];
+  ventasSemanas: PuntoVentaCultivoSemana[];
   stock: { rucula: number; lechuga: number };
   faltanteMes: { rucula: number; lechuga: number; total: number };
 }
@@ -108,8 +108,8 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     .map((m: any) => ({ nombre: String(m.nombre).replace(/^Nave \d+ - /, ''), nave: n.nave, pct: m.ocupacion_pct })))
     .sort((a: any, b: any) => a.pct - b.pct);
 
-  // ── Evolución de venta por artículo, por semana (últimas 6 semanas completas) ──
-  const evolArticuloSemanal = evolucionVentaPorArticuloSemanal(ventas, 6);
+  // ── Ventas por cultivo, últimas 4 semanas calendario completas (lunes a domingo) ──
+  const ventasSemanas = ventasPorCultivoUltimasSemanas(ventas, precios, clientes, 4);
 
   // ── Stock en cámara + faltante acumulado por ajustes del mes en curso ──
   const stock = {
@@ -126,7 +126,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     proyeccionProximaSemana, proyeccionSemanas, cosechaRealSemanaAnterior,
     cicloSemana, cicloSemanaAnterior, cicloMesAnterior,
     pesoSemana, pesoMesAnterior,
-    ocupacion, mesadasBajas, evolArticuloSemanal,
+    ocupacion, mesadasBajas, ventasSemanas,
     stock, faltanteMes,
   };
 }
@@ -162,27 +162,36 @@ function filaVentas(label: string, actual: { unidades: number; monto: number }, 
 }
 
 // Gráfico de barras "email-safe": dos series por columna, con altura real (no
-// acumulada a 100%) — para venta por artículo semanal y proyección de cosecha.
+// acumulada a 100%) — para proyección de cosecha. Usa tablas anidadas con una celda
+// "espaciadora" arriba de cada barra en vez de flexbox: Outlook (y varios clientes de
+// mail más) no soporta display:flex, así que las barras quedaban colgando desde arriba
+// en vez de crecer desde una base común abajo. Con tablas, cada <td> apila de forma
+// predecible en cualquier cliente.
 function graficoBarrasHtml(
   puntos: { label: string; a: number; b: number }[],
   colorA: string, colorB: string, nombreA: string, nombreB: string
 ): string {
   const max = Math.max(...puntos.flatMap(p => [p.a, p.b]), 1);
   const ALTO = 70;
-  const cols = puntos.map(p => {
-    const hA = Math.max(1, Math.round((p.a / max) * ALTO));
-    const hB = Math.max(1, Math.round((p.b / max) * ALTO));
-    return `<td style="text-align:center;vertical-align:bottom;padding:0 6px">
-      <div style="display:flex;gap:3px;align-items:flex-end;justify-content:center;height:${ALTO}px">
-        <div style="width:14px;height:${p.a > 0 ? hA : 0}px;background:${colorA};border-radius:2px 2px 0 0" title="${nombreA} ${p.a}"></div>
-        <div style="width:14px;height:${p.b > 0 ? hB : 0}px;background:${colorB};border-radius:2px 2px 0 0" title="${nombreB} ${p.b}"></div>
-      </div>
+  const barraHtml = (valor: number, color: string, nombre: string) => {
+    const h = Math.max(1, Math.round((valor / max) * ALTO));
+    const espacio = Math.max(0, ALTO - h);
+    return `<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr>
+        <td style="height:${espacio}px;line-height:${espacio}px;font-size:1px">&nbsp;</td>
+      </tr><tr>
+        <td width="14" style="width:14px;height:${valor > 0 ? h : 0}px;line-height:${valor > 0 ? h : 0}px;background:${color};border-radius:2px 2px 0 0;font-size:1px" title="${nombre} ${valor}">&nbsp;</td>
+      </tr></table>`;
+  };
+  const cols = puntos.map(p => `<td style="text-align:center;vertical-align:bottom;padding:0 6px">
+      <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr>
+        <td style="vertical-align:bottom;padding:0 1px">${barraHtml(p.a, colorA, nombreA)}</td>
+        <td style="vertical-align:bottom;padding:0 1px">${barraHtml(p.b, colorB, nombreB)}</td>
+      </tr></table>
       <div style="font-size:9px;color:#9ca3af;margin-top:3px;white-space:nowrap">${p.label}</div>
       <div style="font-size:9px;color:${colorA};font-weight:700;white-space:nowrap">${fmtN(p.a)}</div>
       <div style="font-size:9px;color:${colorB};font-weight:700;white-space:nowrap">${fmtN(p.b)}</div>
-    </td>`;
-  }).join('');
-  return `<table style="border-collapse:collapse"><tr>${cols}</tr></table>
+    </td>`).join('');
+  return `<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr>${cols}</tr></table>
     <p style="font-size:11px;color:#9ca3af;margin:6px 0 0">
       <span style="color:${colorA}">■</span> ${nombreA} · <span style="color:${colorB}">■</span> ${nombreB}
     </p>`;
@@ -288,8 +297,8 @@ export function construirHtml(d: ReporteSemanalData): string {
         `<li style="margin-bottom:4px">N${m.nave} · ${m.nombre}: <strong style="color:${m.pct < 70 ? '#dc2626' : '#d97706'}">${m.pct}%</strong></li>`
       ).join('')}</ul>`;
 
-  const evolArticuloChart = graficoLineasHtml(
-    d.evolArticuloSemanal.map(p => ({ label: p.label, a: p.rucula, b: p.lechuga })),
+  const ventasSemanasChart = graficoLineasHtml(
+    d.ventasSemanas.map(p => ({ label: p.label, a: p.rucula, b: p.lechuga })),
     '#166534', '#4d7c0f', 'Rúcula', 'Lechuga'
   );
   const proyeccionChart = graficoBarrasHtml(
@@ -307,6 +316,8 @@ export function construirHtml(d: ReporteSemanalData): string {
       <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Unidades</th><th style="padding:6px 10px;text-align:right">Total $</th><th style="padding:6px 10px;text-align:right">vs. semana ant.</th></tr></thead>
       <tbody>${ventasFilas}</tbody>
     </table>
+    <p style="margin:0 0 8px;font-size:12px;color:#6b7280">Ventas por cultivo — últimas 4 semanas (cantidades):</p>
+    <div style="margin-bottom:20px">${ventasSemanasChart}</div>
 
     <h3 style="margin:0 0 8px;font-size:14px">Ventas — mes en curso</h3>
     <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
@@ -341,11 +352,65 @@ export function construirHtml(d: ReporteSemanalData): string {
     <h3 style="margin:0 0 8px;font-size:14px">Ocupación por nave</h3>
     <div style="margin-bottom:6px">${ocupacionHtml}</div>
     <p style="margin:10px 0 0;font-size:12px;color:#6b7280">Mesadas F2 por debajo del 90%:</p>
-    <div style="margin-bottom:20px">${mesadasBajasHtml}</div>
-
-    <h3 style="margin:0 0 8px;font-size:14px">Evolución de venta por artículo <span style="font-weight:400;color:#9ca3af">(últimas 6 semanas)</span></h3>
-    <div style="margin-bottom:10px">${evolArticuloChart}</div>
+    <div style="margin-bottom:10px">${mesadasBajasHtml}</div>
   </div>`;
+}
+
+// ── Versión en texto plano, pensada para copiar y pegar en WhatsApp (que no renderiza
+// HTML/tablas) — mismos números que el mail, con emojis y saltos de línea en vez de
+// tablas/gráficos. Se genera con los mismos `ReporteSemanalData`, así que nunca se
+// desincroniza del HTML: ambos salen de la misma consulta fresca a la planilla.
+export function construirTexto(d: ReporteSemanalData): string {
+  const p2 = (n: number | null) => n === null ? '—' : `${n > 0 ? '+' : ''}${n}%`;
+  const L: string[] = [];
+  L.push(`📋 *Reporte semanal — Xavia*`);
+  L.push(d.fechaGenerado);
+  L.push('');
+
+  L.push(`🛒 *Ventas — últimos 7 días* (vs. 7 días ant.)`);
+  L.push(`Rúcula: ${fmtN(d.ventasSemana.rucula.unidades)} u · ${fmtMoneda(d.ventasSemana.rucula.monto)} (${p2(pct(d.ventasSemana.rucula.unidades, d.ventasSemanaAnterior.rucula.unidades))})`);
+  L.push(`Lechuga: ${fmtN(d.ventasSemana.lechuga.unidades)} u · ${fmtMoneda(d.ventasSemana.lechuga.monto)} (${p2(pct(d.ventasSemana.lechuga.unidades, d.ventasSemanaAnterior.lechuga.unidades))})`);
+  const totU = d.ventasSemana.rucula.unidades + d.ventasSemana.lechuga.unidades;
+  const totM = d.ventasSemana.rucula.monto + d.ventasSemana.lechuga.monto;
+  L.push(`Total: ${fmtN(totU)} u · ${fmtMoneda(totM)}`);
+  L.push('');
+  L.push(`Últimas 4 semanas (u.) — Rúcula / Lechuga:`);
+  for (const s of d.ventasSemanas) L.push(`  ${s.label}: ${fmtN(s.rucula)} / ${fmtN(s.lechuga)}`);
+  L.push('');
+
+  L.push(`📅 *Ventas — mes en curso*`);
+  L.push(`Acumulado a hoy: ${fmtN(d.ventasMesActual.unidadesMes)} u`);
+  L.push(`Proyectado a fin de mes: ${fmtN(d.ventasMesActual.proyeccionMes)} u (${p2(pct(d.ventasMesActual.proyeccionMes, d.ventasMesAnteriorTotal))} vs. mes ant.)`);
+  L.push(`Mes pasado (total real): ${fmtN(d.ventasMesAnteriorTotal)} u`);
+  L.push('');
+
+  L.push(`🌱 *Proyección de cosecha — próxima semana* (vs. real semana pasada)`);
+  L.push(`Rúcula: ${fmtN(d.proyeccionProximaSemana.rucula)} est. / ${fmtN(d.cosechaRealSemanaAnterior.rucula)} real`);
+  L.push(`Lechuga: ${fmtN(d.proyeccionProximaSemana.lechuga)} est. / ${fmtN(d.cosechaRealSemanaAnterior.lechuga)} real`);
+  L.push(`Próximas semanas (est.) — Rúcula / Lechuga:`);
+  for (const s of d.proyeccionSemanas) L.push(`  ${s.label}: ${fmtN(s.rucula)} / ${fmtN(s.lechuga)}`);
+  L.push('');
+
+  L.push(`🔄 *Ciclos y peso de esta semana*`);
+  L.push(`Rúcula: ${d.cicloSemana.rucula > 0 ? d.cicloSemana.rucula + 'd' : '—'} ciclo · ${d.pesoSemana.rucula > 0 ? d.pesoSemana.rucula + 'g' : '—'} peso`);
+  L.push(`Lechuga: ${d.cicloSemana.lechuga > 0 ? d.cicloSemana.lechuga + 'd' : '—'} ciclo · ${d.pesoSemana.lechuga > 0 ? d.pesoSemana.lechuga + 'g' : '—'} peso`);
+  L.push('');
+
+  L.push(`❄️ *Stock en cámara* (faltante acumulado del mes)`);
+  L.push(`Rúcula: ${fmtN(d.stock.rucula)} paq · faltante ${d.faltanteMes.rucula >= 0 ? '+' : ''}${d.faltanteMes.rucula} paq`);
+  L.push(`Lechuga: ${fmtN(d.stock.lechuga)} paq · faltante ${d.faltanteMes.lechuga >= 0 ? '+' : ''}${d.faltanteMes.lechuga} paq`);
+  L.push('');
+
+  L.push(`🏭 *Ocupación por nave*`);
+  for (const o of d.ocupacion) L.push(`  Nave ${o.nave}: ${o.pct}%`);
+  if (d.mesadasBajas.length > 0) {
+    L.push(`Mesadas F2 por debajo del 90%:`);
+    for (const m of d.mesadasBajas) L.push(`  N${m.nave} · ${m.nombre}: ${m.pct}%`);
+  } else {
+    L.push(`✓ Ninguna mesada F2 por debajo del 90%.`);
+  }
+
+  return L.join('\n');
 }
 
 export async function enviarReporteSemanal(): Promise<{ ok: boolean; error?: string }> {
@@ -353,6 +418,7 @@ export async function enviarReporteSemanal(): Promise<{ ok: boolean; error?: str
   try {
     const datos = await obtenerDatosReporteSemanal();
     const html = construirHtml(datos);
+    const text = construirTexto(datos);
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
@@ -361,6 +427,7 @@ export async function enviarReporteSemanal(): Promise<{ ok: boolean; error?: str
         to: ['administracion@xavia.com.ar'],
         subject: `Reporte semanal — Xavia — ${datos.fechaGenerado}`,
         html,
+        text,
       }),
     });
     if (!res.ok) { const err = await res.json().catch(() => ({})); return { ok: false, error: (err as any).message || `HTTP ${res.status}` }; }
