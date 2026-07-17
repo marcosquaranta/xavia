@@ -5,7 +5,10 @@ const CUBOS_POR_PLANCHA = 345;
 
 export const DRIVERS = [
   { key: 'planchas_sembradas_rucula',   label: 'Planchas sembradas — rúcula' },
-  { key: 'planchas_sembradas_lechuga',  label: 'Planchas sembradas — lechuga' },
+  { key: 'planchas_sembradas_lechuga',  label: 'Planchas sembradas — lechuga (todas)' },
+  { key: 'planchas_sembradas_lechuga_crespa', label: 'Planchas sembradas — lechuga crespa' },
+  { key: 'planchas_sembradas_lechuga_roble',  label: 'Planchas sembradas — lechuga hoja de roble' },
+  { key: 'planchas_sembradas_lechuga_otras',  label: 'Planchas sembradas — lechuga otras variedades' },
   { key: 'planchas_sembradas_total',    label: 'Planchas sembradas — total' },
   { key: 'paquetes_vendidos_rucula',    label: 'Paquetes vendidos — rúcula' },
   { key: 'paquetes_vendidos_lechuga',   label: 'Paquetes vendidos — lechuga' },
@@ -27,6 +30,10 @@ function esRucula(l: Lote): boolean {
   const v = String(l.variedad || '').toLowerCase();
   return v.includes('rucula') || v.includes('rúcula');
 }
+// Mismo criterio de matching por texto que ya usa el resto del sistema (cosechaSemanaActual
+// en lib/estadisticas.ts) para distinguir sub-variedades de lechuga dentro de "variedad".
+function esCrespa(l: Lote): boolean { return String(l.variedad || '').toLowerCase().includes('crespa'); }
+function esRoble(l: Lote): boolean { return String(l.variedad || '').toLowerCase().includes('roble'); }
 
 // Mismas fórmulas que ya usaba el panel "Usos del sistema" de Stocks — acá quedan
 // centralizadas para poder reutilizarlas en el cálculo de Uso Teórico por artículo.
@@ -41,8 +48,12 @@ export function calcularDriversMes(
 
   const sembLechuga = sembrados.filter((l) => !esRucula(l));
   const sembRucula  = sembrados.filter((l) => esRucula(l));
-  const planchasLechuga = Math.round(sembLechuga.reduce((a, l) => a + (Number(l.plantines_iniciales) || 0), 0) / CUBOS_POR_PLANCHA);
-  const planchasRucula  = Math.round(sembRucula.reduce((a, l) => a + (Number(l.plantines_iniciales) || 0), 0) / CUBOS_POR_PLANCHA);
+  const planchasDe = (arr: Lote[]) => Math.round(arr.reduce((a, l) => a + (Number(l.plantines_iniciales) || 0), 0) / CUBOS_POR_PLANCHA);
+  const planchasLechuga = planchasDe(sembLechuga);
+  const planchasRucula  = planchasDe(sembRucula);
+  const planchasLechugaCrespa = planchasDe(sembLechuga.filter(esCrespa));
+  const planchasLechugaRoble  = planchasDe(sembLechuga.filter(esRoble));
+  const planchasLechugaOtras  = planchasDe(sembLechuga.filter((l) => !esCrespa(l) && !esRoble(l)));
 
   const paqRucula   = cosechados.filter((l) => esRucula(l)).reduce((a, l) => a + (Number(l.unidades_cosechadas) || 0), 0);
   const plantasLech = cosechados.filter((l) => !esRucula(l)).reduce((a, l) => a + (Number(l.unidades_cosechadas) || 0), 0);
@@ -54,6 +65,9 @@ export function calcularDriversMes(
   return {
     planchas_sembradas_rucula: planchasRucula,
     planchas_sembradas_lechuga: planchasLechuga,
+    planchas_sembradas_lechuga_crespa: planchasLechugaCrespa,
+    planchas_sembradas_lechuga_roble: planchasLechugaRoble,
+    planchas_sembradas_lechuga_otras: planchasLechugaOtras,
     planchas_sembradas_total: planchasRucula + planchasLechuga,
     paquetes_vendidos_rucula: ventasRango.rucula.unidades,
     paquetes_vendidos_lechuga: ventasRango.lechuga.unidades,
