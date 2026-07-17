@@ -25,7 +25,9 @@ export default function Header({ user, current }: { user: UsuarioPublico; curren
         {items.map((item) => <Link key={item.key} href={item.href} className={current === item.key ? 'current' : ''}>{item.label}</Link>)}
       </nav>
       <div className="topbar-user">
-        <span>{user.nombre} <span style={{ opacity: 0.6 }}>·</span> <span style={{ fontSize: '11px', color: '#9ca3af' }}>{user.rol}</span></span>
+        <Link href="/perfil" style={{ color: 'inherit', textDecoration: 'none' }}>
+          {user.nombre} <span style={{ opacity: 0.6 }}>·</span> <span style={{ fontSize: '11px', color: '#9ca3af' }}>{user.rol}</span>
+        </Link>
         <form action="/api/auth/logout" method="POST"><button type="submit">Salir</button></form>
       </div>
     </div>
