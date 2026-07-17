@@ -112,14 +112,19 @@ export default async function PanelPage({ searchParams }: {
   const ahora = new Date();
   const mesPasadoRef = mesAnteriorClamp(ahora);
   const resumenMesPanel = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, ahora);
-  // Comparable: mismo tramo (mismo día del mes) del mes pasado, para "venta al día" y precio.
-  const resumenMesPasadoComparable = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, mesPasadoRef, ahora.getDate());
   // Mes pasado completo, para comparar contra la proyección (que estima un mes entero).
   // OJO: sin el diaCorte explícito acá, resumenMesActual usa mesPasadoRef.getDate() como
   // corte (el mismo día que hoy) en vez del mes completo — quedaba idéntico al
-  // "comparable" de arriba e inflaba la variación de la proyección.
+  // "comparable" de abajo e inflaba la variación de la proyección.
   const diasEnMesPasado = new Date(mesPasadoRef.getFullYear(), mesPasadoRef.getMonth() + 1, 0).getDate();
   const resumenMesPasadoCompleto = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, mesPasadoRef, diasEnMesPasado);
+  // Referencia para "venta al día": el RITMO de todo el mes pasado (total real / días del mes),
+  // prorrateado a los días que ya pasaron este mes — NO el total real de "mes pasado, mismos
+  // primeros N días", que quedaba a merced de en qué día cayó algún pedido grande de un
+  // cliente (un pedido grande cayendo del lado equivocado del corte disparaba el % de forma
+  // errática, igual que ya pasaba con las ventas por kg — ver KEYS_EXCLUIDAS_UNIDADES).
+  const corteHoy = ahora.getDate();
+  const ventaEsperadaAlDia = diasEnMesPasado > 0 ? resumenMesPasadoCompleto.unidadesMes * (corteHoy / diasEnMesPasado) : 0;
   const pesoMesPanel = pesoPromedioMes(lotes, ahora);
   const pesoMesPasadoPanel = pesoPromedioMes(lotes, mesPasadoRef, ahora.getDate());
 
@@ -344,7 +349,7 @@ export default async function PanelPage({ searchParams }: {
             <div style={{ display:'flex', flexDirection:'column', gap:'7px' }}>
               {[
                 { label: 'Venta total mes al día', valor: `${resumenMesPanel.unidadesMes.toLocaleString('es-AR')} u`,
-                  pct: pctVs(resumenMesPanel.unidadesMes, resumenMesPasadoComparable.unidadesMes), mejorSiSube: true },
+                  pct: pctVs(resumenMesPanel.unidadesMes, ventaEsperadaAlDia), mejorSiSube: true },
                 { label: 'Venta total mes proyectada', valor: `${resumenMesPanel.proyeccionMes.toLocaleString('es-AR')} u`,
                   pct: pctVs(resumenMesPanel.proyeccionMes, resumenMesPasadoCompleto.unidadesMes), mejorSiSube: true },
                 { label: 'Ciclo actual rúcula', valor: ultSem?.rucula ? `${ultSem.rucula}d` : '—',
