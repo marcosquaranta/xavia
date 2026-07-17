@@ -15,6 +15,7 @@ export const dynamic = 'force-dynamic';
 export default async function EstadisticasPage({ searchParams }: { searchParams: { nave?: string; periodo?: string; evo?: string } }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
+  if (user.rol !== 'admin') redirect('/panel');
 
   const naveFilter = searchParams.nave || 'todas';
   const periodoMesada = (searchParams.periodo === 'd90' || searchParams.periodo === 'd180' ? searchParams.periodo : 'anio') as 'd90' | 'd180' | 'anio';

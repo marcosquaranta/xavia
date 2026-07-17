@@ -12,6 +12,7 @@ export const dynamic = 'force-dynamic';
 export default async function PlanificacionPage() {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
+  if (user.rol !== 'admin') redirect('/panel');
 
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [];
   let reparto: Slot[] = REPARTO_DEFAULT;

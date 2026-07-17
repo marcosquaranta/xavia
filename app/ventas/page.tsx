@@ -53,6 +53,7 @@ function calcStats(ventas: VentaDia[]) {
 export default async function VentasPage() {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
+  if (user.rol !== 'admin') redirect('/panel');
   let clientes: ClienteVenta[] = [], precios: PrecioVenta[] = [], ventas: VentaDia[] = [];
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], historicas: VentaHistorica[] = [];
   let err: string | null = null;
