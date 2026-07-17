@@ -85,3 +85,13 @@ export function calcularUsoTeorico(formulaUso: string, factorUso: number, driver
   if (driverValue === undefined) return null;
   return driverValue * (Number(factorUso) || 0);
 }
+
+// Para artículos SIN fórmula de uso teórico configurada (ácidos, sales, insumos genéricos
+// que no dependen de plantines sembrados): en vez de dejar "—", damos una referencia estimando
+// que el uso escala junto con el volumen de venta total respecto del mes anterior. No es un
+// target preciso como el uso teórico (por eso se marca aparte en la UI), es sólo una guía.
+export function calcularUsoReferencia(usoMesAnterior: number | null, ventasActualTotal: number, ventasAnteriorTotal: number): number | null {
+  if (usoMesAnterior === null || usoMesAnterior <= 0) return null;
+  if (ventasAnteriorTotal <= 0) return usoMesAnterior; // sin base de comparación, se mantiene plano
+  return usoMesAnterior * (ventasActualTotal / ventasAnteriorTotal);
+}

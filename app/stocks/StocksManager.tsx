@@ -3,7 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { Articulo, StockMes, Lote, VentaDia, PrecioVenta, ClienteVenta, Gasto } from '@/lib/types';
-import { calcularDriversMes, calcularUsoTeorico, DRIVERS } from '@/lib/usoTeorico';
+import { calcularDriversMes, calcularUsoTeorico, calcularUsoReferencia, DRIVERS } from '@/lib/usoTeorico';
 import { matchArticuloPorTexto } from '@/lib/matchArticulo';
 
 function copiarTSV(filas: (string | number)[][]) {
@@ -118,6 +118,16 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
   // Drivers de producción/ventas del mes seleccionado — alimentan el Uso Teórico configurado por artículo.
   const drivers = useMemo(() => calcularDriversMes(lotes, ventas, precios, clientes, anio, mes), [lotes, ventas, precios, clientes, anio, mes]);
 
+  const { anioPrev, mesPrev } = useMemo(() => {
+    let m = mes - 1, a = anio;
+    if (m === 0) { m = 12; a--; }
+    return { anioPrev: a, mesPrev: m };
+  }, [anio, mes]);
+
+  // Drivers del mes anterior — sólo se usan para artículos SIN fórmula de uso teórico, como
+  // base de comparación de venta ("Uso de referencia": ver calcularUsoReferencia).
+  const driversMesAnterior = useMemo(() => calcularDriversMes(lotes, ventas, precios, clientes, anioPrev, mesPrev), [lotes, ventas, precios, clientes, anioPrev, mesPrev]);
+
   // Stock del mes seleccionado
   const stockMes = useMemo(() =>
     stocks.filter((s) => String(s.anio) === String(anio) && String(s.mes) === String(mes)),
@@ -209,12 +219,20 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
       const usoTeorico = calcularUsoTeorico(art.formula_uso, Number(art.factor_uso) || 0, drivers);
       const diff = usoTeorico !== null ? usoReal - usoTeorico : null;
       const pct = usoTeorico !== null && usoTeorico !== 0 ? (diff! / usoTeorico) * 100 : null;
+      // Sin fórmula configurada: en vez de "—", una referencia = uso del mes anterior
+      // escalado por la variación de venta total mes vs. mes anterior.
+      let usoReferencia: number | null = null;
+      if (usoTeorico === null) {
+        const usoMesAnterior = getUso(art.id_articulo, anioPrev, mesPrev);
+        usoReferencia = calcularUsoReferencia(usoMesAnterior, drivers.paquetes_vendidos_total, driversMesAnterior.paquetes_vendidos_total);
+      }
+      const esReferencia = usoTeorico === null && usoReferencia !== null;
       const precio = precioUltimoConocido(art.id_articulo, num(vals.precio));
       const valorizado = precio !== null ? fin * precio : null;
-      return { art, ini, comp, fin, usoReal, usoTeorico, diff, pct, precio, valorizado };
+      return { art, ini, comp, fin, usoReal, usoTeorico, diff, pct, usoReferencia, esReferencia, precio, valorizado };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [artActivos, editValues, stockMes, drivers, stocks, anio, mes]);
+  }, [artActivos, editValues, stockMes, drivers, driversMesAnterior, stocks, anio, mes, anioPrev, mesPrev]);
 
   // Vista consolidada del mes
   const consolidado = useMemo(() => {
@@ -344,8 +362,8 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
             </div>
             {consolidado.sinConfigurar > 0 && (
               <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '6px 10px' }}>
-                El "Uso teórico" de cada artículo se calcula con los números de "Usos del sistema" de abajo (planchas sembradas, paquetes vendidos, etc.) — pero necesita que le asignes una fórmula y un factor en{' '}
-                <Link href="/admin/articulos" style={{ color: '#92400e', fontWeight: 700, textDecoration: 'underline' }}>Admin → Artículos</Link>. Sin eso, el artículo queda sin uso teórico (muestra "—").
+                El "Uso teórico" de cada artículo se calcula con los números de "Usos del sistema" de abajo (planchas sembradas, paquetes vendidos, etc.) — asignale una fórmula y un factor en{' '}
+                <Link href="/admin/articulos" style={{ color: '#92400e', fontWeight: 700, textDecoration: 'underline' }}>Admin → Artículos</Link> para tener un target preciso. Mientras tanto, esos artículos muestran un "Uso ref." (≈) estimado a partir del uso del mes anterior ajustado por la venta total — solo orientativo.
               </p>
             )}
             {consolidado.sinPrecio > 0 && (
@@ -609,7 +627,7 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                       <th style={{ textAlign: 'right', width: '90px' }}>Precio compra</th>
                       <th style={{ textAlign: 'right', width: '100px' }}>Stock final</th>
                       <th style={{ textAlign: 'right', width: '80px', color: '#059669', fontWeight: 700 }}>Uso real</th>
-                      <th style={{ textAlign: 'right', width: '80px', color: '#6b7280', fontWeight: 700 }}>Uso teórico</th>
+                      <th style={{ textAlign: 'right', width: '80px', color: '#6b7280', fontWeight: 700 }} title="≈ = referencia estimada (sin fórmula configurada), no un target preciso">Uso teórico</th>
                       <th style={{ textAlign: 'right', width: '100px', fontWeight: 700 }}>Dif. real vs teórico</th>
                       <th style={{ textAlign: 'right', width: '100px', fontWeight: 700 }}>Stock final valorizado</th>
                       <th style={{ width: '50px' }}></th>
@@ -621,7 +639,8 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                       const vals = getEdit(art.id_articulo);
                       const guardado = getStock(art.id_articulo);
                       const modificado = editValues[art.id_articulo] !== undefined;
-                      const diffColor = r.diff === null ? '#9ca3af' : r.diff > 0 ? '#dc2626' : '#059669';
+                      const diffRef = r.esReferencia && r.usoReferencia !== null ? r.usoReal - r.usoReferencia : null;
+                      const diffColor = r.diff !== null ? (r.diff > 0 ? '#dc2626' : '#059669') : diffRef !== null ? '#7c6fda' : '#9ca3af';
                       return (
                         <tr key={art.id_articulo} style={{ background: modificado ? '#fefce8' : 'transparent' }}>
                           <td style={{ fontWeight: 500 }}>{art.articulo}</td>
@@ -650,12 +669,20 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                             {(r.ini || r.comp || r.fin) ? fmt(r.usoReal) : '—'}
                           </td>
                           <td style={{ textAlign: 'right', color: '#6b7280', fontSize: '13px' }}>
-                            {r.usoTeorico !== null ? fmt(r.usoTeorico) : '—'}
+                            {r.usoTeorico !== null ? (
+                              fmt(r.usoTeorico)
+                            ) : r.esReferencia ? (
+                              <span style={{ fontStyle: 'italic', color: '#7c6fda' }} title="Referencia: uso del mes anterior ajustado por la variación de venta total. No hay fórmula configurada, es sólo orientativo.">
+                                ≈{fmt(r.usoReferencia!)}
+                              </span>
+                            ) : '—'}
                           </td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: diffColor, fontSize: '12px' }}>
                             {r.diff !== null && (r.ini || r.comp || r.fin)
                               ? `${r.diff > 0 ? '+' : ''}${fmt(r.diff)}${r.pct !== null ? ` (${r.pct > 0 ? '+' : ''}${fmt(r.pct, 0)}%)` : ''}`
-                              : '—'}
+                              : diffRef !== null && (r.ini || r.comp || r.fin)
+                                ? <span style={{ fontStyle: 'italic' }} title="Diferencia contra la referencia (no un target preciso).">≈{diffRef > 0 ? '+' : ''}{fmt(diffRef)}</span>
+                                : '—'}
                           </td>
                           <td style={{ textAlign: 'right', fontSize: '12px', color: r.valorizado !== null ? '#111827' : '#d1d5db' }}>
                             {r.valorizado !== null ? `$${fmt(r.valorizado, 0)}` : '—'}
@@ -738,7 +765,8 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                 {categorias.map((cat) => {
                   const artscat = artActivos.filter((a) => a.categoria === cat);
                   const hayDatos = artscat.some((a) =>
-                    mesesInforme.some((m) => getUso(a.id_articulo, m.anio, m.mes) !== null)
+                    mesesInforme.some((m) => getUso(a.id_articulo, m.anio, m.mes) !== null) ||
+                    resumenArticulos.find((x) => x.art.id_articulo === a.id_articulo)?.esReferencia
                   );
                   if (!hayDatos) return null;
                   return (
@@ -748,24 +776,38 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                       </tr>
                       {artscat.map((art) => {
                         const usos = mesesInforme.map((m) => getUso(art.id_articulo, m.anio, m.mes));
-                        if (usos.every((u) => u === null)) return null;
+                        const rActual = resumenArticulos.find((x) => x.art.id_articulo === art.id_articulo);
+                        if (usos.every((u) => u === null) && !rActual?.esReferencia) return null;
                         const maxUso = Math.max(...usos.filter((u): u is number => u !== null));
+                        const ultimoIdx = mesesInforme.length - 1;
                         return (
                           <tr key={art.id_articulo}>
                             <td style={{ fontWeight: 500 }}>{art.articulo}</td>
                             <td style={{ textAlign: 'center', color: '#9ca3af', fontSize: '11px' }}>{art.unidad_medida}</td>
-                            {usos.map((u, i) => (
-                              <td key={i} style={{
-                                textAlign: 'right',
-                                fontWeight: u === maxUso && u > 0 ? 700 : 400,
-                                color: u === null ? '#e5e7eb' : u > 0 ? '#1f2937' : '#dc2626',
-                                background: u !== null && u > 0 && maxUso > 0
-                                  ? `rgba(5, 150, 105, ${0.05 + (u / maxUso) * 0.2})`
-                                  : 'transparent',
-                              }}>
-                                {u === null ? '—' : u.toLocaleString('es-AR', { maximumFractionDigits: 3 })}
-                              </td>
-                            ))}
+                            {usos.map((u, i) => {
+                              // Mes actual sin carga todavía + artículo sin fórmula: mostramos la
+                              // referencia estimada en vez de un guión, para que sirva como comparación.
+                              if (u === null && i === ultimoIdx && rActual?.esReferencia) {
+                                return (
+                                  <td key={i} style={{ textAlign: 'right', fontStyle: 'italic', color: '#7c6fda' }}
+                                    title="Referencia estimada: uso del mes anterior ajustado por variación de venta total.">
+                                    ≈{fmt(rActual.usoReferencia!)}
+                                  </td>
+                                );
+                              }
+                              return (
+                                <td key={i} style={{
+                                  textAlign: 'right',
+                                  fontWeight: u === maxUso && u > 0 ? 700 : 400,
+                                  color: u === null ? '#e5e7eb' : u > 0 ? '#1f2937' : '#dc2626',
+                                  background: u !== null && u > 0 && maxUso > 0
+                                    ? `rgba(5, 150, 105, ${0.05 + (u / maxUso) * 0.2})`
+                                    : 'transparent',
+                                }}>
+                                  {u === null ? '—' : u.toLocaleString('es-AR', { maximumFractionDigits: 3 })}
+                                </td>
+                              );
+                            })}
                           </tr>
                         );
                       })}
