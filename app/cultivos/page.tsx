@@ -73,7 +73,7 @@ export default async function CultivosPage({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
           <div>
             <h1 className="page-title">Mis cultivos</h1>
-            <p className="page-subtitle" style={{ marginBottom: 0 }}>{conteos.todos} lotes activos</p>
+            <p className="page-subtitle" style={{ marginBottom: 0 }}>{fase === 'borrados' ? `${conteos.borrados} lotes borrados` : `${conteos.todos} lotes activos`}</p>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <Link
@@ -92,7 +92,7 @@ export default async function CultivosPage({
 
         {/* Filtros — se ocultan cuando hay búsqueda activa */}
         {!query && (
-          <FiltrosLotes cultivoActivo={cultivo} faseActiva={fase} naveActiva={nave} mesadaActiva={mesada} tiempoActivo={tiempo} conteos={conteos} ubicaciones={ubicaciones} baseUrl="/cultivos" />
+          <FiltrosLotes cultivoActivo={cultivo} faseActiva={fase} naveActiva={nave} mesadaActiva={mesada} tiempoActivo={tiempo} conteos={conteos} ubicaciones={ubicaciones} baseUrl="/cultivos" esAdmin={user.rol === 'admin'} />
         )}
 
         {/* Resultados */}
@@ -117,7 +117,7 @@ export default async function CultivosPage({
           </div>
         ) : (
           lotesFiltrados.map((lote) => (
-            <LoteCard key={lote.id_lote} lote={lote} movimientos={movimientos} ubicaciones={ubicaciones} variedades={variedades} ciclosReales={ciclosReales} />
+            <LoteCard key={lote.id_lote} lote={lote} movimientos={movimientos} ubicaciones={ubicaciones} variedades={variedades} ciclosReales={ciclosReales} esAdmin={user.rol === 'admin'} />
           ))
         )}
       </div>

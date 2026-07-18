@@ -1,7 +1,7 @@
 export type Rol = 'admin' | 'usuario';
 export type Fase = 'plantin' | 'fase_1' | 'fase_2';
-export type EstadoLote = 'activo' | 'cosechado' | 'descartado';
-export type TipoMovimiento = 'siembra' | 'trasplante' | 'cosecha' | 'descarte';
+export type EstadoLote = 'activo' | 'cosechado' | 'descartado' | 'borrado';
+export type TipoMovimiento = 'siembra' | 'trasplante' | 'cosecha' | 'descarte' | 'division';
 export type NivelAlerta = '' | 'verde' | 'amarillo' | 'rojo';
 export type DestinoCosecha = 'planta' | 'paquete' | 'bandeja' | 'cajon';
 

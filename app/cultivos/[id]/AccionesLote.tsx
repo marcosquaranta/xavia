@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import RestaurarLoteButton from '@/components/RestaurarLoteButton';
 
 interface Props {
   idLote: string;
@@ -22,6 +23,7 @@ export default function AccionesLote({
   const [loadingBorrar, setLoadingBorrar] = useState(false);
 
   const activo = estado === 'activo';
+  const esBorrado = estado === 'borrado';
   const puedeDeshacer = ultimoMovId && (ultimoMovTipo === 'trasplante' || ultimoMovTipo === 'cosecha');
 
   async function handleDeshacer() {
@@ -44,7 +46,7 @@ export default function AccionesLote({
   }
 
   async function handleBorrar() {
-    if (!confirm(`¿Borrar permanentemente el lote ${idLote} y todos sus movimientos? Esta acción no se puede revertir.`)) return;
+    if (!confirm(`¿Borrar el lote ${idLote}? Deja de aparecer en Mis Cultivos y en los cálculos, pero se puede restaurar después desde el filtro "Borrados".`)) return;
     setLoadingBorrar(true);
     try {
       const fd = new FormData();
@@ -61,6 +63,16 @@ export default function AccionesLote({
     } finally {
       setLoadingBorrar(false);
     }
+  }
+
+  if (esBorrado) {
+    return (
+      <div className="card">
+        <p className="card-title">Acciones</p>
+        <p style={{ margin: '0 0 10px', fontSize: '12px', color: '#b91c1c' }}>Este lote está borrado — no aparece en Mis Cultivos ni en ningún cálculo.</p>
+        {esAdmin && <RestaurarLoteButton idLote={idLote} />}
+      </div>
+    );
   }
 
   return (

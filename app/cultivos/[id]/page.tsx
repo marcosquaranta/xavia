@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Fragment } from 'react';
 import { notFound, redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
@@ -31,7 +32,7 @@ export default async function DetalleLotePage({ params }: { params: { id: string
   const labelFase = lote.fase_actual === 'plantin' ? 'Plantinera' : lote.fase_actual === 'fase_1' ? 'Fase 1' : 'Fase 2';
   function fmt(f: string) { if (!f) return '-'; try { const [,m,d] = String(f).split('-'); return d+'/'+m; } catch { return f; } }
   function fmtFull(f: string) { if (!f) return '-'; try { const [y,m,d] = String(f).split('-'); return d+'/'+m+'/'+y; } catch { return f; } }
-  function lTipo(t: string) { return { siembra: 'Siembra', trasplante: 'Trasplante', cosecha: 'Cosecha', descarte: 'Descarte' }[t] || t; }
+  function lTipo(t: string) { return { siembra: 'Siembra', trasplante: 'Trasplante', cosecha: 'Cosecha', descarte: 'Descarte', division: 'División' }[t] || t; }
   function lFase(f: string) { return { plantin: 'Plantinera', fase_1: 'Fase 1', fase_2: 'Fase 2' }[f] || f || '-'; }
   return (
     <>
@@ -83,13 +84,20 @@ export default async function DetalleLotePage({ params }: { params: { id: string
               <thead><tr><th>Fecha</th><th>Tipo</th><th>Origen</th><th>Destino</th><th style={{ textAlign: 'right' }}>Cant.</th><th>Usuario</th></tr></thead>
               <tbody>
                 {movsLote.map((m) => (
-                  <tr key={m.id_movimiento}>
-                    <td>{fmt(String(m.fecha || ''))}</td><td>{lTipo(String(m.tipo || ''))}</td>
-                    <td style={{ color: '#6b7280' }}>{lFase(String(m.fase_origen || ''))}</td>
-                    <td style={{ color: '#6b7280' }}>{lFase(String(m.fase_destino || ''))}</td>
-                    <td style={{ textAlign: 'right' }}>{m.tipo === 'cosecha' ? (m.unidades_cosechadas || 0) + ' u' : m.plantas_estimadas || '-'}</td>
-                    <td style={{ color: '#9ca3af', fontSize: '11px' }}>{String(m.usuario || '—').split('@')[0]}</td>
-                  </tr>
+                  <Fragment key={m.id_movimiento}>
+                    <tr>
+                      <td>{fmt(String(m.fecha || ''))}</td><td>{lTipo(String(m.tipo || ''))}</td>
+                      <td style={{ color: '#6b7280' }}>{lFase(String(m.fase_origen || ''))}</td>
+                      <td style={{ color: '#6b7280' }}>{lFase(String(m.fase_destino || ''))}</td>
+                      <td style={{ textAlign: 'right' }}>{m.tipo === 'cosecha' ? (m.unidades_cosechadas || 0) + ' u' : m.tipo === 'division' ? (m.plantas_estimadas || 0) + ' quedan' : m.plantas_estimadas || '-'}</td>
+                      <td style={{ color: '#9ca3af', fontSize: '11px' }}>{String(m.usuario || '—').split('@')[0]}</td>
+                    </tr>
+                    {m.tipo === 'division' && m.notas && (
+                      <tr>
+                        <td colSpan={6} style={{ color: '#6b7280', fontSize: '11px', fontStyle: 'italic', paddingTop: 0, paddingBottom: '8px' }}>{m.notas}</td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

@@ -11,9 +11,10 @@ interface Props {
   conteos: ConteosFiltros;
   ubicaciones: Ubicacion[];
   baseUrl: string;
+  esAdmin?: boolean;
 }
 
-export default function FiltrosLotes({ cultivoActivo, faseActiva, naveActiva, mesadaActiva, tiempoActivo = 'todos', conteos, ubicaciones, baseUrl }: Props) {
+export default function FiltrosLotes({ cultivoActivo, faseActiva, naveActiva, mesadaActiva, tiempoActivo = 'todos', conteos, ubicaciones, baseUrl, esAdmin = false }: Props) {
   function url(c: string, f: string, n: string, m: string, t = 'todos') {
     const p = new URLSearchParams();
     if (c !== 'todos') p.set('cultivo', c);
@@ -92,6 +93,11 @@ export default function FiltrosLotes({ cultivoActivo, faseActiva, naveActiva, me
             <span className="pill" style={pill(faseValidada === f.key, '#4b5563', 'white', '#4b5563')}>{f.label}</span>
           </Link>
         ))}
+        {esAdmin && (
+          <Link href={url(cultivoActivo, 'borrados', naveActiva, mesadaActiva)} style={{ textDecoration: 'none' }}>
+            <span className="pill" style={pill(faseValidada === 'borrados', '#b91c1c', '#fef2f2', '#b91c1c')}>🗑 Borrados ({conteos.borrados})</span>
+          </Link>
+        )}
       </div>
 
       {/* Fila 3: Nave */}

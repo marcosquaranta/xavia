@@ -158,6 +158,22 @@ if (nuevoId !== lote.id_lote) {
       `Trasplante con división desde ${lote.id_lote}: ${plantasReales} plantas`,
     ]);
 
+    // Movimiento espejo en el lote PADRE (antes solo quedaba una nota de texto en
+    // lote.notas — no aparecía en "Historial de movimientos" porque ese único registro
+    // de trasplante se grababa con id_lote = idNuevo, no con el del padre). Tipo propio
+    // 'division' (no 'trasplante': no hay cambio de fase real acá, y así el botón
+    // "Deshacer último" — que sólo actúa sobre trasplante/cosecha — no ofrece deshacer
+    // esto a medias sin revertir también el lote hijo ya creado).
+    const idMovPadre = await proximoIdMovimiento();
+    await appendRow('Movimientos', [
+      idMovPadre, lote.id_lote, fecha, 'division',
+      '', '', '', '',
+      '', plantasQuedanReales,
+      '', '', '', '', '', '',
+      '', '', '', '', '', user.email, '',
+      `División: quedan ${plantasQuedanReales} plantas en este lote · ${plantasReales} trasplantadas → ${idNuevo}`,
+    ]);
+
     return NextResponse.json({ ok: true, id_lote_padre: lote.id_lote, id_lote_nuevo: idNuevo, dividido: true });
 
   } catch (err: any) {

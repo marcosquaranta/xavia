@@ -123,7 +123,7 @@ export function naveRealDeLote(l: Lote, mesadaNave?: Map<string, number>): 1 | 2
 }
 
 export type FiltroCultivo = 'todos' | 'lechuga' | 'rucula' | 'albahaca';
-export type FiltroFase = 'todas' | 'plantinera' | 'fase_1' | 'fase_2' | 'cosechados';
+export type FiltroFase = 'todas' | 'plantinera' | 'fase_1' | 'fase_2' | 'cosechados' | 'borrados';
 export type FiltroNave = 'todas' | '1' | '2';
 export type FiltroMesada = string; // nombre de mesada o 'todas'
 export type FiltroTiempo = 'todos' | '7d' | '30d' | '90d'; // para cosechados
@@ -134,7 +134,9 @@ export function aplicarFiltros3(lotes: Lote[], cultivo: FiltroCultivo, fase: Fil
   const mesadaNave = ubicaciones ? mapaMesadaNave(ubicaciones) : undefined;
   let base = fase === 'cosechados'
     ? lotes.filter((l) => l.estado === 'cosechado')
-    : lotes.filter((l) => l.estado === 'activo');
+    : fase === 'borrados'
+      ? lotes.filter((l) => l.estado === 'borrado')
+      : lotes.filter((l) => l.estado === 'activo');
   if (nave !== 'todas') {
     const n = Number(nave);
     base = base.filter((l) => naveRealDeLote(l, mesadaNave) === n);
@@ -172,7 +174,7 @@ export function aplicarFiltros(lotes: Lote[], filtro: FiltroCultivos, nave: Filt
   return aplicarFiltros3(lotes, 'todos', 'todas', nave);
 }
 
-export interface ConteosFiltros { todos: number; lechuga: number; rucula: number; albahaca: number; plantinera: number; fase_1: number; fase_2: number; cosechados: number; }
+export interface ConteosFiltros { todos: number; lechuga: number; rucula: number; albahaca: number; plantinera: number; fase_1: number; fase_2: number; cosechados: number; borrados: number; }
 
 export function contarPorFiltro(lotes: Lote[], nave: FiltroNave, ubicaciones?: Ubicacion[]): ConteosFiltros {
   const mesadaNave = ubicaciones ? mapaMesadaNave(ubicaciones) : undefined;
@@ -182,7 +184,7 @@ export function contarPorFiltro(lotes: Lote[], nave: FiltroNave, ubicaciones?: U
     base = base.filter((l) => naveRealDeLote(l, mesadaNave) === n);
   }
   const activos = base.filter((l) => l.estado === 'activo');
-  const cont: ConteosFiltros = { todos: activos.length, lechuga: 0, rucula: 0, albahaca: 0, plantinera: 0, fase_1: 0, fase_2: 0, cosechados: base.filter((l) => l.estado === 'cosechado').length };
+  const cont: ConteosFiltros = { todos: activos.length, lechuga: 0, rucula: 0, albahaca: 0, plantinera: 0, fase_1: 0, fase_2: 0, cosechados: base.filter((l) => l.estado === 'cosechado').length, borrados: base.filter((l) => l.estado === 'borrado').length };
   for (const l of activos) {
     const c = codigoCultivo(l.variedad);
     if (c === 'L') cont.lechuga++; else if (c === 'R') cont.rucula++; else if (c === 'A') cont.albahaca++;

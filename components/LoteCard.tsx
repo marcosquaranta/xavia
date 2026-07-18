@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { calcularDiasPorFase, claseVariedad, estimarPlantasActuales, naveDeLote } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad } from '@/lib/types';
 import { getCicloReal } from '@/lib/estadisticas';
+import RestaurarLoteButton from './RestaurarLoteButton';
 const COL: Record<string, { bg: string; text: string; label: string }> = {
   lechuga: { bg: '#4d7c0f', text: 'white', label: 'LECHUGA' },
   rucula: { bg: '#166534', text: 'white', label: 'RÚCULA' },
@@ -17,7 +18,7 @@ function fmt(f: string): string {
   if (!f) return '-';
   try { const [, m, d] = String(f).split('-'); return d + '/' + m; } catch { return f; }
 }
-export default function LoteCard({ lote, movimientos, ubicaciones, variedades, ciclosReales }: { lote: Lote; movimientos: Movimiento[]; ubicaciones: Ubicacion[]; variedades: Variedad[]; ciclosReales?: Map<string, number> }) {
+export default function LoteCard({ lote, movimientos, ubicaciones, variedades, ciclosReales, esAdmin = false }: { lote: Lote; movimientos: Movimiento[]; ubicaciones: Ubicacion[]; variedades: Variedad[]; ciclosReales?: Map<string, number>; esAdmin?: boolean }) {
   let dias: any;
   try { dias = calcularDiasPorFase(lote, movimientos); }
   catch { dias = { plantinera: 0, fase_1: null, fase_2: 0, total: 0, fechas: { siembra: '', fase_1_inicio: null, fase_2_inicio: null, cosecha: null } }; }
@@ -39,7 +40,9 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades, c
   if (lote.fase_actual === 'fase_2') { accionLabel = 'Cosechar'; accionHref = '/cultivos/' + encodeURIComponent(lote.id_lote) + '/cosechar'; }
   else if (lote.fase_actual === 'fase_1') accionLabel = 'Pasar a F2';
   const esCosechado = lote.estado === 'cosechado';
-  const colorFase = esCosechado ? '#94a3b8'
+  const esBorrado = lote.estado === 'borrado';
+  const colorFase = esBorrado ? '#dc2626'
+    : esCosechado ? '#94a3b8'
     : lote.fase_actual === 'plantin' ? '#ca8a04'
     : lote.fase_actual === 'fase_1' ? '#3b82f6'
     : '#16a34a';
@@ -47,7 +50,7 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades, c
   return (
     <div className={'lote-row ' + claseVariedad(lote)} style={{
       borderLeft: `5px solid ${colorFase}`,
-      ...(esCosechado ? { background: '#f8fafc', opacity: 0.75 } : {}),
+      ...(esBorrado ? { background: '#fef2f2', opacity: 0.8 } : esCosechado ? { background: '#f8fafc', opacity: 0.75 } : {}),
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -57,6 +60,7 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades, c
             {lote.variedad.toLowerCase().includes('roble') && <span style={{ fontSize: '11px', color: '#6b7280' }}>Hoja de Roble</span>}
             {nave && <span style={{ background: nave === 1 ? '#881337' : '#7c3aed', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>Nave {nave}</span>}
             {mesada && mesada !== 'Plantinera' && <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151', background: '#f3f4f6', padding: '2px 8px', borderRadius: '4px', border: '1px solid #e5e7eb' }}>{mesada}</span>}
+            {esBorrado && <span style={{ background: '#dc2626', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>🗑 Borrado</span>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             <span className={'pill ' + claseFase}>{labelFase}</span>
@@ -71,6 +75,7 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades, c
         </div>
         <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
           {lote.estado === 'activo' && <Link href={accionHref} className="btn small">{accionLabel}</Link>}
+          {esBorrado && esAdmin && <RestaurarLoteButton idLote={lote.id_lote} small />}
           <Link href={'/cultivos/' + encodeURIComponent(lote.id_lote)} className="btn secondary small">Ver</Link>
         </div>
       </div>

@@ -11,6 +11,7 @@ const TIPO_LABEL: Record<string, { label: string; color: string; bg: string }> =
   trasplante: { label: 'Trasplante', color: '#1e40af', bg: '#dbeafe' },
   cosecha:    { label: 'Cosecha',    color: '#166534', bg: '#dcfce7' },
   descarte:   { label: 'Descarte',   color: '#6b7280', bg: '#f3f4f6' },
+  division:   { label: 'División',   color: '#7c3aed', bg: '#ede9fe' },
 };
 
 function fmtFecha(s: any) {
@@ -97,7 +98,7 @@ export default async function MovimientosPage({
           ))}
           <span style={{ width: '1px', height: '20px', background: '#e5e7eb', display: 'inline-block' }} />
           <span style={{ fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase' }}>Tipo</span>
-          {['todos', 'siembra', 'trasplante', 'cosecha'].map(t => (
+          {['todos', 'siembra', 'trasplante', 'cosecha', 'division'].map(t => (
             <Link key={t} href={`/movimientos?tipo=${t}&dias=${diasFiltro}`} style={{ textDecoration: 'none' }}>
               <span style={{ padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: tipoFiltro === t ? 700 : 400, background: tipoFiltro === t ? (TIPO_LABEL[t]?.bg || '#111827') : '#f3f4f6', color: tipoFiltro === t ? (TIPO_LABEL[t]?.color || 'white') : '#374151', border: tipoFiltro === t ? `1px solid ${TIPO_LABEL[t]?.color || '#111'}` : '1px solid transparent', cursor: 'pointer' }}>
                 {t === 'todos' ? 'Todos' : TIPO_LABEL[t]?.label}
@@ -141,7 +142,9 @@ export default async function MovimientosPage({
                       ? `${cantCosechado.toLocaleString('es-AR')} paq. (${cantEstimado.toLocaleString('es-AR')} pl)`
                       : m.tipo === 'cosecha' && cantCosechado > 0
                         ? `${cantCosechado.toLocaleString('es-AR')} pl`
-                        : cantEstimado > 0 ? `${cantEstimado.toLocaleString('es-AR')} pl` : '';
+                        : m.tipo === 'division' && cantEstimado > 0
+                          ? `${cantEstimado.toLocaleString('es-AR')} quedan`
+                          : cantEstimado > 0 ? `${cantEstimado.toLocaleString('es-AR')} pl` : '';
                     const usuario = String(m.usuario || '').split('@')[0] || '—';
 
                     return (
@@ -189,6 +192,13 @@ export default async function MovimientosPage({
                         <span style={{ fontSize: '11px', color: '#9ca3af', minWidth: '60px', textAlign: 'right' }}>
                           {usuario}
                         </span>
+
+                        {/* Detalle de la división: cuántos quedan + a dónde se fue el resto */}
+                        {m.tipo === 'division' && m.notas && (
+                          <span style={{ flexBasis: '100%', fontSize: '11px', color: '#6b7280', fontStyle: 'italic' }}>
+                            {m.notas}
+                          </span>
+                        )}
                       </Link>
                     );
                   })}

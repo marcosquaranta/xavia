@@ -31,6 +31,7 @@ const TIPO_LABEL: Record<string, { label: string; color: string; bg: string }> =
   trasplante: { label: 'Trasplante', color: '#1e40af', bg: '#dbeafe' },
   cosecha:    { label: 'Cosecha',    color: '#166534', bg: '#dcfce7' },
   descarte:   { label: 'Descarte',   color: '#6b7280', bg: '#f3f4f6' },
+  division:   { label: 'División',   color: '#7c3aed', bg: '#ede9fe' },
 };
 
 function fmtFecha(s: any) {
