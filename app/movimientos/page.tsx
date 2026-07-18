@@ -132,10 +132,16 @@ export default async function MovimientosPage({
                     const varNorm = String(lote?.variedad || '').toLowerCase();
                     const esRucula = varNorm.includes('rucula') || varNorm.includes('rúcula');
                     const colorVar = esRucula ? '#166534' : '#4d7c0f';
-                    const cantNum = Number(m.plantas_estimadas || 0);
-                    const unidades = m.tipo === 'cosecha' && esRucula && cantNum > 0
-                      ? `${Math.round(cantNum/3)} paq. (${cantNum.toLocaleString('es-AR')} pl)`
-                      : cantNum > 0 ? `${cantNum.toLocaleString('es-AR')} pl` : '';
+                    // Cosecha: la cantidad real cosechada va en unidades_cosechadas, NO en
+                    // plantas_estimadas (esa es la estimación de siembra/trasplante — para
+                    // cosecha queda vieja/desactualizada). Mismo criterio que ya usa el Panel.
+                    const cantCosechado = Number(m.unidades_cosechadas || 0);
+                    const cantEstimado = Number(m.plantas_estimadas || 0);
+                    const unidades = m.tipo === 'cosecha' && esRucula && cantCosechado > 0
+                      ? `${cantCosechado.toLocaleString('es-AR')} paq. (${cantEstimado.toLocaleString('es-AR')} pl)`
+                      : m.tipo === 'cosecha' && cantCosechado > 0
+                        ? `${cantCosechado.toLocaleString('es-AR')} pl`
+                        : cantEstimado > 0 ? `${cantEstimado.toLocaleString('es-AR')} pl` : '';
                     const usuario = String(m.usuario || '').split('@')[0] || '—';
 
                     return (
@@ -173,7 +179,7 @@ export default async function MovimientosPage({
                         )}
 
                         {/* Cantidad */}
-                        {Number(m.plantas_estimadas || 0) > 0 && (
+                        {unidades && (
                           <span style={{ fontSize: '13px', fontWeight: 600, color: '#374151', minWidth: '70px', textAlign: 'right' }}>
                             {unidades}
                           </span>
