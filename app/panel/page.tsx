@@ -5,11 +5,12 @@ import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
 import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio } from '@/lib/estadisticas';
 import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
-import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara } from '@/lib/types';
+import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, Articulo, StockMes } from '@/lib/types';
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
 import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
 import { evolucionVentaPorArticulo, resumenMesActual } from '@/lib/estadisticasVentas';
-import { generarAlertas } from '@/lib/alertasPanel';
+import { generarAlertas, alertasStockBajo } from '@/lib/alertasPanel';
+import { calcularDriversMes } from '@/lib/usoTeorico';
 import { calcularCamara, diferenciaAjustesMes } from '@/lib/camara';
 import Header from '@/components/Header';
 import FiltrosLotes from '@/components/FiltrosLotes';
@@ -59,8 +60,9 @@ export default async function PanelPage({ searchParams }: {
   let ventasPanel: VentaDia[] = [], clientesPanel: ClienteVenta[] = [], preciosPanel: PrecioVenta[] = [], historicasPanel: VentaHistorica[] = [];
   let configRows: { clave: string; valor: any }[] = [];
   let registrosCamara: StockCamara[] = [];
+  let articulosPanel: Articulo[] = [], stocksPanel: StockMes[] = [];
   try {
-    [lotes, movimientos, ubicaciones, variedades, ventasPanel, clientesPanel, preciosPanel, historicasPanel, configRows, registrosCamara] = await Promise.all([
+    [lotes, movimientos, ubicaciones, variedades, ventasPanel, clientesPanel, preciosPanel, historicasPanel, configRows, registrosCamara, articulosPanel, stocksPanel] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<Ubicacion>('Ubicaciones'), readSheet<Variedad>('Variedades'),
       readSheet<VentaDia>('Ventas'),
@@ -69,6 +71,8 @@ export default async function PanelPage({ searchParams }: {
       readSheet<VentaHistorica>('VentasHistoricas').catch(() => []),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
       readSheet<StockCamara>('StockCamara').catch(() => []),
+      readSheet<Articulo>('Articulos').catch(() => []),
+      readSheet<StockMes>('Stocks').catch(() => []),
     ]);
   } catch {}
 
@@ -159,7 +163,16 @@ export default async function PanelPage({ searchParams }: {
 
   // ── ALERTAS ──
   const hoy = new Date();
-  const alertas = generarAlertas(lotes, tubosMesadas, ciclosRealesMap, ocGlobal);
+  // Stock de insumos por debajo de 15 días de uso — mismos drivers de producción/venta que
+  // alimentan el "Uso Teórico" de Stocks, ver lib/alertasPanel.ts (alertasStockBajo).
+  const driversStockActual = calcularDriversMes(lotes, ventasPanel, preciosPanel, clientesPanel, ahora.getFullYear(), ahora.getMonth() + 1);
+  const driversStockMesAnterior = calcularDriversMes(lotes, ventasPanel, preciosPanel, clientesPanel, mesPasadoRef.getFullYear(), mesPasadoRef.getMonth() + 1);
+  const alertasStock = alertasStockBajo(articulosPanel, stocksPanel, driversStockActual, driversStockMesAnterior, ahora.getFullYear(), ahora.getMonth() + 1, diasEnMesPasado, 15);
+  const alertas = [...generarAlertas(lotes, tubosMesadas, ciclosRealesMap, ocGlobal), ...alertasStock].sort((a, b) => {
+    const pa = a.prioridad ?? ({ error: 1, warn: 2, info: 3 } as any)[a.tipo];
+    const pb = b.prioridad ?? ({ error: 1, warn: 2, info: 3 } as any)[b.tipo];
+    return pa - pb;
+  });
 
   // Desvíos de cosecha (antes en la sección "Alertas" propia, ahora solo en el home) —
   // solo admin, últimos 30 días, sin revisar primero.

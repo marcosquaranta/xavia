@@ -1,4 +1,5 @@
-import type { Lote } from './types';
+import type { Lote, Articulo, StockMes } from './types';
+import { calcularUsoTeorico, type DriversMes } from './usoTeorico';
 
 export interface Alerta { tipo: 'error' | 'warn' | 'info'; msg: string; lote?: string; prioridad?: number }
 
@@ -93,5 +94,59 @@ export function generarAlertas(lotes: Lote[], tubosMesadas: any[], ciclosRealesM
     return pa - pb;
   });
 
+  return alertas;
+}
+
+function numAP(v: any): number { const n = Number(v); return isNaN(n) ? 0 : n; }
+
+// 🔴 Insumos con stock estimado por debajo de N días de uso — mismo motor que "Uso Teórico"
+// de Stocks (calcularUsoTeorico + drivers de producción/venta), pero acá se usa para proyectar
+// el stock ACTUAL (a hoy, no a fin de mes) y compararlo contra el ritmo de consumo diario.
+// Solo se evalúan artículos con fórmula configurada y con algún historial en Stocks — sin eso
+// no hay forma de estimar nada (evita falsos positivos en artículos nunca cargados).
+export function alertasStockBajo(
+  articulos: Articulo[], stocks: StockMes[],
+  driversActual: DriversMes, driversMesAnterior: DriversMes,
+  anioActual: number, mesActual: number, diasEnMesAnterior: number, umbralDias = 15
+): Alerta[] {
+  const diasTranscurridos = new Date().getDate();
+  let mesAnteriorNum = mesActual - 1, anioAnteriorNum = anioActual;
+  if (mesAnteriorNum === 0) { mesAnteriorNum = 12; anioAnteriorNum--; }
+
+  const alertas: Alerta[] = [];
+  for (const art of articulos.filter((a) => a.activo === 'SI' && a.formula_uso)) {
+    const stockDelArticulo = stocks.filter((s) => String(s.id_articulo) === String(art.id_articulo));
+    if (!stockDelArticulo.length) continue; // sin ningún registro histórico, no se puede estimar
+
+    const actualRow = stockDelArticulo.find((s) => String(s.anio) === String(anioActual) && String(s.mes) === String(mesActual));
+    const anteriorRow = stockDelArticulo.find((s) => String(s.anio) === String(anioAnteriorNum) && String(s.mes) === String(mesAnteriorNum));
+    const ini = actualRow ? numAP(actualRow.stock_inicial) : numAP(anteriorRow?.stock_final);
+    const comp = numAP(actualRow?.compras);
+    const finManual = numAP(actualRow?.stock_final);
+    const factor = Number(art.factor_uso) || 0;
+
+    // Stock "del momento": si ya hay un conteo manual cargado este mes se usa ese (más preciso
+    // que cualquier estimación); si no, se proyecta inicial + compras − uso teórico acumulado
+    // en lo que va del mes (drivers reales a la fecha, no proyectados).
+    const usoTeoricoActual = calcularUsoTeorico(art.formula_uso, factor, driversActual);
+    const stockActual = finManual > 0 ? finManual : Math.max(0, ini + comp - (usoTeoricoActual ?? 0));
+
+    // Ritmo diario: preferimos el mes pasado COMPLETO (más estable) y sólo si no hay uso ahí
+    // (insumo nuevo, estacional, etc.) caemos al ritmo parcial de lo que va del mes actual.
+    const usoTeoricoMesAnterior = calcularUsoTeorico(art.formula_uso, factor, driversMesAnterior);
+    let usoPorDia: number | null = null;
+    if (usoTeoricoMesAnterior && usoTeoricoMesAnterior > 0 && diasEnMesAnterior > 0) usoPorDia = usoTeoricoMesAnterior / diasEnMesAnterior;
+    else if (usoTeoricoActual && usoTeoricoActual > 0 && diasTranscurridos > 0) usoPorDia = usoTeoricoActual / diasTranscurridos;
+    if (!usoPorDia || usoPorDia <= 0) continue;
+
+    const diasDeUso = stockActual / usoPorDia;
+    if (diasDeUso < umbralDias) {
+      const diasTxt = Math.max(0, Math.round(diasDeUso));
+      alertas.push({
+        tipo: 'error',
+        msg: `${art.articulo}: stock estimado para ~${diasTxt}d (${stockActual.toLocaleString('es-AR', { maximumFractionDigits: 1 })} ${art.unidad_medida}) — reponer`,
+      });
+    }
+  }
   return alertas;
 }
