@@ -94,9 +94,12 @@ export const PRODUCTO_CODIGO: Record<string, string> = {
   albahaca: 'ALBAHACA_HIDROPONICA',
   rucula_kg: 'RUCULA_HIDROPONICA_KG',
   lechuga_kg: 'LECHUGA_HIDROPONICA_KG', // legacy, ventas cargadas antes del split crespa/roble
-  // Confirmados por el usuario tal cual figuran en Xubio.
-  lechuga_kg_crespa: 'KG Lechuga Crespa',
-  lechuga_kg_roble: 'KG Lechuga Hoja de Roble',
+  // El "código" de Xubio no es un campo aparte que el usuario cargue — son productos
+  // sin código propio, y por lo que ya funciona en los de arriba, Xubio deriva el código
+  // del nombre (mayúsculas, sin acentos, espacios → "_"). Nombres reales del catálogo:
+  // "KG Lechuga Crespa" / "KG Lechuga Hoja de Roble" → mismo patrón aplicado acá.
+  lechuga_kg_crespa: 'KG_LECHUGA_CRESPA',
+  lechuga_kg_roble: 'KG_LECHUGA_HOJA_DE_ROBLE',
 };
 
 async function xubioPost<T = any>(path: string, body: any): Promise<{ ok: boolean; status: number; data: T }> {
