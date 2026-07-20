@@ -85,7 +85,9 @@ export async function getUltimosNumerosPorPV(): Promise<UltimoNumeroPV[]> {
 export const PV_ID_A = 126160; // PV 00002 — Factura A, electrónica con CAE
 export const PV_ID_B = 123457; // PV 00001 — Factura B, sin CAE
 
-// Mapeo de nuestros productos al código de producto en Xubio
+// Mapeo de nuestros productos al NOMBRE de producto en Xubio (no hay un código aparte
+// cargado en el catálogo — la conexión con Xubio siempre fue por nombre de producto,
+// igual que con el cliente en matchClienteXubio más abajo).
 export const PRODUCTO_CODIGO: Record<string, string> = {
   rucula: 'RUCULA_HIDROPONICA',
   lechuga_crespa: 'LECHUGA_CRESPA_HIDROPONICA',
@@ -94,12 +96,9 @@ export const PRODUCTO_CODIGO: Record<string, string> = {
   albahaca: 'ALBAHACA_HIDROPONICA',
   rucula_kg: 'RUCULA_HIDROPONICA_KG',
   lechuga_kg: 'LECHUGA_HIDROPONICA_KG', // legacy, ventas cargadas antes del split crespa/roble
-  // El "código" de Xubio no es un campo aparte que el usuario cargue — son productos
-  // sin código propio, y por lo que ya funciona en los de arriba, Xubio deriva el código
-  // del nombre (mayúsculas, sin acentos, espacios → "_"). Nombres reales del catálogo:
-  // "KG Lechuga Crespa" / "KG Lechuga Hoja de Roble" → mismo patrón aplicado acá.
-  lechuga_kg_crespa: 'KG_LECHUGA_CRESPA',
-  lechuga_kg_roble: 'KG_LECHUGA_HOJA_DE_ROBLE',
+  // Nombres reales confirmados por el usuario, tal cual figuran en Xubio.
+  lechuga_kg_crespa: 'KG Lechuga Crespa',
+  lechuga_kg_roble: 'KG Lechuga Hoja de Roble',
 };
 
 async function xubioPost<T = any>(path: string, body: any): Promise<{ ok: boolean; status: number; data: T }> {
@@ -143,7 +142,10 @@ export async function emitirFactura(args: { clienteId: number; esA: boolean; fec
     condicionDePago: 1,
     deposito: { codigo: 'DEPOSITO_UNIVERSAL' },
     transaccionProductoItems: args.items.map(it => ({
-      producto: { codigo: it.codigo },
+      // Conexión con el producto por NOMBRE, no por código (mismo criterio que el
+      // cliente en matchClienteXubio) — Xubio no tiene un código propio cargado para
+      // estos productos.
+      producto: { nombre: it.codigo },
       descripcion: it.descripcion || '',
       cantidad: it.cantidad,
       precio: it.precio,
