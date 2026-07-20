@@ -94,10 +94,9 @@ export const PRODUCTO_CODIGO: Record<string, string> = {
   albahaca: 'ALBAHACA_HIDROPONICA',
   rucula_kg: 'RUCULA_HIDROPONICA_KG',
   lechuga_kg: 'LECHUGA_HIDROPONICA_KG', // legacy, ventas cargadas antes del split crespa/roble
-  // OJO: códigos armados por convención con los de arriba — verificar que existan tal cual
-  // en el catálogo de Xubio antes de emitir la primera factura real con estos productos.
-  lechuga_kg_crespa: 'LECHUGA_CRESPA_HIDROPONICA_KG',
-  lechuga_kg_roble: 'LECHUGA_HOJA_DE_ROBLE_VERDE_HIDROPONICA_KG',
+  // Confirmados por el usuario tal cual figuran en Xubio.
+  lechuga_kg_crespa: 'KG Lechuga Crespa',
+  lechuga_kg_roble: 'KG Lechuga Hoja de Roble',
 };
 
 async function xubioPost<T = any>(path: string, body: any): Promise<{ ok: boolean; status: number; data: T }> {

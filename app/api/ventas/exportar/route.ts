@@ -22,8 +22,8 @@ const PRODS = [
 const PRODS_KG = [
   { key: 'rucula_kg',          xubio: 'Rucula Hidropónica KG' },
   { key: 'lechuga_kg',         xubio: 'Lechuga Hidropónica KG' },
-  { key: 'lechuga_kg_crespa',  xubio: 'Lechuga Crespa Hidropónica KG' },
-  { key: 'lechuga_kg_roble',   xubio: 'Lechuga Hoja de Roble Verde Hidropónica KG' },
+  { key: 'lechuga_kg_crespa',  xubio: 'KG Lechuga Crespa' },
+  { key: 'lechuga_kg_roble',   xubio: 'KG Lechuga Hoja de Roble' },
 ] as const;
 
 
