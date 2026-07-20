@@ -245,9 +245,13 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
       const r=await fetch('/api/ventas/cargar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha})});
       const j=await r.json();if(!r.ok)throw new Error(j.error);
       const nEmit=(j.emitidas||[]).length, nErr=(j.errores||[]).length;
+      // Antes solo se mostraba la cantidad de errores ("revisá en Facturación") sin el
+      // detalle — y esa página no guarda el error en ningún lado, solo lo muestra al
+      // momento de reintentar ahí. Mostrar el mensaje real acá evita ese callejón sin salida.
+      const detalleErrores = (j.errores||[]).map((e:any)=>`• ${e.cliente}: ${e.error}`).join('\n');
       const txt = nEmit>0
-        ? `✓ Facturas cargadas OK\n${resumenCarga(todasLineas)}${nErr>0?`\n\n⚠ ${nErr} con error — revisalas en Facturación.`:''}`
-        : nErr>0 ? `No se pudo emitir ninguna (${nErr} con error) — revisá en Facturación.` : `${j.clientes} cliente(s) cargados.`;
+        ? `✓ Facturas cargadas OK\n${resumenCarga(todasLineas)}${nErr>0?`\n\n⚠ ${nErr} con error:\n${detalleErrores}`:''}`
+        : nErr>0 ? `No se pudo emitir ninguna (${nErr} con error):\n${detalleErrores}` : `${j.clientes} cliente(s) cargados.`;
       setMsg({t: nErr>0 && nEmit===0 ? 'err' : 'ok', s: txt});
       setCtds({});setEsts({});setCtdsKg({});ctdsKgLive.current={};setFc({});
     }catch(err:any){setMsg({t:'err',s:err.message});}
