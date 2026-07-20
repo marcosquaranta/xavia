@@ -15,7 +15,9 @@ const PRODS: { key: string; label: string }[] = [
   { key: 'bandeja_rucula', label: 'Bandeja' },
   { key: 'albahaca', label: 'Albahaca' },
   { key: 'rucula_kg', label: 'Rúcula KG' },
-  { key: 'lechuga_kg', label: 'Lechuga KG' },
+  { key: 'lechuga_kg', label: 'Lechuga KG' }, // legacy, ventas cargadas antes del split crespa/roble
+  { key: 'lechuga_kg_crespa', label: 'Lechuga Crespa KG' },
+  { key: 'lechuga_kg_roble', label: 'Lechuga Roble KG' },
 ];
 
 function getPrecio(precios: PrecioVenta[], id_control: string, sucursal: string, key: string, clienteSucursales?: string): number {

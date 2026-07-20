@@ -5,7 +5,7 @@ import { enviarResumenPendientes } from '@/lib/resumenFacturacion';
 import { emitirPendientes, enviarAvisoCaePendiente } from '@/lib/facturacionEmitir';
 import type { VentaDia } from '@/lib/types';
 
-const QTY_KEYS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg'];
+const QTY_KEYS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'];
 
 // Marca las ventas borrador de una fecha como PENDIENTE y las emite DIRECTO a Xubio
 // (una factura por cliente, sin pasar por la sección Facturación). Las que fallen

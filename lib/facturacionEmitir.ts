@@ -2,7 +2,8 @@ import { readSheet, batchUpdateRows } from './sheets';
 import type { ClienteVenta, PrecioVenta, VentaDia } from './types';
 import { getClientesXubio, matchClienteXubio, emitirFactura, PRODUCTO_CODIGO } from './xubio';
 
-const PROD_KEYS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg'] as const;
+// lechuga_kg queda para no perder ventas por kg cargadas antes del split crespa/roble.
+const PROD_KEYS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
 
 const NOMBRE_PROD: Record<string, string> = {
   rucula: 'Rúcula (paquetes)',
@@ -12,6 +13,8 @@ const NOMBRE_PROD: Record<string, string> = {
   albahaca: 'Albahaca',
   rucula_kg: 'Rúcula (kg)',
   lechuga_kg: 'Lechuga (kg)',
+  lechuga_kg_crespa: 'Lechuga Crespa (kg)',
+  lechuga_kg_roble: 'Lechuga Hoja de Roble (kg)',
 };
 
 function getPrecio(precios: PrecioVenta[], id_control: string, sucursal: string, key: string, clienteSucursales?: string): number {

@@ -13,9 +13,12 @@ const PROD_LABELS = [
   { key: 'bandeja_rucula', label: 'Bandeja Rúcula' },
   { key: 'albahaca',       label: 'Albahaca' },
 ];
+// lechuga_kg (precio único, legacy) ya no se edita acá — reemplazado por precio propio
+// por variedad. El valor viejo se preserva en la planilla pero no se toca desde este form.
 const KG_LABELS = [
-  { key: 'rucula_kg',  label: 'Rúcula KG' },
-  { key: 'lechuga_kg', label: 'Lechuga KG' },
+  { key: 'rucula_kg',         label: 'Rúcula KG' },
+  { key: 'lechuga_kg_crespa', label: 'Lechuga Crespa KG' },
+  { key: 'lechuga_kg_roble',  label: 'Lechuga Roble KG' },
 ];
 
 function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, esKg, onSaved }: {

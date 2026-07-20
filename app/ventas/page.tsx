@@ -33,13 +33,14 @@ function calcStats(ventas: VentaDia[]) {
   const iniMesAnt  = new Date(hoy.getFullYear(), hoy.getMonth()-1, 1);
   const finMesAnt  = new Date(hoy.getFullYear(), hoy.getMonth(), 0, 23, 59, 59);
   const emptyPaq = () => ({ rucula: 0, lechuga_crespa: 0, hoja_roble: 0 });
-  const emptyKg  = () => ({ rucula_kg: 0, lechuga_kg: 0 });
+  // lechuga_kg (legacy) queda para no perder ventas cargadas antes del split crespa/roble.
+  const emptyKg  = () => ({ rucula_kg: 0, lechuga_kg: 0, lechuga_kg_crespa: 0, lechuga_kg_roble: 0 });
   const r = { semanaActual: emptyPaq(), semanaAnterior: emptyPaq(), mesActual: emptyPaq(), mesAnterior: emptyPaq() };
   const kg = { semanaActual: emptyKg(), semanaAnterior: emptyKg(), mesActual: emptyKg(), mesAnterior: emptyKg() };
   for (const v of ventas) {
     const f = safeD(v.fecha); if (!f) continue;
     const keysPaq = ['rucula','lechuga_crespa','hoja_roble'] as const;
-    const keysKg  = ['rucula_kg','lechuga_kg'] as const;
+    const keysKg  = ['rucula_kg','lechuga_kg','lechuga_kg_crespa','lechuga_kg_roble'] as const;
     const addPaq = (t: typeof r.semanaActual)  => { for (const k of keysPaq) t[k] += Number((v as any)[k]) || 0; };
     const addKg  = (t: typeof kg.semanaActual) => { for (const k of keysKg)  t[k] += Number((v as any)[k]) || 0; };
     if (f >= iniSemAct)                         { addPaq(r.semanaActual);  addKg(kg.semanaActual); }

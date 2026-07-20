@@ -14,10 +14,10 @@ const PE = [
 ] as const;
 const ALL = [...PP,...PE];
 
-interface LineaCarga { id_control:string; nombre_cliente:string; rucula:number; lechuga_crespa:number; hoja_roble:number; bandeja_rucula:number; albahaca:number; rucula_kg:number; lechuga_kg:number }
+interface LineaCarga { id_control:string; nombre_cliente:string; rucula:number; lechuga_crespa:number; hoja_roble:number; bandeja_rucula:number; albahaca:number; rucula_kg:number; lechuga_kg_crespa:number; lechuga_kg_roble:number }
 // Resumen de texto (cantidades por cliente y por producto) para el mensaje de "Cargar ventas".
 function resumenCarga(lineas: LineaCarga[]): string {
-  const claveProd = [...ALL.map(p=>({key:p.key as keyof LineaCarga & string, label:p.label, u:'u'})), {key:'rucula_kg' as const,label:'Rúcula',u:'kg'}, {key:'lechuga_kg' as const,label:'Lechuga',u:'kg'}];
+  const claveProd = [...ALL.map(p=>({key:p.key as keyof LineaCarga & string, label:p.label, u:'u'})), {key:'rucula_kg' as const,label:'Rúcula',u:'kg'}, {key:'lechuga_kg_crespa' as const,label:'Lechuga Crespa',u:'kg'}, {key:'lechuga_kg_roble' as const,label:'Lechuga Roble',u:'kg'}];
   const porCliente = new Map<string, number>();
   const porProducto = new Map<string, number>();
   for (const l of lineas) {
@@ -37,13 +37,19 @@ function resumenCarga(lineas: LineaCarga[]): string {
 }
 type PK = 'rucula'|'lechuga_crespa'|'hoja_roble'|'bandeja_rucula'|'albahaca';
 type SV = { rucula:number; lechuga_crespa:number; hoja_roble:number };
-type SKG = { rucula_kg:number; lechuga_kg:number };
+// lechuga_kg (legacy, sin distinguir variedad) sigue en el shape porque calcStats la
+// sigue sumando para no perder historial, aunque esta pantalla ya no la usa.
+type SKG = { rucula_kg:number; lechuga_kg:number; lechuga_kg_crespa:number; lechuga_kg_roble:number };
 type Stats = { semanaActual:SV; semanaAnterior:SV; mesActual:SV; mesAnterior:SV; kg:{semanaActual:SKG;semanaAnterior:SKG;mesActual:SKG;mesAnterior:SKG} };
 interface Fila { id_control:string; nombre_cliente:string; sucursal:string; nombre_display:string; tipo:string; unidad:'paq'|'kg'|'' }
 type Ctds = Record<string, Record<PK,string>>;
-type CKG = Record<string, {rucula_kg:string; lechuga_kg:string}>;
+// Claves KG editables desde esta pantalla — lechuga_kg (legacy, precio único sin variedad)
+// ya no se carga acá, solo se preserva lo ya guardado (ver /api/ventas/guardar).
+type KGK = 'rucula_kg'|'lechuga_kg_crespa'|'lechuga_kg_roble';
+type CKG = Record<string, Record<KGK,string>>;
 type Ests = Record<string, Record<PK,'idle'|'saving'|'saved'|'error'>>;
 const EQ: Record<PK,string> = { rucula:'',lechuga_crespa:'',hoja_roble:'',bandeja_rucula:'',albahaca:'' };
+const EQ_KG: Record<KGK,string> = { rucula_kg:'', lechuga_kg_crespa:'', lechuga_kg_roble:'' };
 
 function mkFilas(cs: ClienteVenta[], freq: Record<string,number>): Fila[] {
   const out: Fila[] = [];
@@ -86,8 +92,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
   const [facturadasHoy,setFacturadasHoy]=useState<VentaDia[]>([]);
   const ctdsKgLive=useRef<CKG>({});
   // Referencias directas a los inputs KG del DOM — fuente de verdad para saveKg
-  const kgInputRefs=useRef<Record<string,{rucula_kg:HTMLInputElement|null;lechuga_kg:HTMLInputElement|null}>>({});
-  type EstKG = Record<string,{rucula_kg:'idle'|'saving'|'saved'|'error';lechuga_kg:'idle'|'saving'|'saved'|'error'}>;
+  const kgInputRefs=useRef<Record<string,Record<KGK,HTMLInputElement|null>>>({});
+  type EstKG = Record<string,Record<KGK,'idle'|'saving'|'saved'|'error'>>;
   const [estsKg,setEstsKg]=useState<EstKG>({});
   const tmrs=useRef<Record<string,ReturnType<typeof setTimeout>>>({});
 
@@ -145,7 +151,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
       for(const v of data){
         const key=`${v.id_control}__${v.sucursal}`;
         c[key]={rucula:String(v.rucula||''),lechuga_crespa:String(v.lechuga_crespa||''),hoja_roble:String(v.hoja_roble||''),bandeja_rucula:String(v.bandeja_rucula||''),albahaca:String(v.albahaca||'')};
-        ckg[key]={rucula_kg:String(v.rucula_kg||''),lechuga_kg:String(v.lechuga_kg||'')};
+        ckg[key]={rucula_kg:String(v.rucula_kg||''),lechuga_kg_crespa:String(v.lechuga_kg_crespa||''),lechuga_kg_roble:String(v.lechuga_kg_roble||'')};
       }
       ctdsKgLive.current=ckg;
       setFechaExportada(true);
@@ -161,7 +167,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
       for(const v of data){
         const key=`${v.id_control}__${v.sucursal}`;
         c[key]={rucula:String(v.rucula||''),lechuga_crespa:String(v.lechuga_crespa||''),hoja_roble:String(v.hoja_roble||''),bandeja_rucula:String(v.bandeja_rucula||''),albahaca:String(v.albahaca||'')};
-        ckg[key]={rucula_kg:String(v.rucula_kg||''),lechuga_kg:String(v.lechuga_kg||'')};
+        ckg[key]={rucula_kg:String(v.rucula_kg||''),lechuga_kg_crespa:String(v.lechuga_kg_crespa||''),lechuga_kg_roble:String(v.lechuga_kg_roble||'')};
       }
       ctdsKgLive.current = ckg;
       setFechaExportada(false);
@@ -199,26 +205,28 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
       se(f.id_control,f.sucursal,k,'saved');setTimeout(()=>se(f.id_control,f.sucursal,k,'idle'),2000);
     }catch{se(f.id_control,f.sucursal,k,'error');}
   }
-  function qKg(id:string,suc:string,k:'rucula_kg'|'lechuga_kg'){return ctdsKg[`${id}__${suc}`]?.[k]||'';}
-  function seKg(id:string,suc:string,k:'rucula_kg'|'lechuga_kg',v:'idle'|'saving'|'saved'|'error'){
-    setEstsKg(p=>({...p,[`${id}__${suc}`]:{...(p[`${id}__${suc}`]||{rucula_kg:'idle',lechuga_kg:'idle'}),[k]:v}}));
+  const KGK_ALL: KGK[] = ['rucula_kg','lechuga_kg_crespa','lechuga_kg_roble'];
+  function qKg(id:string,suc:string,k:KGK){return ctdsKg[`${id}__${suc}`]?.[k]||'';}
+  function seKg(id:string,suc:string,k:KGK,v:'idle'|'saving'|'saved'|'error'){
+    setEstsKg(p=>({...p,[`${id}__${suc}`]:{...(p[`${id}__${suc}`]||{rucula_kg:'idle',lechuga_kg_crespa:'idle',lechuga_kg_roble:'idle'}),[k]:v}}));
   }
-  function onChangeKg(f:Fila,k:'rucula_kg'|'lechuga_kg',v:string){
-    setCtdsKg(p=>{const next={...p,[`${f.id_control}__${f.sucursal}`]:{...(p[`${f.id_control}__${f.sucursal}`]||{rucula_kg:'',lechuga_kg:''}),[k]:v}};ctdsKgLive.current=next;return next;});
+  function onChangeKg(f:Fila,k:KGK,v:string){
+    setCtdsKg(p=>{const next={...p,[`${f.id_control}__${f.sucursal}`]:{...(p[`${f.id_control}__${f.sucursal}`]||EQ_KG),[k]:v}};ctdsKgLive.current=next;return next;});
     seKg(f.id_control,f.sucursal,k,'idle');
   }
   async function saveKg(f:Fila){
     const domRefs=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];
     // Leer del DOM directamente — es la fuente más confiable (sin closures ni batching de React)
     const rkg=Number(domRefs?.rucula_kg?.value)||0;
-    const lkg=Number(domRefs?.lechuga_kg?.value)||0;
-    (['rucula_kg','lechuga_kg'] as const).forEach(k=>seKg(f.id_control,f.sucursal,k,'saving'));
+    const lkgC=Number(domRefs?.lechuga_kg_crespa?.value)||0;
+    const lkgR=Number(domRefs?.lechuga_kg_roble?.value)||0;
+    KGK_ALL.forEach(k=>seKg(f.id_control,f.sucursal,k,'saving'));
     try{
-      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:currentExportId,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:rkg,lechuga_kg:lkg}]})});
+      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:currentExportId,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:rkg,lechuga_kg_crespa:lkgC,lechuga_kg_roble:lkgR}]})});
       if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error((j as any).error||'Error');};
-      (['rucula_kg','lechuga_kg'] as const).forEach(k=>{seKg(f.id_control,f.sucursal,k,'saved');setTimeout(()=>seKg(f.id_control,f.sucursal,k,'idle'),2000);});
+      KGK_ALL.forEach(k=>{seKg(f.id_control,f.sucursal,k,'saved');setTimeout(()=>seKg(f.id_control,f.sucursal,k,'idle'),2000);});
     }catch(err:any){
-      (['rucula_kg','lechuga_kg'] as const).forEach(k=>seKg(f.id_control,f.sucursal,k,'error'));
+      KGK_ALL.forEach(k=>seKg(f.id_control,f.sucursal,k,'error'));
       setMsg({t:'err',s:`Error al guardar KG de ${f.nombre_display}: ${err.message}`});
     }
   }
@@ -229,9 +237,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
       Object.values(tmrs.current).forEach(t=>clearTimeout(t));
       // Flush de todas las cantidades cargadas (igual que en exportar)
       const todasLineas = [
-        ...filasNormales.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:Number(q(f.id_control,f.sucursal,'rucula'))||0,lechuga_crespa:Number(q(f.id_control,f.sucursal,'lechuga_crespa'))||0,hoja_roble:Number(q(f.id_control,f.sucursal,'hoja_roble'))||0,bandeja_rucula:Number(q(f.id_control,f.sucursal,'bandeja_rucula'))||0,albahaca:Number(q(f.id_control,f.sucursal,'albahaca'))||0,rucula_kg:0,lechuga_kg:0})),
-        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg:Number(dr?.lechuga_kg?.value)||0};}),
-      ].filter(l=>l.rucula>0||l.lechuga_crespa>0||l.hoja_roble>0||l.bandeja_rucula>0||l.albahaca>0||l.rucula_kg>0||l.lechuga_kg>0);
+        ...filasNormales.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:Number(q(f.id_control,f.sucursal,'rucula'))||0,lechuga_crespa:Number(q(f.id_control,f.sucursal,'lechuga_crespa'))||0,hoja_roble:Number(q(f.id_control,f.sucursal,'hoja_roble'))||0,bandeja_rucula:Number(q(f.id_control,f.sucursal,'bandeja_rucula'))||0,albahaca:Number(q(f.id_control,f.sucursal,'albahaca'))||0,rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
+        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg_crespa:Number(dr?.lechuga_kg_crespa?.value)||0,lechuga_kg_roble:Number(dr?.lechuga_kg_roble?.value)||0};}),
+      ].filter(l=>l.rucula>0||l.lechuga_crespa>0||l.hoja_roble>0||l.bandeja_rucula>0||l.albahaca>0||l.rucula_kg>0||l.lechuga_kg_crespa>0||l.lechuga_kg_roble>0);
       const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:todasLineas})});
       if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar ventas');}
       const r=await fetch('/api/ventas/cargar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha})});
@@ -252,10 +260,10 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
       // Cancelar timers pendientes y guardar TODO en UN solo request antes de exportar
       Object.values(tmrs.current).forEach(t=>clearTimeout(t));
       const todasLineas = [
-        ...filasNormales.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:Number(q(f.id_control,f.sucursal,'rucula'))||0,lechuga_crespa:Number(q(f.id_control,f.sucursal,'lechuga_crespa'))||0,hoja_roble:Number(q(f.id_control,f.sucursal,'hoja_roble'))||0,bandeja_rucula:Number(q(f.id_control,f.sucursal,'bandeja_rucula'))||0,albahaca:Number(q(f.id_control,f.sucursal,'albahaca'))||0,rucula_kg:0,lechuga_kg:0})),
-        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg:Number(dr?.lechuga_kg?.value)||0};}),
+        ...filasNormales.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:Number(q(f.id_control,f.sucursal,'rucula'))||0,lechuga_crespa:Number(q(f.id_control,f.sucursal,'lechuga_crespa'))||0,hoja_roble:Number(q(f.id_control,f.sucursal,'hoja_roble'))||0,bandeja_rucula:Number(q(f.id_control,f.sucursal,'bandeja_rucula'))||0,albahaca:Number(q(f.id_control,f.sucursal,'albahaca'))||0,rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
+        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg_crespa:Number(dr?.lechuga_kg_crespa?.value)||0,lechuga_kg_roble:Number(dr?.lechuga_kg_roble?.value)||0};}),
       // Solo enviar líneas con al menos una cantidad > 0
-      ].filter(l=>l.rucula>0||l.lechuga_crespa>0||l.hoja_roble>0||l.bandeja_rucula>0||l.albahaca>0||l.rucula_kg>0||l.lechuga_kg>0);
+      ].filter(l=>l.rucula>0||l.lechuga_crespa>0||l.hoja_roble>0||l.bandeja_rucula>0||l.albahaca>0||l.rucula_kg>0||l.lechuga_kg_crespa>0||l.lechuga_kg_roble>0);
       const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:currentExportId,lineas:todasLineas})});
       if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar ventas');}
       const r=await fetch('/api/ventas/exportar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,fechasCliente:fc,correlaA:Number(correlaA),correlaB:Number(correlaB),enviarEmail,...(currentExportId?{id_exportacion:currentExportId}:{})})});
@@ -277,9 +285,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
   const filasKg = filas.filter(f=>f.unidad==='kg');
   const tots:Record<PK,number>={rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0};
   for(const f of filasNormales)for(const p of ALL)tots[p.key]+=Number(q(f.id_control,f.sucursal,p.key))||0;
-  const totsKg={rucula_kg:0,lechuga_kg:0};
-  for(const f of filasKg){totsKg.rucula_kg+=Number(qKg(f.id_control,f.sucursal,'rucula_kg'))||0;totsKg.lechuga_kg+=Number(qKg(f.id_control,f.sucursal,'lechuga_kg'))||0;}
-  const hayV=Object.values(tots).some(v=>v>0)||totsKg.rucula_kg>0||totsKg.lechuga_kg>0;
+  const totsKg={rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0};
+  for(const f of filasKg)for(const k of KGK_ALL) totsKg[k]+=Number(qKg(f.id_control,f.sucursal,k))||0;
+  const hayV=Object.values(tots).some(v=>v>0)||Object.values(totsKg).some(v=>v>0);
 
   // Total por cliente hace 7 días (para comparación)
   function total7d(id_control:string, sucursal:string): number {
@@ -572,7 +580,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
                 <tr style={{background:'#fef3c7',borderBottom:'1px solid #fde68a'}}>
                   <th style={{textAlign:'left',padding:'8px 12px',minWidth:'150px'}}>Cliente</th>
                   <th style={{textAlign:'center',padding:'8px 10px',color:'#166534',fontWeight:700,minWidth:'110px'}}>Rúcula KG</th>
-                  <th style={{textAlign:'center',padding:'8px 10px',color:'#4d7c0f',fontWeight:700,minWidth:'110px'}}>Lechuga KG</th>
+                  <th style={{textAlign:'center',padding:'8px 10px',color:'#4d7c0f',fontWeight:700,minWidth:'110px'}}>Lechuga Crespa KG</th>
+                  <th style={{textAlign:'center',padding:'8px 10px',color:'#65a30d',fontWeight:700,minWidth:'110px'}}>Lechuga Roble KG</th>
                   <th style={{textAlign:'right',padding:'8px 10px',color:'#92400e',fontWeight:700,minWidth:'90px'}}>Total KG</th>
                   <th style={{textAlign:'center',padding:'8px 6px',color:'#9ca3af',minWidth:'92px',fontSize:'10px'}}>Fecha fact.</th>
                 </tr>
@@ -580,15 +589,16 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
               <tbody>
                 {filasKg.map((f,i)=>{
                   const rkg=Number(qKg(f.id_control,f.sucursal,'rucula_kg'))||0;
-                  const lkg=Number(qKg(f.id_control,f.sucursal,'lechuga_kg'))||0;
-                  const act=rkg>0||lkg>0;
+                  const lkgC=Number(qKg(f.id_control,f.sucursal,'lechuga_kg_crespa'))||0;
+                  const lkgR=Number(qKg(f.id_control,f.sucursal,'lechuga_kg_roble'))||0;
+                  const act=rkg>0||lkgC>0||lkgR>0;
                   return(
                     <tr key={`${f.id_control}__${f.sucursal}`} style={{background:act?'#fffbeb':(i%2===0?'white':'#fafafa'),borderBottom:'1px solid #fef3c7'}}>
                       <td style={{padding:'6px 12px'}}>
                         <span style={{fontWeight:act?600:400}}>{f.nombre_display}</span>
                         <span style={{marginLeft:'4px',fontSize:'10px',background:f.tipo==='A'?'#dbeafe':'#fef9c3',color:f.tipo==='A'?'#1e40af':'#92400e',padding:'1px 4px',borderRadius:'3px',fontWeight:600}}>F{f.tipo}</span>
                       </td>
-                      {(['rucula_kg','lechuga_kg'] as const).map(k=>{
+                      {KGK_ALL.map(k=>{
                         const val=qKg(f.id_control,f.sucursal,k);
                         const estKg=estsKg[`${f.id_control}__${f.sucursal}`]?.[k]||'idle';
                         const bdrCol=estKg==='saved'?'#22c55e':estKg==='error'?'#ef4444':Number(val)>0?'#fbbf24':'#e5e7eb';
@@ -596,7 +606,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
                           <td key={k} style={{padding:'3px 8px',textAlign:'center'}}>
                             <div style={{position:'relative',display:'inline-block'}}>
                               <input type="number" min={0} step={0.1} value={val} placeholder="0"
-                                ref={el=>{if(!kgInputRefs.current[`${f.id_control}__${f.sucursal}`])kgInputRefs.current[`${f.id_control}__${f.sucursal}`]={rucula_kg:null,lechuga_kg:null};kgInputRefs.current[`${f.id_control}__${f.sucursal}`][k]=el;}}
+                                ref={el=>{if(!kgInputRefs.current[`${f.id_control}__${f.sucursal}`])kgInputRefs.current[`${f.id_control}__${f.sucursal}`]={rucula_kg:null,lechuga_kg_crespa:null,lechuga_kg_roble:null};kgInputRefs.current[`${f.id_control}__${f.sucursal}`][k]=el;}}
                                 onChange={ev=>onChangeKg(f,k,ev.target.value)} onBlur={()=>saveKg(f)}
                                 style={{width:'90px',textAlign:'center',fontSize:'15px',fontWeight:700,
                                   border:`2px solid ${bdrCol}`,
@@ -612,7 +622,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
                       })}
                       <td style={{padding:'4px 10px',textAlign:'right'}}>
                         <p style={{margin:0,fontSize:'15px',fontWeight:800,color:act?'#92400e':'#d1d5db'}}>
-                          {act?(rkg+lkg).toFixed(1)+' kg':'—'}
+                          {act?(rkg+lkgC+lkgR).toFixed(1)+' kg':'—'}
                         </p>
                       </td>
                       <td style={{padding:'3px 5px'}}>
@@ -625,8 +635,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
                 <tr style={{background:'#fef3c7',borderTop:'2px solid #fbbf24'}}>
                   <td style={{padding:'8px 12px',fontSize:'12px',fontWeight:700,color:'#92400e'}}>Total KG</td>
                   <td style={{textAlign:'center',padding:'8px',fontSize:'15px',fontWeight:800,color:totsKg.rucula_kg>0?'#166534':'#d1d5db'}}>{totsKg.rucula_kg>0?totsKg.rucula_kg.toFixed(1)+' kg':'—'}</td>
-                  <td style={{textAlign:'center',padding:'8px',fontSize:'15px',fontWeight:800,color:totsKg.lechuga_kg>0?'#4d7c0f':'#d1d5db'}}>{totsKg.lechuga_kg>0?totsKg.lechuga_kg.toFixed(1)+' kg':'—'}</td>
-                  <td style={{textAlign:'right',padding:'8px 10px',fontSize:'16px',fontWeight:800,color:'#92400e'}}>{(totsKg.rucula_kg+totsKg.lechuga_kg).toFixed(1)} kg</td>
+                  <td style={{textAlign:'center',padding:'8px',fontSize:'15px',fontWeight:800,color:totsKg.lechuga_kg_crespa>0?'#4d7c0f':'#d1d5db'}}>{totsKg.lechuga_kg_crespa>0?totsKg.lechuga_kg_crespa.toFixed(1)+' kg':'—'}</td>
+                  <td style={{textAlign:'center',padding:'8px',fontSize:'15px',fontWeight:800,color:totsKg.lechuga_kg_roble>0?'#65a30d':'#d1d5db'}}>{totsKg.lechuga_kg_roble>0?totsKg.lechuga_kg_roble.toFixed(1)+' kg':'—'}</td>
+                  <td style={{textAlign:'right',padding:'8px 10px',fontSize:'16px',fontWeight:800,color:'#92400e'}}>{(totsKg.rucula_kg+totsKg.lechuga_kg_crespa+totsKg.lechuga_kg_roble).toFixed(1)} kg</td>
                   <td/>
                 </tr>
               </tbody>
@@ -640,7 +651,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
           const fL = stockCamara?.factorGrPaq?.lechuga || 330;
           const lecPaq = tots.lechuga_crespa+tots.hoja_roble;
           const rKgPaq = Math.round(totsKg.rucula_kg*1000/fR);  // KG cajón → paq equivalentes
-          const lKgPaq = Math.round(totsKg.lechuga_kg*1000/fL);
+          const lKgPaqCrespa = Math.round(totsKg.lechuga_kg_crespa*1000/fL);
+          const lKgPaqRoble = Math.round(totsKg.lechuga_kg_roble*1000/fL);
+          const lKgPaq = lKgPaqCrespa + lKgPaqRoble;
           const rTotPaq = tots.rucula + rKgPaq;
           const lTotPaq = lecPaq + lKgPaq;
           return(
@@ -659,7 +672,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
                 <p style={{margin:'0 0 4px',fontSize:'10px',fontWeight:700,color:'#4d7c0f',textTransform:'uppercase'}}>Lechuga</p>
                 {lecPaq>0&&<p style={{margin:'0 0 1px',fontSize:'13px',color:'#374151'}}><strong>{lecPaq}</strong> paq</p>}
                 {tots.lechuga_crespa>0&&tots.hoja_roble>0&&<p style={{margin:'0 0 1px',fontSize:'10px',color:'#9ca3af'}}>{tots.lechuga_crespa} crespa · {tots.hoja_roble} roble</p>}
-                {totsKg.lechuga_kg>0&&<p style={{margin:'0 0 1px',fontSize:'12px',color:'#92400e'}}>{totsKg.lechuga_kg.toFixed(1)} kg cajón <span style={{color:'#9ca3af'}}>→ {lKgPaq} paq</span></p>}
+                {totsKg.lechuga_kg_crespa>0&&<p style={{margin:'0 0 1px',fontSize:'12px',color:'#92400e'}}>{totsKg.lechuga_kg_crespa.toFixed(1)} kg crespa <span style={{color:'#9ca3af'}}>→ {lKgPaqCrespa} paq</span></p>}
+                {totsKg.lechuga_kg_roble>0&&<p style={{margin:'0 0 1px',fontSize:'12px',color:'#92400e'}}>{totsKg.lechuga_kg_roble.toFixed(1)} kg roble <span style={{color:'#9ca3af'}}>→ {lKgPaqRoble} paq</span></p>}
                 <p style={{margin:'4px 0 0',fontSize:'15px',fontWeight:800,color:'#4d7c0f',borderTop:'1px solid #e5e7eb',paddingTop:'4px'}}>{lTotPaq} paq total</p>
               </div>
               {/* Total consolidado */}

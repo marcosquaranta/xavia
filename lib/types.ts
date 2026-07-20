@@ -143,7 +143,12 @@ export interface PrecioVenta {
   bandeja_rucula: string;
   albahaca: string;
   rucula_kg: string;   // precio por KG de rúcula (para clientes unidad=kg)
-  lechuga_kg: string;  // precio por KG de lechuga
+  lechuga_kg: string;  // LEGACY — precio por KG de lechuga sin distinguir variedad. Ya no se
+                        // edita desde el admin (ver KG_LABELS en ClientesVentaManager); se
+                        // mantiene solo para no perder el valor de clientes cargados antes del
+                        // split. Los precios nuevos van en lechuga_kg_crespa/lechuga_kg_roble.
+  lechuga_kg_crespa: string;
+  lechuga_kg_roble: string;
 }
 
 export interface VentaDia {
@@ -158,10 +163,14 @@ export interface VentaDia {
   bandeja_rucula: string;
   albahaca: string;
   rucula_kg: string;
-  lechuga_kg: string;
+  lechuga_kg: string;  // LEGACY — ver comentario en PrecioVenta. Las cargas nuevas usan
+                        // lechuga_kg_crespa/lechuga_kg_roble; esta columna sigue existiendo
+                        // solo para no perder las ventas por kg cargadas antes del split.
   exportado: string;
   usuario: string;
   fecha_carga: string;
+  lechuga_kg_crespa: string;
+  lechuga_kg_roble: string;
 }
 
 export interface ConfigItem {

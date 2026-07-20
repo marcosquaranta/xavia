@@ -1,7 +1,7 @@
 import { readSheet } from './sheets';
 import type { ClienteVenta, PrecioVenta, VentaDia } from './types';
 
-const PRODS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg'];
+const PRODS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'];
 const fmt = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 
 function getPrecio(precios: PrecioVenta[], id_control: string, sucursal: string, key: string, clienteSucursales?: string): number {

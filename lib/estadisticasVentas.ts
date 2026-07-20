@@ -7,7 +7,8 @@ export const GR_PAQ_RUCULA = 210;
 export const GR_PAQ_LECHUGA = 330;
 
 const MESES_CORTO = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sept', 'oct', 'nov', 'dic'];
-const PROD_KEYS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg'] as const;
+// lechuga_kg queda (legacy) para no perder ventas por kg cargadas antes del split crespa/roble.
+const PROD_KEYS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
 
 function mesKey(fecha: string): string { return String(fecha || '').slice(0, 7); } // YYYY-MM
 function mesLabel(mk: string): string {
@@ -118,7 +119,7 @@ export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas
     }
     const delMes = ventas.filter((v) => mesKey(v.fecha) === mes);
     const ruculaKgEnPaq = delMes.reduce((a, v) => a + (Number(v.rucula_kg) || 0), 0) * 1000 / GR_PAQ_RUCULA;
-    const lechugaKgEnPaq = delMes.reduce((a, v) => a + (Number(v.lechuga_kg) || 0), 0) * 1000 / GR_PAQ_LECHUGA;
+    const lechugaKgEnPaq = delMes.reduce((a, v) => a + (Number(v.lechuga_kg) || 0) + (Number(v.lechuga_kg_crespa) || 0) + (Number(v.lechuga_kg_roble) || 0), 0) * 1000 / GR_PAQ_LECHUGA;
     const rucula = delMes.reduce((a, v) => a + (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0), 0) + Math.round(ruculaKgEnPaq);
     const lechuga = delMes.reduce((a, v) => a + (Number(v.lechuga_crespa) || 0) + (Number(v.hoja_roble) || 0), 0) + Math.round(lechugaKgEnPaq);
     const albahaca = delMes.reduce((a, v) => a + (Number(v.albahaca) || 0), 0);
@@ -230,7 +231,7 @@ export function resumenMesActual(
   // dispara el % de "venta al día"/"proyectada" de forma completamente errática, aunque la
   // conversión a paquete-equivalente sea matemáticamente correcta — el problema no es la
   // conversión, es que ese volumen no se reparte día a día como el resto.
-  const KEYS_EXCLUIDAS_UNIDADES = ['rucula_kg', 'lechuga_kg'] as const;
+  const KEYS_EXCLUIDAS_UNIDADES = ['rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
   let unidades = 0, ingresosComparables = 0, unidadesComparables = 0;
   for (const v of delMes) {
     const cliente = clienteMap.get(v.id_control);
@@ -284,10 +285,13 @@ export function ventasEnRango(ventas: VentaDia[], precios: PrecioVenta[], client
       acc.lechuga.unidades += qty;
       acc.lechuga.monto += qty * precioFinal(precios, v.id_control, v.sucursal, key, cliente);
     }
-    const kgL = Number(v.lechuga_kg) || 0;
-    if (kgL > 0) {
+    // lechuga_kg (legacy) + lechuga_kg_crespa/lechuga_kg_roble (split por variedad) — cada
+    // uno con su propio precio, todos suman al mismo total de lechuga.
+    for (const keyKg of ['lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const) {
+      const kgL = Number((v as any)[keyKg]) || 0;
+      if (kgL <= 0) continue;
       acc.lechuga.unidades += Math.round((kgL * 1000) / GR_PAQ_LECHUGA);
-      acc.lechuga.monto += kgL * precioFinal(precios, v.id_control, v.sucursal, 'lechuga_kg', cliente);
+      acc.lechuga.monto += kgL * precioFinal(precios, v.id_control, v.sucursal, keyKg, cliente);
     }
   }
   acc.rucula.monto = Math.round(acc.rucula.monto);

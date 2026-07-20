@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { appendRow, batchUpdateRows, readSheet } from '@/lib/sheets';
+import { appendRowObj, batchUpdateRows, readSheet } from '@/lib/sheets';
 import type { VentaDia } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
@@ -34,19 +34,28 @@ export async function POST(req: NextRequest) {
             rucula: l.rucula || 0, lechuga_crespa: l.lechuga_crespa || 0,
             hoja_roble: l.hoja_roble || 0, bandeja_rucula: l.bandeja_rucula || 0,
             albahaca: l.albahaca || 0,
-            rucula_kg: l.rucula_kg || 0, lechuga_kg: l.lechuga_kg || 0,
+            rucula_kg: l.rucula_kg || 0,
+            // lechuga_kg (legacy) ya no lo manda la pantalla de Ventas — si no viene en el
+            // request se preserva lo que ya estaba, para no pisar con 0 una venta por kg
+            // cargada antes del split crespa/roble al re-guardar cualquier otro campo de la fila.
+            lechuga_kg: l.lechuga_kg !== undefined ? l.lechuga_kg : (Number(existente.lechuga_kg) || 0),
+            lechuga_kg_crespa: l.lechuga_kg_crespa || 0, lechuga_kg_roble: l.lechuga_kg_roble || 0,
             usuario: user.email, fecha_carga: fechaCarga,
           },
         });
       } else {
-        await appendRow('Ventas', [
-          `V-${String(nextId++).padStart(5, '0')}`, fecha,
-          l.id_control, l.nombre_cliente, l.sucursal,
-          l.rucula || 0, l.lechuga_crespa || 0, l.hoja_roble || 0,
-          l.bandeja_rucula || 0, l.albahaca || 0,
-          l.rucula_kg || 0, l.lechuga_kg || 0,
-          '', user.email, fechaCarga,
-        ]);
+        // appendRowObj (por nombre de columna) en vez de appendRow posicional: evita tener
+        // que llevar la cuenta exacta de la posición de cada columna en la planilla —
+        // importante acá porque lechuga_kg_crespa/lechuga_kg_roble son columnas nuevas.
+        await appendRowObj('Ventas', {
+          id_venta: `V-${String(nextId++).padStart(5, '0')}`, fecha,
+          id_control: l.id_control, nombre_cliente: l.nombre_cliente, sucursal: l.sucursal,
+          rucula: l.rucula || 0, lechuga_crespa: l.lechuga_crespa || 0, hoja_roble: l.hoja_roble || 0,
+          bandeja_rucula: l.bandeja_rucula || 0, albahaca: l.albahaca || 0,
+          rucula_kg: l.rucula_kg || 0, lechuga_kg: l.lechuga_kg || 0,
+          lechuga_kg_crespa: l.lechuga_kg_crespa || 0, lechuga_kg_roble: l.lechuga_kg_roble || 0,
+          exportado: '', usuario: user.email, fecha_carga: fechaCarga,
+        });
       }
     }
 

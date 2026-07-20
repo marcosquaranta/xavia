@@ -39,7 +39,7 @@ export async function GET() {
           rucula: 0, lechuga: 0, rucula_kg: 0, lechuga_kg: 0,
         };
         // Contar clientes distintos con al menos una cantidad > 0
-        const tieneVentas = ['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca','rucula_kg','lechuga_kg']
+        const tieneVentas = ['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca','rucula_kg','lechuga_kg','lechuga_kg_crespa','lechuga_kg_roble']
           .some(k => Number((v as any)[k]) > 0);
         const nombre = clienteMap.get(String(v.id_control)) || String(v.id_control);
         if (tieneVentas && !ex.clientesNombres.includes(nombre)) {
@@ -49,7 +49,9 @@ export async function GET() {
         ex.rucula    += Number(v.rucula || 0);
         ex.lechuga   += Number(v.lechuga_crespa || 0) + Number(v.hoja_roble || 0);
         ex.rucula_kg  += Number(v.rucula_kg || 0);
-        ex.lechuga_kg += Number(v.lechuga_kg || 0);
+        // lechuga_kg acá es el total en kg (rollup, igual que "lechuga" ya rollupea crespa+roble
+        // en paquete) — suma la columna legacy + las dos nuevas por variedad.
+        ex.lechuga_kg += Number(v.lechuga_kg || 0) + Number(v.lechuga_kg_crespa || 0) + Number(v.lechuga_kg_roble || 0);
         porExp.set(expId, ex);
       } else {
         const p = pendientes.get(fecha) || {
@@ -59,7 +61,7 @@ export async function GET() {
         p.rucula    += Number(v.rucula || 0);
         p.lechuga   += Number(v.lechuga_crespa || 0) + Number(v.hoja_roble || 0);
         p.rucula_kg  += Number(v.rucula_kg || 0);
-        p.lechuga_kg += Number(v.lechuga_kg || 0);
+        p.lechuga_kg += Number(v.lechuga_kg || 0) + Number(v.lechuga_kg_crespa || 0) + Number(v.lechuga_kg_roble || 0);
         pendientes.set(fecha, p);
       }
     }

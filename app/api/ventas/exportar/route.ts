@@ -17,10 +17,13 @@ const PRODS = [
   { key: 'albahaca',       xubio: 'Albahaca Hidropónica' },
 ] as const;
 
-// Productos por KG (clientes que facturan por cajón, ej. Select Food)
+// Productos por KG (clientes que facturan por cajón, ej. Select Food). lechuga_kg queda
+// para no perder ventas cargadas antes del split crespa/roble.
 const PRODS_KG = [
-  { key: 'rucula_kg',   xubio: 'Rucula Hidropónica KG' },
-  { key: 'lechuga_kg',  xubio: 'Lechuga Hidropónica KG' },
+  { key: 'rucula_kg',          xubio: 'Rucula Hidropónica KG' },
+  { key: 'lechuga_kg',         xubio: 'Lechuga Hidropónica KG' },
+  { key: 'lechuga_kg_crespa',  xubio: 'Lechuga Crespa Hidropónica KG' },
+  { key: 'lechuga_kg_roble',   xubio: 'Lechuga Hoja de Roble Verde Hidropónica KG' },
 ] as const;
 
 
@@ -153,7 +156,7 @@ export async function POST(req: NextRequest) {
 
       // Verificar si hay alguna cantidad > 0 (paquetes o KG)
       const tieneVentas = lineas.some(l =>
-        ['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca','rucula_kg','lechuga_kg']
+        ['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca','rucula_kg','lechuga_kg','lechuga_kg_crespa','lechuga_kg_roble']
           .some(k => Number((l as any)[k]) > 0)
       );
       if (!tieneVentas) continue;
