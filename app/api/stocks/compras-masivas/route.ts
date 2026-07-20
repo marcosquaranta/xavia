@@ -31,6 +31,9 @@ export async function POST(req: NextRequest) {
       .filter((n) => !isNaN(n))
       .reduce((m, n) => Math.max(m, n), 0);
 
+    let mesPrev = Number(mes) - 1, anioPrev = Number(anio);
+    if (mesPrev === 0) { mesPrev = 12; anioPrev--; }
+
     const actualizaciones: { keyValue: string; updates: Record<string, any> }[] = [];
     const nuevasFilas: any[][] = [];
     let actualizados = 0, creados = 0, saltados = 0;
@@ -56,10 +59,16 @@ export async function POST(req: NextRequest) {
       } else {
         maxId++;
         const idNuevo = `STK-${String(maxId).padStart(4, '0')}`;
+        // Arrastrar el stock final del mes anterior como inicial — mismo motivo que en
+        // gastos-aplicar: dejarlo en 0 hacía que el "stock actual" pareciera vacío.
+        const stockAnterior = stocks.find((s) =>
+          s.id_articulo === art.id_articulo && String(s.anio) === String(anioPrev) && String(s.mes) === String(mesPrev)
+        );
+        const iniHeredado = Number(stockAnterior?.stock_final) || 0;
         const obj: Record<string, any> = {
           id_stock: idNuevo, id_articulo: art.id_articulo, categoria: art.categoria, articulo: art.articulo,
-          unidad_medida: art.unidad_medida, anio, mes, stock_inicial: 0, compras: 0, stock_final: 0,
-          uso_calculado: columna === 'stock_final' ? -comp : comp, notas: '', usuario: user.email, fecha_carga: fechaCarga,
+          unidad_medida: art.unidad_medida, anio, mes, stock_inicial: iniHeredado, compras: 0, stock_final: 0,
+          notas: '', usuario: user.email, fecha_carga: fechaCarga,
         };
         obj[columna] = comp;
         obj.uso_calculado = (Number(obj.stock_inicial) || 0) + (Number(obj.compras) || 0) - (Number(obj.stock_final) || 0);

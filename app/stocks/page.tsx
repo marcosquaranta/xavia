@@ -7,6 +7,8 @@ import StocksManager from './StocksManager';
 import StockCamaraCards from '@/components/StockCamaraCards';
 import { calcularCamara } from '@/lib/camara';
 import { calcularValorizacionMes } from '@/lib/valorizacionStock';
+import { calcularDriversMes } from '@/lib/usoTeorico';
+import { alertasStockBajo } from '@/lib/alertasPanel';
 export const dynamic = 'force-dynamic';
 
 export default async function StocksPage() {
@@ -34,6 +36,15 @@ export default async function StocksPage() {
   const hoy = new Date();
   const valorizacionActual = calcularValorizacionMes(articulos, stocks, hoy.getFullYear(), hoy.getMonth() + 1);
 
+  // Alertas de stock bajo (< 15 días de uso) — antes vivían en el Panel, se movieron acá
+  // por pedido: "que las alertas de stock queden en la sección de Stocks, no en la home".
+  let mesPrevAlertas = hoy.getMonth(), anioPrevAlertas = hoy.getFullYear();
+  if (mesPrevAlertas === 0) { mesPrevAlertas = 12; anioPrevAlertas--; }
+  const diasEnMesPrevAlertas = new Date(anioPrevAlertas, mesPrevAlertas, 0).getDate();
+  const driversStockActual = calcularDriversMes(lotes, ventas, precios, clientes, hoy.getFullYear(), hoy.getMonth() + 1);
+  const driversStockMesAnterior = calcularDriversMes(lotes, ventas, precios, clientes, anioPrevAlertas, mesPrevAlertas);
+  const alertasStock = alertasStockBajo(articulos, stocks, driversStockActual, driversStockMesAnterior, hoy.getFullYear(), hoy.getMonth() + 1, diasEnMesPrevAlertas, 15);
+
   if (err) return (
     <>
       <Header user={user} current="stocks" />
@@ -51,6 +62,19 @@ export default async function StocksPage() {
       <div className="container">
         <h1 className="page-title">Stocks</h1>
         <p className="page-subtitle">Control de insumos · carga mensual · informe comparativo</p>
+
+        {alertasStock.length > 0 && (
+          <div className="card" style={{ marginBottom: '14px', background: '#fef2f2', border: '1px solid #fecaca' }}>
+            <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#991b1b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              ⚠️ Stock estimado por debajo de 15 días de uso
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {alertasStock.map((a, i) => (
+                <p key={i} style={{ margin: 0, fontSize: '13px', color: '#7f1d1d' }}>{a.msg}</p>
+              ))}
+            </div>
+          </div>
+        )}
 
         <StockCamaraCards rucula={camaraRucula} lechuga={camaraLechuga} isAdmin={user.rol === 'admin'} valorizacionActual={valorizacionActual.total} />
 

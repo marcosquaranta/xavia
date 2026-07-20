@@ -60,9 +60,18 @@ export async function POST(req: NextRequest) {
         .filter((n) => !isNaN(n))
         .reduce((m, n) => Math.max(m, n), 0);
       const idNuevo = `STK-${String(maxId + 1).padStart(4, '0')}`;
+      // Arrastrar el stock final del mes anterior como inicial de este — antes quedaba
+      // siempre en 0, lo que hacía que el "stock actual" del artículo pareciera vacío
+      // apenas se confirmaba una compra desde Gastos (ver alertasStockBajo en Panel/Stocks).
+      let mesPrev = Number(mes) - 1, anioPrev = Number(anio);
+      if (mesPrev === 0) { mesPrev = 12; anioPrev--; }
+      const stockAnterior = stocks.find((s) =>
+        s.id_articulo === id_articulo && String(s.anio) === String(anioPrev) && String(s.mes) === String(mesPrev)
+      );
+      const iniHeredado = Number(stockAnterior?.stock_final) || 0;
       await appendRowObj('Stocks', {
         id_stock: idNuevo, id_articulo, categoria: art.categoria, articulo: art.articulo, unidad_medida: art.unidad_medida,
-        anio, mes, stock_inicial: 0, compras: cant, stock_final: 0, uso_calculado: cant,
+        anio, mes, stock_inicial: iniHeredado, compras: cant, stock_final: 0, uso_calculado: iniHeredado + cant,
         precio_unitario: precioUnitario || '', notas: '', usuario: user.email, fecha_carga: fechaCarga,
       });
     }
