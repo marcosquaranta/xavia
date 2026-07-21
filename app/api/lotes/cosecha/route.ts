@@ -52,6 +52,11 @@ export async function POST(req: NextRequest) {
     if (!lote) return NextResponse.json({ error: 'lote_no_encontrado' }, { status: 404 });
 
     const plantasEst = Number(plantas_estimadas_lote) || Number(lote.plantas_estimadas_actual) || Number(lote.plantines_iniciales) || 0;
+    // En lechuga, 1 paquete = 1 planta (mismo criterio que el pesaje testigo) — un
+    // faltante de paquetes ahí SÍ es descarte real. En rúcula no: paquetes de menos
+    // puede ser solo paquetes más grandes de lo esperado, no pérdida real, así que el
+    // descarte de cosecha en rúcula queda en 0 salvo que se declare a mano.
+    const esRuculaLote = codigoCultivo(lote.variedad) === 'R';
 
     let unidades: number, plantasUsadas: number, pesoKg: number, descarteEf: number;
     if (modoFinal === 'planta') {
@@ -66,8 +71,13 @@ export async function POST(req: NextRequest) {
       pesoKg = Number(peso_total_kg_cajon) || (unidades * (Number(kg_por_cajon) || 0));
     } else {
       unidades = Number(paquetes_armados) || 0;
-      plantasUsadas = plantasEst;
-      descarteEf = 0;
+      if (esRuculaLote) {
+        plantasUsadas = plantasEst;
+        descarteEf = 0;
+      } else {
+        descarteEf = Math.max(0, plantasEst - unidades);
+        plantasUsadas = unidades + descarteEf;
+      }
       pesoKg = ((Number(peso_muestra_paquete_gr) || 0) * unidades + (Number(peso_muestra_bandeja_gr) || 0) * (Number(bandejas_armadas) || 0)) / 1000;
     }
 
@@ -118,7 +128,8 @@ export async function POST(req: NextRequest) {
       const tubosPadreNuevo = tubosPadre > 0 ? Math.max(0, Math.round(tubosPadre * plantasQuedan / plantasEst)) : 0;
       const tubosHijo = Math.max(0, tubosPadre - tubosPadreNuevo);
       const plantasHijo = Math.max(1, plantasEst - plantasQuedan);
-      const descarteHijo = modoFinal === 'planta' ? Math.max(0, plantasHijo - unidades) : 0;
+      const descarteHijo = (modoFinal === 'planta' || (modoFinal === 'paquete' && !esRuculaLote))
+        ? Math.max(0, plantasHijo - unidades) : 0;
 
       // Id del hijo (división): N1L-007 → N1L-007B
       const idPadreCompleto = /^N[12][LRA]-/.test(lote.id_lote) ? lote.id_lote : completarIdEnTrasplante(lote.id_lote, codigoCultivo(lote.variedad));

@@ -39,6 +39,11 @@ export async function POST(req: NextRequest) {
     const factorPlantines = esRucula ? 2 : 1;
     const plantasReales = Math.round(plantas_trasplantadas / factorPlantines);
     const plantasQuedanReales = Math.round((plantas_quedan || 0) / factorPlantines);
+    // Descarte declarado en el trasplante (mismo criterio que el resto del formulario:
+    // rúcula entra en plantines, se pasa a plantas reales ÷2) — se acumula en
+    // Lote.descarte_reportado para que Estadísticas (descarte por mes/cultivo) refleje
+    // también lo perdido en plantinera→F1 y F1→F2, no solo en la cosecha.
+    const descarteReal = Math.round((Number(descarte) || 0) / factorPlantines);
     const seDivide = plantas_quedan > 0 && plantas_trasplantadas > 0;
 
     const matchMesada = /M[LR]([12])/.exec(ubicDestino.id_ubicacion);
@@ -89,6 +94,7 @@ if (nuevoId !== lote.id_lote) {
         plantas_estimadas_actual: plantasReales,
         plantines_iniciales: plantas_trasplantadas,
         fecha_ult_movimiento: fecha,
+        ...(descarteReal > 0 ? { descarte_reportado: (Number(lote.descarte_reportado) || 0) + descarteReal } : {}),
         ...camposAnalisis,
       });
 
@@ -143,6 +149,10 @@ if (nuevoId !== lote.id_lote) {
       usuario_creador: user.email,
       lote_origen: lote.id_lote,
       semilla_id: lote.semilla_id || '',
+      // El descarte declarado en esta división queda con el lote hijo (es el que sigue
+      // su ciclo hasta cosecharse) — el padre acumula el suyo por separado en sus propios
+      // trasplantes/cosecha futuros.
+      descarte_reportado: descarteReal > 0 ? descarteReal : '',
       notas: `Lote hijo de ${lote.id_lote}`,
       estado: 'activo',
     });

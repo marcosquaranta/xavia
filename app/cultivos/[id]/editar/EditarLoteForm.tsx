@@ -54,9 +54,14 @@ export default function EditarLoteForm({
   // cantidad cosechada, se sugiere automáticamente el descarte equivalente (igual que ya
   // hace el formulario de Cosechar para "por planta"); queda editable por si el motivo
   // real no es descarte (ej. paquetes más grandes de lo esperado).
+  // En rúcula por paquete NO se autocalcula: la relación plantas/paquete varía (no es
+  // 1:1 como en lechuga), así que un faltante de paquetes no es necesariamente pérdida
+  // real — ahí el descarte queda 100% manual, se declara a mano si corresponde.
+  const esRuculaLote = lote.variedad.toLowerCase().includes('rucula') || lote.variedad.toLowerCase().includes('rúcula');
   const plantasPorUnidad = Number(lote.plantas_por_unidad_real) || 1;
   function onChangeUnidadesCosechadas(v: number) {
     setUnidadesCosechadas(v);
+    if (esRuculaLote) return;
     const equivalente = v * plantasPorUnidad;
     setDescarteReportado(Math.max(0, plantas - equivalente));
   }
@@ -247,7 +252,10 @@ export default function EditarLoteForm({
         )}
         {editaCosecha && (
           <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#9ca3af' }}>
-            Al cambiar la cantidad cosechada, el descarte se recalcula solo (estimadas − cosechado) — si la diferencia no es descarte real (ej. paquetes más grandes de lo esperado), corregilo a mano. También actualiza el movimiento de cosecha (Actividad) y recalcula el peso total con el pesaje testigo cargado.
+            {esRuculaLote
+              ? 'En rúcula el descarte no se recalcula solo (la relación plantas/paquete varía) — declaralo a mano si corresponde.'
+              : 'Al cambiar la cantidad cosechada, el descarte se recalcula solo (estimadas − cosechado) — si la diferencia no es descarte real (ej. paquetes más grandes de lo esperado), corregilo a mano.'}
+            {' '}También actualiza el movimiento de cosecha (Actividad) y recalcula el peso total con el pesaje testigo cargado.
           </p>
         )}
         {editaPesaje && (
