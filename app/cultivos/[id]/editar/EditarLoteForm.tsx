@@ -49,6 +49,17 @@ export default function EditarLoteForm({
   const unidadLabel = lote.destino_cosecha === 'planta' ? 'plantas' : lote.destino_cosecha === 'cajon' ? 'cajones' : 'paquetes';
   const [unidadesCosechadas, setUnidadesCosechadas] = useState(Number(lote.unidades_cosechadas) || 0);
   const [descarteReportado, setDescarteReportado] = useState(Number(lote.descarte_reportado) || 0);
+  // La diferencia entre lo estimado y lo realmente cosechado no se perdía en ningún
+  // lado — simplemente no había ningún campo que la mostrara al editar. Al tocar la
+  // cantidad cosechada, se sugiere automáticamente el descarte equivalente (igual que ya
+  // hace el formulario de Cosechar para "por planta"); queda editable por si el motivo
+  // real no es descarte (ej. paquetes más grandes de lo esperado).
+  const plantasPorUnidad = Number(lote.plantas_por_unidad_real) || 1;
+  function onChangeUnidadesCosechadas(v: number) {
+    setUnidadesCosechadas(v);
+    const equivalente = v * plantasPorUnidad;
+    setDescarteReportado(Math.max(0, plantas - equivalente));
+  }
 
   // Fechas de movimientos
   const [fechaSiembra,  setFechaSiembra]  = useState(fechas.siembra.fecha);
@@ -209,7 +220,7 @@ export default function EditarLoteForm({
           {editaCosecha && (
             <div>
               <label>Cantidad cosechada ({unidadLabel})</label>
-              <NumberInput value={unidadesCosechadas} onChange={setUnidadesCosechadas} min={0} disabled={loading} />
+              <NumberInput value={unidadesCosechadas} onChange={onChangeUnidadesCosechadas} min={0} disabled={loading} />
             </div>
           )}
           {editaCosecha && (
@@ -226,8 +237,17 @@ export default function EditarLoteForm({
           )}
         </div>
         {editaCosecha && (
+          <div style={{ marginTop: '10px', padding: '10px 12px', background: '#f9fafb', borderRadius: '6px', fontSize: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#6b7280' }}>Plantas estimadas</span><span>{plantas}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#6b7280' }}>Cosechado (equivalente en plantas)</span><span>{Math.round(unidadesCosechadas * plantasPorUnidad)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 500, paddingTop: '6px', borderTop: '1px solid #e5e7eb', marginTop: '6px', color: descarteReportado > 0 ? '#dc2626' : '#059669' }}>
+              <span>Descarte</span><span>{descarteReportado}</span>
+            </div>
+          </div>
+        )}
+        {editaCosecha && (
           <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#9ca3af' }}>
-            Corrige también el movimiento de cosecha (Actividad) y recalcula el peso total estimado con el pesaje testigo cargado.
+            Al cambiar la cantidad cosechada, el descarte se recalcula solo (estimadas − cosechado) — si la diferencia no es descarte real (ej. paquetes más grandes de lo esperado), corregilo a mano. También actualiza el movimiento de cosecha (Actividad) y recalcula el peso total con el pesaje testigo cargado.
           </p>
         )}
         {editaPesaje && (
