@@ -133,6 +133,27 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     hoyIdx: hoy.getMonth(),
   };
 
+  // ── DESCARTE POR MES, POR CULTIVO ── descarte_reportado es la diferencia entre lo
+  // estimado (al sembrar/trasplantar) y lo realmente cosechado — agrupa cualquier fase
+  // donde se haya perdido (plantinera, F1 o F2), no hay desglose por etapa hoy.
+  const accDescarte = { lechuga: Array.from({ length: 12 }, () => 0), rucula: Array.from({ length: 12 }, () => 0) };
+  for (const l of lotes) {
+    if (l.estado !== 'cosechado' || !l.fecha_cosecha) continue;
+    const f = new Date(String(l.fecha_cosecha) + 'T12:00:00');
+    if (isNaN(f.getTime()) || f.getFullYear() !== anioActual) continue;
+    const desc = Number(l.descarte_reportado) || 0;
+    if (desc <= 0) continue;
+    (esRuculaV(l.variedad) ? accDescarte.rucula : accDescarte.lechuga)[f.getMonth()] += desc;
+  }
+  const evoDescarte = {
+    series: [
+      { nombre: 'Lechuga', color: '#4d7c0f', puntos: accDescarte.lechuga.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+      { nombre: 'Rúcula', color: '#166534', puntos: accDescarte.rucula.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+    ],
+    labels: MESES_CORTO_ANIO,
+    hoyIdx: hoy.getMonth(),
+  };
+
   // ── SIEMBRA DEL MES: real (lotes sembrados) vs. lo que el plan indica ──
   let siembraRealRucPl = 0, siembraRealLecPl = 0, siembraPlanRucPl = 0, siembraPlanLecPl = 0;
   try {
@@ -341,6 +362,12 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             <p className="card-title">Plantas por paquete — Rúcula</p>
             <p className="card-sub">Promedio mensual · {anioActual}</p>
             <GraficoEvolucion series={evoPlantasPaq.series} labels={evoPlantasPaq.labels} hoyIdx={evoPlantasPaq.hoyIdx} unidad=" pl/paq" />
+          </div>
+
+          <div className="card" style={{ margin:0 }}>
+            <p className="card-title">Descarte por mes — por cultivo</p>
+            <p className="card-sub">Plantas de diferencia entre lo estimado y lo cosechado (cualquier fase/plantinera) · {anioActual}</p>
+            <GraficoEvolucion series={evoDescarte.series} labels={evoDescarte.labels} hoyIdx={evoDescarte.hoyIdx} unidad=" pl" />
           </div>
         </div>
 
