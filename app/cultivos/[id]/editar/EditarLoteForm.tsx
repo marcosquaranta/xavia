@@ -43,6 +43,13 @@ export default function EditarLoteForm({
     : Number(lote.peso_muestra_kg) > 0 ? Math.round(Number(lote.peso_muestra_kg) * 1000) : 0;
   const [pesoGr, setPesoGr] = useState(pesoActualGr);
 
+  // Cantidad cosechada + descarte — a diferencia del pesaje testigo, esto aplica a
+  // cualquier destino de cosecha (incluido cajón, donde "cantidad" son los cajones).
+  const editaCosecha = estado === 'cosechado';
+  const unidadLabel = lote.destino_cosecha === 'planta' ? 'plantas' : lote.destino_cosecha === 'cajon' ? 'cajones' : 'paquetes';
+  const [unidadesCosechadas, setUnidadesCosechadas] = useState(Number(lote.unidades_cosechadas) || 0);
+  const [descarteReportado, setDescarteReportado] = useState(Number(lote.descarte_reportado) || 0);
+
   // Fechas de movimientos
   const [fechaSiembra,  setFechaSiembra]  = useState(fechas.siembra.fecha);
   const [fechaF1,       setFechaF1]       = useState(fechas.f1.fecha);
@@ -70,6 +77,7 @@ export default function EditarLoteForm({
           tubos_ocupados_actual: tubos,
           notas,
           ...(editaPesaje ? { peso_testigo_gr: pesoGr } : {}),
+          ...(editaCosecha ? { unidades_cosechadas: unidadesCosechadas, descarte_reportado: descarteReportado } : {}),
           fechas: {
             siembra: { id: fechas.siembra.id, fecha: fechaSiembra },
             f1:      { id: fechas.f1.id,      fecha: fechaF1 },
@@ -198,6 +206,18 @@ export default function EditarLoteForm({
             <label>Tubos ocupados</label>
             <NumberInput value={tubos} onChange={setTubos} min={0} disabled={loading} />
           </div>
+          {editaCosecha && (
+            <div>
+              <label>Cantidad cosechada ({unidadLabel})</label>
+              <NumberInput value={unidadesCosechadas} onChange={setUnidadesCosechadas} min={0} disabled={loading} />
+            </div>
+          )}
+          {editaCosecha && (
+            <div>
+              <label>Descarte (plantas)</label>
+              <NumberInput value={descarteReportado} onChange={setDescarteReportado} min={0} disabled={loading} />
+            </div>
+          )}
           {editaPesaje && (
             <div>
               <label>Pesaje testigo (gramos por paquete)</label>
@@ -205,8 +225,13 @@ export default function EditarLoteForm({
             </div>
           )}
         </div>
-        {editaPesaje && (
+        {editaCosecha && (
           <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#9ca3af' }}>
+            Corrige también el movimiento de cosecha (Actividad) y recalcula el peso total estimado con el pesaje testigo cargado.
+          </p>
+        )}
+        {editaPesaje && (
+          <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#9ca3af' }}>
             Es el peso del paquete pesado directamente en la balanza (en lechuga, 1 paquete = 1 planta) — no se multiplica por nada.
           </p>
         )}
