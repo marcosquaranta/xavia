@@ -299,11 +299,11 @@ export function construirHtml(d: ReporteSemanalData): string {
 
   const ventasSemanasChart = graficoLineasHtml(
     d.ventasSemanas.map(p => ({ label: p.label, a: p.rucula, b: p.lechuga })),
-    '#166534', '#4d7c0f', 'Rúcula', 'Lechuga'
+    '#134e4a', '#84cc16', 'Rúcula', 'Lechuga'
   );
   const proyeccionChart = graficoBarrasHtml(
     d.proyeccionSemanas.map(p => ({ label: p.label, a: p.rucula, b: p.lechuga })),
-    '#166534', '#4d7c0f', 'Rúcula', 'Lechuga'
+    '#134e4a', '#84cc16', 'Rúcula', 'Lechuga'
   );
 
   return `

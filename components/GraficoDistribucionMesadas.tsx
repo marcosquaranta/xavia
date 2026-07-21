@@ -4,8 +4,8 @@ export interface PuntoProyeccionCosecha { semana: string; label: string; rucula:
 
 interface Props { datos: PuntoProyeccionCosecha[] }
 
-const COLOR_RUCULA = '#166534';
-const COLOR_LECHUGA = '#4d7c0f';
+const COLOR_RUCULA = '#134e4a';
+const COLOR_LECHUGA = '#84cc16';
 
 export default function GraficoDistribucionMesadas({ datos }: Props) {
   if (!datos.length || datos.every((d) => d.rucula === 0 && d.lechuga === 0)) {

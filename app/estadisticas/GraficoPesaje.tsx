@@ -3,8 +3,8 @@
 interface PuntoPesaje { fecha: string; variedad: string; peso_gr: number; paquetes: number; }
 
 const CULTIVOS = [
-  { key: 'rucula', label: 'Rúcula', color: '#166534', bg: '#dcfce7' },
-  { key: 'lechuga', label: 'Lechuga', color: '#4d7c0f', bg: '#f0fdf4' },
+  { key: 'rucula', label: 'Rúcula', color: '#134e4a', bg: '#dcfce7' },
+  { key: 'lechuga', label: 'Lechuga', color: '#84cc16', bg: '#f0fdf4' },
 ];
 
 export default function GraficoPesaje({ puntos }: { puntos: PuntoPesaje[] }) {

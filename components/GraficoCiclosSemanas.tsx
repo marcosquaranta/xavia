@@ -35,10 +35,10 @@ export default function GraficoCiclosSemanas({ datos }: Props) {
       {/* Leyenda */}
       <div style={{ display: 'flex', gap: '14px', marginBottom: '8px', fontSize: '11px', flexWrap: 'wrap' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span style={{ width: 12, height: 12, background: '#4d7c0f', borderRadius: 2, display: 'inline-block' }} />Lechuga F2
+          <span style={{ width: 12, height: 12, background: '#84cc16', borderRadius: 2, display: 'inline-block' }} />Lechuga F2
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span style={{ width: 12, height: 12, background: '#166534', borderRadius: 2, display: 'inline-block' }} />Rúcula
+          <span style={{ width: 12, height: 12, background: '#134e4a', borderRadius: 2, display: 'inline-block' }} />Rúcula
         </span>
       </div>
 
@@ -59,11 +59,11 @@ export default function GraficoCiclosSemanas({ datos }: Props) {
           return (
             <g key={i}>
               {/* Lechuga F2 */}
-              {hF2 > 0 && <rect x={xL(i)} y={baseY - hF2} width={barW} height={hF2} fill="#4d7c0f" rx={2} />}
+              {hF2 > 0 && <rect x={xL(i)} y={baseY - hF2} width={barW} height={hF2} fill="#84cc16" rx={2} />}
               {d.lechugaF2 > 0 && <text x={xL(i) + barW / 2} y={baseY - hF2 - 3} textAnchor="middle" fontSize={9} fill="#374151" fontWeight={500}>{d.lechugaF2}d</text>}
 
               {/* Rúcula */}
-              {hR > 0 && <rect x={xR(i)} y={baseY - hR} width={barW} height={hR} fill="#166534" rx={2} />}
+              {hR > 0 && <rect x={xR(i)} y={baseY - hR} width={barW} height={hR} fill="#134e4a" rx={2} />}
               {hR > 0 && <text x={xR(i) + barW / 2} y={baseY - hR - 3} textAnchor="middle" fontSize={9} fill="#374151" fontWeight={500}>{d.rucula}d</text>}
 
               {/* Label semana */}

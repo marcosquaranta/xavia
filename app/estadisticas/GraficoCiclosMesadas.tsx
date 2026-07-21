@@ -128,10 +128,10 @@ export default function GraficoCiclosMesadas({ datos }: { datos: CicloMesada[] }
       {/* Leyenda */}
       <div style={{ display: 'flex', gap: '16px', fontSize: '11px', marginBottom: '14px', flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <span style={{ width: 10, height: 10, background: '#4d7c0f', borderRadius: 2, display: 'inline-block' }} /> Lechuga F2
+          <span style={{ width: 10, height: 10, background: '#84cc16', borderRadius: 2, display: 'inline-block' }} /> Lechuga F2
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <span style={{ width: 10, height: 10, background: '#166534', borderRadius: 2, display: 'inline-block' }} /> Rúcula F2
+          <span style={{ width: 10, height: 10, background: '#134e4a', borderRadius: 2, display: 'inline-block' }} /> Rúcula F2
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
           <svg width={10} height={10} style={{ display: 'inline-block' }}>
@@ -145,14 +145,14 @@ export default function GraficoCiclosMesadas({ datos }: { datos: CicloMesada[] }
         <SubGrafico
           titulo="Lechuga — ciclos por mesada (F2)"
           datos={lechuga}
-          f2Color="#4d7c0f"
+          f2Color="#84cc16"
           pesoKey="pesoGrLechuga"
           f2Key="lechugaF2"
         />
         <SubGrafico
           titulo="Rúcula — ciclos por mesada"
           datos={rucula}
-          f2Color="#166534"
+          f2Color="#134e4a"
           pesoKey="pesoGrRucula"
           f2Key="ruculaF2"
         />

@@ -103,12 +103,12 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     const lech = avgArr(acc.lechuga), ruc = avgArr(acc.rucula);
     const lechP = avgArr(accPeso.lechuga), rucP = avgArr(accPeso.rucula);
     const series = [
-      { nombre: 'Lechuga F2', color: '#4d7c0f', puntos: lech.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
-      { nombre: 'Rúcula F2', color: '#166534', puntos: ruc.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+      { nombre: 'Lechuga F2', color: '#84cc16', puntos: lech.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+      { nombre: 'Rúcula F2', color: '#134e4a', puntos: ruc.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
     ];
     const pesoSeries = [
-      { nombre: 'Lechuga peso', color: '#4d7c0f', puntos: lechP.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
-      { nombre: 'Rúcula peso', color: '#166534', puntos: rucP.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+      { nombre: 'Lechuga peso', color: '#84cc16', puntos: lechP.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+      { nombre: 'Rúcula peso', color: '#134e4a', puntos: rucP.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
     ];
     return { series, pesoSeries, labels, hoyIdx };
   }
@@ -128,7 +128,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   }
   const plantasPaqSerie = accPlantasPaq.map(xs => xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : 0);
   const evoPlantasPaq = {
-    series: [{ nombre: 'Rúcula', color: '#166534', puntos: plantasPaqSerie.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) }],
+    series: [{ nombre: 'Rúcula', color: '#134e4a', puntos: plantasPaqSerie.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) }],
     labels: MESES_CORTO_ANIO,
     hoyIdx: hoy.getMonth(),
   };
@@ -147,8 +147,8 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   }
   const evoDescarte = {
     series: [
-      { nombre: 'Lechuga', color: '#4d7c0f', puntos: accDescarte.lechuga.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
-      { nombre: 'Rúcula', color: '#166534', puntos: accDescarte.rucula.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+      { nombre: 'Lechuga', color: '#84cc16', puntos: accDescarte.lechuga.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+      { nombre: 'Rúcula', color: '#134e4a', puntos: accDescarte.rucula.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
     ],
     labels: MESES_CORTO_ANIO,
     hoyIdx: hoy.getMonth(),
