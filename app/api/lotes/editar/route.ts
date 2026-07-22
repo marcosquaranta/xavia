@@ -20,9 +20,16 @@ export async function POST(req: NextRequest) {
     // Pesaje testigo obligatorio para marcar/mantener un lote como cosechado (salvo
     // destino cajón) — este endpoint es otra vía por la que un lote pasa a "cosechado"
     // (además de /api/lotes/cosecha), y se le había quedado sin exigir el peso.
+    // OJO: también hay que bloquear que se lo BORRE en una edición posterior — antes,
+    // si ya tenía un peso válido, la validación se salteaba entera y el recálculo de
+    // más abajo aceptaba sin más un peso_testigo_gr en 0 mandado por error, dejando un
+    // lote "cosechado" con cantidad cargada pero sin peso (justo lo que rompía el
+    // gráfico de pesaje testigo en Estadísticas).
     if (estado === 'cosechado' && lote?.destino_cosecha !== 'cajon') {
       const yaTenePeso = !!lote && (Number(lote.peso_muestra_paquete_gr) > 0 || Number(lote.peso_muestra_kg) > 0);
-      if (!yaTenePeso && !(Number(peso_testigo_gr) > 0)) {
+      const pesoNuevoValido = Number(peso_testigo_gr) > 0;
+      const seIntentaBorrarPeso = peso_testigo_gr !== undefined && !pesoNuevoValido;
+      if ((!yaTenePeso || seIntentaBorrarPeso) && !pesoNuevoValido) {
         return NextResponse.json({ error: 'El pesaje testigo (peso del paquete en gramos) es obligatorio para un lote cosechado' }, { status: 400 });
       }
     }
