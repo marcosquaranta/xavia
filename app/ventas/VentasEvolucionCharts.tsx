@@ -81,11 +81,23 @@ export function GraficoVentaPorArticulo({ datos }: { datos: PuntoArticulo[] }) {
   );
 }
 
-export function GraficoVentaPorCliente({ datos }: { datos: EvolucionClientes }) {
+export function GraficoVentaPorCliente({ semanal, mensual }: { semanal: EvolucionClientes; mensual: EvolucionClientes }) {
+  const [modo, setModo] = useState<'semana' | 'mes'>('semana');
+  const datos = modo === 'semana' ? semanal : mensual;
   const data = datos.meses.map((m, i) => ({ label: m.label, ...datos.puntos[i] }));
   return (
     <div style={cardStyle}>
-      <p style={titleStyle}>Evolución de venta por cliente <span style={{ fontWeight: 400, color: '#9ca3af' }}>· por semana · top {datos.series.length} · unidades totales</span></p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+        <p style={{ ...titleStyle, margin: 0 }}>Evolución de venta por cliente <span style={{ fontWeight: 400, color: '#9ca3af' }}>· top {datos.series.length} · unidades totales</span></p>
+        <div style={{ display: 'flex', gap: '4px' }}>
+          {([['semana', 'Por semana'], ['mes', 'Por mes']] as const).map(([v, l]) => (
+            <button key={v} onClick={() => setModo(v)}
+              style={{ padding: '3px 10px', borderRadius: '5px', fontSize: '11px', fontWeight: modo === v ? 700 : 400, background: modo === v ? '#111827' : '#f3f4f6', color: modo === v ? 'white' : '#6b7280', border: 'none', cursor: 'pointer' }}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
       <ResponsiveContainer width="100%" height={280}>
         <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid stroke={GRID} vertical={false} />
@@ -102,7 +114,7 @@ export function GraficoVentaPorCliente({ datos }: { datos: EvolucionClientes }) 
       <TablaToggle>
         {() => (
           <table style={{ fontSize: '12px', width: '100%' }}>
-            <thead><tr><th style={{ textAlign: 'left' }}>Semana</th>{datos.series.map((s) => <th key={s.id_control} style={{ textAlign: 'right' }}>{s.nombre}</th>)}</tr></thead>
+            <thead><tr><th style={{ textAlign: 'left' }}>{modo === 'semana' ? 'Semana' : 'Mes'}</th>{datos.series.map((s) => <th key={s.id_control} style={{ textAlign: 'right' }}>{s.nombre}</th>)}</tr></thead>
             <tbody>{datos.meses.map((m, i) => (
               <tr key={m.mes}><td>{m.label}</td>{datos.series.map((s) => <td key={s.id_control} style={{ textAlign: 'right' }}>{fmtEntero(datos.puntos[i][s.id_control] || 0)}</td>)}</tr>
             ))}</tbody>
@@ -169,15 +181,15 @@ export function TarjetaIndicadores({ datos }: { datos: ResumenMesActual }) {
   );
 }
 
-export default function VentasEvolucionCharts({ articulo, cliente, precio, resumenMes }: {
-  articulo: PuntoArticulo[]; cliente: EvolucionClientes; precio: PuntoPrecio[]; resumenMes: ResumenMesActual;
+export default function VentasEvolucionCharts({ articulo, clienteSemanal, clienteMensual, precio, resumenMes }: {
+  articulo: PuntoArticulo[]; clienteSemanal: EvolucionClientes; clienteMensual: EvolucionClientes; precio: PuntoPrecio[]; resumenMes: ResumenMesActual;
 }) {
-  if (!articulo.length && !cliente.meses.length && !precio.length) return null;
+  if (!articulo.length && !clienteSemanal.meses.length && !precio.length) return null;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '16px' }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
         <GraficoVentaPorArticulo datos={articulo} />
-        <GraficoVentaPorCliente datos={cliente} />
+        <GraficoVentaPorCliente semanal={clienteSemanal} mensual={clienteMensual} />
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
         <GraficoPrecioPromedio datos={precio} />

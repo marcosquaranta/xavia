@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import type { ClienteVenta, PrecioVenta, VentaDia, Lote, Movimiento, VentaHistorica } from '@/lib/types';
-import { evolucionVentaPorArticulo, evolucionVentaPorClienteSemanal, evolucionPrecioPromedio, resumenMesActual } from '@/lib/estadisticasVentas';
+import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionVentaPorClienteSemanal, evolucionPrecioPromedio, resumenMesActual } from '@/lib/estadisticasVentas';
 import { estimacionCosechaHoyManana } from '@/lib/planificacionServer';
 import Header from '@/components/Header';
 import VentasManager from './VentasManager';
@@ -70,7 +70,8 @@ export default async function VentasPage() {
   for (const v of ventas) frecuencias[v.id_control] = (frecuencias[v.id_control]||0) + 1;
 
   const evolArticulo = evolucionVentaPorArticulo(ventas, 12, historicas);
-  const evolCliente = evolucionVentaPorClienteSemanal(ventas, clientes, 5, 4);
+  const evolClienteSemanal = evolucionVentaPorClienteSemanal(ventas, clientes, 6, 4);
+  const evolClienteMensual = evolucionVentaPorCliente(ventas, clientes, 6, 4);
   const evolPrecio = evolucionPrecioPromedio(ventas, precios, clientes, 12);
   const resumenMes = resumenMesActual(ventas, precios, clientes);
   const estimCosecha = estimacionCosechaHoyManana(lotes, movimientos);
@@ -88,7 +89,7 @@ export default async function VentasPage() {
             📄 Facturación →
           </Link>
         </div>
-        <VentasEvolucionCharts articulo={evolArticulo} cliente={evolCliente} precio={evolPrecio} resumenMes={resumenMes} />
+        <VentasEvolucionCharts articulo={evolArticulo} clienteSemanal={evolClienteSemanal} clienteMensual={evolClienteMensual} precio={evolPrecio} resumenMes={resumenMes} />
         <div className="card">
           <VentasManager clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} estimCosecha={estimCosecha} />
           <XubioResumen />
