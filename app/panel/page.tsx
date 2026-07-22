@@ -251,6 +251,9 @@ export default async function PanelPage({ searchParams }: {
   }
 
   const hoyStr = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
+  // Recordatorio de stock físico en cámara — sábados, lunes y miércoles.
+  const diaSemanaHoy = new Date().getDay(); // 0=domingo..6=sábado
+  const esDiaStockCamara = diaSemanaHoy === 6 || diaSemanaHoy === 1 || diaSemanaHoy === 3;
 
   return (
     <>
@@ -258,6 +261,19 @@ export default async function PanelPage({ searchParams }: {
       <div className="container">
         <h1 className="page-title">Panel de control</h1>
         <p className="page-subtitle">{hoyStr.charAt(0).toUpperCase()+hoyStr.slice(1)} · Bienvenido, {user.nombre}</p>
+
+        {esDiaStockCamara && (
+          <div style={{ background:'#fef3c7', border:'2px solid #f59e0b', borderRadius:'10px', padding:'16px 18px', marginBottom:'14px', display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }}>
+            <span style={{ fontSize:'28px', lineHeight:1 }}>📦</span>
+            <div style={{ flex:1, minWidth:'260px' }}>
+              <p style={{ margin:'0 0 4px', fontSize:'15px', fontWeight:800, color:'#92400e' }}>Hoy toca hacer stock de plantas en cámara</p>
+              <p style={{ margin:0, fontSize:'12.5px', color:'#78350f' }}>
+                Hacelo <strong>antes de cargar las cosechas/ventas del día</strong> (a primera hora) o <strong>después de cargarlas</strong> (al cierre) — nunca a la mitad, porque el conteo queda comparado contra un stock esperado a medio actualizar.
+              </p>
+            </div>
+            <a href="#stock-camara" className="btn secondary" style={{ fontSize:'12px', whiteSpace:'nowrap' }}>Ir a Stock en cámara ↓</a>
+          </div>
+        )}
 
         {/* ══ TAREAS DE HOY ══ */}
         <div style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)', border:'1px solid #bfdbfe', borderRadius:'10px', padding:'14px', marginBottom:'14px' }}>
@@ -445,11 +461,13 @@ export default async function PanelPage({ searchParams }: {
               })()}
             </div>
 
-            <AjusteStockCard
-              rucula={{ actual: camaraRucula.stockActual, ajusteMes: ajusteMesRucula.acumulado }}
-              lechuga={{ actual: camaraLechuga.stockActual, ajusteMes: ajusteMesLechuga.acumulado }}
-              esAdmin={user.rol === 'admin'}
-            />
+            <div id="stock-camara">
+              <AjusteStockCard
+                rucula={{ actual: camaraRucula.stockActual, ajusteMes: ajusteMesRucula.acumulado }}
+                lechuga={{ actual: camaraLechuga.stockActual, ajusteMes: ajusteMesLechuga.acumulado }}
+                esAdmin={user.rol === 'admin'}
+              />
+            </div>
           </div>
 
           {/* Últimos movimientos, por tipo */}

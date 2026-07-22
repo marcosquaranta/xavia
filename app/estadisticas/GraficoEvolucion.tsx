@@ -18,21 +18,25 @@ export default function GraficoEvolucion({ series, pesoSeries, labels, hoyIdx, u
 
   const todosPeso = (pesoSeries || []).flatMap(s => s.puntos.map(p => p[1]));
   const hayPeso = todosPeso.length > 0;
-  const maxPeso = hayPeso ? Math.ceil(Math.max(...todosPeso) / 10) * 10 : 0;
+  // Eje ajustado al rango real de los datos (no siempre arrancando en 0) — así las
+  // variaciones se ven mejor en vez de quedar todas apretadas arriba del gráfico.
+  const minPeso = hayPeso ? Math.floor(Math.min(...todosPeso) * 0.9 / 10) * 10 : 0;
+  const maxPeso = hayPeso ? Math.max(Math.ceil(Math.max(...todosPeso) * 1.1 / 10) * 10, minPeso + 10) : 0;
 
-  const maxV = Math.max(...todos, 10);
+  const minV = Math.max(0, Math.floor(Math.min(...todos) * 0.9));
+  const maxV = Math.max(Math.ceil(Math.max(...todos) * 1.1), minV + 10, 10);
   const n = labels.length;
   const W = 700, H = 300, L = 50, R = hayPeso ? 630 : 660, T = 30, Bot = 240;
   const px = (i: number) => n <= 1 ? (L + R) / 2 : L + i * (R - L) / (n - 1);
-  const py = (d: number) => Bot - (d / maxV) * (Bot - T);
-  const pyPeso = (g: number) => Bot - (g / maxPeso) * (Bot - T);
+  const py = (d: number) => Bot - ((d - minV) / (maxV - minV || 1)) * (Bot - T);
+  const pyPeso = (g: number) => Bot - ((g - minPeso) / (maxPeso - minPeso || 1)) * (Bot - T);
   function pathLine(pts: [number, number][], y: (v: number) => number) {
     if (!pts.length) return '';
     return [...pts].sort((a, b) => a[0] - b[0]).map(([i, d], k) => `${k === 0 ? 'M' : 'L'} ${px(i)} ${y(d)}`).join(' ');
   }
 
-  const yRefs = [0, Math.round(maxV * 0.5), maxV];
-  const yRefsPeso = hayPeso ? [0, Math.round(maxPeso * 0.5), maxPeso] : [];
+  const yRefs = [minV, Math.round((minV + maxV) / 2), maxV];
+  const yRefsPeso = hayPeso ? [minPeso, Math.round((minPeso + maxPeso) / 2), maxPeso] : [];
   // Para muchos labels (semanas) mostrar uno de cada N para no amontonar
   const stepLbl = n > 14 ? 2 : 1;
 
