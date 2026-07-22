@@ -236,8 +236,8 @@ export default function EditarLoteForm({
           )}
           {editaPesaje && (
             <div>
-              <label>Pesaje testigo (gramos por paquete)</label>
-              <NumberInput value={pesoGr} onChange={setPesoGr} min={0} disabled={loading} placeholder="Ej: 210" />
+              <label style={pesoGr <= 0 ? { color: '#dc2626' } : undefined}>Pesaje testigo (gramos por paquete){pesoGr <= 0 && ' — FALTA'}</label>
+              <NumberInput value={pesoGr} onChange={setPesoGr} min={0} disabled={loading} placeholder="Ej: 210" hideZero={false} />
             </div>
           )}
         </div>
