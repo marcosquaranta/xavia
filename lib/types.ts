@@ -223,6 +223,7 @@ export interface Empleado {
   nombre: string;
   sueldo_hora: number | string;
   horas_teoricas_quincena: number | string; // default 46, editable
+  presentismo: number | string; // monto fijo — se paga solo si no hubo tardanzas en la quincena
   hora_entrada_esperada: string; // "08:00"
   hora_salida_esperada: string;  // "17:00"
   activo: 'SI' | 'NO';

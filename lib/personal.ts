@@ -72,14 +72,21 @@ export interface ResumenEmpleado {
   horasTeoricas: number;
   diferenciaHoras: number;
   sueldoHora: number;
+  presentismoConfigurado: number;
+  presentismoAplicado: number; // 0 si hubo alguna tardanza en la quincena
   sueldoAPagar: number;
   tardanzas: number;
   diasIncompletos: number;
 }
 
-// Sueldo a pagar = horas TEÓRICAS (fijas, editables por empleado) × sueldo/hora — no las
-// horas reales. Las horas reales quedan como dato de control/comparación, no afectan el
-// pago (decisión explícita del usuario).
+// Umbral por debajo del cual un ingreso NO cuenta como tardanza aunque llegue después
+// del horario esperado — un fichaje pasadas las 11 de la mañana casi seguro es un día
+// raro (franco, medio día, fin de semana) y no una llegada tarde real.
+const LIMITE_TARDANZA_MIN = 11 * 60;
+
+// Sueldo a pagar = horas TEÓRICAS (fijas, editables por empleado) × sueldo/hora, más el
+// presentismo (monto fijo) SOLO si no hubo ninguna tardanza en la quincena — no las horas
+// reales (decisión explícita del usuario).
 export function calcularResumenQuincena(
   registros: RegistroCrossChex[], empleados: Empleado[], anio: number, mes: number, quincena: 1 | 2
 ): ResumenEmpleado[] {
@@ -109,7 +116,7 @@ export function calcularResumenQuincena(
       const incompleto = salidaMin === null;
       const horas = incompleto ? 0 : Math.max(0, (salidaMin - entradaMin) / 60);
       const esperadaMin = emp?.hora_entrada_esperada ? minDeHora(emp.hora_entrada_esperada) : null;
-      const tardanzaMin = esperadaMin !== null ? Math.max(0, entradaMin - esperadaMin) : 0;
+      const tardanzaMin = esperadaMin !== null && entradaMin <= LIMITE_TARDANZA_MIN ? Math.max(0, entradaMin - esperadaMin) : 0;
       dias.push({
         fecha, entrada: fmtHoraMin(entradaMin), salida: salidaMin !== null ? fmtHoraMin(salidaMin) : null,
         horas: Math.round(horas * 100) / 100, incompleto, tardanzaMin,
@@ -118,12 +125,16 @@ export function calcularResumenQuincena(
     const horasReales = Math.round(dias.reduce((a, d) => a + d.horas, 0) * 100) / 100;
     const horasTeoricas = Number(emp?.horas_teoricas_quincena) || 46;
     const sueldoHora = Number(emp?.sueldo_hora) || 0;
+    const tardanzas = dias.filter((d) => d.tardanzaMin > 0).length;
+    const presentismoConfigurado = Number(emp?.presentismo) || 0;
+    const presentismoAplicado = tardanzas === 0 ? presentismoConfigurado : 0;
     resultados.push({
       workno, nombre: emp?.nombre || nombresCrossChex.get(workno) || workno,
       dias, horasReales, horasTeoricas,
       diferenciaHoras: Math.round((horasReales - horasTeoricas) * 100) / 100,
-      sueldoHora, sueldoAPagar: Math.round(horasTeoricas * sueldoHora * 100) / 100,
-      tardanzas: dias.filter((d) => d.tardanzaMin > 0).length,
+      sueldoHora, presentismoConfigurado, presentismoAplicado,
+      sueldoAPagar: Math.round((horasTeoricas * sueldoHora + presentismoAplicado) * 100) / 100,
+      tardanzas,
       diasIncompletos: dias.filter((d) => d.incompleto).length,
     });
   }

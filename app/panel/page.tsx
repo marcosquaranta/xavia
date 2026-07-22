@@ -5,12 +5,14 @@ import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
 import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio } from '@/lib/estadisticas';
 import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
-import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara } from '@/lib/types';
+import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, Empleado } from '@/lib/types';
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
 import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
 import { evolucionVentaPorArticulo, resumenMesActual } from '@/lib/estadisticasVentas';
 import { generarAlertas } from '@/lib/alertasPanel';
 import { calcularCamara, diferenciaAjustesMes } from '@/lib/camara';
+import { getRegistrosCrossChex } from '@/lib/crosschex';
+import { calcularResumenQuincena, rangoQuincena } from '@/lib/personal';
 import Header from '@/components/Header';
 import FiltrosLotes from '@/components/FiltrosLotes';
 import LoteCard from '@/components/LoteCard';
@@ -166,6 +168,23 @@ export default async function PanelPage({ searchParams }: {
   // ahora quedan afuera de las Alertas del Panel hasta confirmar que están bien.
   const alertas = generarAlertas(lotes, tubosMesadas, ciclosRealesMap, ocGlobal);
 
+  // Tardanzas de la quincena en curso (CrossChex) — solo admin, banner grande en el home.
+  // Envuelto en try/catch: si CrossChex está caído o faltan credenciales, no debe romper
+  // el resto del Panel.
+  let tardanzasHoy: { nombre: string; cantidad: number }[] = [];
+  if (user.rol === 'admin') {
+    try {
+      const quincenaActual = (hoy.getDate() <= 15 ? 1 : 2) as 1 | 2;
+      const { desde, hasta } = rangoQuincena(hoy.getFullYear(), hoy.getMonth() + 1, quincenaActual);
+      const [empleadosPanel, registrosPanel] = await Promise.all([
+        readSheet<Empleado>('Empleados').catch(() => []),
+        getRegistrosCrossChex(desde, hasta),
+      ]);
+      const resumenPersonal = calcularResumenQuincena(registrosPanel, empleadosPanel, hoy.getFullYear(), hoy.getMonth() + 1, quincenaActual);
+      tardanzasHoy = resumenPersonal.filter((r) => r.tardanzas > 0).map((r) => ({ nombre: r.nombre, cantidad: r.tardanzas }));
+    } catch {}
+  }
+
   // Desvíos de cosecha (antes en la sección "Alertas" propia, ahora solo en el home) —
   // solo admin, últimos 30 días, sin revisar primero.
   const cosechasConAlerta = movimientos.filter((m) => {
@@ -261,6 +280,20 @@ export default async function PanelPage({ searchParams }: {
       <div className="container">
         <h1 className="page-title">Panel de control</h1>
         <p className="page-subtitle">{hoyStr.charAt(0).toUpperCase()+hoyStr.slice(1)} · Bienvenido, {user.nombre}</p>
+
+        {tardanzasHoy.length > 0 && (
+          <div style={{ background:'#fef2f2', border:'2px solid #dc2626', borderRadius:'10px', padding:'16px 18px', marginBottom:'14px', display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }}>
+            <span style={{ fontSize:'28px', lineHeight:1 }}>⏰</span>
+            <div style={{ flex:1, minWidth:'260px' }}>
+              <p style={{ margin:'0 0 4px', fontSize:'15px', fontWeight:800, color:'#991b1b' }}>Hay tardanzas en la quincena en curso</p>
+              <p style={{ margin:0, fontSize:'12.5px', color:'#7f1d1d' }}>
+                {tardanzasHoy.map((t, i) => (<span key={t.nombre}>{i > 0 && ' · '}<strong>{t.nombre}</strong> ({t.cantidad})</span>))}
+                {' — pierden el presentismo de esta quincena.'}
+              </p>
+            </div>
+            <Link href="/admin/personal" className="btn secondary" style={{ fontSize:'12px', whiteSpace:'nowrap' }}>Ver Control de personal →</Link>
+          </div>
+        )}
 
         {esDiaStockCamara && (
           <div style={{ background:'#fef3c7', border:'2px solid #f59e0b', borderRadius:'10px', padding:'16px 18px', marginBottom:'14px', display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }}>
