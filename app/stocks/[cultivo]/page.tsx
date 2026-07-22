@@ -19,10 +19,11 @@ const fmtN = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: 2
 export default async function StockDetallePage({ params, searchParams }: { params: { cultivo: string }; searchParams: { mes?: string } }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
-  const cultivo = params.cultivo === 'lechuga' ? 'lechuga' : 'rucula';
+  const cultivo = params.cultivo === 'lechuga_crespa' ? 'lechuga_crespa' : params.cultivo === 'lechuga_roble' ? 'lechuga_roble' : 'rucula';
   const isRucula = cultivo === 'rucula';
-  const label = isRucula ? 'Rúcula' : 'Lechuga';
-  const accent = isRucula ? '#166534' : '#4d7c0f';
+  const isCrespa = cultivo === 'lechuga_crespa';
+  const label = isRucula ? 'Rúcula' : isCrespa ? 'Lechuga Crespa' : 'Lechuga Hoja de Roble';
+  const accent = isRucula ? '#134e4a' : isCrespa ? '#84cc16' : '#4d7c0f';
 
   let lotes: Lote[] = [], ventas: VentaDia[] = [], registros: StockCamara[] = [];
   try {
@@ -31,14 +32,18 @@ export default async function StockDetallePage({ params, searchParams }: { param
     ]);
   } catch {}
 
+  // "Roble" es catch-all de cualquier lechuga no-crespa (mismo criterio que lib/camara.ts)
+  // — así nunca se pierde stock de una variedad sin clasificar explícitamente.
   const matchVar = (v: string) => {
     const x = String(v).toLowerCase();
     const r = x.includes('rucula') || x.includes('rúcula');
-    return isRucula ? r : (!r && !x.includes('albahaca'));
+    if (isRucula) return r;
+    if (r) return false;
+    return isCrespa ? x.includes('crespa') : !x.includes('crespa');
   };
   const ventaQty = (v: VentaDia) => isRucula
     ? num(v.rucula) + num(v.bandeja_rucula)
-    : num(v.lechuga_crespa) + num(v.hoja_roble);
+    : isCrespa ? num(v.lechuga_crespa) : num(v.hoja_roble);
 
   // Mes (default: actual). ?mes=YYYY-MM
   const hoy = new Date();
@@ -157,7 +162,7 @@ export default async function StockDetallePage({ params, searchParams }: { param
           </table>
         </div>
         <p style={{ fontSize: '11px', color: '#9ca3af', marginTop: '10px' }}>
-          <span style={{ display: 'inline-block', width: 10, height: 10, background: '#eff6ff', border: '1px solid #2563eb', borderRadius: 2, marginRight: 4 }} /> día con control de stock (ajuste) · agrupa {isRucula ? 'rúcula + bandeja' : 'crespa + hoja de roble'}
+          <span style={{ display: 'inline-block', width: 10, height: 10, background: '#eff6ff', border: '1px solid #2563eb', borderRadius: 2, marginRight: 4 }} /> día con control de stock (ajuste) · agrupa {isRucula ? 'rúcula + bandeja' : isCrespa ? 'solo lechuga crespa' : 'hoja de roble + otras variedades de lechuga'}
         </p>
       </div>
     </>

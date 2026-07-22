@@ -133,13 +133,16 @@ export default async function PanelPage({ searchParams }: {
 
   // ── Stock en cámara + diferencia acumulada de ajustes del mes ──
   const camaraRucula = calcularCamara('rucula', registrosCamara, lotes, ventasPanel);
-  const camaraLechuga = calcularCamara('lechuga', registrosCamara, lotes, ventasPanel);
+  const camaraLechugaCrespa = calcularCamara('lechuga_crespa', registrosCamara, lotes, ventasPanel);
+  const camaraLechugaRoble = calcularCamara('lechuga_roble', registrosCamara, lotes, ventasPanel);
   const ajusteMesRucula = diferenciaAjustesMes('rucula', registrosCamara, lotes, ventasPanel, ahora);
-  const ajusteMesLechuga = diferenciaAjustesMes('lechuga', registrosCamara, lotes, ventasPanel, ahora);
+  const ajusteMesLechugaCrespa = diferenciaAjustesMes('lechuga_crespa', registrosCamara, lotes, ventasPanel, ahora);
+  const ajusteMesLechugaRoble = diferenciaAjustesMes('lechuga_roble', registrosCamara, lotes, ventasPanel, ahora);
   const ajusteMesRuculaPasado = diferenciaAjustesMes('rucula', registrosCamara, lotes, ventasPanel, mesPasadoRef);
-  const ajusteMesLechugaPasado = diferenciaAjustesMes('lechuga', registrosCamara, lotes, ventasPanel, mesPasadoRef);
-  const faltanteMesTotal = ajusteMesRucula.acumulado + ajusteMesLechuga.acumulado;
-  const faltanteMesTotalPasado = ajusteMesRuculaPasado.acumulado + ajusteMesLechugaPasado.acumulado;
+  const ajusteMesLechugaCrespaPasado = diferenciaAjustesMes('lechuga_crespa', registrosCamara, lotes, ventasPanel, mesPasadoRef);
+  const ajusteMesLechugaRoblePasado = diferenciaAjustesMes('lechuga_roble', registrosCamara, lotes, ventasPanel, mesPasadoRef);
+  const faltanteMesTotal = ajusteMesRucula.acumulado + ajusteMesLechugaCrespa.acumulado + ajusteMesLechugaRoble.acumulado;
+  const faltanteMesTotalPasado = ajusteMesRuculaPasado.acumulado + ajusteMesLechugaCrespaPasado.acumulado + ajusteMesLechugaRoblePasado.acumulado;
 
   const ocupNaves = tubosMesadas.map((n: any) => {
     const f2 = (n.mesadas || []).filter((m: any) => m.sector_fase !== 'fase_1');
@@ -503,7 +506,8 @@ export default async function PanelPage({ searchParams }: {
             <div id="stock-camara">
               <AjusteStockCard
                 rucula={{ actual: camaraRucula.stockActual, ajusteMes: ajusteMesRucula.acumulado }}
-                lechuga={{ actual: camaraLechuga.stockActual, ajusteMes: ajusteMesLechuga.acumulado }}
+                lechugaCrespa={{ actual: camaraLechugaCrespa.stockActual, ajusteMes: ajusteMesLechugaCrespa.acumulado }}
+                lechugaRoble={{ actual: camaraLechugaRoble.stockActual, ajusteMes: ajusteMesLechugaRoble.acumulado }}
                 esAdmin={user.rol === 'admin'}
               />
             </div>

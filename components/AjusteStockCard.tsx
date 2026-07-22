@@ -1,25 +1,27 @@
 'use client';
 import { useState } from 'react';
+import type { CultivoCamara } from '@/lib/camara';
 
 interface CultivoStock { actual: number; ajusteMes: number }
 
-export default function AjusteStockCard({ rucula, lechuga, esAdmin }: {
-  rucula: CultivoStock; lechuga: CultivoStock; esAdmin: boolean;
+export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, esAdmin }: {
+  rucula: CultivoStock; lechugaCrespa: CultivoStock; lechugaRoble: CultivoStock; esAdmin: boolean;
 }) {
-  const [abierto, setAbierto] = useState<'rucula' | 'lechuga' | null>(null);
+  const [abierto, setAbierto] = useState<CultivoCamara | null>(null);
   const [cantidad, setCantidad] = useState('');
   const [notas, setNotas] = useState('');
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; s: string } | null>(null);
 
   const cultivos = [
-    { key: 'rucula' as const, label: 'Rúcula', color: '#166534', data: rucula },
-    { key: 'lechuga' as const, label: 'Lechuga', color: '#4d7c0f', data: lechuga },
+    { key: 'rucula' as const, label: 'Rúcula', color: '#134e4a', data: rucula },
+    { key: 'lechuga_crespa' as const, label: 'Lechuga Crespa', color: '#84cc16', data: lechugaCrespa },
+    { key: 'lechuga_roble' as const, label: 'Lechuga Hoja de Roble', color: '#4d7c0f', data: lechugaRoble },
   ];
   const stockAbierto = abierto ? cultivos.find(c => c.key === abierto)!.data.actual : 0;
   const diff = abierto && cantidad !== '' ? Math.round(Number(cantidad) - stockAbierto) : null;
 
-  function abrir(key: 'rucula' | 'lechuga') {
+  function abrir(key: CultivoCamara) {
     setAbierto(key); setCantidad(''); setNotas(''); setMsg(null);
   }
   function cerrar() {
@@ -51,7 +53,7 @@ export default function AjusteStockCard({ rucula, lechuga, esAdmin }: {
   return (
     <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '14px' }}>
       <p style={{ margin: '0 0 10px', fontSize: '13px', fontWeight: 700, color: '#111827' }}>Stock en cámara</p>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
         {cultivos.map(c => (
           <div key={c.key} style={{ background: '#fafafa', border: '1px solid #f1f0eb', borderRadius: '8px', padding: '10px 12px' }}>
             <p style={{ margin: '0 0 6px', fontSize: '11px', fontWeight: 700, color: c.color, textTransform: 'uppercase' }}>{c.label}</p>

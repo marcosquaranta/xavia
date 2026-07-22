@@ -31,8 +31,9 @@ export default async function StocksPage() {
     ]);
   } catch (e: any) { err = e?.message || 'Error'; }
 
-  const camaraRucula  = calcularCamara('rucula',  registrosCamara, lotes, ventas);
-  const camaraLechuga = calcularCamara('lechuga', registrosCamara, lotes, ventas);
+  const camaraRucula = calcularCamara('rucula', registrosCamara, lotes, ventas);
+  const camaraLechugaCrespa = calcularCamara('lechuga_crespa', registrosCamara, lotes, ventas);
+  const camaraLechugaRoble = calcularCamara('lechuga_roble', registrosCamara, lotes, ventas);
   const hoy = new Date();
   const valorizacionActual = calcularValorizacionMes(articulos, stocks, hoy.getFullYear(), hoy.getMonth() + 1);
 
@@ -76,7 +77,7 @@ export default async function StocksPage() {
           </div>
         )}
 
-        <StockCamaraCards rucula={camaraRucula} lechuga={camaraLechuga} isAdmin={user.rol === 'admin'} valorizacionActual={valorizacionActual.total} />
+        <StockCamaraCards rucula={camaraRucula} lechugaCrespa={camaraLechugaCrespa} lechugaRoble={camaraLechugaRoble} isAdmin={user.rol === 'admin'} valorizacionActual={valorizacionActual.total} />
 
         <StocksManager
           articulos={articulos.filter((a) => a.activo === 'SI')}

@@ -7,7 +7,8 @@ import type { ResultadoCamara } from '@/lib/camara';
 
 interface Props {
   rucula: ResultadoCamara;
-  lechuga: ResultadoCamara;
+  lechugaCrespa: ResultadoCamara;
+  lechugaRoble: ResultadoCamara;
   isAdmin: boolean;
   valorizacionActual: number;
 }
@@ -52,7 +53,7 @@ function CardCamara({ datos, cultivo, cultivoKey, isAdmin, onSaved }: {
     }
   }
 
-  const colorTop = datos.cultivo === 'rucula' ? '#166534' : '#4d7c0f';
+  const colorTop = datos.cultivo === 'rucula' ? '#134e4a' : datos.cultivo === 'lechuga_crespa' ? '#84cc16' : '#4d7c0f';
 
   return (
     <div style={{ background: 'white', border: '1px solid #e5e7eb', borderTop: `3px solid ${colorTop}`, borderRadius: '10px', padding: '12px' }}>
@@ -127,12 +128,13 @@ function CardCamara({ datos, cultivo, cultivoKey, isAdmin, onSaved }: {
   );
 }
 
-export default function StockCamaraCards({ rucula, lechuga, isAdmin, valorizacionActual }: Props) {
+export default function StockCamaraCards({ rucula, lechugaCrespa, lechugaRoble, isAdmin, valorizacionActual }: Props) {
   const router = useRouter();
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '20px' }}>
       <CardCamara datos={rucula} cultivo="Rúcula" cultivoKey="rucula" isAdmin={isAdmin} onSaved={() => router.refresh()} />
-      <CardCamara datos={lechuga} cultivo="Lechuga" cultivoKey="lechuga" isAdmin={isAdmin} onSaved={() => router.refresh()} />
+      <CardCamara datos={lechugaCrespa} cultivo="Lechuga Crespa" cultivoKey="lechuga_crespa" isAdmin={isAdmin} onSaved={() => router.refresh()} />
+      <CardCamara datos={lechugaRoble} cultivo="Lechuga Hoja de Roble" cultivoKey="lechuga_roble" isAdmin={isAdmin} onSaved={() => router.refresh()} />
       <div style={{ background: '#111827', borderRadius: '10px', padding: '12px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
           <span style={{ fontSize: '10px', fontWeight: 800, color: '#d1d5db', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Stock valorizado</span>

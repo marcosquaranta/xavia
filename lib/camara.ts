@@ -1,5 +1,7 @@
 import type { Lote, VentaDia, StockCamara } from './types';
 
+export type CultivoCamara = 'rucula' | 'lechuga_crespa' | 'lechuga_roble';
+
 function parseDate(s: any): Date | null {
   if (!s) return null;
   const str = String(s).split(/[\sT]/)[0];
@@ -8,18 +10,29 @@ function parseDate(s: any): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
-function isRucula(variedad: string) {
+function esRucula(variedad: string) {
   const v = String(variedad || '').toLowerCase();
   return v.includes('rucula') || v.includes('rúcula');
+}
+function esCrespa(variedad: string) {
+  return String(variedad || '').toLowerCase().includes('crespa');
+}
+// "Roble" es el catch-all de lechuga (hoja de roble + cualquier otra variedad de
+// lechuga que no sea explícitamente crespa) — así nunca se pierde stock de un lote con
+// una variedad rara sin clasificar, igual criterio que ya se usa en lib/usoTeorico.ts.
+function matchCultivo(cultivo: CultivoCamara, variedad: string): boolean {
+  if (cultivo === 'rucula') return esRucula(variedad);
+  if (esRucula(variedad)) return false;
+  return cultivo === 'lechuga_crespa' ? esCrespa(variedad) : !esCrespa(variedad);
 }
 
 // Paquetes cosechados de `cultivo` con fecha en (desde, hasta] — mismo criterio que
 // calcularCamara, pero acotado a un rango (no siempre "hasta hoy").
-function cosechadoEntre(cultivo: 'rucula' | 'lechuga', lotes: Lote[], desde: Date, hasta: Date): number {
+function cosechadoEntre(cultivo: CultivoCamara, lotes: Lote[], desde: Date, hasta: Date): number {
   return lotes
     .filter(l => {
       if (l.estado !== 'cosechado') return false;
-      if (cultivo === 'rucula' ? !isRucula(l.variedad) : isRucula(l.variedad)) return false;
+      if (!matchCultivo(cultivo, l.variedad)) return false;
       const f = parseDate(l.fecha_cosecha || l.fecha_ult_movimiento);
       return f && f > desde && f <= hasta;
     })
@@ -29,7 +42,9 @@ function cosechadoEntre(cultivo: 'rucula' | 'lechuga', lotes: Lote[], desde: Dat
 // Paquetes vendidos (exportados a Xubio) de `cultivo` con fecha en (desde, hasta].
 // El export marca `exportado` con el id de exportación (ej. "EXP-20260619-1430"),
 // NO con el literal 'SI'. Por eso se descuenta cualquier venta con exportado no vacío.
-function vendidoEntre(cultivo: 'rucula' | 'lechuga', ventas: VentaDia[], desde: Date, hasta: Date): number {
+// lechuga_crespa/hoja_roble ya son campos separados en Ventas — no hace falta
+// clasificar por texto de variedad como con las cosechas.
+function vendidoEntre(cultivo: CultivoCamara, ventas: VentaDia[], desde: Date, hasta: Date): number {
   return ventas
     .filter(v => {
       if (!v.exportado || String(v.exportado).trim() === '') return false;
@@ -38,19 +53,20 @@ function vendidoEntre(cultivo: 'rucula' | 'lechuga', ventas: VentaDia[], desde: 
     })
     .reduce((acc, v) => {
       if (cultivo === 'rucula') return acc + (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0);
-      return acc + (Number(v.lechuga_crespa) || 0) + (Number(v.hoja_roble) || 0);
+      if (cultivo === 'lechuga_crespa') return acc + (Number(v.lechuga_crespa) || 0);
+      return acc + (Number(v.hoja_roble) || 0);
     }, 0);
 }
 
 export interface ResultadoCamara {
-  cultivo: 'rucula' | 'lechuga';
+  cultivo: CultivoCamara;
   stockActual: number;
   diasPromedio: number;
   base: StockCamara | null;
 }
 
 export function calcularCamara(
-  cultivo: 'rucula' | 'lechuga',
+  cultivo: CultivoCamara,
   registros: StockCamara[],
   lotes: Lote[],
   ventas: VentaDia[]
@@ -74,7 +90,7 @@ export function calcularCamara(
   const cosechas = lotes
     .filter(l => {
       if (l.estado !== 'cosechado') return false;
-      if (cultivo === 'rucula' ? !isRucula(l.variedad) : isRucula(l.variedad)) return false;
+      if (!matchCultivo(cultivo, l.variedad)) return false;
       const f = parseDate(l.fecha_cosecha || l.fecha_ult_movimiento);
       return f && f > fechaBase;
     })
@@ -118,7 +134,7 @@ export function calcularCamara(
 // tener en cámara a esa fecha (stock teórico según la última base + movimientos desde
 // entonces). Sirve tanto para avisar al cargar un ajuste como para el acumulado mensual.
 export function diferenciaAjuste(
-  cultivo: 'rucula' | 'lechuga',
+  cultivo: CultivoCamara,
   registros: StockCamara[],
   lotes: Lote[],
   ventas: VentaDia[],
@@ -144,7 +160,7 @@ export interface DiferenciaAjustesMes { acumulado: number; cantidadAjustes: numb
 // Suma las diferencias reveladas por cada ajuste cargado en el mes de `fechaRef`
 // (por defecto el mes en curso) — "cuánto se corrigió" acumulado ese mes.
 export function diferenciaAjustesMes(
-  cultivo: 'rucula' | 'lechuga',
+  cultivo: CultivoCamara,
   registros: StockCamara[],
   lotes: Lote[],
   ventas: VentaDia[],

@@ -31,8 +31,8 @@ export interface ReporteSemanalData {
   ocupacion: { nave: number; pct: number }[];
   mesadasBajas: { nombre: string; nave: number; pct: number }[];
   ventasSemanas: PuntoVentaCultivoSemana[];
-  stock: { rucula: number; lechuga: number };
-  faltanteMes: { rucula: number; lechuga: number; total: number };
+  stock: { rucula: number; lechuga_crespa: number; lechuga_roble: number };
+  faltanteMes: { rucula: number; lechuga_crespa: number; lechuga_roble: number; total: number };
 }
 
 export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> {
@@ -114,11 +114,16 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   // ── Stock en cámara + faltante acumulado por ajustes del mes en curso ──
   const stock = {
     rucula: calcularCamara('rucula', registrosCamara, lotes, ventas).stockActual,
-    lechuga: calcularCamara('lechuga', registrosCamara, lotes, ventas).stockActual,
+    lechuga_crespa: calcularCamara('lechuga_crespa', registrosCamara, lotes, ventas).stockActual,
+    lechuga_roble: calcularCamara('lechuga_roble', registrosCamara, lotes, ventas).stockActual,
   };
   const ajusteRuc = diferenciaAjustesMes('rucula', registrosCamara, lotes, ventas, hoy);
-  const ajusteLec = diferenciaAjustesMes('lechuga', registrosCamara, lotes, ventas, hoy);
-  const faltanteMes = { rucula: ajusteRuc.acumulado, lechuga: ajusteLec.acumulado, total: ajusteRuc.acumulado + ajusteLec.acumulado };
+  const ajusteLecCrespa = diferenciaAjustesMes('lechuga_crespa', registrosCamara, lotes, ventas, hoy);
+  const ajusteLecRoble = diferenciaAjustesMes('lechuga_roble', registrosCamara, lotes, ventas, hoy);
+  const faltanteMes = {
+    rucula: ajusteRuc.acumulado, lechuga_crespa: ajusteLecCrespa.acumulado, lechuga_roble: ajusteLecRoble.acumulado,
+    total: ajusteRuc.acumulado + ajusteLecCrespa.acumulado + ajusteLecRoble.acumulado,
+  };
 
   return {
     fechaGenerado: fmtISO(hoy),
@@ -270,8 +275,8 @@ export function construirHtml(d: ReporteSemanalData): string {
     </tr>`;
   }).join('');
 
-  const stockFilas = (['rucula', 'lechuga'] as const).map((c) => {
-    const label = c === 'rucula' ? 'Rúcula' : 'Lechuga';
+  const stockFilas = (['rucula', 'lechuga_crespa', 'lechuga_roble'] as const).map((c) => {
+    const label = c === 'rucula' ? 'Rúcula' : c === 'lechuga_crespa' ? 'Lechuga Crespa' : 'Lechuga Roble';
     const falt = d.faltanteMes[c];
     return `<tr>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">${label}</td>
@@ -281,7 +286,7 @@ export function construirHtml(d: ReporteSemanalData): string {
   }).join('');
   const stockTotalRow = `<tr style="background:#fafafa">
     <td style="padding:6px 10px;font-weight:800">Total</td>
-    <td style="padding:6px 10px;text-align:right;font-weight:800">${fmtN(d.stock.rucula + d.stock.lechuga)} paq</td>
+    <td style="padding:6px 10px;text-align:right;font-weight:800">${fmtN(d.stock.rucula + d.stock.lechuga_crespa + d.stock.lechuga_roble)} paq</td>
     <td style="padding:6px 10px;text-align:right;font-weight:800">${d.faltanteMes.total >= 0 ? '+' : ''}${d.faltanteMes.total} paq</td>
   </tr>`;
 
@@ -398,7 +403,8 @@ export function construirTexto(d: ReporteSemanalData): string {
 
   L.push(`❄️ *Stock en cámara* (faltante acumulado del mes)`);
   L.push(`Rúcula: ${fmtN(d.stock.rucula)} paq · faltante ${d.faltanteMes.rucula >= 0 ? '+' : ''}${d.faltanteMes.rucula} paq`);
-  L.push(`Lechuga: ${fmtN(d.stock.lechuga)} paq · faltante ${d.faltanteMes.lechuga >= 0 ? '+' : ''}${d.faltanteMes.lechuga} paq`);
+  L.push(`Lechuga Crespa: ${fmtN(d.stock.lechuga_crespa)} paq · faltante ${d.faltanteMes.lechuga_crespa >= 0 ? '+' : ''}${d.faltanteMes.lechuga_crespa} paq`);
+  L.push(`Lechuga Roble: ${fmtN(d.stock.lechuga_roble)} paq · faltante ${d.faltanteMes.lechuga_roble >= 0 ? '+' : ''}${d.faltanteMes.lechuga_roble} paq`);
   L.push('');
 
   L.push(`🏭 *Ocupación por nave*`);

@@ -110,26 +110,45 @@ export function cosechasAgrupadas(lotes: Lote[], movimientos: Movimiento[]): Gru
 
 // ── Estimación de cosecha que posiblemente caiga HOY o MAÑANA (para Ventas: "cuánto
 // puedo llegar a tener para vender"). Mismo criterio de referencia que cosechasAgrupadas
-// (F2 del último lote cosechado de ese cultivo), pero con un día de margen hacia
+// (F2 del último lote cosechado de esa variedad), pero con un día de margen hacia
 // adelante. En unidades de venta: rúcula en paquetes (÷3, 3 posiciones/paquete),
-// lechuga en plantas — sin conversión, ya que 1 planta = 1 unidad de venta. ──
-export interface EstimacionCosechaCercana { rucula: number; lechuga: number }
+// lechuga en plantas — sin conversión, ya que 1 planta = 1 unidad de venta.
+// Lechuga separada en crespa/roble (roble = catch-all de cualquier lechuga no-crespa,
+// mismo criterio que lib/camara.ts) — antes iba junta, pero tienen precio y demanda
+// distintos y hace falta saber cuánta hay de cada una. ──
+const esCrespaVar = (v: string) => String(v).toLowerCase().includes('crespa');
+
+export interface EstimacionCosechaCercana { rucula: number; lechuga_crespa: number; lechuga_roble: number }
 export function estimacionCosechaHoyManana(lotes: Lote[], movimientos: Movimiento[]): EstimacionCosechaCercana {
-  const ref = ultimoF2PorCultivo(lotes, movimientos);
+  const cosechados = lotes
+    .filter(l => l.estado === 'cosechado' && l.fecha_cosecha)
+    .sort((a, b) => String(b.fecha_cosecha || '').localeCompare(String(a.fecha_cosecha || '')));
+  function refF2(match: (v: string) => boolean): number | null {
+    const l = cosechados.find(l => match(l.variedad));
+    if (!l) return null;
+    try { const d = calcularDiasPorFase(l, movimientos); return d.fase_2 > 0 ? d.fase_2 : null; } catch { return null; }
+  }
+  const refRucula = refF2(esRuculaVar);
+  const refCrespa = refF2((v) => !esRuculaVar(v) && esCrespaVar(v));
+  const refRoble = refF2((v) => !esRuculaVar(v) && !esCrespaVar(v));
+
   const activos = lotes.filter(l => l.estado === 'activo' && l.fase_actual === 'fase_2');
-  let ruculaPlantas = 0, lechugaPlantas = 0;
+  let ruculaPlantas = 0, crespaPlantas = 0, roblePlantas = 0;
   for (const l of activos) {
     let dias: any;
     try { dias = calcularDiasPorFase(l, movimientos); } catch { continue; }
     const esRucula = esRuculaVar(l.variedad);
-    const refF2 = esRucula ? ref.rucula : ref.lechuga;
-    if (refF2 === null) continue;
+    const esCrespa = !esRucula && esCrespaVar(l.variedad);
+    const refF2Usado = esRucula ? refRucula : esCrespa ? refCrespa : refRoble;
+    if (refF2Usado === null) continue;
     const diasF2 = dias.fase_2 || 0;
-    if (refF2 - diasF2 > 1) continue; // falta más de 1 día para el punto de cosecha esperado
+    if (refF2Usado - diasF2 > 1) continue; // falta más de 1 día para el punto de cosecha esperado
     const plantas = Number(l.plantas_estimadas_actual) || 0;
-    if (esRucula) ruculaPlantas += plantas; else lechugaPlantas += plantas;
+    if (esRucula) ruculaPlantas += plantas;
+    else if (esCrespa) crespaPlantas += plantas;
+    else roblePlantas += plantas;
   }
-  return { rucula: Math.round(ruculaPlantas / POSPAQ), lechuga: Math.round(lechugaPlantas) };
+  return { rucula: Math.round(ruculaPlantas / POSPAQ), lechuga_crespa: Math.round(crespaPlantas), lechuga_roble: Math.round(roblePlantas) };
 }
 
 // ── Capacidad por nave desde Ubicaciones ──

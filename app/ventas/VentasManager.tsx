@@ -85,7 +85,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
   const [loadHist,setLoadHist]=useState(false);
   const [currentExportId,setCurrentExportId]=useState<string|null>(null);
   const [limpiando,setLimpiando]=useState(false);
-  const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number;diasPromedio:number};lechuga:{stockActual:number;diasPromedio:number};factorGrPaq:{rucula:number;lechuga:number}}|null>(null);
+  const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number;diasPromedio:number};lechuga_crespa:{stockActual:number;diasPromedio:number};lechuga_roble:{stockActual:number;diasPromedio:number};factorGrPaq:{rucula:number;lechuga_crespa:number;lechuga_roble:number}}|null>(null);
   const [ctdsKg,setCtdsKg]=useState<CKG>({});
   const [fechaExportada,setFechaExportada]=useState(false);
   const [ventas7,setVentas7]=useState<VentaDia[]>([]);
@@ -112,7 +112,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
 
   // Cargar stock en cámara
   useEffect(()=>{
-    fetch('/api/stocks/camara').then(r=>r.json()).then(j=>{ if(j.rucula&&j.lechuga) setStockCamara(j); }).catch(()=>{});
+    fetch('/api/stocks/camara').then(r=>r.json()).then(j=>{ if(j.rucula&&j.lechuga_crespa&&j.lechuga_roble) setStockCamara(j); }).catch(()=>{});
   },[]);
 
   // Cargar correlativo actual al iniciar
@@ -353,14 +353,14 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
       {/* Stock disponible hoy (unidades) */}
       <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'8px',padding:'8px 14px',marginBottom:'12px'}}>
         <p style={{margin:'0 0 8px',fontSize:'12px',fontWeight:700,color:'#166534'}}>🥬 Disponible para vender hoy</p>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}}>
-          {(['rucula','lechuga'] as const).map(cultivo=>{
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))',gap:'10px'}}>
+          {(['rucula','lechuga_crespa','lechuga_roble'] as const).map(cultivo=>{
             const sc = stockCamara?.[cultivo]?.stockActual ?? 0;
             const estCosecha = estimCosecha?.[cultivo] ?? 0;
-            const label  = cultivo==='rucula'?'Rúcula':'Lechuga';
-            const color  = cultivo==='rucula'?'#b45309':'#166534';
-            const bg     = cultivo==='rucula'?'#fffbeb':'#f0fdf4';
-            const border = cultivo==='rucula'?'#fde68a':'#bbf7d0';
+            const label  = cultivo==='rucula'?'Rúcula':cultivo==='lechuga_crespa'?'Lechuga Crespa':'Lechuga Roble';
+            const color  = cultivo==='rucula'?'#b45309':cultivo==='lechuga_crespa'?'#4d7c0f':'#166534';
+            const bg     = cultivo==='rucula'?'#fffbeb':cultivo==='lechuga_crespa'?'#f7fee7':'#f0fdf4';
+            const border = cultivo==='rucula'?'#fde68a':cultivo==='lechuga_crespa'?'#d9f99d':'#bbf7d0';
             return (
               <div key={cultivo} style={{background:bg,border:`1px solid ${border}`,borderRadius:'8px',padding:'8px 12px',display:'flex',justifyContent:'space-between',alignItems:'center',gap:'8px'}}>
                 <span style={{fontSize:'12px',fontWeight:700,color}}>{label}</span>
@@ -681,12 +681,13 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
 
         {/* ── Resumen del día (en paquetes / unidades) ── */}
         {hayV&&(()=>{
-          const fR = stockCamara?.factorGrPaq?.rucula  || 210;
-          const fL = stockCamara?.factorGrPaq?.lechuga || 330;
+          const fR = stockCamara?.factorGrPaq?.rucula || 210;
+          const fLCrespa = stockCamara?.factorGrPaq?.lechuga_crespa || 330;
+          const fLRoble = stockCamara?.factorGrPaq?.lechuga_roble || 330;
           const lecPaq = tots.lechuga_crespa+tots.hoja_roble;
           const rKgPaq = Math.round(totsKg.rucula_kg*1000/fR);  // KG cajón → paq equivalentes
-          const lKgPaqCrespa = Math.round(totsKg.lechuga_kg_crespa*1000/fL);
-          const lKgPaqRoble = Math.round(totsKg.lechuga_kg_roble*1000/fL);
+          const lKgPaqCrespa = Math.round(totsKg.lechuga_kg_crespa*1000/fLCrespa);
+          const lKgPaqRoble = Math.round(totsKg.lechuga_kg_roble*1000/fLRoble);
           const lKgPaq = lKgPaqCrespa + lKgPaqRoble;
           const rTotPaq = tots.rucula + rKgPaq;
           const lTotPaq = lecPaq + lKgPaq;

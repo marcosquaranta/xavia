@@ -207,7 +207,9 @@ export interface VentaHistorica {
 
 export interface StockCamara {
   id_registro: string;
-  cultivo: 'rucula' | 'lechuga';
+  // 'lechuga' queda solo por compatibilidad con registros viejos (antes del split
+  // crespa/roble) — los nuevos conteos van directo a 'lechuga_crespa'/'lechuga_roble'.
+  cultivo: 'rucula' | 'lechuga' | 'lechuga_crespa' | 'lechuga_roble';
   fecha: string;
   tipo: 'inicial' | 'ajuste';
   cantidad_paq: number | string;
