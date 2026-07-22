@@ -13,6 +13,7 @@ export default async function AdminPage() {
     { href: '/admin/usuarios', titulo: 'Usuarios', desc: 'Gestionar accesos y roles' },
     { href: '/admin/clientes-venta', titulo: 'Clientes', desc: 'Facturación, precios y Xubio' },
     { href: '/admin/pedidos-fijos', titulo: 'Pedidos fijos', desc: 'Pedidos recurrentes por día de la semana' },
+    { href: '/admin/personal', titulo: 'Control de personal', desc: 'Horas, tardanzas y sueldo por quincena (CrossChex)' },
     { href: '/admin/articulos', titulo: 'Artículos de stock', desc: 'Categorías, unidades y fórmula de uso teórico' },
   ];
   return (

@@ -215,3 +215,15 @@ export interface StockCamara {
   usuario: string;
   fecha_carga: string;
 }
+
+// Configuración por empleado para Control de personal (horas/CrossChex) — workno es el
+// número de legajo tal cual figura en CrossChex, para cruzar los fichajes.
+export interface Empleado {
+  workno: string;
+  nombre: string;
+  sueldo_hora: number | string;
+  horas_teoricas_quincena: number | string; // default 46, editable
+  hora_entrada_esperada: string; // "08:00"
+  hora_salida_esperada: string;  // "17:00"
+  activo: 'SI' | 'NO';
+}
