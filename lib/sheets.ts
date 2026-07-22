@@ -28,8 +28,14 @@ export async function readSheet<T = Record<string, any>>(sheetName: string): Pro
     const obj: Record<string, any> = {};
     headers.forEach((header, idx) => {
       const raw = row[idx];
+      // Google Sheets devuelve los números con el separador decimal de la config
+      // regional de la planilla — con configuración en español eso es COMA, no punto
+      // ("0,201" en vez de "0.201"). Sin este segundo caso, esos valores quedaban como
+      // texto y cualquier Number(...) sobre ellos daba NaN en silencio (comparaciones
+      // ">0", sumas, etc. — ej. el pesaje testigo de un lote "desaparecía" de golpe).
       if (raw === undefined || raw === null || raw === '') { obj[header] = ''; }
       else if (typeof raw === 'string' && /^-?\d+(\.\d+)?$/.test(raw)) { obj[header] = parseFloat(raw); }
+      else if (typeof raw === 'string' && /^-?\d+,\d+$/.test(raw)) { obj[header] = parseFloat(raw.replace(',', '.')); }
       else { obj[header] = raw; }
     });
     return obj as T;
