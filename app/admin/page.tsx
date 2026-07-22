@@ -12,6 +12,7 @@ export default async function AdminPage() {
     { href: '/admin/semillas', titulo: 'Semillas', desc: 'Stock de semillas y batches' },
     { href: '/admin/usuarios', titulo: 'Usuarios', desc: 'Gestionar accesos y roles' },
     { href: '/admin/clientes-venta', titulo: 'Clientes', desc: 'Facturación, precios y Xubio' },
+    { href: '/admin/pedidos-fijos', titulo: 'Pedidos fijos', desc: 'Pedidos recurrentes por día de la semana' },
     { href: '/admin/articulos', titulo: 'Artículos de stock', desc: 'Categorías, unidades y fórmula de uso teórico' },
   ];
   return (

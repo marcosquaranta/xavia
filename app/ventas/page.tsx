@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import type { ClienteVenta, PrecioVenta, VentaDia, Lote, Movimiento, VentaHistorica } from '@/lib/types';
+import type { ClienteVenta, PrecioVenta, VentaDia, Lote, Movimiento, VentaHistorica, PedidoFijo } from '@/lib/types';
 import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionVentaPorClienteSemanal, evolucionPrecioPromedio, resumenMesActual } from '@/lib/estadisticasVentas';
 import { estimacionCosechaHoyManana } from '@/lib/planificacionServer';
 import Header from '@/components/Header';
@@ -57,12 +57,14 @@ export default async function VentasPage() {
   if (user.rol !== 'admin') redirect('/panel');
   let clientes: ClienteVenta[] = [], precios: PrecioVenta[] = [], ventas: VentaDia[] = [];
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], historicas: VentaHistorica[] = [];
+  let pedidosFijos: PedidoFijo[] = [];
   let err: string | null = null;
   try {
-    [clientes, precios, ventas, lotes, movimientos, historicas] = await Promise.all([
+    [clientes, precios, ventas, lotes, movimientos, historicas, pedidosFijos] = await Promise.all([
       readSheet<ClienteVenta>('Clientes'), readSheet<PrecioVenta>('Precios'), readSheet<VentaDia>('Ventas'),
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<VentaHistorica>('VentasHistoricas').catch(() => []),
+      readSheet<PedidoFijo>('PedidosFijos').catch(() => []),
     ]);
   } catch (e: any) { err = e?.message || 'Error'; }
   if (err) return (<><Header user={user} current="ventas" /><div className="container"><div className="alert-box error">{err}</div></div></>);
@@ -91,7 +93,7 @@ export default async function VentasPage() {
         </div>
         <VentasEvolucionCharts articulo={evolArticulo} clienteSemanal={evolClienteSemanal} clienteMensual={evolClienteMensual} precio={evolPrecio} resumenMes={resumenMes} />
         <div className="card">
-          <VentasManager clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} estimCosecha={estimCosecha} />
+          <VentasManager clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} estimCosecha={estimCosecha} pedidosFijos={pedidosFijos.filter(p=>p.activo==='SI')} />
           <XubioResumen />
         </div>
       </div>

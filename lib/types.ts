@@ -133,6 +133,24 @@ export interface ClienteVenta {
   email: string;  // para enviarle el detalle de venta cuando es Factura B
 }
 
+// Pedido recurrente de un cliente para un día fijo de la semana (0=domingo..6=sábado,
+// igual que Date.getDay()) — se usa para pre-cargar la carga de Ventas de ese día,
+// sin pisar nada si ya hay algo cargado.
+export interface PedidoFijo {
+  id_pedido_fijo: string;
+  id_control: string;
+  nombre_cliente: string;
+  sucursal: string;
+  dia_semana: number | string;
+  rucula: number | string;
+  lechuga_crespa: number | string;
+  hoja_roble: number | string;
+  bandeja_rucula: number | string;
+  albahaca: number | string;
+  activo: 'SI' | 'NO';
+  notas: string;
+}
+
 export interface PrecioVenta {
   id_control: string;
   nombre_cliente: string;

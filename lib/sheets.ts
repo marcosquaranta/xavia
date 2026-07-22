@@ -179,6 +179,24 @@ export async function deleteRow(sheetName: string, keyColumn: string, keyValue: 
   return true;
 }
 
+// Crea la pestaña con ese nombre (y el header dado) si todavía no existe — para
+// features nuevas que necesitan una hoja propia sin depender de que alguien la arme
+// a mano en Google Sheets primero. Idempotente: si ya existe, no hace nada.
+export async function asegurarHoja(nombre: string, headers: string[]): Promise<void> {
+  const sheets = getClient();
+  const meta = await sheets.spreadsheets.get({ spreadsheetId: SHEET_ID });
+  const existe = meta.data.sheets?.some((s) => s.properties?.title === nombre);
+  if (existe) return;
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SHEET_ID,
+    requestBody: { requests: [{ addSheet: { properties: { title: nombre } } }] },
+  });
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SHEET_ID, range: `${nombre}!A1`,
+    valueInputOption: 'RAW', requestBody: { values: [headers] },
+  });
+}
+
 export async function readConfig(clave: string): Promise<string | number | null> {
   const items = await readSheet<{ clave: string; valor: any }>('Configuracion');
   const item = items.find((i) => i.clave === clave);

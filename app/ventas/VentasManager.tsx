@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import type { ClienteVenta, PrecioVenta, VentaDia } from '@/lib/types';
+import type { ClienteVenta, PrecioVenta, VentaDia, PedidoFijo } from '@/lib/types';
 import type { EstimacionCosechaCercana } from '@/lib/planificacionServer';
 
 const PP = [
@@ -63,7 +63,7 @@ function mkFilas(cs: ClienteVenta[], freq: Record<string,number>): Fila[] {
   return out.sort((a,b)=>(freq[b.id_control]||0)-(freq[a.id_control]||0));
 }
 
-export default function VentasManager({clientes,precios,frecuencias,stats,estimCosecha}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;estimCosecha:EstimacionCosechaCercana}) {
+export default function VentasManager({clientes,precios,frecuencias,stats,estimCosecha,pedidosFijos}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;estimCosecha:EstimacionCosechaCercana;pedidosFijos:PedidoFijo[]}) {
   const hoy = new Date().toISOString().split('T')[0];
   const [fecha,setFecha]=useState(hoy);
   const [showExpSelector,setShowExpSelector]=useState(false);
@@ -90,6 +90,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
   const [fechaExportada,setFechaExportada]=useState(false);
   const [ventas7,setVentas7]=useState<VentaDia[]>([]);
   const [facturadasHoy,setFacturadasHoy]=useState<VentaDia[]>([]);
+  // Celdas pre-cargadas desde un Pedido fijo (todavía no tocadas por el usuario) — se
+  // marcan distinto para dejar en claro que es una sugerencia, no algo ya guardado.
+  const [prefijo,setPrefijo]=useState<Set<string>>(new Set());
   const ctdsKgLive=useRef<CKG>({});
   // Referencias directas a los inputs KG del DOM — fuente de verdad para saveKg
   const kgInputRefs=useRef<Record<string,Record<KGK,HTMLInputElement|null>>>({});
@@ -155,7 +158,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
       }
       ctdsKgLive.current=ckg;
       setFechaExportada(true);
-      setCtds(c);setCtdsKg(ckg);setEsts({});setEstsKg({});
+      setCtds(c);setCtdsKg(ckg);setEsts({});setEstsKg({});setPrefijo(new Set());
     }).catch(()=>{}).finally(()=>setLoading(false));
   }
 
@@ -169,12 +172,29 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
         c[key]={rucula:String(v.rucula||''),lechuga_crespa:String(v.lechuga_crespa||''),hoja_roble:String(v.hoja_roble||''),bandeja_rucula:String(v.bandeja_rucula||''),albahaca:String(v.albahaca||'')};
         ckg[key]={rucula_kg:String(v.rucula_kg||''),lechuga_kg_crespa:String(v.lechuga_kg_crespa||''),lechuga_kg_roble:String(v.lechuga_kg_roble||'')};
       }
+      // Pedidos fijos de ese día de la semana: pre-cargan solo lo que todavía no tiene
+      // nada guardado — nunca pisan una carga ya existente. Quedan editables y marcados
+      // aparte (ver `prefijo`) hasta que se guarden como cualquier otra celda.
+      const diaSemana = new Date(fecha+'T12:00:00').getDay();
+      const nuevoPrefijo = new Set<string>();
+      for (const pf of pedidosFijos) {
+        if (Number(pf.dia_semana) !== diaSemana) continue;
+        const key = `${pf.id_control}__${pf.sucursal}`;
+        if (c[key]) continue;
+        const vals = {...EQ};
+        let tieneAlgo = false;
+        for (const k of ['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca'] as PK[]) {
+          const n = Number((pf as any)[k]) || 0;
+          if (n > 0) { vals[k] = String(n); tieneAlgo = true; nuevoPrefijo.add(`${key}__${k}`); }
+        }
+        if (tieneAlgo) c[key] = vals;
+      }
       ctdsKgLive.current = ckg;
       setFechaExportada(false);
       setCurrentExportId(null);
-      setCtds(c); setCtdsKg(ckg); setEsts({}); setEstsKg({});
+      setCtds(c); setCtdsKg(ckg); setEsts({}); setEstsKg({}); setPrefijo(nuevoPrefijo);
     }).catch(()=>{}).finally(()=>setLoading(false));
-  },[fecha]);
+  },[fecha,pedidosFijos]);
 
   // Ventas del mismo día de la semana pasada (para la comparación por cliente) — se
   // recalcula según la fecha seleccionada, no según "hoy" (si no, la comparación quedaba
@@ -194,6 +214,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
   function onChange(f:Fila,k:PK,v:string){
     setCtds(p=>({...p,[`${f.id_control}__${f.sucursal}`]:{...(p[`${f.id_control}__${f.sucursal}`]||EQ),[k]:v}}));
     se(f.id_control,f.sucursal,k,'idle');
+    const pk=`${f.id_control}__${f.sucursal}__${k}`;
+    if(prefijo.has(pk)) setPrefijo(prev=>{const n=new Set(prev);n.delete(pk);return n;});
   }
   function onBlur(f:Fila,k:PK){const tk=`${f.id_control}__${f.sucursal}__${k}`;clearTimeout(tmrs.current[tk]);tmrs.current[tk]=setTimeout(()=>save(f,k),400);}
   async function save(f:Fila,k:PK){
@@ -505,11 +527,17 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
               {filasNormales.map((f,i)=>{
                 const act=(prods as any[]).some((p:any)=>Number(q(f.id_control,f.sucursal,p.key))>0);
                 const dup=esPosibleDuplicado(f.id_control,f.sucursal);
+                const tienePrefijo=(prods as any[]).some((p:any)=>prefijo.has(`${f.id_control}__${f.sucursal}__${p.key}`));
                 return(
                   <tr key={`${f.id_control}__${f.sucursal}`} style={{background:dup?'#fef2f2':act?'#f0fdf4':(i%2===0?'white':'#fafafa'),borderBottom:'1px solid #f3f4f6'}}>
                     <td style={{padding:'6px 12px'}}>
                       <span style={{fontWeight:act?600:400}}>{f.nombre_display}</span>
                       <span style={{marginLeft:'4px',fontSize:'10px',background:f.tipo==='A'?'#dbeafe':'#fef9c3',color:f.tipo==='A'?'#1e40af':'#92400e',padding:'1px 4px',borderRadius:'3px',fontWeight:600}}>F{f.tipo}</span>
+                      {tienePrefijo && (
+                        <span title="Pre-cargado desde un pedido fijo — revisá y confirmá" style={{marginLeft:'6px',fontSize:'10px',background:'#fef3c7',color:'#92400e',padding:'1px 6px',borderRadius:'3px',fontWeight:700}}>
+                          📌 pedido fijo
+                        </span>
+                      )}
                       {dup && (
                         <span title="Estos mismos valores ya están facturados hoy para este cliente" style={{marginLeft:'6px',fontSize:'10px',background:'#fee2e2',color:'#dc2626',padding:'1px 6px',borderRadius:'3px',fontWeight:700}}>
                           ⚠ posible duplicado
@@ -518,13 +546,15 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
                     </td>
                     {(prods as any[]).map((p:any)=>{
                       const est=e(f.id_control,f.sucursal,p.key);const val=q(f.id_control,f.sucursal,p.key);
+                      const esPrefijo=prefijo.has(`${f.id_control}__${f.sucursal}__${p.key}`);
                       return(
                         <td key={p.key} style={{padding:'3px 4px'}}>
                           <input type="number" min={0} value={val} placeholder="—"
+                            title={esPrefijo?'Pre-cargado desde un pedido fijo — revisá y confirmá':undefined}
                             onChange={ev=>onChange(f,p.key,ev.target.value)} onBlur={()=>onBlur(f,p.key)}
                             style={{width:'100%',textAlign:'center',fontSize:'15px',fontWeight:700,
-                              border:`2px solid ${est==='saving'?'#fbbf24':est==='saved'?'#86efac':est==='error'?'#fca5a5':Number(val)>0?'#86efac':'#e5e7eb'}`,
-                              borderRadius:'6px',padding:'5px 4px',background:Number(val)>0?'#f0fdf4':'white',color:Number(val)>0?'#166534':'#9ca3af',outline:'none'}}/>
+                              border:`2px solid ${est==='saving'?'#fbbf24':est==='saved'?'#86efac':est==='error'?'#fca5a5':esPrefijo?'#f59e0b':Number(val)>0?'#86efac':'#e5e7eb'}`,
+                              borderRadius:'6px',padding:'5px 4px',background:esPrefijo?'#fffbeb':Number(val)>0?'#f0fdf4':'white',color:esPrefijo?'#92400e':Number(val)>0?'#166534':'#9ca3af',outline:'none'}}/>
                         </td>
                       );
                     })}
