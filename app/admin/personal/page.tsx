@@ -3,8 +3,8 @@ import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { getRegistrosCrossChex } from '@/lib/crosschex';
-import { calcularResumenQuincena, rangoQuincena, type ResumenEmpleado } from '@/lib/personal';
-import type { Empleado } from '@/lib/types';
+import { calcularResumenQuincena, rangoQuincena, type AjusteQuincena, type ResumenEmpleado } from '@/lib/personal';
+import type { Empleado, PersonalQuincena } from '@/lib/types';
 import Header from '@/components/Header';
 import PersonalManager from './PersonalManager';
 
@@ -26,10 +26,19 @@ export default async function PersonalPage({ searchParams }: { searchParams: { a
   let resumen: ResumenEmpleado[] = [];
   let err: string | null = null;
   try {
-    empleados = await readSheet<Empleado>('Empleados').catch(() => []);
+    const [empleadosData, ajustesData] = await Promise.all([
+      readSheet<Empleado>('Empleados').catch(() => []),
+      readSheet<PersonalQuincena>('PersonalQuincena').catch(() => []),
+    ]);
+    empleados = empleadosData;
+    const ajustesDeEstaQuincena = ajustesData.filter((a) => String(a.anio) === String(anio) && String(a.mes) === String(mes) && String(a.quincena) === String(quincena));
+    const ajustes: Record<string, AjusteQuincena> = {};
+    for (const a of ajustesDeEstaQuincena) {
+      ajustes[String(a.workno)] = { presentismoManual: a.presentismo_manual, extras: Number(a.extras) || 0, horasExtras: Number(a.horas_extras) || 0 };
+    }
     const { desde, hasta } = rangoQuincena(anio, mes, quincena);
     const registros = await getRegistrosCrossChex(desde, hasta);
-    resumen = calcularResumenQuincena(registros, empleados, anio, mes, quincena);
+    resumen = calcularResumenQuincena(registros, empleados, anio, mes, quincena, ajustes);
   } catch (e: any) {
     err = e?.message || 'Error consultando CrossChex';
   }
@@ -68,7 +77,7 @@ export default async function PersonalPage({ searchParams }: { searchParams: { a
           </div>
         )}
 
-        {!err && <PersonalManager resumen={resumen} empleados={empleados} />}
+        {!err && <PersonalManager resumen={resumen} empleados={empleados} anio={anio} mes={mes} quincena={quincena} />}
       </div>
     </>
   );

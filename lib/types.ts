@@ -228,3 +228,17 @@ export interface Empleado {
   hora_salida_esperada: string;  // "17:00"
   activo: 'SI' | 'NO';
 }
+
+// Ajustes puntuales por empleado + quincena (no son atributos permanentes del empleado,
+// se cargan quincena a quincena): si cumplió presentismo a mano, un extra $ suelto, y
+// horas extra a pagar por fuera de las teóricas.
+export interface PersonalQuincena {
+  id: string; // `${workno}-${anio}-${mes}-${quincena}`
+  workno: string;
+  anio: number | string;
+  mes: number | string;
+  quincena: number | string;
+  presentismo_manual: 'SI' | 'NO' | '';
+  extras: number | string;
+  horas_extras: number | string;
+}

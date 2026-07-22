@@ -4,12 +4,12 @@ import { useRouter } from 'next/navigation';
 import type { Empleado } from '@/lib/types';
 import type { ResumenEmpleado } from '@/lib/personal';
 
-interface Props { resumen: ResumenEmpleado[]; empleados: Empleado[]; }
+interface Props { resumen: ResumenEmpleado[]; empleados: Empleado[]; anio: number; mes: number; quincena: 1 | 2; }
 
 const fmtN = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: 2 });
 const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 
-export default function PersonalManager({ resumen, empleados }: Props) {
+export default function PersonalManager({ resumen, empleados, anio, mes, quincena }: Props) {
   const router = useRouter();
   const [abierto, setAbierto] = useState<{ workno: string; modo: 'dias' | 'tardanzas' } | null>(null);
   const [editando, setEditando] = useState<string | null>(null);
@@ -29,6 +29,9 @@ export default function PersonalManager({ resumen, empleados }: Props) {
       presentismo: String(emp?.presentismo ?? 50000),
       hora_entrada_esperada: emp?.hora_entrada_esperada || '08:00',
       hora_salida_esperada: emp?.hora_salida_esperada || '17:00',
+      presentismo_manual: r.presentismoManual || '',
+      extras: String(r.extras || 0),
+      horas_extras: String(r.horasExtras || 0),
     });
     setEditando(r.workno);
     setError(null);
@@ -38,16 +41,27 @@ export default function PersonalManager({ resumen, empleados }: Props) {
     setGuardando(r.workno); setError(null);
     const emp = empleados.find((e) => String(e.workno) === r.workno);
     const campos = {
-      ...form,
       sueldo_hora: Number(form.sueldo_hora) || 0,
       horas_teoricas_quincena: Number(form.horas_teoricas_quincena) || 46,
       presentismo: Number(form.presentismo) || 0,
+      hora_entrada_esperada: form.hora_entrada_esperada,
+      hora_salida_esperada: form.hora_salida_esperada,
     };
     try {
       const res = emp
         ? await fetch('/api/admin/empleados', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workno: r.workno, ...campos }) })
         : await fetch('/api/admin/empleados', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workno: r.workno, nombre: r.nombre, ...campos }) });
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || 'Error'); }
+      const resAjuste = await fetch('/api/admin/personal-quincena', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workno: r.workno, anio, mes, quincena,
+          presentismo_manual: form.presentismo_manual || '',
+          extras: Number(form.extras) || 0,
+          horas_extras: Number(form.horas_extras) || 0,
+        }),
+      });
+      if (!resAjuste.ok) { const j = await resAjuste.json().catch(() => ({})); throw new Error(j.error || 'Error guardando ajustes de la quincena'); }
       setEditando(null);
       router.refresh();
     } catch (e: any) {
@@ -72,8 +86,11 @@ export default function PersonalManager({ resumen, empleados }: Props) {
               <th style={{ textAlign: 'right' }}>Hs. reales</th>
               <th style={{ textAlign: 'right' }}>Hs. teóricas</th>
               <th style={{ textAlign: 'right' }}>Diferencia</th>
+              <th style={{ textAlign: 'right' }}>Hs. de más<br /><span style={{ fontWeight: 400, fontSize: '10px', color: '#9ca3af' }}>(sobre turno 8hs)</span></th>
               <th style={{ textAlign: 'right' }}>Sueldo/hora</th>
               <th style={{ textAlign: 'right' }}>Presentismo</th>
+              <th style={{ textAlign: 'right' }}>Extras</th>
+              <th style={{ textAlign: 'right' }}>Hs. extras</th>
               <th style={{ textAlign: 'right' }}>Sueldo a pagar</th>
               <th style={{ textAlign: 'center' }}>Tardanzas</th>
               <th></th>
@@ -81,12 +98,17 @@ export default function PersonalManager({ resumen, empleados }: Props) {
           </thead>
           <tbody>
             {resumen.map((r) => {
-              const esNuevo = !empleados.find((e) => String(e.workno) === r.workno);
+              const emp = empleados.find((e) => String(e.workno) === r.workno);
+              const esNuevo = !emp;
               const editandoEsta = editando === r.workno;
               const sueldoPreview = editandoEsta
-                ? (Number(form.horas_teoricas_quincena) || 0) * (Number(form.sueldo_hora) || 0) + (r.tardanzas === 0 ? (Number(form.presentismo) || 0) : 0)
+                ? (() => {
+                    const cumplioPreview = form.presentismo_manual === 'SI' ? true : form.presentismo_manual === 'NO' ? false : r.tardanzas === 0;
+                    const presentismoPreview = cumplioPreview ? (Number(form.presentismo) || 0) : 0;
+                    return (Number(form.horas_teoricas_quincena) || 0) * (Number(form.sueldo_hora) || 0) + presentismoPreview + (Number(form.extras) || 0) + (Number(form.horas_extras) || 0) * (Number(form.sueldo_hora) || 0);
+                  })()
                 : r.sueldoAPagar;
-              const diasTarde = r.dias.filter((d) => d.tardanzaMin > 0);
+              const diasTarde = r.dias.filter((d) => d.esTardanza);
               return (
                 <Fragment key={r.workno}>
                   <tr style={{ borderTop: '1px solid #f3f4f6', background: esNuevo ? '#fffbeb' : 'transparent' }}>
@@ -99,6 +121,7 @@ export default function PersonalManager({ resumen, empleados }: Props) {
                           ⚠ {r.diasIncompletos} incompleto(s)
                         </span>
                       )}
+                      {emp && <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#9ca3af' }}>Horario esperado: {emp.hora_entrada_esperada || '—'} a {emp.hora_salida_esperada || '—'}</p>}
                     </td>
                     <td style={{ textAlign: 'right' }}>{fmtN(r.horasReales)} hs</td>
                     <td style={{ textAlign: 'right', color: '#6b7280' }}>{editandoEsta ? (
@@ -108,20 +131,39 @@ export default function PersonalManager({ resumen, empleados }: Props) {
                     <td style={{ textAlign: 'right', fontWeight: 600, color: r.diferenciaHoras < 0 ? '#dc2626' : r.diferenciaHoras > 0 ? '#059669' : '#6b7280' }}>
                       {r.diferenciaHoras > 0 ? '+' : ''}{fmtN(r.diferenciaHoras)} hs
                     </td>
+                    <td style={{ textAlign: 'right', color: r.horasDeMasTotal > 0 ? '#d97706' : '#9ca3af' }}>
+                      {r.horasDeMasTotal > 0 ? `${fmtN(r.horasDeMasTotal)} hs` : '—'}
+                    </td>
                     <td style={{ textAlign: 'right' }}>{editandoEsta ? (
                       <input type="number" min={0} value={form.sueldo_hora} onChange={(e) => setForm((f) => ({ ...f, sueldo_hora: e.target.value }))}
                         style={{ width: '80px', textAlign: 'right', fontSize: '12px' }} />
                     ) : fmt$(r.sueldoHora)}</td>
                     <td style={{ textAlign: 'right' }}>
                       {editandoEsta ? (
-                        <input type="number" min={0} value={form.presentismo} onChange={(e) => setForm((f) => ({ ...f, presentismo: e.target.value }))}
-                          style={{ width: '80px', textAlign: 'right', fontSize: '12px' }} />
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-end' }}>
+                          <input type="number" min={0} value={form.presentismo} onChange={(e) => setForm((f) => ({ ...f, presentismo: e.target.value }))}
+                            style={{ width: '80px', textAlign: 'right', fontSize: '12px' }} />
+                          <select value={form.presentismo_manual} onChange={(e) => setForm((f) => ({ ...f, presentismo_manual: e.target.value }))} style={{ fontSize: '11px' }}>
+                            <option value="">Auto (según tardanzas)</option>
+                            <option value="SI">Cumplió (SI)</option>
+                            <option value="NO">No cumplió (NO)</option>
+                          </select>
+                        </div>
                       ) : (
-                        <span title={r.tardanzas === 0 ? 'Se paga: sin tardanzas en la quincena' : 'No se paga: hubo tardanzas en la quincena'} style={{ color: r.presentismoAplicado > 0 ? '#059669' : '#dc2626' }}>
+                        <span title={r.presentismoManual ? `Forzado a mano: ${r.presentismoManual}` : (r.tardanzas === 0 ? 'Automático: sin tardanzas' : 'Automático: hubo tardanzas')} style={{ color: r.presentismoAplicado > 0 ? '#059669' : '#dc2626' }}>
                           {r.presentismoAplicado > 0 ? fmt$(r.presentismoAplicado) : `${fmt$(r.presentismoConfigurado)} (perdido)`}
+                          {r.presentismoManual && <span style={{ marginLeft: '4px', fontSize: '10px', color: '#9ca3af' }}>(manual)</span>}
                         </span>
                       )}
                     </td>
+                    <td style={{ textAlign: 'right' }}>{editandoEsta ? (
+                      <input type="number" value={form.extras} onChange={(e) => setForm((f) => ({ ...f, extras: e.target.value }))}
+                        style={{ width: '80px', textAlign: 'right', fontSize: '12px' }} />
+                    ) : (r.extras !== 0 ? fmt$(r.extras) : '—')}</td>
+                    <td style={{ textAlign: 'right' }}>{editandoEsta ? (
+                      <input type="number" min={0} value={form.horas_extras} onChange={(e) => setForm((f) => ({ ...f, horas_extras: e.target.value }))}
+                        style={{ width: '70px', textAlign: 'right', fontSize: '12px' }} />
+                    ) : (r.horasExtras !== 0 ? `${fmtN(r.horasExtras)} hs` : '—')}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmt$(sueldoPreview)}</td>
                     <td style={{ textAlign: 'center' }}>
                       {r.tardanzas > 0 ? (
@@ -150,17 +192,18 @@ export default function PersonalManager({ resumen, empleados }: Props) {
                   </tr>
                   {editandoEsta && (
                     <tr style={{ background: '#f9fafb' }}>
-                      <td colSpan={9} style={{ padding: '8px 12px', fontSize: '12px', color: '#6b7280' }}>
+                      <td colSpan={12} style={{ padding: '8px 12px', fontSize: '12px', color: '#6b7280' }}>
                         Horario esperado (para calcular tardanzas):{' '}
                         <input type="time" value={form.hora_entrada_esperada} onChange={(e) => setForm((f) => ({ ...f, hora_entrada_esperada: e.target.value }))} style={{ fontSize: '12px', marginRight: '8px' }} />
                         a{' '}
                         <input type="time" value={form.hora_salida_esperada} onChange={(e) => setForm((f) => ({ ...f, hora_salida_esperada: e.target.value }))} style={{ fontSize: '12px' }} />
+                        <span style={{ marginLeft: '10px', color: '#9ca3af' }}>Presentismo, Extras y Hs. extras de esta fila son para ESTA quincena únicamente.</span>
                       </td>
                     </tr>
                   )}
                   {abierto?.workno === r.workno && abierto.modo === 'tardanzas' && (
                     <tr>
-                      <td colSpan={9} style={{ padding: '8px 12px', background: '#fef2f2' }}>
+                      <td colSpan={12} style={{ padding: '8px 12px', background: '#fef2f2' }}>
                         {diasTarde.length === 0 ? <span style={{ fontSize: '12px', color: '#9ca3af' }}>Sin tardanzas.</span> : (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                             {diasTarde.map((d) => (
@@ -175,10 +218,10 @@ export default function PersonalManager({ resumen, empleados }: Props) {
                   )}
                   {abierto?.workno === r.workno && abierto.modo === 'dias' && (
                     <tr>
-                      <td colSpan={9} style={{ padding: '8px 12px', background: '#fafafa' }}>
+                      <td colSpan={12} style={{ padding: '8px 12px', background: '#fafafa' }}>
                         {r.dias.length === 0 ? <span style={{ fontSize: '12px', color: '#9ca3af' }}>Sin fichajes en el período.</span> : (
                           <table style={{ fontSize: '12px', width: '100%' }}>
-                            <thead><tr><th style={{ textAlign: 'left' }}>Fecha</th><th style={{ textAlign: 'right' }}>Entrada</th><th style={{ textAlign: 'right' }}>Salida</th><th style={{ textAlign: 'right' }}>Horas</th><th style={{ textAlign: 'right' }}>Tardanza</th></tr></thead>
+                            <thead><tr><th style={{ textAlign: 'left' }}>Fecha</th><th style={{ textAlign: 'right' }}>Entrada</th><th style={{ textAlign: 'right' }}>Salida</th><th style={{ textAlign: 'right' }}>Horas</th><th style={{ textAlign: 'right' }}>Hs. de más</th><th style={{ textAlign: 'right' }}>Tardanza</th></tr></thead>
                             <tbody>
                               {r.dias.map((d) => (
                                 <tr key={d.fecha}>
@@ -186,7 +229,8 @@ export default function PersonalManager({ resumen, empleados }: Props) {
                                   <td style={{ textAlign: 'right' }}>{d.entrada}</td>
                                   <td style={{ textAlign: 'right', color: d.incompleto ? '#dc2626' : undefined }}>{d.salida || '— (incompleto)'}</td>
                                   <td style={{ textAlign: 'right' }}>{d.incompleto ? '—' : `${fmtN(d.horas)} hs`}</td>
-                                  <td style={{ textAlign: 'right', color: d.tardanzaMin > 0 ? '#dc2626' : '#9ca3af' }}>{d.tardanzaMin > 0 ? `${d.tardanzaMin} min` : '—'}</td>
+                                  <td style={{ textAlign: 'right', color: d.horasDeMas > 0 ? '#d97706' : '#9ca3af' }}>{d.horasDeMas > 0 ? `${fmtN(d.horasDeMas)} hs` : '—'}</td>
+                                  <td style={{ textAlign: 'right', color: d.esTardanza ? '#dc2626' : '#9ca3af' }}>{d.tardanzaMin > 0 ? `${d.tardanzaMin} min${d.esTardanza ? '' : ' (dentro del margen)'}` : '—'}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -202,7 +246,7 @@ export default function PersonalManager({ resumen, empleados }: Props) {
         </table>
       </div>
       <p style={{ margin: '10px 0 0', fontSize: '11px', color: '#9ca3af' }}>
-        Entrada = primer fichaje del día · Salida = último fichaje del día (CrossChex no distingue entrada/salida de forma confiable). Un ingreso pasadas las 11 no cuenta como tardanza (día raro/franco). "Sueldo a pagar" = horas teóricas × sueldo/hora, más el presentismo si no hubo tardanzas.
+        Entrada = primer fichaje del día · Salida = último fichaje del día. Tolerancia de 15 min para tardanzas; un ingreso pasadas las 11 no cuenta (día raro/franco). "Sueldo a pagar" = horas teóricas × sueldo/hora + presentismo (si corresponde) + extras + horas extra × sueldo/hora.
       </p>
     </div>
   );

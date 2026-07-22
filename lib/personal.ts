@@ -13,6 +13,11 @@ function partesArg(iso: string): { fecha: string; horaMin: number } {
   const get = (t: string) => parts.find((p) => p.type === t)?.value || '00';
   return { fecha: `${get('year')}-${get('month')}-${get('day')}`, horaMin: Number(get('hour')) * 60 + Number(get('minute')) };
 }
+// Fecha de "hoy" en Argentina, para el aviso del home (solo tardanzas del día, no de toda
+// la quincena).
+export function hoyArg(): string {
+  return partesArg(new Date().toISOString()).fecha;
+}
 function fmtHoraMin(min: number): string {
   const h = Math.floor(min / 60), m = min % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
@@ -61,7 +66,17 @@ export interface DiaTrabajado {
   salida: string | null;
   horas: number;
   incompleto: boolean;
-  tardanzaMin: number;
+  tardanzaMin: number; // minutos de atraso reales (aunque no llegue al umbral de tardanza)
+  esTardanza: boolean; // ya con el umbral de 15 min aplicado
+  horasDeMas: number; // por encima de un turno de 8hs, ese día puntual
+}
+
+// Ajustes manuales por empleado + quincena puntual (no son atributos permanentes del
+// empleado, cambian mes a mes): si cumplió presentismo, un extra $ y horas extra.
+export interface AjusteQuincena {
+  presentismoManual?: 'SI' | 'NO' | '';
+  extras?: number;
+  horasExtras?: number;
 }
 
 export interface ResumenEmpleado {
@@ -71,9 +86,13 @@ export interface ResumenEmpleado {
   horasReales: number;
   horasTeoricas: number;
   diferenciaHoras: number;
+  horasDeMasTotal: number; // suma de excedentes diarios sobre un turno de 8hs (informativo)
   sueldoHora: number;
   presentismoConfigurado: number;
-  presentismoAplicado: number; // 0 si hubo alguna tardanza en la quincena
+  presentismoAplicado: number;
+  presentismoManual: 'SI' | 'NO' | ''; // '' = automático (según tardanzas)
+  extras: number;
+  horasExtras: number;
   sueldoAPagar: number;
   tardanzas: number;
   diasIncompletos: number;
@@ -82,13 +101,16 @@ export interface ResumenEmpleado {
 // Umbral por debajo del cual un ingreso NO cuenta como tardanza aunque llegue después
 // del horario esperado — un fichaje pasadas las 11 de la mañana casi seguro es un día
 // raro (franco, medio día, fin de semana) y no una llegada tarde real.
-const LIMITE_TARDANZA_MIN = 11 * 60;
+const LIMITE_ENTRADA_RARA_MIN = 11 * 60;
+// Margen de tolerancia: hasta 15 minutos tarde no cuenta como tardanza.
+const TOLERANCIA_TARDANZA_MIN = 15;
+const HORAS_TURNO = 8;
 
-// Sueldo a pagar = horas TEÓRICAS (fijas, editables por empleado) × sueldo/hora, más el
-// presentismo (monto fijo) SOLO si no hubo ninguna tardanza en la quincena — no las horas
-// reales (decisión explícita del usuario).
+// Sueldo a pagar = horas TEÓRICAS × sueldo/hora, + presentismo (si corresponde: manual si
+// se cargó, si no automático según tardanzas), + extras $ sueltos, + horas extra × sueldo/hora.
 export function calcularResumenQuincena(
-  registros: RegistroCrossChex[], empleados: Empleado[], anio: number, mes: number, quincena: 1 | 2
+  registros: RegistroCrossChex[], empleados: Empleado[], anio: number, mes: number, quincena: 1 | 2,
+  ajustes: Record<string, AjusteQuincena> = {} // key: workno
 ): ResumenEmpleado[] {
   const { diasDesde, diasHasta } = rangoQuincena(anio, mes, quincena);
   const porEmpleadoDia = agruparPorEmpleadoYDia(registros);
@@ -116,27 +138,47 @@ export function calcularResumenQuincena(
       const incompleto = salidaMin === null;
       const horas = incompleto ? 0 : Math.max(0, (salidaMin - entradaMin) / 60);
       const esperadaMin = emp?.hora_entrada_esperada ? minDeHora(emp.hora_entrada_esperada) : null;
-      const tardanzaMin = esperadaMin !== null && entradaMin <= LIMITE_TARDANZA_MIN ? Math.max(0, entradaMin - esperadaMin) : 0;
+      const tardanzaMin = esperadaMin !== null && entradaMin <= LIMITE_ENTRADA_RARA_MIN ? Math.max(0, entradaMin - esperadaMin) : 0;
       dias.push({
         fecha, entrada: fmtHoraMin(entradaMin), salida: salidaMin !== null ? fmtHoraMin(salidaMin) : null,
         horas: Math.round(horas * 100) / 100, incompleto, tardanzaMin,
+        esTardanza: tardanzaMin > TOLERANCIA_TARDANZA_MIN,
+        horasDeMas: Math.round(Math.max(0, horas - HORAS_TURNO) * 100) / 100,
       });
     }
     const horasReales = Math.round(dias.reduce((a, d) => a + d.horas, 0) * 100) / 100;
     const horasTeoricas = Number(emp?.horas_teoricas_quincena) || 46;
     const sueldoHora = Number(emp?.sueldo_hora) || 0;
-    const tardanzas = dias.filter((d) => d.tardanzaMin > 0).length;
+    const tardanzas = dias.filter((d) => d.esTardanza).length;
     const presentismoConfigurado = Number(emp?.presentismo) || 0;
-    const presentismoAplicado = tardanzas === 0 ? presentismoConfigurado : 0;
+    const ajuste = ajustes[workno] || {};
+    const presentismoManual = ajuste.presentismoManual || '';
+    const cumplioPresentismo = presentismoManual === 'SI' ? true : presentismoManual === 'NO' ? false : tardanzas === 0;
+    const presentismoAplicado = cumplioPresentismo ? presentismoConfigurado : 0;
+    const extras = Number(ajuste.extras) || 0;
+    const horasExtras = Number(ajuste.horasExtras) || 0;
     resultados.push({
       workno, nombre: emp?.nombre || nombresCrossChex.get(workno) || workno,
       dias, horasReales, horasTeoricas,
       diferenciaHoras: Math.round((horasReales - horasTeoricas) * 100) / 100,
-      sueldoHora, presentismoConfigurado, presentismoAplicado,
-      sueldoAPagar: Math.round((horasTeoricas * sueldoHora + presentismoAplicado) * 100) / 100,
+      horasDeMasTotal: Math.round(dias.reduce((a, d) => a + d.horasDeMas, 0) * 100) / 100,
+      sueldoHora, presentismoConfigurado, presentismoAplicado, presentismoManual,
+      extras, horasExtras,
+      sueldoAPagar: Math.round((horasTeoricas * sueldoHora + presentismoAplicado + extras + horasExtras * sueldoHora) * 100) / 100,
       tardanzas,
       diasIncompletos: dias.filter((d) => d.incompleto).length,
     });
   }
   return resultados.sort((a, b) => a.nombre.localeCompare(b.nombre));
+}
+
+// Para el aviso del home: tardanzas puntuales DEL DÍA de hoy (no de toda la quincena).
+export function tardanzasDeHoy(resumen: ResumenEmpleado[]): { nombre: string; hora: string }[] {
+  const hoy = hoyArg();
+  const out: { nombre: string; hora: string }[] = [];
+  for (const r of resumen) {
+    const dia = r.dias.find((d) => d.fecha === hoy && d.esTardanza);
+    if (dia) out.push({ nombre: r.nombre, hora: dia.entrada || '' });
+  }
+  return out;
 }
