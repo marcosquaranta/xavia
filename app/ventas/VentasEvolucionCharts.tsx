@@ -187,11 +187,11 @@ export default function VentasEvolucionCharts({ articulo, clienteSemanal, client
   if (!articulo.length && !clienteSemanal.meses.length && !precio.length) return null;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '16px' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: '14px' }}>
         <GraficoVentaPorArticulo datos={articulo} />
         <GraficoVentaPorCliente semanal={clienteSemanal} mensual={clienteMensual} />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: '14px' }}>
         <GraficoPrecioPromedio datos={precio} />
         <TarjetaIndicadores datos={resumenMes} />
       </div>

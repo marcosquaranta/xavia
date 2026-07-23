@@ -122,7 +122,7 @@ export default function PlanificacionManager({ naves, defaults, repartoInicial, 
         <div style={card}>
           <p style={{ margin: '0 0 4px', fontSize: '15px', fontWeight: 700 }}>Días de ciclo en perfil</p>
           <p style={{ margin: '0 0 14px', fontSize: '12px', color: '#6b7280' }}>Por defecto se toma el ciclo del <strong>último lote cosechado</strong> de cada cultivo (no un promedio) — así refleja lo que está pasando ahora. Siempre editable para simular. Los lotes que conviven = días ÷ 7 (la planta ocupa el perfil los 7 días de la semana, incluido fin de semana).</p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '14px' }}>
             <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '12px' }}>
               <p style={{ margin: '0 0 8px', fontSize: '12px', fontWeight: 700, color: ROCKET, textTransform: 'uppercase' }}>● Rúcula</p>
               <Field label="Días en perfil" hint="hasta cosecha" value={rucDias} onChange={setRucDias} />
@@ -156,7 +156,7 @@ export default function PlanificacionManager({ naves, defaults, repartoInicial, 
               <p style={{ margin: 0, fontSize: '17px', fontWeight: 800 }}>Nave {n}</p>
               <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#9ca3af' }}>rúcula {fmt(naves[n].ruc)} pos · lechuga F2 {naves[n].lecF2PerfTot} perf</span>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '14px' }}>
               <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '14px' }}>
                 <p style={{ margin: '0 0 4px', fontSize: '11px', fontWeight: 700, color: ROCKET, textTransform: 'uppercase' }}>● Rúcula</p>
                 <p style={{ margin: 0, fontSize: '34px', fontWeight: 900, color: ROCKET, lineHeight: 1 }}>{planchas(d.rucPl)}<span style={{ fontSize: '12px', color: '#9ca3af', fontWeight: 400, display: 'block' }}>planchas / semana</span></p>
@@ -184,7 +184,7 @@ export default function PlanificacionManager({ naves, defaults, repartoInicial, 
 
         <div style={{ background: 'linear-gradient(135deg,#f0fdf4,#fffbeb)', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '16px', marginBottom: '16px' }}>
           <p style={{ margin: '0 0 12px', fontSize: '15px', fontWeight: 700 }}>Total a sembrar por semana · ambas naves</p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', gap: '12px' }}>
             <Tot v={String(planchas(totRucPl))} l="PLANCHAS RÚCULA" c={ROCKET} />
             <Tot v={fmt(totRucPaq)} l="PAQUETES/SEM" c={ROCKET} />
             <Tot v={String(planchas(totLecPl))} l="PLANCHAS LECHUGA" c={LEAF} />

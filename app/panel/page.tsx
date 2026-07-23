@@ -407,7 +407,7 @@ export default async function PanelPage({ searchParams }: {
         </div>
 
         {/* ══ FILA 1: VENTAS + INDICADORES ══ */}
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'14px' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))', gap:'12px', marginBottom:'14px' }}>
           <GraficoVentaPorArticulo datos={evolArticuloPanel} />
           <div style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'16px' }}>
             <p style={{ margin:'0 0 12px', fontSize:'13px', fontWeight:700, color:'#111827' }}>Indicadores</p>
@@ -453,7 +453,7 @@ export default async function PanelPage({ searchParams }: {
         </div>
 
         {/* ══ FILA 2: CICLOS + ÚLTIMOS MOVIMIENTOS ══ */}
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'14px', alignItems:'start' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))', gap:'12px', marginBottom:'14px', alignItems:'start' }}>
           <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
             <div className="card" style={{ margin:0 }}>
               <p className="card-title">Ciclos en mesadas — 8 semanas</p>
@@ -471,7 +471,7 @@ export default async function PanelPage({ searchParams }: {
                   ? (varPctSem(ultSem.rucula, antSem?.rucula) ?? varPctSem(ultSem.rucula, cicloMesPasado.rucula))
                   : null;
                 return (
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginTop:'10px', paddingTop:'10px', borderTop:'1px solid #f3f4f6' }}>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))', gap:'8px', marginTop:'10px', paddingTop:'10px', borderTop:'1px solid #f3f4f6' }}>
                     {lechugaVal > 0 && (
                       <div style={{ textAlign:'center', padding:'8px', background:'#f7fee7', borderRadius:'7px' }}>
                         <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#4d7c0f', fontWeight:700 }}>Lechuga F2</p>
@@ -548,7 +548,7 @@ export default async function PanelPage({ searchParams }: {
         </div>
 
         {/* ══ FILA 4: OCUPACIÓN POR MESADA ══ */}
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'14px' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))', gap:'12px', marginBottom:'14px' }}>
           {tubosMesadas.map((nave: any) => (
             <div key={nave.nave} style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'12px' }}>
               {(() => { const f2=(nave.mesadas||[]).filter((m:any)=>m.sector_fase!=='fase_1'); const tot=f2.reduce((s:number,m:any)=>s+m.tubos_totales,0); const ocu=f2.reduce((s:number,m:any)=>s+m.tubos_ocupados,0); const pct=tot>0?Math.round(ocu/tot*100):0; return (<>

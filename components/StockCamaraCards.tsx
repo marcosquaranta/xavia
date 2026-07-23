@@ -94,7 +94,7 @@ function CardCamara({ datos, cultivo, cultivoKey, isAdmin, onSaved }: {
       {mostrarForm && (
         <form onSubmit={guardar} style={{ marginTop: '12px', borderTop: '1px solid #f3f4f6', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {error && <p style={{ color: '#dc2626', fontSize: '12px', margin: 0 }}>{error}</p>}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(100px,1fr))', gap: '8px' }}>
             <div>
               <label style={{ fontSize: '11px' }}>Tipo</label>
               <select value={tipo} onChange={e => setTipo(e.target.value as any)} disabled={loading}>

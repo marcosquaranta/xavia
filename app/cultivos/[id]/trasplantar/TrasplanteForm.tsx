@@ -159,7 +159,7 @@ export default function TrasplanteForm({
             Calculá por tubos o por posiciones — los plantines se calculan solos
           </p>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: '14px', marginBottom: '16px' }}>
             {/* TUBOS */}
             <div>
               <label>

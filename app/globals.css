@@ -47,6 +47,17 @@ tr:last-child td { border-bottom: none; }
 .topbar-user { font-size: 12px; color: #6b7280; display: flex; align-items: center; gap: 10px; }
 .topbar-user form button { background: none; border: none; color: #6b7280; font-size: 12px; padding: 0; cursor: pointer; }
 .topbar-user form button:hover { color: #dc2626; }
+.menu-toggle { display: none; background: none; border: 1px solid #e5e7eb; border-radius: 6px; padding: 5px 10px; font-size: 16px; line-height: 1; color: #374151; }
 .page-title { margin: 0 0 4px; font-size: 20px; font-weight: 600; }
 .page-subtitle { margin: 0 0 20px; font-size: 13px; color: #6b7280; }
-@media (max-width: 640px) { .topbar { flex-direction: column; gap: 10px; padding: 12px; } .topbar-menu { width: 100%; justify-content: center; } .container { padding: 16px; } }
+@media (max-width: 640px) {
+  .container { padding: 14px; }
+  .card, [class~="card"] { padding: 12px 14px; }
+  .topbar { flex-wrap: wrap; padding: 10px 14px; }
+  .menu-toggle { display: block; order: 2; }
+  .topbar-user { order: 3; font-size: 11px; gap: 8px; }
+  .topbar-menu { display: none; order: 4; width: 100%; flex-direction: column; gap: 2px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #f3f4f6; }
+  .topbar-menu.open { display: flex; }
+  .topbar-menu a { padding: 10px 10px; font-size: 13px; }
+  table { display: block; overflow-x: auto; white-space: nowrap; }
+}
