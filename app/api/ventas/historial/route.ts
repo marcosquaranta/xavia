@@ -19,7 +19,7 @@ export async function GET() {
     // por tanda, aunque combine varias sucursales, así que agrupar por cliente (no por
     // sucursal) refleja exactamente la factura real.
     type EntradaExpCliente = {
-      id_exportacion: string; fecha: string; fecha_exportacion: string; cliente: string;
+      id_exportacion: string; fecha: string; fecha_exportacion: string; cliente: string; id_control: string;
       rucula: number; lechuga: number; rucula_kg: number; lechuga_kg: number;
     };
     const porExpCliente = new Map<string, EntradaExpCliente>();
@@ -38,7 +38,7 @@ export async function GET() {
         const nombre = clienteMap.get(String(v.id_control)) || String(v.id_control);
         const key = `${expId}__${v.id_control}`;
         const ex = porExpCliente.get(key) || {
-          id_exportacion: expId, fecha, fecha_exportacion: String(v.fecha_carga || fecha), cliente: nombre,
+          id_exportacion: expId, fecha, fecha_exportacion: String(v.fecha_carga || fecha), cliente: nombre, id_control: String(v.id_control),
           rucula: 0, lechuga: 0, rucula_kg: 0, lechuga_kg: 0,
         };
         ex.rucula    += Number(v.rucula || 0);
@@ -67,6 +67,7 @@ export async function GET() {
       .slice(0, 150);
 
     const pendientesArr = [...pendientes.values()]
+      .filter(p => p.rucula > 0 || p.lechuga > 0 || p.rucula_kg > 0 || p.lechuga_kg > 0)
       .sort((a, b) => b.fecha.localeCompare(a.fecha))
       .slice(0, 10);
 

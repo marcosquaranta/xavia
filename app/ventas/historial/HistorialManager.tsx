@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
 interface EntradaExpCliente {
-  id_exportacion: string; fecha: string; fecha_exportacion: string; cliente: string;
+  id_exportacion: string; fecha: string; fecha_exportacion: string; cliente: string; id_control: string;
   rucula: number; lechuga: number; rucula_kg: number; lechuga_kg: number;
 }
 interface EntradaPend {
@@ -19,6 +19,7 @@ export default function HistorialManager() {
   const [pendientes, setPendientes] = useState<EntradaPend[]>([]);
   const [filtro, setFiltro] = useState('');
   const [limpiando, setLimpiando] = useState(false);
+  const [eliminandoTodosPend, setEliminandoTodosPend] = useState(false);
   const [eliminando, setEliminando] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -31,14 +32,32 @@ export default function HistorialManager() {
   }
   useEffect(() => { cargar(); }, []);
 
+  async function limpiar(body: Record<string, any>) {
+    const r = await fetch('/api/ventas/limpiar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Error'); }
+  }
+
   async function eliminarPendiente(fecha: string) {
     if (!confirm(`¿Eliminar todas las ventas no facturadas del ${fecha}? Esto no se puede deshacer.`)) return;
     setEliminando(fecha); setMsg(null);
-    try {
-      const r = await fetch('/api/ventas/limpiar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fecha, limpiarTodo: false }) });
-      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Error'); }
-      cargar();
-    } catch (e: any) { setMsg(e.message); }
+    try { await limpiar({ fecha, limpiarTodo: false }); cargar(); }
+    catch (e: any) { setMsg(e.message); }
+    setEliminando(null);
+  }
+
+  async function eliminarTodosPendientes() {
+    if (!confirm('¿Eliminar TODAS las ventas no facturadas (de cualquier fecha)? Esto no se puede deshacer.')) return;
+    setEliminandoTodosPend(true); setMsg(null);
+    try { await limpiar({ soloPendientes: true }); cargar(); }
+    catch (e: any) { setMsg(e.message); }
+    setEliminandoTodosPend(false);
+  }
+
+  async function eliminarFacturado(id_exportacion: string, id_control: string, cliente: string) {
+    if (!confirm(`¿Eliminar la venta de ${cliente} en la exportación ${id_exportacion}? Esto corrige solo el registro interno de Xavia — no anula la factura ya emitida en Xubio.`)) return;
+    setEliminando(`${id_exportacion}__${id_control}`); setMsg(null);
+    try { await limpiar({ id_exportacion, id_control }); cargar(); }
+    catch (e: any) { setMsg(e.message); }
     setEliminando(null);
   }
 
@@ -46,7 +65,7 @@ export default function HistorialManager() {
     if (!confirm('¿Limpiar TODAS las ventas de la hoja? Esto no se puede deshacer.')) return;
     setLimpiando(true); setMsg(null);
     try {
-      await fetch('/api/ventas/limpiar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limpiarTodo: true }) });
+      await limpiar({ limpiarTodo: true });
       setMsg('Hoja limpiada.');
       cargar();
     } catch (e: any) { setMsg(e.message); }
@@ -64,7 +83,15 @@ export default function HistorialManager() {
     <div>
       {/* ── No facturado ── */}
       <div style={{ marginBottom: '24px' }}>
-        <p className="card-title" style={{ marginBottom: '2px' }}>🕓 No facturado</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px', marginBottom: '2px' }}>
+          <p className="card-title" style={{ margin: 0 }}>🕓 No facturado</p>
+          {pendientes.length > 0 && (
+            <button onClick={eliminarTodosPendientes} disabled={eliminandoTodosPend}
+              style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: '6px', padding: '4px 10px', fontSize: '11px', cursor: 'pointer', color: '#dc2626' }}>
+              {eliminandoTodosPend ? 'Eliminando…' : '🗑 Eliminar todos'}
+            </button>
+          )}
+        </div>
         <p className="card-sub">Cargado en Ventas pero todavía sin enviar a Xubio</p>
         {pendientes.length === 0 ? (
           <p style={{ color: '#9ca3af', fontSize: '13px' }}>No hay nada pendiente de facturar.</p>
@@ -135,8 +162,12 @@ export default function HistorialManager() {
                     <td style={{ textAlign: 'right', padding: '7px 10px', color: '#4d7c0f' }}>{h.lechuga > 0 ? fmt(h.lechuga) : '—'}</td>
                     <td style={{ textAlign: 'right', padding: '7px 10px', color: '#92400e' }}>{fmtKg(h.rucula_kg)}</td>
                     <td style={{ textAlign: 'right', padding: '7px 10px', color: '#b45309' }}>{fmtKg(h.lechuga_kg)}</td>
-                    <td style={{ padding: '7px 10px', textAlign: 'right' }}>
+                    <td style={{ padding: '7px 10px', textAlign: 'right', display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
                       <Link href={`/ventas?fecha=${h.fecha}&exportacion=${h.id_exportacion}`} className="btn secondary small">✏️ Editar →</Link>
+                      <button onClick={() => eliminarFacturado(h.id_exportacion, h.id_control, h.cliente)} disabled={eliminando === `${h.id_exportacion}__${h.id_control}`}
+                        style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: '6px', padding: '5px 10px', fontSize: '11px', cursor: 'pointer', color: '#dc2626' }}>
+                        {eliminando === `${h.id_exportacion}__${h.id_control}` ? 'Eliminando…' : '🗑 Eliminar'}
+                      </button>
                     </td>
                   </tr>
                 ))}
