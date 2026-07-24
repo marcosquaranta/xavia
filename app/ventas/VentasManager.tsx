@@ -1,5 +1,7 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import type { ClienteVenta, PrecioVenta, VentaDia, PedidoFijo } from '@/lib/types';
 import type { EstimacionCosechaCercana } from '@/lib/planificacionServer';
 import { ventasCargadasSemana } from '@/lib/estadisticasVentas';
@@ -64,10 +66,10 @@ function mkFilas(cs: ClienteVenta[], freq: Record<string,number>): Fila[] {
   return out.sort((a,b)=>(freq[b.id_control]||0)-(freq[a.id_control]||0));
 }
 
-export default function VentasManager({clientes,precios,frecuencias,stats,estimCosecha,pedidosFijos}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;estimCosecha:EstimacionCosechaCercana;pedidosFijos:PedidoFijo[]}) {
+export default function VentasManager({clientes,precios,frecuencias,stats,estimCosecha,pedidosFijos,initialFecha,initialExportacion}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;estimCosecha:EstimacionCosechaCercana;pedidosFijos:PedidoFijo[];initialFecha?:string;initialExportacion?:string}) {
+  const router = useRouter();
   const hoy = new Date().toISOString().split('T')[0];
-  const [fecha,setFecha]=useState(hoy);
-  const [showExpSelector,setShowExpSelector]=useState(false);
+  const [fecha,setFecha]=useState(initialFecha || hoy);
   const [fc,setFc]=useState<Record<string,string>>({});
   const [ctds,setCtds]=useState<Ctds>({});
   const [ests,setEsts]=useState<Ests>({});
@@ -77,13 +79,10 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
   const [exp,setExp]=useState(false);
   const [msg,setMsg]=useState<{t:'ok'|'err';s:string}|null>(null);
   const [showP,setShowP]=useState(false);
-  const [showHistorial,setShowHistorial]=useState(false);
   const [showPreExport,setShowPreExport]=useState(false);
   const [correlaA,setCorrelaA]=useState<string>('');
   const [correlaB,setCorrelaB]=useState<string>('');
   const [enviarEmail,setEnviarEmail]=useState(true);
-  const [historial,setHistorial]=useState<{exportaciones:any[];pendientes:any[]}>({exportaciones:[],pendientes:[]});
-  const [loadHist,setLoadHist]=useState(false);
   const [currentExportId,setCurrentExportId]=useState<string|null>(null);
   const [limpiando,setLimpiando]=useState(false);
   const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number;diasPromedio:number};lechuga_crespa:{stockActual:number;diasPromedio:number};lechuga_roble:{stockActual:number;diasPromedio:number};factorGrPaq:{rucula:number;lechuga_crespa:number;lechuga_roble:number}}|null>(null);
@@ -125,6 +124,16 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
     }).catch(()=>{});
   },[]);
 
+  // Si se llega desde el historial de facturación con una exportación puntual para
+  // editar (?fecha=...&exportacion=...), cargarla directo y limpiar la URL.
+  useEffect(()=>{
+    if(initialExportacion && initialFecha){
+      cargarExportacion(initialExportacion, initialFecha);
+      router.replace('/ventas');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+
   async function limpiarDia(todo=false){
     const msg2 = todo ? '¿Limpiar TODAS las ventas de la hoja? Esto no se puede deshacer.' : `¿Limpiar todas las ventas del ${fecha}?`;
     if(!confirm(msg2)) return;
@@ -137,19 +146,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
     setLimpiando(false);
   }
 
-  function cargarHistorial(){
-    setLoadHist(true);
-    fetch('/api/ventas/historial').then(r=>r.json()).then(j=>{
-      setHistorial({exportaciones:j.exportaciones||[],pendientes:j.pendientes||[]});
-      if(j.lastA) setCorrelaA(String(j.lastA+1));
-      if(j.lastB) setCorrelaB(String(j.lastB+1));
-    }).catch(()=>{}).finally(()=>setLoadHist(false));
-  }
-
   function cargarExportacion(idExp:string, fechaExp:string){
     setCurrentExportId(idExp);
     setFecha(fechaExp);
-    setShowHistorial(false);
     setLoading(true);setMsg(null);
     fetch(`/api/ventas/fecha?id_exportacion=${idExp}`).then(r=>r.json()).then((data:VentaDia[])=>{
       const c:Ctds={}; const ckg:CKG={};
@@ -398,43 +397,6 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
           <label style={{fontSize:'10px',color:'#6b7280',display:'block',marginBottom:'2px'}}>FECHA FACTURACIÓN</label>
           <input type="date" value={fecha} onChange={ev=>setFecha(ev.target.value)} style={{fontSize:'14px',fontWeight:600,border:'1px solid #e5e7eb',borderRadius:'7px',padding:'6px 10px'}}/>
         </div>
-        {/* Selector de exportaciones anteriores */}
-        <div style={{position:'relative'}}>
-          <button onClick={()=>{if(!showExpSelector){cargarHistorial();}setShowExpSelector(p=>!p);}}
-            style={{background:currentExportId?'#dbeafe':'white',border:`1px solid ${currentExportId?'#93c5fd':'#e5e7eb'}`,borderRadius:'7px',padding:'6px 10px',fontSize:'12px',cursor:'pointer',color:currentExportId?'#1e40af':'#6b7280',fontWeight:currentExportId?700:400,marginTop:'14px',whiteSpace:'nowrap'}}>
-            {currentExportId?`📋 ${currentExportId}`:'📋 Exportaciones'}
-          </button>
-          {showExpSelector&&(
-            <div style={{position:'absolute',top:'100%',left:0,zIndex:100,background:'white',border:'1px solid #e5e7eb',borderRadius:'8px',boxShadow:'0 4px 12px rgba(0,0,0,0.1)',minWidth:'300px',maxHeight:'280px',overflowY:'auto',marginTop:'4px'}}>
-              {loadHist?<p style={{padding:'12px',fontSize:'12px',color:'#9ca3af'}}>Cargando…</p>:(
-                <>
-                  <div style={{padding:'8px',borderBottom:'1px solid #f3f4f6'}}>
-                    <button onClick={()=>{setCurrentExportId(null);setFechaExportada(false);setShowExpSelector(false);}}
-                      style={{width:'100%',textAlign:'left',background:!currentExportId?'#eff6ff':'none',border:'none',borderRadius:'5px',padding:'5px 8px',fontSize:'12px',cursor:'pointer',color:'#374151',fontWeight:!currentExportId?700:400}}>
-                      ✏️ Nueva sesión (pendientes)
-                    </button>
-                  </div>
-                  {historial.exportaciones.length===0?<p style={{padding:'12px',fontSize:'12px',color:'#9ca3af'}}>Sin exportaciones previas</p>:(
-                    historial.exportaciones.map((h:any)=>(
-                      <button key={h.id_exportacion} onClick={()=>{cargarExportacion(h.id_exportacion,h.fecha);setShowExpSelector(false);}}
-                        style={{width:'100%',textAlign:'left',background:h.id_exportacion===currentExportId?'#dbeafe':'none',border:'none',borderBottom:'1px solid #f9fafb',padding:'7px 10px',fontSize:'12px',cursor:'pointer',color:'#374151',display:'block'}}>
-                        <div style={{display:'flex',alignItems:'baseline',gap:'6px'}}>
-                          <span style={{fontFamily:'monospace',color:'#1e40af',fontWeight:600}}>{h.id_exportacion}</span>
-                          <span style={{color:'#9ca3af',fontSize:'11px'}}>{h.fecha} · {h.facturas ?? h.clientes ?? 0} fact.</span>
-                        </div>
-                        {h.clientesNombres?.length>0 && (
-                          <div style={{fontSize:'10px',color:'#6b7280',marginTop:'2px',lineHeight:'1.4'}}>
-                            {h.clientesNombres.join(' · ')}
-                          </div>
-                        )}
-                      </button>
-                    ))
-                  )}
-                </>
-              )}
-            </div>
-          )}
-        </div>
         <label style={{display:'flex',alignItems:'center',gap:'5px',fontSize:'11px',color:'#6b7280',cursor:'pointer',userSelect:'none',marginBottom:'2px'}}>
           <input type="checkbox" checked={extras} onChange={ev=>setExtras(ev.target.checked)}/> Bandeja + Albahaca
         </label>
@@ -450,9 +412,11 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
           style={{background:hayV&&!exp?'#1d4ed8':'#e5e7eb',color:hayV&&!exp?'white':'#9ca3af',border:'none',borderRadius:'8px',padding:'8px 18px',fontWeight:700,fontSize:'13px',cursor:hayV&&!exp?'pointer':'not-allowed',display:'flex',alignItems:'center',gap:'5px'}}>
           <span>📥</span>{exp?'Cargando…':'Cargar ventas'}
         </button>
+        <Link href="/ventas/historial"
+          style={{background:'white',color:'#6b7280',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'8px 12px',fontWeight:600,fontSize:'12px',textDecoration:'none',display:'flex',alignItems:'center',gap:'4px',marginTop:'14px'}}>
+          📊 Historial de facturación →
+        </Link>
       </div>
-      {/* Click outside para cerrar selector */}
-      {showExpSelector&&<div style={{position:'fixed',inset:0,zIndex:99}} onClick={()=>setShowExpSelector(false)}/>}
 
       {/* Banner exportación cargada */}
       {currentExportId&&(
@@ -772,54 +736,6 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
             </div>
           </div>
         )}
-
-      {/* Historial de exportaciones */}
-      <div style={{marginTop:'14px',borderTop:'1px solid #f3f4f6',paddingTop:'10px'}}>
-        <button onClick={()=>{ if(!showHistorial){cargarHistorial();} setShowHistorial(!showHistorial); }}
-          style={{background:'none',border:'1px solid #e5e7eb',borderRadius:'6px',padding:'4px 12px',fontSize:'11px',cursor:'pointer',color:'#6b7280'}}>
-          {showHistorial?'▲ Ocultar pendientes':'▼ Ver sesiones sin exportar'}
-        </button>
-        {showHistorial && (
-          <div style={{marginBottom:'8px',textAlign:'right'}}>
-            <button onClick={()=>limpiarDia(true)} disabled={limpiando} style={{background:'none',border:'1px solid #fca5a5',borderRadius:'6px',padding:'3px 10px',fontSize:'11px',cursor:'pointer',color:'#dc2626'}}>
-              🗑 Limpiar toda la hoja
-            </button>
-          </div>
-        )}
-        {showHistorial && (
-          <div style={{marginTop:'10px'}}>
-            {loadHist ? <p style={{color:'#9ca3af',fontSize:'12px'}}>Cargando…</p> : historial.pendientes.length===0 ? <p style={{color:'#9ca3af',fontSize:'12px'}}>Sin sesiones pendientes.</p> : (
-              <table style={{fontSize:'12px',width:'100%'}}>
-                <thead><tr style={{background:'#fefce8',borderBottom:'1px solid #fde68a'}}>
-                  <th style={{textAlign:'left',padding:'5px 8px'}}>Fecha</th>
-                  <th style={{textAlign:'right',padding:'5px 6px'}}>Rúcula</th>
-                  <th style={{textAlign:'right',padding:'5px 6px'}}>Lechuga</th>
-                  <th style={{textAlign:'right',padding:'5px 6px'}}>R. kg</th>
-                  <th style={{textAlign:'right',padding:'5px 6px'}}>L. kg</th>
-                  <th style={{padding:'5px 6px'}}></th>
-                </tr></thead>
-                <tbody>
-                  {historial.pendientes.map((h:any)=>(
-                    <tr key={h.fecha} style={{borderBottom:'1px solid #f3f4f6',background:h.fecha===fecha?'#fef9c3':'white'}}>
-                      <td style={{padding:'5px 8px',fontWeight:600,whiteSpace:'nowrap'}}>{h.fecha}</td>
-                      <td style={{textAlign:'right',padding:'5px 6px',color:'#166534'}}>{h.rucula>0?h.rucula:'—'}</td>
-                      <td style={{textAlign:'right',padding:'5px 6px',color:'#4d7c0f'}}>{h.lechuga>0?h.lechuga:'—'}</td>
-                      <td style={{textAlign:'right',padding:'5px 6px',color:'#92400e'}}>{h.rucula_kg>0?h.rucula_kg.toFixed(1)+' kg':'—'}</td>
-                      <td style={{textAlign:'right',padding:'5px 6px',color:'#b45309'}}>{h.lechuga_kg>0?h.lechuga_kg.toFixed(1)+' kg':'—'}</td>
-                      <td style={{padding:'5px 6px'}}>
-                        <button onClick={()=>{setFecha(h.fecha);setShowHistorial(false);}}
-                          style={{background:'none',border:'1px solid #e5e7eb',borderRadius:'5px',padding:'2px 8px',fontSize:'11px',cursor:'pointer',color:'#374151'}}>
-                          Ir →
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
-      </div>
 
       {/* Precios */}
       <div style={{marginTop:'14px',borderTop:'1px solid #f3f4f6',paddingTop:'10px'}}>
