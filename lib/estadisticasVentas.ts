@@ -331,3 +331,46 @@ export function ventasPorCultivoUltimasSemanas(
   }
   return puntos;
 }
+
+// ── Ventas cargadas de la semana en curso (lunes → hoy), agrupadas por día y por
+// cliente — para el recuadro de "Ventas de esta semana" en la carga diaria. Incluye
+// todo lo cargado (facturado o no), a diferencia de facturadasHoy que solo trae lo ya
+// exportado. Los días futuros de la semana (aún no llegan) y los días sin ninguna
+// carga se omiten, para no mostrar filas vacías sin valor informativo. ──
+const DOW_LARGO = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+export interface ClienteDiaCargado { nombre: string; totalPaq: number; totalKg: number }
+export interface DiaCargado { fecha: string; label: string; clientes: ClienteDiaCargado[]; totalPaqDia: number; totalKgDia: number }
+export function ventasCargadasSemana(ventas: VentaDia[], clientes: ClienteVenta[], hoy: Date = new Date()): DiaCargado[] {
+  const nombreMap = new Map(clientes.map((c) => [c.id_control, c.nombre_display || c.nombre_xubio || c.id_control]));
+  const lunes = lunesDeSemana(hoy);
+  const hoyStr = fmtISOLocal(hoy);
+  const KEYS_PAQ = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca'] as const;
+  const KEYS_KG = ['rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
+  const dias: DiaCargado[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(lunes); d.setDate(lunes.getDate() + i);
+    const fecha = fmtISOLocal(d);
+    if (fecha > hoyStr) break;
+    const porCliente = new Map<string, ClienteDiaCargado>();
+    for (const v of ventas) {
+      if (String(v.fecha || '').split(/[T ]/)[0] !== fecha) continue;
+      const totalPaq = KEYS_PAQ.reduce((a, k) => a + (Number((v as any)[k]) || 0), 0);
+      const totalKg = KEYS_KG.reduce((a, k) => a + (Number((v as any)[k]) || 0), 0);
+      if (totalPaq <= 0 && totalKg <= 0) continue;
+      const nombre = nombreMap.get(v.id_control) || v.nombre_cliente || v.id_control;
+      const prev = porCliente.get(nombre) || { nombre, totalPaq: 0, totalKg: 0 };
+      prev.totalPaq += totalPaq; prev.totalKg += totalKg;
+      porCliente.set(nombre, prev);
+    }
+    if (porCliente.size === 0) continue;
+    const clientesDia = Array.from(porCliente.values()).sort((a, b) => b.totalPaq - a.totalPaq);
+    dias.push({
+      fecha,
+      label: `${DOW_LARGO[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`,
+      clientes: clientesDia,
+      totalPaqDia: clientesDia.reduce((a, c) => a + c.totalPaq, 0),
+      totalKgDia: clientesDia.reduce((a, c) => a + c.totalKg, 0),
+    });
+  }
+  return dias;
+}

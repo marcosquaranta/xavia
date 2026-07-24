@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { ClienteVenta, PrecioVenta, VentaDia, PedidoFijo } from '@/lib/types';
 import type { EstimacionCosechaCercana } from '@/lib/planificacionServer';
+import { ventasCargadasSemana } from '@/lib/estadisticasVentas';
 
 const PP = [
   { key:'rucula',         xubio:'Rucula Hidropónica',                     label:'Rúcula',     color:'#166534' },
@@ -90,6 +91,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
   const [fechaExportada,setFechaExportada]=useState(false);
   const [ventas7,setVentas7]=useState<VentaDia[]>([]);
   const [facturadasHoy,setFacturadasHoy]=useState<VentaDia[]>([]);
+  const [ventasSemana,setVentasSemana]=useState<VentaDia[]>([]);
   // Celdas pre-cargadas desde un Pedido fijo (todavía no tocadas por el usuario) — se
   // marcan distinto para dejar en claro que es una sugerencia, no algo ya guardado.
   const [prefijo,setPrefijo]=useState<Set<string>>(new Set());
@@ -211,6 +213,17 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
     fetch(`/api/ventas/fecha?fecha=${fecha}&facturadas=1`).then(r=>r.json()).then(setFacturadasHoy).catch(()=>setFacturadasHoy([]));
   },[fecha]);
 
+  // Ventas cargadas de la semana en curso (lunes → hoy, según la fecha real de hoy — no
+  // la fecha seleccionada en el selector), para el recuadro "Ventas de esta semana".
+  function cargarVentasSemana(){
+    const hoy=new Date();
+    const dow=hoy.getDay();
+    const lunes=new Date(hoy); lunes.setDate(hoy.getDate()-(dow===0?6:dow-1));
+    const f=(d:Date)=>d.toISOString().split('T')[0];
+    fetch(`/api/ventas/fecha?desde=${f(lunes)}&hasta=${f(hoy)}`).then(r=>r.json()).then(setVentasSemana).catch(()=>setVentasSemana([]));
+  }
+  useEffect(()=>{ cargarVentasSemana(); },[]);
+
   function onChange(f:Fila,k:PK,v:string){
     setCtds(p=>({...p,[`${f.id_control}__${f.sucursal}`]:{...(p[`${f.id_control}__${f.sucursal}`]||EQ),[k]:v}}));
     se(f.id_control,f.sucursal,k,'idle');
@@ -225,6 +238,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
       const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:currentExportId,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:Number(q(f.id_control,f.sucursal,'rucula'))||0,lechuga_crespa:Number(q(f.id_control,f.sucursal,'lechuga_crespa'))||0,hoja_roble:Number(q(f.id_control,f.sucursal,'hoja_roble'))||0,bandeja_rucula:Number(q(f.id_control,f.sucursal,'bandeja_rucula'))||0,albahaca:Number(q(f.id_control,f.sucursal,'albahaca'))||0}]})});
       if(!r.ok)throw new Error();
       se(f.id_control,f.sucursal,k,'saved');setTimeout(()=>se(f.id_control,f.sucursal,k,'idle'),2000);
+      cargarVentasSemana();
     }catch{se(f.id_control,f.sucursal,k,'error');}
   }
   const KGK_ALL: KGK[] = ['rucula_kg','lechuga_kg_crespa','lechuga_kg_roble'];
@@ -247,6 +261,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
       const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:currentExportId,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:rkg,lechuga_kg_crespa:lkgC,lechuga_kg_roble:lkgR}]})});
       if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error((j as any).error||'Error');};
       KGK_ALL.forEach(k=>{seKg(f.id_control,f.sucursal,k,'saved');setTimeout(()=>seKg(f.id_control,f.sucursal,k,'idle'),2000);});
+      cargarVentasSemana();
     }catch(err:any){
       KGK_ALL.forEach(k=>seKg(f.id_control,f.sucursal,k,'error'));
       setMsg({t:'err',s:`Error al guardar KG de ${f.nombre_display}: ${err.message}`});
@@ -276,6 +291,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
         : nErr>0 ? `No se pudo emitir ninguna (${nErr} con error):\n${detalleErrores}` : `${j.clientes} cliente(s) cargados.`;
       setMsg({t: nErr>0 && nEmit===0 ? 'err' : 'ok', s: txt});
       setCtds({});setEsts({});setCtdsKg({});ctdsKgLive.current={};setFc({});
+      cargarVentasSemana();
     }catch(err:any){setMsg({t:'err',s:err.message});}
     setExp(false);
   }
@@ -303,6 +319,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
       // Limpiar estado local (la hoja conserva los valores como registro histórico)
       setCtds({});setEsts({});setCtdsKg({});ctdsKgLive.current={};setFc({});
       setCurrentExportId(null);setFechaExportada(false);
+      cargarVentasSemana();
     }catch(err:any){setMsg({t:'err',s:err.message});}
     setExp(false);
   }
@@ -314,6 +331,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
   const totsKg={rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0};
   for(const f of filasKg)for(const k of KGK_ALL) totsKg[k]+=Number(qKg(f.id_control,f.sucursal,k))||0;
   const hayV=Object.values(tots).some(v=>v>0)||Object.values(totsKg).some(v=>v>0);
+  const diasSemana = ventasCargadasSemana(ventasSemana, clientes);
 
   // Total por cliente hace 7 días (para comparación)
   function total7d(id_control:string, sucursal:string): number {
@@ -722,7 +740,38 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
           );
         })()}
 
-
+        {/* ── Ventas cargadas de la semana en curso, por día y cliente ── */}
+        {diasSemana.length>0 && (
+          <div style={{marginTop:'12px',background:'#f8fafc',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'10px 14px'}}>
+            <p style={{margin:'0 0 8px',fontSize:'12px',fontWeight:700,color:'#374151'}}>📅 Ventas cargadas esta semana</p>
+            <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
+              {diasSemana.map(dia=>(
+                <div key={dia.fecha} style={{background:'white',border:'1px solid #e5e7eb',borderRadius:'7px',padding:'8px 10px'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'5px'}}>
+                    <span style={{fontSize:'12px',fontWeight:700,color:'#111827'}}>{dia.label}{dia.fecha===hoy?' · hoy':''}</span>
+                    <span style={{fontSize:'11px',color:'#6b7280'}}>
+                      {dia.totalPaqDia>0&&<strong style={{color:'#374151'}}>{dia.totalPaqDia} paq</strong>}
+                      {dia.totalPaqDia>0&&dia.totalKgDia>0&&' · '}
+                      {dia.totalKgDia>0&&<strong style={{color:'#374151'}}>{dia.totalKgDia.toFixed(1)} kg</strong>}
+                    </span>
+                  </div>
+                  <div style={{display:'flex',flexDirection:'column',gap:'2px'}}>
+                    {dia.clientes.map(c=>(
+                      <div key={c.nombre} style={{display:'flex',justifyContent:'space-between',fontSize:'11.5px',color:'#4b5563'}}>
+                        <span>{c.nombre}</span>
+                        <span style={{color:'#9ca3af'}}>
+                          {c.totalPaq>0&&`${c.totalPaq} paq`}
+                          {c.totalPaq>0&&c.totalKg>0&&' · '}
+                          {c.totalKg>0&&`${c.totalKg.toFixed(1)} kg`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
       {/* Historial de exportaciones */}
       <div style={{marginTop:'14px',borderTop:'1px solid #f3f4f6',paddingTop:'10px'}}>
