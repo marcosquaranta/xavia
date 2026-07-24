@@ -15,12 +15,14 @@ export async function GET() {
 
     const clienteMap = new Map(clientes.map(c => [String(c.id_control), c.nombre_display || c.nombre_xubio || c.id_control]));
 
-    type EntradaExp = {
-      id_exportacion: string; fecha: string; fecha_exportacion: string;
-      facturas: number; clientesNombres: string[];
+    // Una línea por (exportación, cliente) — en Xubio se factura una sola vez por cliente
+    // por tanda, aunque combine varias sucursales, así que agrupar por cliente (no por
+    // sucursal) refleja exactamente la factura real.
+    type EntradaExpCliente = {
+      id_exportacion: string; fecha: string; fecha_exportacion: string; cliente: string;
       rucula: number; lechuga: number; rucula_kg: number; lechuga_kg: number;
     };
-    const porExp = new Map<string, EntradaExp>();
+    const porExpCliente = new Map<string, EntradaExpCliente>();
 
     type EntradaPend = {
       fecha: string; filas: number; rucula: number; lechuga: number; rucula_kg: number; lechuga_kg: number;
@@ -33,26 +35,19 @@ export async function GET() {
       const expId = String(v.exportado || '');
 
       if (expId && expId !== '') {
-        const ex = porExp.get(expId) || {
-          id_exportacion: expId, fecha, fecha_exportacion: String(v.fecha_carga || fecha),
-          facturas: 0, clientesNombres: [],
+        const nombre = clienteMap.get(String(v.id_control)) || String(v.id_control);
+        const key = `${expId}__${v.id_control}`;
+        const ex = porExpCliente.get(key) || {
+          id_exportacion: expId, fecha, fecha_exportacion: String(v.fecha_carga || fecha), cliente: nombre,
           rucula: 0, lechuga: 0, rucula_kg: 0, lechuga_kg: 0,
         };
-        // Contar clientes distintos con al menos una cantidad > 0
-        const tieneVentas = ['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca','rucula_kg','lechuga_kg','lechuga_kg_crespa','lechuga_kg_roble']
-          .some(k => Number((v as any)[k]) > 0);
-        const nombre = clienteMap.get(String(v.id_control)) || String(v.id_control);
-        if (tieneVentas && !ex.clientesNombres.includes(nombre)) {
-          ex.facturas++;
-          ex.clientesNombres.push(nombre);
-        }
         ex.rucula    += Number(v.rucula || 0);
         ex.lechuga   += Number(v.lechuga_crespa || 0) + Number(v.hoja_roble || 0);
         ex.rucula_kg  += Number(v.rucula_kg || 0);
         // lechuga_kg acá es el total en kg (rollup, igual que "lechuga" ya rollupea crespa+roble
         // en paquete) — suma la columna legacy + las dos nuevas por variedad.
         ex.lechuga_kg += Number(v.lechuga_kg || 0) + Number(v.lechuga_kg_crespa || 0) + Number(v.lechuga_kg_roble || 0);
-        porExp.set(expId, ex);
+        porExpCliente.set(key, ex);
       } else {
         const p = pendientes.get(fecha) || {
           fecha, filas: 0, rucula: 0, lechuga: 0, rucula_kg: 0, lechuga_kg: 0,
@@ -66,9 +61,10 @@ export async function GET() {
       }
     }
 
-    const exportaciones = [...porExp.values()]
-      .sort((a, b) => b.id_exportacion.localeCompare(a.id_exportacion))
-      .slice(0, 40);
+    const exportaciones = [...porExpCliente.values()]
+      .filter(e => e.rucula > 0 || e.lechuga > 0 || e.rucula_kg > 0 || e.lechuga_kg > 0)
+      .sort((a, b) => b.fecha.localeCompare(a.fecha) || b.id_exportacion.localeCompare(a.id_exportacion) || a.cliente.localeCompare(b.cliente))
+      .slice(0, 150);
 
     const pendientesArr = [...pendientes.values()]
       .sort((a, b) => b.fecha.localeCompare(a.fecha))

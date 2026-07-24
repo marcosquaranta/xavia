@@ -467,17 +467,19 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
 
       {/* Ya facturado hoy — para no volver a cargarlo por duplicado */}
       {(()=>{
-        const porCliente = new Map<string,{nombre:string;total:number}>();
+        const KG_ALL = ['rucula_kg','lechuga_kg','lechuga_kg_crespa','lechuga_kg_roble'] as const;
+        const porCliente = new Map<string,{nombre:string;totalPaq:number;totalKg:number}>();
         for(const v of facturadasHoy){
-          const total = PK_ALL.reduce((a,k)=>a+(Number((v as any)[k])||0),0);
-          if(total<=0) continue;
+          const totalPaq = PK_ALL.reduce((a,k)=>a+(Number((v as any)[k])||0),0);
+          const totalKg = KG_ALL.reduce((a,k)=>a+(Number((v as any)[k])||0),0);
+          if(totalPaq<=0 && totalKg<=0) continue;
           const key = `${v.id_control}__${v.sucursal}`;
           const fila = filas.find(f=>f.id_control===v.id_control&&f.sucursal===v.sucursal);
           const nombre = fila?.nombre_display || v.nombre_cliente || v.id_control;
           const prev = porCliente.get(key);
-          porCliente.set(key,{nombre,total:(prev?.total||0)+total});
+          porCliente.set(key,{nombre,totalPaq:(prev?.totalPaq||0)+totalPaq,totalKg:(prev?.totalKg||0)+totalKg});
         }
-        const items = Array.from(porCliente.values()).sort((a,b)=>b.total-a.total);
+        const items = Array.from(porCliente.values()).sort((a,b)=>(b.totalPaq+b.totalKg)-(a.totalPaq+a.totalKg));
         if(!items.length) return null;
         return (
           <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'8px',padding:'8px 14px',marginBottom:'12px'}}>
@@ -485,7 +487,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
             <div style={{display:'flex',flexWrap:'wrap',gap:'6px'}}>
               {items.map(it=>(
                 <span key={it.nombre} style={{fontSize:'11px',background:'white',border:'1px solid #fde68a',borderRadius:'5px',padding:'3px 8px',color:'#92400e'}}>
-                  {it.nombre}: <strong>{it.total}</strong> u
+                  {it.nombre}: {it.totalPaq>0&&<strong>{it.totalPaq} u</strong>}{it.totalPaq>0&&it.totalKg>0&&' · '}{it.totalKg>0&&<strong>{it.totalKg.toFixed(1)} kg</strong>}
                 </span>
               ))}
             </div>

@@ -2,9 +2,8 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
-interface EntradaExp {
-  id_exportacion: string; fecha: string; fecha_exportacion: string;
-  facturas: number; clientesNombres: string[];
+interface EntradaExpCliente {
+  id_exportacion: string; fecha: string; fecha_exportacion: string; cliente: string;
   rucula: number; lechuga: number; rucula_kg: number; lechuga_kg: number;
 }
 interface EntradaPend {
@@ -16,10 +15,11 @@ const fmtKg = (n: number) => n > 0 ? `${n.toFixed(1)} kg` : '—';
 
 export default function HistorialManager() {
   const [loading, setLoading] = useState(true);
-  const [exportaciones, setExportaciones] = useState<EntradaExp[]>([]);
+  const [exportaciones, setExportaciones] = useState<EntradaExpCliente[]>([]);
   const [pendientes, setPendientes] = useState<EntradaPend[]>([]);
   const [filtro, setFiltro] = useState('');
   const [limpiando, setLimpiando] = useState(false);
+  const [eliminando, setEliminando] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   function cargar() {
@@ -30,6 +30,17 @@ export default function HistorialManager() {
     }).catch(() => {}).finally(() => setLoading(false));
   }
   useEffect(() => { cargar(); }, []);
+
+  async function eliminarPendiente(fecha: string) {
+    if (!confirm(`¿Eliminar todas las ventas no facturadas del ${fecha}? Esto no se puede deshacer.`)) return;
+    setEliminando(fecha); setMsg(null);
+    try {
+      const r = await fetch('/api/ventas/limpiar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fecha, limpiarTodo: false }) });
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Error'); }
+      cargar();
+    } catch (e: any) { setMsg(e.message); }
+    setEliminando(null);
+  }
 
   async function limpiarTodo() {
     if (!confirm('¿Limpiar TODAS las ventas de la hoja? Esto no se puede deshacer.')) return;
@@ -44,7 +55,7 @@ export default function HistorialManager() {
 
   const q = filtro.trim().toLowerCase();
   const expFiltradas = q
-    ? exportaciones.filter(e => e.clientesNombres.some(c => c.toLowerCase().includes(q)) || e.fecha.includes(q) || e.id_exportacion.toLowerCase().includes(q))
+    ? exportaciones.filter(e => e.cliente.toLowerCase().includes(q) || e.fecha.includes(q) || e.id_exportacion.toLowerCase().includes(q))
     : exportaciones;
 
   if (loading) return <p style={{ color: '#9ca3af', fontSize: '13px' }}>Cargando…</p>;
@@ -76,8 +87,12 @@ export default function HistorialManager() {
                     <td style={{ textAlign: 'right', padding: '7px 10px', color: '#4d7c0f' }}>{h.lechuga > 0 ? fmt(h.lechuga) : '—'}</td>
                     <td style={{ textAlign: 'right', padding: '7px 10px', color: '#92400e' }}>{fmtKg(h.rucula_kg)}</td>
                     <td style={{ textAlign: 'right', padding: '7px 10px', color: '#b45309' }}>{fmtKg(h.lechuga_kg)}</td>
-                    <td style={{ padding: '7px 10px', textAlign: 'right' }}>
+                    <td style={{ padding: '7px 10px', textAlign: 'right', display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
                       <Link href={`/ventas?fecha=${h.fecha}`} className="btn secondary small">Ir a cargar →</Link>
+                      <button onClick={() => eliminarPendiente(h.fecha)} disabled={eliminando === h.fecha}
+                        style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: '6px', padding: '5px 10px', fontSize: '11px', cursor: 'pointer', color: '#dc2626' }}>
+                        {eliminando === h.fecha ? 'Eliminando…' : '🗑 Eliminar'}
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -94,7 +109,7 @@ export default function HistorialManager() {
           <input type="text" value={filtro} onChange={ev => setFiltro(ev.target.value)} placeholder="Buscar por cliente, fecha o N° de exportación…"
             style={{ fontSize: '12px', padding: '5px 10px', maxWidth: '280px' }} />
         </div>
-        <p className="card-sub">Ya enviado a Xubio · últimas {exportaciones.length} exportaciones</p>
+        <p className="card-sub">Ya enviado a Xubio · más reciente primero · {exportaciones.length} líneas</p>
         {expFiltradas.length === 0 ? (
           <p style={{ color: '#9ca3af', fontSize: '13px' }}>{q ? 'Sin resultados para ese filtro.' : 'Todavía no se facturó nada.'}</p>
         ) : (
@@ -103,7 +118,7 @@ export default function HistorialManager() {
               <thead><tr style={{ background: '#eff6ff', borderBottom: '1px solid #bfdbfe' }}>
                 <th style={{ textAlign: 'left', padding: '6px 10px' }}>Fecha</th>
                 <th style={{ textAlign: 'left', padding: '6px 10px' }}>N° exportación</th>
-                <th style={{ textAlign: 'left', padding: '6px 10px' }}>Clientes</th>
+                <th style={{ textAlign: 'left', padding: '6px 10px' }}>Cliente</th>
                 <th style={{ textAlign: 'right', padding: '6px 10px' }}>Rúcula</th>
                 <th style={{ textAlign: 'right', padding: '6px 10px' }}>Lechuga</th>
                 <th style={{ textAlign: 'right', padding: '6px 10px' }}>Rúcula kg</th>
@@ -112,10 +127,10 @@ export default function HistorialManager() {
               </tr></thead>
               <tbody>
                 {expFiltradas.map(h => (
-                  <tr key={h.id_exportacion} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                  <tr key={`${h.id_exportacion}__${h.cliente}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
                     <td style={{ padding: '7px 10px', fontWeight: 600, whiteSpace: 'nowrap' }}>{h.fecha}</td>
                     <td style={{ padding: '7px 10px', fontFamily: 'monospace', color: '#1e40af', fontWeight: 600, whiteSpace: 'nowrap' }}>{h.id_exportacion}</td>
-                    <td style={{ padding: '7px 10px', color: '#374151' }}>{h.clientesNombres.join(' · ')}</td>
+                    <td style={{ padding: '7px 10px', color: '#374151' }}>{h.cliente}</td>
                     <td style={{ textAlign: 'right', padding: '7px 10px', color: '#166534' }}>{h.rucula > 0 ? fmt(h.rucula) : '—'}</td>
                     <td style={{ textAlign: 'right', padding: '7px 10px', color: '#4d7c0f' }}>{h.lechuga > 0 ? fmt(h.lechuga) : '—'}</td>
                     <td style={{ textAlign: 'right', padding: '7px 10px', color: '#92400e' }}>{fmtKg(h.rucula_kg)}</td>
