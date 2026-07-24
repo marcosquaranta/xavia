@@ -51,7 +51,7 @@ function calcStats(ventas: VentaDia[]) {
   return { ...r, kg };
 }
 
-export default async function VentasPage({ searchParams }: { searchParams: { fecha?: string; exportacion?: string } }) {
+export default async function VentasPage({ searchParams }: { searchParams: { fecha?: string } }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
   if (user.rol !== 'admin') redirect('/panel');
@@ -93,7 +93,7 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
         </div>
         <VentasEvolucionCharts articulo={evolArticulo} clienteSemanal={evolClienteSemanal} clienteMensual={evolClienteMensual} precio={evolPrecio} resumenMes={resumenMes} />
         <div className="card">
-          <VentasManager clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} estimCosecha={estimCosecha} pedidosFijos={pedidosFijos.filter(p=>p.activo==='SI')} initialFecha={searchParams.fecha} initialExportacion={searchParams.exportacion} />
+          <VentasManager clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} estimCosecha={estimCosecha} pedidosFijos={pedidosFijos.filter(p=>p.activo==='SI')} initialFecha={searchParams.fecha} />
           <XubioResumen />
         </div>
       </div>

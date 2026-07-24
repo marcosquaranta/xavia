@@ -1,6 +1,7 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import Link from 'next/link';
+import type { VentaDia } from '@/lib/types';
 
 interface EntradaExpCliente {
   id_exportacion: string; fecha: string; fecha_exportacion: string; cliente: string; id_control: string;
@@ -13,6 +14,103 @@ interface EntradaPend {
 const fmt = (n: number) => Math.round(n).toLocaleString('es-AR');
 const fmtKg = (n: number) => n > 0 ? `${n.toFixed(1)} kg` : '—';
 
+const CAMPOS = [
+  { key: 'rucula', label: 'Rúcula' },
+  { key: 'lechuga_crespa', label: 'Crespa' },
+  { key: 'hoja_roble', label: 'Hoja Roble' },
+  { key: 'bandeja_rucula', label: 'Bandeja' },
+  { key: 'albahaca', label: 'Albahaca' },
+  { key: 'rucula_kg', label: 'Rúcula kg' },
+  { key: 'lechuga_kg_crespa', label: 'Crespa kg' },
+  { key: 'lechuga_kg_roble', label: 'Roble kg' },
+] as const;
+
+// Editor inline de una venta puntual ya facturada — corrige el registro interno de Xavia
+// (no anula la factura real ya emitida en Xubio) sin salir de esta página.
+function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, onCerrar }: {
+  idExportacion: string; idControl: string; fecha: string; onGuardado: () => void; onCerrar: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [filas, setFilas] = useState<VentaDia[]>([]);
+  const [valores, setValores] = useState<Record<string, Record<string, string>>>({});
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/ventas/fecha?id_exportacion=${idExportacion}`).then(r => r.json()).then((data: VentaDia[]) => {
+      const propias = data.filter(v => String(v.id_control) === String(idControl));
+      setFilas(propias);
+      const v0: Record<string, Record<string, string>> = {};
+      for (const f of propias) {
+        v0[f.sucursal] = {};
+        for (const c of CAMPOS) v0[f.sucursal][c.key] = String(Number((f as any)[c.key]) || '');
+      }
+      setValores(v0);
+    }).catch(() => setError('No se pudo cargar el detalle.')).finally(() => setLoading(false));
+  }, [idExportacion, idControl]);
+
+  function setVal(sucursal: string, key: string, val: string) {
+    setValores(prev => ({ ...prev, [sucursal]: { ...prev[sucursal], [key]: val } }));
+  }
+
+  async function guardar() {
+    setGuardando(true); setError(null);
+    try {
+      const lineas = filas.map(f => {
+        const v = valores[f.sucursal] || {};
+        const g = (k: string) => Number(v[k]) || 0;
+        return {
+          id_control: idControl, nombre_cliente: f.nombre_cliente, sucursal: f.sucursal,
+          rucula: g('rucula'), lechuga_crespa: g('lechuga_crespa'), hoja_roble: g('hoja_roble'),
+          bandeja_rucula: g('bandeja_rucula'), albahaca: g('albahaca'),
+          rucula_kg: g('rucula_kg'), lechuga_kg_crespa: g('lechuga_kg_crespa'), lechuga_kg_roble: g('lechuga_kg_roble'),
+        };
+      });
+      const r = await fetch('/api/ventas/guardar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fecha, id_exportacion: idExportacion, lineas }) });
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Error'); }
+      onGuardado();
+    } catch (e: any) { setError(e.message); }
+    setGuardando(false);
+  }
+
+  if (loading) return <p style={{ fontSize: '12px', color: '#9ca3af', margin: '8px 0' }}>Cargando detalle…</p>;
+  if (filas.length === 0) return <p style={{ fontSize: '12px', color: '#9ca3af', margin: '8px 0' }}>No se encontraron filas para editar.</p>;
+
+  return (
+    <div style={{ padding: '10px 12px', background: 'white', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+      {error && <p style={{ color: '#dc2626', fontSize: '12px', margin: '0 0 8px' }}>{error}</p>}
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ fontSize: '12px', width: '100%' }}>
+          <thead><tr>
+            <th style={{ textAlign: 'left', padding: '4px 6px' }}>Sucursal</th>
+            {CAMPOS.map(c => <th key={c.key} style={{ textAlign: 'center', padding: '4px 6px' }}>{c.label}</th>)}
+          </tr></thead>
+          <tbody>
+            {filas.map(f => (
+              <tr key={f.sucursal}>
+                <td style={{ padding: '4px 6px', fontWeight: 600, whiteSpace: 'nowrap' }}>{f.sucursal}</td>
+                {CAMPOS.map(c => (
+                  <td key={c.key} style={{ padding: '3px 4px' }}>
+                    <input type="number" min={0} step="any" value={valores[f.sucursal]?.[c.key] ?? ''}
+                      onChange={ev => setVal(f.sucursal, c.key, ev.target.value)}
+                      style={{ width: '72px', textAlign: 'center', fontSize: '12px', padding: '4px' }} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ marginTop: '10px', display: 'flex', gap: '8px' }}>
+        <button onClick={guardar} disabled={guardando} className="btn" style={{ fontSize: '12px', padding: '6px 14px' }}>
+          {guardando ? 'Guardando…' : '✓ Guardar cambios'}
+        </button>
+        <button onClick={onCerrar} className="btn secondary" style={{ fontSize: '12px', padding: '6px 14px' }}>Cerrar</button>
+      </div>
+    </div>
+  );
+}
+
 export default function HistorialManager() {
   const [loading, setLoading] = useState(true);
   const [exportaciones, setExportaciones] = useState<EntradaExpCliente[]>([]);
@@ -21,6 +119,7 @@ export default function HistorialManager() {
   const [limpiando, setLimpiando] = useState(false);
   const [eliminandoTodosPend, setEliminandoTodosPend] = useState(false);
   const [eliminando, setEliminando] = useState<string | null>(null);
+  const [editando, setEditando] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   function cargar() {
@@ -153,24 +252,40 @@ export default function HistorialManager() {
                 <th style={{ padding: '6px 10px' }}></th>
               </tr></thead>
               <tbody>
-                {expFiltradas.map(h => (
-                  <tr key={`${h.id_exportacion}__${h.cliente}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '7px 10px', fontWeight: 600, whiteSpace: 'nowrap' }}>{h.fecha}</td>
-                    <td style={{ padding: '7px 10px', fontFamily: 'monospace', color: '#1e40af', fontWeight: 600, whiteSpace: 'nowrap' }}>{h.id_exportacion}</td>
-                    <td style={{ padding: '7px 10px', color: '#374151' }}>{h.cliente}</td>
-                    <td style={{ textAlign: 'right', padding: '7px 10px', color: '#166534' }}>{h.rucula > 0 ? fmt(h.rucula) : '—'}</td>
-                    <td style={{ textAlign: 'right', padding: '7px 10px', color: '#4d7c0f' }}>{h.lechuga > 0 ? fmt(h.lechuga) : '—'}</td>
-                    <td style={{ textAlign: 'right', padding: '7px 10px', color: '#92400e' }}>{fmtKg(h.rucula_kg)}</td>
-                    <td style={{ textAlign: 'right', padding: '7px 10px', color: '#b45309' }}>{fmtKg(h.lechuga_kg)}</td>
-                    <td style={{ padding: '7px 10px', textAlign: 'right', display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
-                      <Link href={`/ventas?fecha=${h.fecha}&exportacion=${h.id_exportacion}`} className="btn secondary small">✏️ Editar →</Link>
-                      <button onClick={() => eliminarFacturado(h.id_exportacion, h.id_control, h.cliente)} disabled={eliminando === `${h.id_exportacion}__${h.id_control}`}
-                        style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: '6px', padding: '5px 10px', fontSize: '11px', cursor: 'pointer', color: '#dc2626' }}>
-                        {eliminando === `${h.id_exportacion}__${h.id_control}` ? 'Eliminando…' : '🗑 Eliminar'}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {expFiltradas.map(h => {
+                  const key = `${h.id_exportacion}__${h.id_control}`;
+                  const abierto = editando === key;
+                  return (
+                  <Fragment key={key}>
+                    <tr style={{ borderBottom: abierto ? 'none' : '1px solid #f3f4f6', background: abierto ? '#eff6ff' : undefined }}>
+                      <td style={{ padding: '7px 10px', fontWeight: 600, whiteSpace: 'nowrap' }}>{h.fecha}</td>
+                      <td style={{ padding: '7px 10px', fontFamily: 'monospace', color: '#1e40af', fontWeight: 600, whiteSpace: 'nowrap' }}>{h.id_exportacion}</td>
+                      <td style={{ padding: '7px 10px', color: '#374151' }}>{h.cliente}</td>
+                      <td style={{ textAlign: 'right', padding: '7px 10px', color: '#166534' }}>{h.rucula > 0 ? fmt(h.rucula) : '—'}</td>
+                      <td style={{ textAlign: 'right', padding: '7px 10px', color: '#4d7c0f' }}>{h.lechuga > 0 ? fmt(h.lechuga) : '—'}</td>
+                      <td style={{ textAlign: 'right', padding: '7px 10px', color: '#92400e' }}>{fmtKg(h.rucula_kg)}</td>
+                      <td style={{ textAlign: 'right', padding: '7px 10px', color: '#b45309' }}>{fmtKg(h.lechuga_kg)}</td>
+                      <td style={{ padding: '7px 10px', textAlign: 'right', display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                        <button onClick={() => setEditando(abierto ? null : key)} className="btn secondary small">
+                          {abierto ? '▲ Cerrar' : '✏️ Editar'}
+                        </button>
+                        <button onClick={() => eliminarFacturado(h.id_exportacion, h.id_control, h.cliente)} disabled={eliminando === key}
+                          style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: '6px', padding: '5px 10px', fontSize: '11px', cursor: 'pointer', color: '#dc2626' }}>
+                          {eliminando === key ? 'Eliminando…' : '🗑 Eliminar'}
+                        </button>
+                      </td>
+                    </tr>
+                    {abierto && (
+                      <tr style={{ borderBottom: '1px solid #f3f4f6', background: '#eff6ff' }}>
+                        <td colSpan={8} style={{ padding: '0 10px 12px' }}>
+                          <EditorFacturadoDetalle idExportacion={h.id_exportacion} idControl={h.id_control} fecha={h.fecha}
+                            onGuardado={() => { setEditando(null); cargar(); }} onCerrar={() => setEditando(null)} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

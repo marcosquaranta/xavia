@@ -1,7 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import type { ClienteVenta, PrecioVenta, VentaDia, PedidoFijo } from '@/lib/types';
 import type { EstimacionCosechaCercana } from '@/lib/planificacionServer';
 import { ventasCargadasSemana } from '@/lib/estadisticasVentas';
@@ -66,8 +65,7 @@ function mkFilas(cs: ClienteVenta[], freq: Record<string,number>): Fila[] {
   return out.sort((a,b)=>(freq[b.id_control]||0)-(freq[a.id_control]||0));
 }
 
-export default function VentasManager({clientes,precios,frecuencias,stats,estimCosecha,pedidosFijos,initialFecha,initialExportacion}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;estimCosecha:EstimacionCosechaCercana;pedidosFijos:PedidoFijo[];initialFecha?:string;initialExportacion?:string}) {
-  const router = useRouter();
+export default function VentasManager({clientes,precios,frecuencias,stats,estimCosecha,pedidosFijos,initialFecha}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;estimCosecha:EstimacionCosechaCercana;pedidosFijos:PedidoFijo[];initialFecha?:string}) {
   const hoy = new Date().toISOString().split('T')[0];
   const [fecha,setFecha]=useState(initialFecha || hoy);
   const [fc,setFc]=useState<Record<string,string>>({});
@@ -83,11 +81,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
   const [correlaA,setCorrelaA]=useState<string>('');
   const [correlaB,setCorrelaB]=useState<string>('');
   const [enviarEmail,setEnviarEmail]=useState(true);
-  const [currentExportId,setCurrentExportId]=useState<string|null>(null);
   const [limpiando,setLimpiando]=useState(false);
   const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number;diasPromedio:number};lechuga_crespa:{stockActual:number;diasPromedio:number};lechuga_roble:{stockActual:number;diasPromedio:number};factorGrPaq:{rucula:number;lechuga_crespa:number;lechuga_roble:number}}|null>(null);
   const [ctdsKg,setCtdsKg]=useState<CKG>({});
-  const [fechaExportada,setFechaExportada]=useState(false);
   const [ventas7,setVentas7]=useState<VentaDia[]>([]);
   const [facturadasHoy,setFacturadasHoy]=useState<VentaDia[]>([]);
   const [ventasSemana,setVentasSemana]=useState<VentaDia[]>([]);
@@ -124,16 +120,6 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
     }).catch(()=>{});
   },[]);
 
-  // Si se llega desde el historial de facturación con una exportación puntual para
-  // editar (?fecha=...&exportacion=...), cargarla directo y limpiar la URL.
-  useEffect(()=>{
-    if(initialExportacion && initialFecha){
-      cargarExportacion(initialExportacion, initialFecha);
-      router.replace('/ventas');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[]);
-
   async function limpiarDia(todo=false){
     const msg2 = todo ? '¿Limpiar TODAS las ventas de la hoja? Esto no se puede deshacer.' : `¿Limpiar todas las ventas del ${fecha}?`;
     if(!confirm(msg2)) return;
@@ -146,25 +132,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
     setLimpiando(false);
   }
 
-  function cargarExportacion(idExp:string, fechaExp:string){
-    setCurrentExportId(idExp);
-    setFecha(fechaExp);
-    setLoading(true);setMsg(null);
-    fetch(`/api/ventas/fecha?id_exportacion=${idExp}`).then(r=>r.json()).then((data:VentaDia[])=>{
-      const c:Ctds={}; const ckg:CKG={};
-      for(const v of data){
-        const key=`${v.id_control}__${v.sucursal}`;
-        c[key]={rucula:String(v.rucula||''),lechuga_crespa:String(v.lechuga_crespa||''),hoja_roble:String(v.hoja_roble||''),bandeja_rucula:String(v.bandeja_rucula||''),albahaca:String(v.albahaca||'')};
-        ckg[key]={rucula_kg:String(v.rucula_kg||''),lechuga_kg_crespa:String(v.lechuga_kg_crespa||''),lechuga_kg_roble:String(v.lechuga_kg_roble||'')};
-      }
-      ctdsKgLive.current=ckg;
-      setFechaExportada(true);
-      setCtds(c);setCtdsKg(ckg);setEsts({});setEstsKg({});setPrefijo(new Set());
-    }).catch(()=>{}).finally(()=>setLoading(false));
-  }
-
   useEffect(()=>{
-    if(currentExportId) return; // Si estamos editando una exportación, no recargar por fecha
     setLoading(true);setMsg(null);
     fetch(`/api/ventas/fecha?fecha=${fecha}`).then(r=>r.json()).then((data:VentaDia[])=>{
       const c:Ctds={}; const ckg:CKG={};
@@ -191,8 +159,6 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
         if (tieneAlgo) c[key] = vals;
       }
       ctdsKgLive.current = ckg;
-      setFechaExportada(false);
-      setCurrentExportId(null);
       setCtds(c); setCtdsKg(ckg); setEsts({}); setEstsKg({}); setPrefijo(nuevoPrefijo);
     }).catch(()=>{}).finally(()=>setLoading(false));
   },[fecha,pedidosFijos]);
@@ -234,7 +200,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
     if(q(f.id_control,f.sucursal,k)==='')return;
     se(f.id_control,f.sucursal,k,'saving');
     try{
-      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:currentExportId,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:Number(q(f.id_control,f.sucursal,'rucula'))||0,lechuga_crespa:Number(q(f.id_control,f.sucursal,'lechuga_crespa'))||0,hoja_roble:Number(q(f.id_control,f.sucursal,'hoja_roble'))||0,bandeja_rucula:Number(q(f.id_control,f.sucursal,'bandeja_rucula'))||0,albahaca:Number(q(f.id_control,f.sucursal,'albahaca'))||0}]})});
+      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:Number(q(f.id_control,f.sucursal,'rucula'))||0,lechuga_crespa:Number(q(f.id_control,f.sucursal,'lechuga_crespa'))||0,hoja_roble:Number(q(f.id_control,f.sucursal,'hoja_roble'))||0,bandeja_rucula:Number(q(f.id_control,f.sucursal,'bandeja_rucula'))||0,albahaca:Number(q(f.id_control,f.sucursal,'albahaca'))||0}]})});
       if(!r.ok)throw new Error();
       se(f.id_control,f.sucursal,k,'saved');setTimeout(()=>se(f.id_control,f.sucursal,k,'idle'),2000);
       cargarVentasSemana();
@@ -257,7 +223,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
     const lkgR=Number(domRefs?.lechuga_kg_roble?.value)||0;
     KGK_ALL.forEach(k=>seKg(f.id_control,f.sucursal,k,'saving'));
     try{
-      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:currentExportId,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:rkg,lechuga_kg_crespa:lkgC,lechuga_kg_roble:lkgR}]})});
+      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:rkg,lechuga_kg_crespa:lkgC,lechuga_kg_roble:lkgR}]})});
       if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error((j as any).error||'Error');};
       KGK_ALL.forEach(k=>{seKg(f.id_control,f.sucursal,k,'saved');setTimeout(()=>seKg(f.id_control,f.sucursal,k,'idle'),2000);});
       cargarVentasSemana();
@@ -305,9 +271,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
         ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg_crespa:Number(dr?.lechuga_kg_crespa?.value)||0,lechuga_kg_roble:Number(dr?.lechuga_kg_roble?.value)||0};}),
       // Solo enviar líneas con al menos una cantidad > 0
       ].filter(l=>l.rucula>0||l.lechuga_crespa>0||l.hoja_roble>0||l.bandeja_rucula>0||l.albahaca>0||l.rucula_kg>0||l.lechuga_kg_crespa>0||l.lechuga_kg_roble>0);
-      const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:currentExportId,lineas:todasLineas})});
+      const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:todasLineas})});
       if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar ventas');}
-      const r=await fetch('/api/ventas/exportar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,fechasCliente:fc,correlaA:Number(correlaA),correlaB:Number(correlaB),enviarEmail,...(currentExportId?{id_exportacion:currentExportId}:{})})});
+      const r=await fetch('/api/ventas/exportar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,fechasCliente:fc,correlaA:Number(correlaA),correlaB:Number(correlaB),enviarEmail})});
       const j=await r.json();if(!r.ok)throw new Error(j.error);
       const bytes=Uint8Array.from(atob(j.file),c=>c.charCodeAt(0));
       const url=URL.createObjectURL(new Blob([bytes]));
@@ -317,7 +283,6 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
       setCorrelaA(String(j.lastA+1)); setCorrelaB(String(j.lastB+1));
       // Limpiar estado local (la hoja conserva los valores como registro histórico)
       setCtds({});setEsts({});setCtdsKg({});ctdsKgLive.current={};setFc({});
-      setCurrentExportId(null);setFechaExportada(false);
       cargarVentasSemana();
     }catch(err:any){setMsg({t:'err',s:err.message});}
     setExp(false);
@@ -418,17 +383,6 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
         </Link>
       </div>
 
-      {/* Banner exportación cargada */}
-      {currentExportId&&(
-        <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'8px',padding:'8px 14px',marginBottom:'8px',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
-          <span style={{fontSize:'13px',color:'#1e40af',fontWeight:600}}>📋 Editando exportación {currentExportId}</span>
-          <span style={{fontSize:'12px',color:'#3b82f6'}}>Modificá los valores y volvé a exportar.</span>
-          <button onClick={()=>{setCurrentExportId(null);setFechaExportada(false);setCtds({});setCtdsKg({});ctdsKgLive.current={};}}
-            style={{marginLeft:'auto',background:'none',border:'1px solid #bfdbfe',borderRadius:'5px',padding:'2px 8px',fontSize:'11px',cursor:'pointer',color:'#1e40af'}}>
-            × Cerrar
-          </button>
-        </div>
-      )}
 
       {/* Panel pre-exportación */}
       {showPreExport && (
