@@ -77,6 +77,8 @@ export default async function StocksPage() {
           </div>
         )}
 
+        <p style={{ margin: '0 0 3px', fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>📦 Stock de cultivos en cámara</p>
+        <p style={{ margin: '0 0 10px', fontSize: '12px', color: '#9ca3af' }}>Conteo físico de rúcula y lechuga ya cosechadas, listas para vender — cargá acá el stock inicial o un ajuste cuando hagas el recuento.</p>
         <StockCamaraCards rucula={camaraRucula} lechugaCrespa={camaraLechugaCrespa} lechugaRoble={camaraLechugaRoble} isAdmin={user.rol === 'admin'} valorizacionActual={valorizacionActual.total} />
 
         <StocksManager

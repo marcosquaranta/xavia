@@ -85,9 +85,9 @@ function CardCamara({ datos, cultivo, cultivoKey, isAdmin, onSaved }: {
       )}
 
       {isAdmin && !mostrarForm && (
-        <button type="button" className="btn secondary" style={{ marginTop: '8px', fontSize: '10px', padding: '3px 8px' }}
+        <button type="button" className="btn" style={{ marginTop: '10px', width: '100%', fontSize: '12.5px', fontWeight: 700, padding: '7px 12px' }}
           onClick={() => setMostrarForm(true)}>
-          {datos.base ? 'Registrar ajuste' : 'Cargar stock inicial'}
+          📦 {datos.base ? 'Registrar ajuste' : 'Cargar stock inicial'}
         </button>
       )}
 
