@@ -19,14 +19,19 @@ export async function POST(req: NextRequest) {
     const toUpdate: Array<{ keyValue: string; updates: Record<string, any> }> = [];
 
     for (const l of lineas) {
-      // Si hay id_exportacion: re-editando una exportación existente → buscar esa fila
-      // Si no: sesión nueva → solo buscar filas no exportadas
-      const existente = ventas.find(v =>
-        v.fecha === fecha &&
-        String(v.id_control) === String(l.id_control) &&
-        v.sucursal === l.sucursal &&
-        (id_exportacion ? v.exportado === id_exportacion : (!v.exportado || v.exportado === ''))
-      );
+      // Si la línea trae id_venta (edición puntual desde el historial de facturación),
+      // apuntar directo a esa fila — necesario porque puede haber filas duplicadas con
+      // la misma (fecha, cliente, sucursal), y buscar por esos campos sería ambiguo.
+      // Si no, el flujo normal: con id_exportacion buscar esa fila puntual, sin
+      // id_exportacion (sesión nueva) solo buscar filas no exportadas.
+      const existente = l.id_venta
+        ? ventas.find(v => v.id_venta === l.id_venta)
+        : ventas.find(v =>
+            v.fecha === fecha &&
+            String(v.id_control) === String(l.id_control) &&
+            v.sucursal === l.sucursal &&
+            (id_exportacion ? v.exportado === id_exportacion : (!v.exportado || v.exportado === ''))
+          );
       if (existente) {
         toUpdate.push({
           keyValue: existente.id_venta,

@@ -27,13 +27,17 @@ const CAMPOS = [
 
 // Editor inline de una venta puntual ya facturada — corrige el registro interno de Xavia
 // (no anula la factura real ya emitida en Xubio) sin salir de esta página.
-function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, onCerrar }: {
-  idExportacion: string; idControl: string; fecha: string; onGuardado: () => void; onCerrar: () => void;
+function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, onFilaEliminada, onCerrar }: {
+  idExportacion: string; idControl: string; fecha: string; onGuardado: () => void; onFilaEliminada: () => void; onCerrar: () => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [filas, setFilas] = useState<VentaDia[]>([]);
+  // Ojo: puede haber varias filas con la misma (fecha, cliente, sucursal) — filas
+  // repetidas por error de carga — así que el estado se indexa por id_venta (único por
+  // fila real), nunca por sucursal, o editar/borrar una repetida movería a todas juntas.
   const [valores, setValores] = useState<Record<string, Record<string, string>>>({});
   const [guardando, setGuardando] = useState(false);
+  const [eliminandoFila, setEliminandoFila] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -42,25 +46,25 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
       setFilas(propias);
       const v0: Record<string, Record<string, string>> = {};
       for (const f of propias) {
-        v0[f.sucursal] = {};
-        for (const c of CAMPOS) v0[f.sucursal][c.key] = String(Number((f as any)[c.key]) || '');
+        v0[f.id_venta] = {};
+        for (const c of CAMPOS) v0[f.id_venta][c.key] = String(Number((f as any)[c.key]) || '');
       }
       setValores(v0);
     }).catch(() => setError('No se pudo cargar el detalle.')).finally(() => setLoading(false));
   }, [idExportacion, idControl]);
 
-  function setVal(sucursal: string, key: string, val: string) {
-    setValores(prev => ({ ...prev, [sucursal]: { ...prev[sucursal], [key]: val } }));
+  function setVal(id_venta: string, key: string, val: string) {
+    setValores(prev => ({ ...prev, [id_venta]: { ...prev[id_venta], [key]: val } }));
   }
 
   async function guardar() {
     setGuardando(true); setError(null);
     try {
       const lineas = filas.map(f => {
-        const v = valores[f.sucursal] || {};
+        const v = valores[f.id_venta] || {};
         const g = (k: string) => Number(v[k]) || 0;
         return {
-          id_control: idControl, nombre_cliente: f.nombre_cliente, sucursal: f.sucursal,
+          id_venta: f.id_venta, id_control: idControl, nombre_cliente: f.nombre_cliente, sucursal: f.sucursal,
           rucula: g('rucula'), lechuga_crespa: g('lechuga_crespa'), hoja_roble: g('hoja_roble'),
           bandeja_rucula: g('bandeja_rucula'), albahaca: g('albahaca'),
           rucula_kg: g('rucula_kg'), lechuga_kg_crespa: g('lechuga_kg_crespa'), lechuga_kg_roble: g('lechuga_kg_roble'),
@@ -71,6 +75,18 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
       onGuardado();
     } catch (e: any) { setError(e.message); }
     setGuardando(false);
+  }
+
+  async function eliminarFila(id_venta: string) {
+    if (!confirm('¿Eliminar esta fila? Esto no se puede deshacer.')) return;
+    setEliminandoFila(id_venta); setError(null);
+    try {
+      const r = await fetch('/api/ventas/limpiar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id_venta }) });
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Error'); }
+      setFilas(prev => prev.filter(f => f.id_venta !== id_venta));
+      onFilaEliminada();
+    } catch (e: any) { setError(e.message); }
+    setEliminandoFila(null);
   }
 
   if (loading) return <p style={{ fontSize: '12px', color: '#9ca3af', margin: '8px 0' }}>Cargando detalle…</p>;
@@ -84,18 +100,26 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
           <thead><tr>
             <th style={{ textAlign: 'left', padding: '4px 6px' }}>Sucursal</th>
             {CAMPOS.map(c => <th key={c.key} style={{ textAlign: 'center', padding: '4px 6px' }}>{c.label}</th>)}
+            <th style={{ padding: '4px 6px' }}></th>
           </tr></thead>
           <tbody>
             {filas.map(f => (
-              <tr key={f.sucursal}>
+              <tr key={f.id_venta}>
                 <td style={{ padding: '4px 6px', fontWeight: 600, whiteSpace: 'nowrap' }}>{f.sucursal}</td>
                 {CAMPOS.map(c => (
                   <td key={c.key} style={{ padding: '3px 4px' }}>
-                    <input type="number" min={0} step="any" value={valores[f.sucursal]?.[c.key] ?? ''}
-                      onChange={ev => setVal(f.sucursal, c.key, ev.target.value)}
+                    <input type="number" min={0} step="any" value={valores[f.id_venta]?.[c.key] ?? ''}
+                      onChange={ev => setVal(f.id_venta, c.key, ev.target.value)}
                       style={{ width: '72px', textAlign: 'center', fontSize: '12px', padding: '4px' }} />
                   </td>
                 ))}
+                <td style={{ padding: '3px 4px' }}>
+                  <button onClick={() => eliminarFila(f.id_venta)} disabled={eliminandoFila === f.id_venta}
+                    title="Eliminar esta fila (ej. venta duplicada)"
+                    style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: '5px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', color: '#dc2626', whiteSpace: 'nowrap' }}>
+                    {eliminandoFila === f.id_venta ? '…' : '🗑'}
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -279,7 +303,7 @@ export default function HistorialManager() {
                       <tr style={{ borderBottom: '1px solid #f3f4f6', background: '#eff6ff' }}>
                         <td colSpan={8} style={{ padding: '0 10px 12px' }}>
                           <EditorFacturadoDetalle idExportacion={h.id_exportacion} idControl={h.id_control} fecha={h.fecha}
-                            onGuardado={() => { setEditando(null); cargar(); }} onCerrar={() => setEditando(null)} />
+                            onGuardado={() => { setEditando(null); cargar(); }} onFilaEliminada={cargar} onCerrar={() => setEditando(null)} />
                         </td>
                       </tr>
                     )}

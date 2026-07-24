@@ -7,13 +7,17 @@ export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
   try {
-    const { fecha, limpiarTodo, soloPendientes, id_exportacion, id_control } = await req.json();
+    const { fecha, limpiarTodo, soloPendientes, id_exportacion, id_control, id_venta } = await req.json();
     const ventas = await readSheet<VentaDia>('Ventas');
     const noExportado = (v: VentaDia) => !v.exportado || v.exportado === '';
 
     let aLimpiar: VentaDia[];
     if (limpiarTodo) {
       aLimpiar = ventas;
+    } else if (id_venta) {
+      // Una fila puntual por su id único — para borrar duplicados sueltos sin afectar
+      // otras filas que compartan la misma (fecha, cliente, sucursal).
+      aLimpiar = ventas.filter(v => v.id_venta === id_venta);
     } else if (id_exportacion) {
       // Una línea puntual ya facturada (por cliente, dentro de esa tanda) — para corregir
       // el registro interno cuando una venta se facturó mal, sin tocar el resto de la tanda.
