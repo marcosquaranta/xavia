@@ -105,8 +105,8 @@ export const CATEGORIAS_GASTO: { value: CategoriaGasto; label: string }[] = [
   { value: 'inversion_nave3', label: 'Inversión 3ra Nave' },
   { value: 'abonos', label: 'Abonos' },
 ];
-export type MedioPagoGasto = 'Brubank' | 'Macro' | 'Caja MQ';
-export const MEDIOS_PAGO: MedioPagoGasto[] = ['Brubank', 'Macro', 'Caja MQ'];
+export type MedioPagoGasto = 'Brubank' | 'Macro' | 'Caja MQ' | 'Caja FL' | 'Caja Marce' | 'Caja JP';
+export const MEDIOS_PAGO: MedioPagoGasto[] = ['Brubank', 'Macro', 'Caja MQ', 'Caja FL', 'Caja Marce', 'Caja JP'];
 export interface Gasto {
   id_gasto: string;
   fecha: string;
