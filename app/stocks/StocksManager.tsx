@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { Articulo, StockMes, Lote, VentaDia, PrecioVenta, ClienteVenta, Gasto } from '@/lib/types';
+import { MEDIOS_PAGO } from '@/lib/types';
 import { calcularDriversMes, calcularUsoTeorico, calcularUsoReferencia, DRIVERS } from '@/lib/usoTeorico';
 import { matchArticuloPorTexto } from '@/lib/matchArticulo';
 
@@ -110,6 +111,42 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
       setResultadoMasivo('Error: ' + (err.message || 'no se pudo guardar'));
     } finally {
       setGuardandoMasivo(false);
+    }
+  }
+
+  // Ingresar compra puntual de un artículo — crea el Gasto (categoría insumos) y suma la
+  // cantidad a "Compras" de este mes en un solo paso, pidiendo cantidad, precio unitario
+  // y medio de pago (obligatorio: sin medio de pago no deja confirmar).
+  const [comprandoPara, setComprandoPara] = useState<string | null>(null);
+  const [compraCantidad, setCompraCantidad] = useState('');
+  const [compraPrecio, setCompraPrecio] = useState('');
+  const [compraMedioPago, setCompraMedioPago] = useState('');
+  const [guardandoCompra, setGuardandoCompra] = useState(false);
+  const [errorCompra, setErrorCompra] = useState<string | null>(null);
+
+  function abrirCompra(id_articulo: string) {
+    setComprandoPara(id_articulo);
+    setCompraCantidad(''); setCompraPrecio(''); setCompraMedioPago(''); setErrorCompra(null);
+  }
+  async function confirmarCompra(art: Articulo) {
+    const cant = Number(compraCantidad), precio = Number(compraPrecio);
+    if (!(cant > 0)) { setErrorCompra('Ingresá una cantidad válida.'); return; }
+    if (!(precio > 0)) { setErrorCompra('Ingresá un precio válido.'); return; }
+    if (!compraMedioPago) { setErrorCompra('Elegí un medio de pago.'); return; }
+    setGuardandoCompra(true); setErrorCompra(null);
+    try {
+      const res = await fetch('/api/stocks/comprar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_articulo: art.id_articulo, anio, mes, cantidad: cant, precio_unitario: precio, medio_pago: compraMedioPago }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || 'Error');
+      setComprandoPara(null);
+      router.refresh();
+    } catch (err: any) {
+      setErrorCompra(err.message || 'No se pudo guardar la compra');
+    } finally {
+      setGuardandoCompra(false);
     }
   }
 
@@ -630,7 +667,7 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                       <th style={{ textAlign: 'right', width: '80px', color: '#6b7280', fontWeight: 700 }} title="≈ = referencia estimada (sin fórmula configurada), no un target preciso">Uso teórico</th>
                       <th style={{ textAlign: 'right', width: '100px', fontWeight: 700 }}>Dif. real vs teórico</th>
                       <th style={{ textAlign: 'right', width: '100px', fontWeight: 700 }}>Stock final valorizado</th>
-                      <th style={{ width: '50px' }}></th>
+                      <th style={{ width: '110px' }}></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -641,8 +678,10 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                       const modificado = editValues[art.id_articulo] !== undefined;
                       const diffRef = r.esReferencia && r.usoReferencia !== null ? r.usoReal - r.usoReferencia : null;
                       const diffColor = r.diff !== null ? (r.diff > 0 ? '#dc2626' : '#059669') : diffRef !== null ? '#7c6fda' : '#9ca3af';
+                      const comprandoAqui = comprandoPara === art.id_articulo;
                       return (
-                        <tr key={art.id_articulo} style={{ background: modificado ? '#fefce8' : 'transparent' }}>
+                        <React.Fragment key={art.id_articulo}>
+                        <tr style={{ background: modificado ? '#fefce8' : comprandoAqui ? '#eff6ff' : 'transparent' }}>
                           <td style={{ fontWeight: 500 }}>{art.articulo}</td>
                           <td style={{ textAlign: 'center', color: '#9ca3af', fontSize: '11px' }}>{art.unidad_medida}</td>
                           <td style={{ padding: '2px 4px' }}>
@@ -688,17 +727,69 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                             {r.valorizado !== null ? `$${fmt(r.valorizado, 0)}` : '—'}
                           </td>
                           <td style={{ textAlign: 'center' }}>
-                            {modificado && (
-                              <button onClick={() => guardar(art)} disabled={saving === art.id_articulo}
-                                style={{ background: '#059669', color: 'white', border: 'none', borderRadius: '4px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: 600 }}>
-                                {saving === art.id_articulo ? '…' : '✓'}
+                            <div style={{ display: 'flex', gap: '4px', alignItems: 'center', justifyContent: 'center' }}>
+                              {modificado && (
+                                <button onClick={() => guardar(art)} disabled={saving === art.id_articulo}
+                                  style={{ background: '#059669', color: 'white', border: 'none', borderRadius: '4px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: 600 }}>
+                                  {saving === art.id_articulo ? '…' : '✓'}
+                                </button>
+                              )}
+                              {!modificado && guardado && (
+                                <span style={{ fontSize: '10px', color: '#9ca3af' }}>✓</span>
+                              )}
+                              <button onClick={() => comprandoAqui ? setComprandoPara(null) : abrirCompra(art.id_articulo)}
+                                title="Ingresar compra (cantidad, precio y medio de pago)"
+                                className={comprandoAqui ? 'btn' : 'btn secondary'} style={{ fontSize: '11px', padding: '3px 7px' }}>
+                                🛒
                               </button>
-                            )}
-                            {!modificado && guardado && (
-                              <span style={{ fontSize: '10px', color: '#9ca3af' }}>✓</span>
-                            )}
+                            </div>
                           </td>
                         </tr>
+                        {comprandoAqui && (
+                          <tr style={{ background: '#eff6ff' }}>
+                            <td colSpan={11} style={{ padding: '10px 12px' }}>
+                              <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                                <p style={{ margin: 0, fontSize: '12px', fontWeight: 700, color: '#1e40af', width: '100%' }}>
+                                  🛒 Ingresar compra — {art.articulo}
+                                </p>
+                                <div>
+                                  <label style={{ fontSize: '10px' }}>Cantidad ({art.unidad_medida})</label>
+                                  <input type="number" min={0} step={0.001} value={compraCantidad} onChange={(e) => setCompraCantidad(e.target.value)}
+                                    style={{ width: '110px', fontSize: '12px', padding: '5px 8px' }} disabled={guardandoCompra} />
+                                </div>
+                                <div>
+                                  <label style={{ fontSize: '10px', color: '#dc2626', fontWeight: 700 }}>Precio unitario (IVA incluido)</label>
+                                  <input type="number" min={0} step={0.01} value={compraPrecio} onChange={(e) => setCompraPrecio(e.target.value)}
+                                    style={{ width: '110px', fontSize: '12px', padding: '5px 8px' }} disabled={guardandoCompra} />
+                                </div>
+                                <div>
+                                  <label style={{ fontSize: '10px' }}>Medio de pago</label>
+                                  <select value={compraMedioPago} onChange={(e) => setCompraMedioPago(e.target.value)}
+                                    style={{ width: '140px', fontSize: '12px', padding: '5px 8px', color: compraMedioPago ? '#111827' : '#dc2626' }} disabled={guardandoCompra}>
+                                    <option value="">— elegir —</option>
+                                    {MEDIOS_PAGO.map((m) => <option key={m} value={m}>{m}</option>)}
+                                  </select>
+                                </div>
+                                {Number(compraCantidad) > 0 && Number(compraPrecio) > 0 && (
+                                  <p style={{ margin: '0 0 8px', fontSize: '12px', color: '#6b7280' }}>
+                                    Total: <strong>${fmt(Number(compraCantidad) * Number(compraPrecio), 0)}</strong>
+                                  </p>
+                                )}
+                                <button onClick={() => confirmarCompra(art)} disabled={guardandoCompra} className="btn" style={{ fontSize: '12px', padding: '6px 14px' }}>
+                                  {guardandoCompra ? 'Guardando…' : '✓ Confirmar compra'}
+                                </button>
+                                <button onClick={() => setComprandoPara(null)} className="btn secondary" style={{ fontSize: '12px', padding: '6px 14px' }} disabled={guardandoCompra}>
+                                  Cancelar
+                                </button>
+                              </div>
+                              {errorCompra && <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#dc2626' }}>{errorCompra}</p>}
+                              <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#6b7280' }}>
+                                Esto suma la cantidad a "Compras" de este mes y crea el gasto correspondiente (categoría Insumos) en la planilla de Gastos.
+                              </p>
+                            </td>
+                          </tr>
+                        )}
+                        </React.Fragment>
                       );
                     })}
                     {artscat.some((a) => resumenArticulos.find((x) => x.art.id_articulo === a.id_articulo)?.valorizado) && (

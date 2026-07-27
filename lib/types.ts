@@ -106,6 +106,7 @@ export const CATEGORIAS_GASTO: { value: CategoriaGasto; label: string }[] = [
   { value: 'abonos', label: 'Abonos' },
 ];
 export type MedioPagoGasto = 'Brubank' | 'Macro' | 'Caja MQ';
+export const MEDIOS_PAGO: MedioPagoGasto[] = ['Brubank', 'Macro', 'Caja MQ'];
 export interface Gasto {
   id_gasto: string;
   fecha: string;

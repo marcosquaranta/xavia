@@ -1,11 +1,11 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { CATEGORIAS_GASTO, type Gasto, type CategoriaGasto, type Articulo } from '@/lib/types';
+import { CATEGORIAS_GASTO, MEDIOS_PAGO, type Gasto, type CategoriaGasto, type Articulo } from '@/lib/types';
 import NumberInput from '@/components/NumberInput';
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-const MEDIOS = ['Brubank', 'Macro', 'Caja MQ'] as const;
+const MEDIOS = MEDIOS_PAGO;
 const LABEL_CAT: Record<string, string> = Object.fromEntries(CATEGORIAS_GASTO.map((c) => [c.value, c.label]));
 const ORDEN_CAT: CategoriaGasto[] = CATEGORIAS_GASTO.map((c) => c.value);
 const HOY = new Date();
