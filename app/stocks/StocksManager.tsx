@@ -123,10 +123,38 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
   const [compraMedioPago, setCompraMedioPago] = useState('');
   const [guardandoCompra, setGuardandoCompra] = useState(false);
   const [errorCompra, setErrorCompra] = useState<string | null>(null);
+  // Corrección directa del total de "Compras" ya acumulado (sin generar un gasto nuevo) —
+  // vive dentro del mismo formulario, para casos de error de carga.
+  const [correccionCompras, setCorreccionCompras] = useState('');
+  const [guardandoCorreccion, setGuardandoCorreccion] = useState(false);
+  const [errorCorreccion, setErrorCorreccion] = useState<string | null>(null);
 
   function abrirCompra(id_articulo: string) {
     setComprandoPara(id_articulo);
     setCompraCantidad(''); setCompraPrecio(''); setCompraMedioPago(''); setErrorCompra(null);
+    setCorreccionCompras(getEdit(id_articulo).comp); setErrorCorreccion(null);
+  }
+  async function guardarCorreccionCompras(art: Articulo) {
+    setGuardandoCorreccion(true); setErrorCorreccion(null);
+    try {
+      const vals = getEdit(art.id_articulo);
+      const res = await fetch('/api/stocks/guardar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id_articulo: art.id_articulo, anio, mes,
+          stock_inicial: vals.ini, compras: correccionCompras,
+          stock_final: vals.fin, precio_unitario: vals.precio, notas: vals.notas,
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || 'Error');
+      setComprandoPara(null);
+      router.refresh();
+    } catch (err: any) {
+      setErrorCorreccion(err.message || 'No se pudo guardar la corrección');
+    } finally {
+      setGuardandoCorreccion(false);
+    }
   }
   async function confirmarCompra(art: Articulo) {
     const cant = Number(compraCantidad), precio = Number(compraPrecio);
@@ -690,9 +718,17 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                               min={0} step={0.001} />
                           </td>
                           <td style={{ padding: '2px 4px' }}>
-                            <input type="number" value={vals.comp} onChange={(e) => setField(art.id_articulo, 'comp', e.target.value)}
-                              style={{ width: '100%', textAlign: 'right', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '3px 6px' }}
-                              min={0} step={0.001} />
+                            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                              <input type="number" value={vals.comp} disabled readOnly
+                                title="Solo se edita desde el botón 🛒 (Ingresar compra)"
+                                style={{ width: '100%', textAlign: 'right', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '3px 6px', background: '#f9fafb', color: '#6b7280' }}
+                                min={0} step={0.001} />
+                              <button onClick={() => comprandoAqui ? setComprandoPara(null) : abrirCompra(art.id_articulo)}
+                                title="Ingresar compra (cantidad, precio y medio de pago)"
+                                className={comprandoAqui ? 'btn' : 'btn secondary'} style={{ fontSize: '11px', padding: '3px 7px', flexShrink: 0 }}>
+                                🛒
+                              </button>
+                            </div>
                           </td>
                           <td style={{ padding: '2px 4px' }}>
                             <input type="number" value={vals.precio} onChange={(e) => setField(art.id_articulo, 'precio', e.target.value)}
@@ -727,22 +763,15 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                             {r.valorizado !== null ? `$${fmt(r.valorizado, 0)}` : '—'}
                           </td>
                           <td style={{ textAlign: 'center' }}>
-                            <div style={{ display: 'flex', gap: '4px', alignItems: 'center', justifyContent: 'center' }}>
-                              {modificado && (
-                                <button onClick={() => guardar(art)} disabled={saving === art.id_articulo}
-                                  style={{ background: '#059669', color: 'white', border: 'none', borderRadius: '4px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: 600 }}>
-                                  {saving === art.id_articulo ? '…' : '✓'}
-                                </button>
-                              )}
-                              {!modificado && guardado && (
-                                <span style={{ fontSize: '10px', color: '#9ca3af' }}>✓</span>
-                              )}
-                              <button onClick={() => comprandoAqui ? setComprandoPara(null) : abrirCompra(art.id_articulo)}
-                                title="Ingresar compra (cantidad, precio y medio de pago)"
-                                className={comprandoAqui ? 'btn' : 'btn secondary'} style={{ fontSize: '11px', padding: '3px 7px' }}>
-                                🛒
+                            {modificado && (
+                              <button onClick={() => guardar(art)} disabled={saving === art.id_articulo}
+                                style={{ background: '#059669', color: 'white', border: 'none', borderRadius: '4px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: 600 }}>
+                                {saving === art.id_articulo ? '…' : '✓'}
                               </button>
-                            </div>
+                            )}
+                            {!modificado && guardado && (
+                              <span style={{ fontSize: '10px', color: '#9ca3af' }}>✓</span>
+                            )}
                           </td>
                         </tr>
                         {comprandoAqui && (
@@ -785,6 +814,24 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                               {errorCompra && <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#dc2626' }}>{errorCompra}</p>}
                               <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#6b7280' }}>
                                 Esto suma la cantidad a "Compras" de este mes y crea el gasto correspondiente (categoría Insumos) en la planilla de Gastos.
+                              </p>
+
+                              <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px dashed #bfdbfe', display: 'flex', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                                <p style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: '#6b7280', width: '100%' }}>
+                                  ✏️ Corregir compras acumuladas de este mes
+                                </p>
+                                <div>
+                                  <label style={{ fontSize: '10px' }}>Total de compras ({art.unidad_medida})</label>
+                                  <input type="number" min={0} step={0.001} value={correccionCompras} onChange={(e) => setCorreccionCompras(e.target.value)}
+                                    style={{ width: '110px', fontSize: '12px', padding: '5px 8px' }} disabled={guardandoCorreccion} />
+                                </div>
+                                <button onClick={() => guardarCorreccionCompras(art)} disabled={guardandoCorreccion} className="btn secondary" style={{ fontSize: '12px', padding: '6px 14px' }}>
+                                  {guardandoCorreccion ? 'Guardando…' : 'Guardar corrección'}
+                                </button>
+                              </div>
+                              {errorCorreccion && <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#dc2626' }}>{errorCorreccion}</p>}
+                              <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#6b7280' }}>
+                                Esto NO genera un gasto nuevo — solo corrige el número de Compras si hubo un error de carga.
                               </p>
                             </td>
                           </tr>
