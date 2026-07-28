@@ -169,7 +169,10 @@ export default async function PanelPage({ searchParams }: {
   // — se apoyan en datos de Uso Teórico que todavía dan cifras raras para algunos
   // artículos (stock_inicial arrastrado en 0 en filas creadas desde Gastos), así que por
   // ahora quedan afuera de las Alertas del Panel hasta confirmar que están bien.
-  const alertas = generarAlertas(lotes, tubosMesadas, ciclosRealesMap, ocGlobal);
+  // En el home solo se muestran las alertas extremas (tipo 'error') — el detalle de
+  // trasplante/cosecha en curso ya se ve más abajo en "Cosechar"/"Trasplantar", así que acá
+  // no hace falta duplicar los warn/info (ocupación, mesadas vacías, etc.).
+  const alertas = generarAlertas(lotes, tubosMesadas, ciclosRealesMap, ocGlobal).filter(a => a.tipo === 'error');
 
   // Tardanzas DE HOY (no de toda la quincena) (CrossChex) — solo admin, banner grande en
   // el home. Envuelto en try/catch: si CrossChex está caído o faltan credenciales, no debe
@@ -406,9 +409,19 @@ export default async function PanelPage({ searchParams }: {
             )}
         </div>
 
-        {/* ══ FILA 1: VENTAS + INDICADORES ══ */}
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))', gap:'12px', marginBottom:'14px' }}>
-          <GraficoVentaPorArticulo datos={evolArticuloPanel} />
+        {/* ══ FILA 1: VENTAS (+ STOCK EN CÁMARA) + INDICADORES ══ */}
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))', gap:'12px', marginBottom:'14px', alignItems:'start' }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
+            <GraficoVentaPorArticulo datos={evolArticuloPanel} />
+            <div id="stock-camara">
+              <AjusteStockCard
+                rucula={{ actual: camaraRucula.stockActual, ajusteMes: ajusteMesRucula.acumulado }}
+                lechugaCrespa={{ actual: camaraLechugaCrespa.stockActual, ajusteMes: ajusteMesLechugaCrespa.acumulado }}
+                lechugaRoble={{ actual: camaraLechugaRoble.stockActual, ajusteMes: ajusteMesLechugaRoble.acumulado }}
+                esAdmin={user.rol === 'admin'}
+              />
+            </div>
+          </div>
           <div style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'16px' }}>
             <p style={{ margin:'0 0 12px', fontSize:'13px', fontWeight:700, color:'#111827' }}>Indicadores</p>
             <div style={{ display:'flex', flexDirection:'column', gap:'7px' }}>
@@ -454,7 +467,6 @@ export default async function PanelPage({ searchParams }: {
 
         {/* ══ FILA 2: CICLOS + ÚLTIMOS MOVIMIENTOS ══ */}
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))', gap:'12px', marginBottom:'14px', alignItems:'start' }}>
-          <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
             <div className="card" style={{ margin:0 }}>
               <p className="card-title">Ciclos en mesadas — 8 semanas</p>
               <p className="card-sub">Días promedio F2 por semana · sin plantinera</p>
@@ -502,16 +514,6 @@ export default async function PanelPage({ searchParams }: {
                 );
               })()}
             </div>
-
-            <div id="stock-camara">
-              <AjusteStockCard
-                rucula={{ actual: camaraRucula.stockActual, ajusteMes: ajusteMesRucula.acumulado }}
-                lechugaCrespa={{ actual: camaraLechugaCrespa.stockActual, ajusteMes: ajusteMesLechugaCrespa.acumulado }}
-                lechugaRoble={{ actual: camaraLechugaRoble.stockActual, ajusteMes: ajusteMesLechugaRoble.acumulado }}
-                esAdmin={user.rol === 'admin'}
-              />
-            </div>
-          </div>
 
           {/* Últimos movimientos, por tipo */}
           <div className="card" style={{ margin:0 }}>
