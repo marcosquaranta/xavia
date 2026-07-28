@@ -169,10 +169,11 @@ export default async function PanelPage({ searchParams }: {
   // — se apoyan en datos de Uso Teórico que todavía dan cifras raras para algunos
   // artículos (stock_inicial arrastrado en 0 en filas creadas desde Gastos), así que por
   // ahora quedan afuera de las Alertas del Panel hasta confirmar que están bien.
-  // En el home solo se muestran las alertas extremas (tipo 'error') — el detalle de
-  // trasplante/cosecha en curso ya se ve más abajo en "Cosechar"/"Trasplantar", así que acá
-  // no hace falta duplicar los warn/info (ocupación, mesadas vacías, etc.).
-  const alertas = generarAlertas(lotes, tubosMesadas, ciclosRealesMap, ocGlobal).filter(a => a.tipo === 'error');
+  // En el home se excluyen las alertas de atraso puntual de trasplante/cosecha — ese
+  // detalle ya se ve más abajo en "Cosechar"/"Trasplantar", con su propio color por
+  // tiempo transcurrido. El resto (mesadas vacías, sin siembras recientes, ocupación, etc.)
+  // sí se muestra acá.
+  const alertas = generarAlertas(lotes, tubosMesadas, ciclosRealesMap, ocGlobal).filter(a => a.categoria !== 'lote_atraso');
 
   // Tardanzas DE HOY (no de toda la quincena) (CrossChex) — solo admin, banner grande en
   // el home. Envuelto en try/catch: si CrossChex está caído o faltan credenciales, no debe

@@ -1,12 +1,16 @@
 import Link from 'next/link';
 import type { GrupoLotes } from '@/lib/planificacionServer';
 
-// Rojo = ya atrasado (días > estimado) · Ámbar = justo hoy · Gris = normal, en margen
+// Estos lotes ya están listos para trasplantar/cosechar (dias >= est), así que el color
+// marca CUÁNTO tiempo pasó desde que quedaron listos, de negro (recién) a rojo (muy
+// atrasado) — usa la proporción dias/est para que escale igual en ciclos cortos
+// (rúcula) y largos (lechuga), en vez de un umbral fijo de días.
 function colorItem(dias: number, est: number) {
-  const faltan = est - dias;
-  if (faltan < 0) return '#dc2626';
-  if (faltan === 0) return '#d97706';
-  return '#374151';
+  if (est <= 0) return '#111827';
+  const ratio = dias / est;
+  if (ratio > 1.3) return '#dc2626';   // rojo — muy atrasado
+  if (ratio > 1.15) return '#d97706';  // amarillo — atrasándose
+  return '#111827';                    // negro — recién listo
 }
 
 // Estilo por tipo de transición — para que las dos etapas de trasplante (que tienen
