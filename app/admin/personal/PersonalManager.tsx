@@ -6,7 +6,7 @@ import type { ResumenEmpleado } from '@/lib/personal';
 
 interface Props { resumen: ResumenEmpleado[]; empleados: Empleado[]; anio: number; mes: number; quincena: 1 | 2; }
 
-const fmtN = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: 2 });
+const fmtN = (n: number) => n.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 
 export default function PersonalManager({ resumen, empleados, anio, mes, quincena }: Props) {
