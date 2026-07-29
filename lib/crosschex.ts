@@ -54,18 +54,29 @@ export interface RegistroCrossChex {
 // (según el equipo, es más bien el método de verificación) — el criterio para separar
 // entrada/salida es: primer fichaje del día = entrada, último = salida (ver lib/personal.ts).
 export async function getRegistrosCrossChex(desde: string, hasta: string): Promise<RegistroCrossChex[]> {
-  const token = await getToken();
+  let token = await getToken();
   const out: RegistroCrossChex[] = [];
   let page = 1;
+  let reintentado = false;
   for (;;) {
     const json = await crosschexPost('attendance.record', 'getrecord', {
       begin_time: desde, end_time: hasta, order: 'asc', page, per_page: 100,
     }, token);
-    if (json?.payload?.message === 'TOKEN_EXPIRES') {
-      cachedToken = null;
-      throw new Error('El token de CrossChex expiró — reintentá');
+    // Antes acá solo se detectaba el token vencido comparando contra el string exacto
+    // 'TOKEN_EXPIRES', y cualquier otra respuesta de error caía en `|| []` silenciosamente
+    // — la quincena quedaba en 0 sin ningún aviso, como pasó en la 2da quincena de julio.
+    // Ahora: si `list` no viene como array (cualquier tipo de error), se invalida el token
+    // cacheado y se reintenta UNA vez con uno nuevo antes de recién ahí tirar error visible.
+    const list = json?.payload?.list;
+    if (!Array.isArray(list)) {
+      if (!reintentado) {
+        cachedToken = null;
+        token = await getToken();
+        reintentado = true;
+        continue;
+      }
+      throw new Error(json?.payload?.message ? `CrossChex: ${json.payload.message}` : 'CrossChex no devolvió datos (respuesta inesperada) — probá de nuevo en unos minutos');
     }
-    const list: RegistroCrossChex[] = json?.payload?.list || [];
     out.push(...list);
     const pageCount = Number(json?.payload?.pageCount) || 0;
     if (list.length < 100 || page >= pageCount) break;
