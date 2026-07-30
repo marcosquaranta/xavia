@@ -12,14 +12,15 @@ import GraficoCiclosMesadas from './GraficoCiclosMesadas';
 import GraficoPesaje from './GraficoPesaje';
 export const dynamic = 'force-dynamic';
 
-export default async function EstadisticasPage({ searchParams }: { searchParams: { nave?: string; periodo?: string; evo?: string } }) {
+type PeriodoGlobal = 'd30' | 'd180' | 'anio' | 'historico';
+
+export default async function EstadisticasPage({ searchParams }: { searchParams: { nave?: string; periodo?: string } }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
   if (user.rol !== 'admin') redirect('/panel');
 
   const naveFilter = searchParams.nave || 'todas';
-  const periodoMesada = (searchParams.periodo === 'd90' || searchParams.periodo === 'd180' ? searchParams.periodo : 'anio') as 'd90' | 'd180' | 'anio';
-  const evoModo = (searchParams.evo === 'anio' ? 'anio' : 'trimestre') as 'anio' | 'trimestre';
+  const periodo = (['d30', 'd180', 'anio', 'historico'].includes(searchParams.periodo || '') ? searchParams.periodo : 'anio') as PeriodoGlobal;
 
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [];
   let configRows: { clave: string; valor: any }[] = [];
@@ -42,11 +43,73 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   const hoy = new Date();
   const nombreMes = hoy.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
 
-  // Puntos de pesaje testigo: lotes cosechados con peso registrado
+  const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  const esRuculaV = (v: string) => { const x = String(v).toLowerCase(); return x.includes('rucula') || x.includes('rúcula'); };
+
+  // Fecha desde la que arranca el filtro global elegido — null = histórico, sin límite.
+  function desdeDePeriodo(p: PeriodoGlobal): Date | null {
+    if (p === 'd30') { const d = new Date(hoy); d.setDate(d.getDate() - 30); return d; }
+    if (p === 'd180') { const d = new Date(hoy); d.setDate(d.getDate() - 180); return d; }
+    if (p === 'anio') return new Date(hoy.getFullYear(), 0, 1);
+    return null;
+  }
+  const desdeFiltro = desdeDePeriodo(periodo);
+
+  // Buckets del eje X compartidos por los 3 gráficos de evolución de abajo, según el
+  // filtro global elegido: días (30d), semanas (180d), meses del año actual (Año actual),
+  // o meses desde la cosecha más vieja registrada hasta hoy (Histórico).
+  function construirBuckets(p: PeriodoGlobal): { nBuckets: number; labels: string[]; hoyIdx: number; bucketDe: (f: Date) => number } {
+    const ahora = hoy;
+    if (p === 'd30') {
+      const nBuckets = 30;
+      const start = new Date(ahora); start.setDate(start.getDate() - (nBuckets - 1)); start.setHours(0, 0, 0, 0);
+      const bucketDe = (f: Date) => { const idx = Math.floor((f.getTime() - start.getTime()) / 86400000); return idx >= 0 && idx < nBuckets ? idx : -1; };
+      const labels = Array.from({ length: nBuckets }, (_, i) => { const d = new Date(start); d.setDate(d.getDate() + i); return `${d.getDate()}/${d.getMonth() + 1}`; });
+      return { nBuckets, labels, hoyIdx: nBuckets - 1, bucketDe };
+    }
+    if (p === 'd180') {
+      const nBuckets = 26; // ~180 días en semanas
+      const start = new Date(ahora); start.setDate(start.getDate() - 7 * (nBuckets - 1)); start.setHours(0, 0, 0, 0);
+      const bucketDe = (f: Date) => { const idx = Math.floor((f.getTime() - start.getTime()) / (7 * 86400000)); return idx >= 0 && idx < nBuckets ? idx : -1; };
+      const labels = Array.from({ length: nBuckets }, (_, i) => { const d = new Date(start); d.setDate(d.getDate() + i * 7); return `${d.getDate()}/${d.getMonth() + 1}`; });
+      return { nBuckets, labels, hoyIdx: nBuckets - 1, bucketDe };
+    }
+    if (p === 'anio') {
+      const nBuckets = 12;
+      const bucketDe = (f: Date) => f.getFullYear() === ahora.getFullYear() ? f.getMonth() : -1;
+      return { nBuckets, labels: [...MESES_CORTO], hoyIdx: ahora.getMonth(), bucketDe };
+    }
+    // historico: un bucket por mes, desde la cosecha más vieja registrada hasta hoy
+    const fechas = lotes
+      .filter(l => l.estado === 'cosechado' && l.fecha_cosecha)
+      .map(l => new Date(String(l.fecha_cosecha) + 'T12:00:00'))
+      .filter(d => !isNaN(d.getTime()));
+    if (!fechas.length) {
+      const bucketDe = (f: Date) => f.getFullYear() === ahora.getFullYear() ? f.getMonth() : -1;
+      return { nBuckets: 12, labels: [...MESES_CORTO], hoyIdx: ahora.getMonth(), bucketDe };
+    }
+    const minFecha = new Date(Math.min(...fechas.map(d => d.getTime())));
+    const startYear = minFecha.getFullYear(), startMonth = minFecha.getMonth();
+    const nBuckets = (ahora.getFullYear() - startYear) * 12 + (ahora.getMonth() - startMonth) + 1;
+    const bucketDe = (f: Date) => (f.getFullYear() - startYear) * 12 + (f.getMonth() - startMonth);
+    const labels = Array.from({ length: nBuckets }, (_, i) => {
+      const m = (startMonth + i) % 12, y = startYear + Math.floor((startMonth + i) / 12);
+      return `${MESES_CORTO[m]} ${String(y).slice(2)}`;
+    });
+    return { nBuckets, labels, hoyIdx: nBuckets - 1, bucketDe };
+  }
+  const buckets = construirBuckets(periodo);
+
+  // Puntos de pesaje testigo: lotes cosechados con peso registrado, respetando el filtro global.
   const puntosPesaje = lotes
     .filter(l => {
       if (l.estado !== 'cosechado' || !l.fecha_cosecha) return false;
-      return Number(l.peso_muestra_paquete_gr) > 0 || Number(l.peso_muestra_kg) > 0;
+      if (!(Number(l.peso_muestra_paquete_gr) > 0 || Number(l.peso_muestra_kg) > 0)) return false;
+      if (desdeFiltro) {
+        const f = new Date(String(l.fecha_cosecha) + 'T12:00:00');
+        if (isNaN(f.getTime()) || f < desdeFiltro) return false;
+      }
+      return true;
     })
     .map(l => ({
       fecha: String(l.fecha_cosecha),
@@ -58,100 +121,65 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     }))
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
 
-  // ── EVOLUCIÓN DE CICLOS (F2 promedio) ──
-  // Una línea de lechuga (promedio de todas las variedades) y una de rúcula.
-  // Modo año = buckets por mes (12); modo trimestre = buckets por semana (13).
-  const esRuculaV = (v: string) => { const x = String(v).toLowerCase(); return x.includes('rucula') || x.includes('rúcula'); };
-  function curvasEvo(modo: 'anio' | 'trimestre') {
-    const ahora = new Date();
-    let nBuckets: number, labels: string[], hoyIdx: number;
-    let bucketDe: (f: Date) => number;
-    if (modo === 'trimestre') {
-      nBuckets = 13;
-      const start = new Date(ahora); start.setDate(start.getDate() - 7 * (nBuckets - 1)); start.setHours(0, 0, 0, 0);
-      bucketDe = (f) => { const idx = Math.floor((f.getTime() - start.getTime()) / (7 * 86400000)); return idx >= 0 && idx < nBuckets ? idx : -1; };
-      labels = Array.from({ length: nBuckets }, (_, i) => { const d = new Date(start); d.setDate(d.getDate() + i * 7); return `${d.getDate()}/${d.getMonth() + 1}`; });
-      hoyIdx = nBuckets - 1;
-    } else {
-      nBuckets = 12;
-      bucketDe = (f) => f.getFullYear() === ahora.getFullYear() ? f.getMonth() : -1;
-      labels = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-      hoyIdx = ahora.getMonth();
-    }
-    const acc = {
-      lechuga: Array.from({ length: nBuckets }, () => [] as number[]),
-      rucula: Array.from({ length: nBuckets }, () => [] as number[]),
-    };
-    const accPeso = {
-      lechuga: Array.from({ length: nBuckets }, () => [] as number[]),
-      rucula: Array.from({ length: nBuckets }, () => [] as number[]),
-    };
-    for (const l of lotes) {
-      if (l.estado !== 'cosechado' || !l.fecha_cosecha) continue;
-      const f = new Date(String(l.fecha_cosecha) + 'T12:00:00');
-      if (isNaN(f.getTime())) continue;
-      const b = bucketDe(f); if (b < 0) continue;
-      const esR = esRuculaV(l.variedad);
-      let f2 = 0; try { f2 = calcularDiasPorFase(l, movimientos).fase_2; } catch {}
-      if (f2 > 0) (esR ? acc.rucula : acc.lechuga)[b].push(f2);
-      const gr = Number(l.peso_muestra_paquete_gr) > 0
-        ? Number(l.peso_muestra_paquete_gr)
-        : Number(l.peso_muestra_kg) > 0 ? Math.round(Number(l.peso_muestra_kg) * 1000) : 0;
-      if (gr > 0) (esR ? accPeso.rucula : accPeso.lechuga)[b].push(gr);
-    }
-    const avgArr = (a: number[][]) => a.map(xs => xs.length ? Math.round(xs.reduce((p, c) => p + c, 0) / xs.length) : 0);
-    const lech = avgArr(acc.lechuga), ruc = avgArr(acc.rucula);
-    const lechP = avgArr(accPeso.lechuga), rucP = avgArr(accPeso.rucula);
-    const series = [
+  // ── EVOLUCIÓN DE CICLOS (F2 promedio) ── una línea de lechuga (promedio de todas las
+  // variedades) y una de rúcula, sobre los buckets del filtro global.
+  const acc = {
+    lechuga: Array.from({ length: buckets.nBuckets }, () => [] as number[]),
+    rucula: Array.from({ length: buckets.nBuckets }, () => [] as number[]),
+  };
+  for (const l of lotes) {
+    if (l.estado !== 'cosechado' || !l.fecha_cosecha) continue;
+    const f = new Date(String(l.fecha_cosecha) + 'T12:00:00');
+    if (isNaN(f.getTime())) continue;
+    const b = buckets.bucketDe(f); if (b < 0) continue;
+    const esR = esRuculaV(l.variedad);
+    let f2 = 0; try { f2 = calcularDiasPorFase(l, movimientos).fase_2; } catch {}
+    if (f2 > 0) (esR ? acc.rucula : acc.lechuga)[b].push(f2);
+  }
+  const avgArr = (a: number[][]) => a.map(xs => xs.length ? Math.round(xs.reduce((p, c) => p + c, 0) / xs.length) : 0);
+  const lech = avgArr(acc.lechuga), ruc = avgArr(acc.rucula);
+  const evo = {
+    series: [
       { nombre: 'Lechuga F2', color: '#84cc16', puntos: lech.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
       { nombre: 'Rúcula F2', color: '#134e4a', puntos: ruc.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
-    ];
-    const pesoSeries = [
-      { nombre: 'Lechuga peso', color: '#84cc16', puntos: lechP.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
-      { nombre: 'Rúcula peso', color: '#134e4a', puntos: rucP.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
-    ];
-    return { series, pesoSeries, labels, hoyIdx };
-  }
-  const evo = curvasEvo(evoModo);
+    ],
+    labels: buckets.labels, hoyIdx: buckets.hoyIdx,
+  };
 
-  // ── EVOLUCIÓN MENSUAL DE PLANTAS POR PAQUETE (rúcula) ──
-  const MESES_CORTO_ANIO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-  const anioActual = hoy.getFullYear();
-  const accPlantasPaq: number[][] = Array.from({ length: 12 }, () => []);
+  // ── EVOLUCIÓN DE PLANTAS POR PAQUETE (rúcula) ──
+  const accPlantasPaq: number[][] = Array.from({ length: buckets.nBuckets }, () => []);
   for (const l of lotes) {
     if (l.estado !== 'cosechado' || !l.fecha_cosecha || !esRuculaV(l.variedad)) continue;
     const f = new Date(String(l.fecha_cosecha) + 'T12:00:00');
-    if (isNaN(f.getTime()) || f.getFullYear() !== anioActual) continue;
+    if (isNaN(f.getTime())) continue;
+    const b = buckets.bucketDe(f); if (b < 0) continue;
     const ppu = Number(l.plantas_por_unidad_real);
     if (!(ppu > 1)) continue; // 1 = sin dato real cargado
-    accPlantasPaq[f.getMonth()].push(ppu);
+    accPlantasPaq[b].push(ppu);
   }
   const plantasPaqSerie = accPlantasPaq.map(xs => xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : 0);
   const evoPlantasPaq = {
     series: [{ nombre: 'Rúcula', color: '#134e4a', puntos: plantasPaqSerie.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) }],
-    labels: MESES_CORTO_ANIO,
-    hoyIdx: hoy.getMonth(),
+    labels: buckets.labels, hoyIdx: buckets.hoyIdx,
   };
 
-  // ── DESCARTE POR MES, POR CULTIVO ── descarte_reportado es la diferencia entre lo
+  // ── DESCARTE POR MES, LECHUGA ── descarte_reportado es la diferencia entre lo
   // estimado (al sembrar/trasplantar) y lo realmente cosechado — agrupa cualquier fase
-  // donde se haya perdido (plantinera, F1 o F2), no hay desglose por etapa hoy.
-  const accDescarte = { lechuga: Array.from({ length: 12 }, () => 0), rucula: Array.from({ length: 12 }, () => 0) };
+  // donde se haya perdido (plantinera, F1 o F2), no hay desglose por etapa hoy. Solo
+  // lechuga: en rúcula el descarte no se declara acá (ver nota en Lote.descarte_reportado).
+  const accDescarte: number[] = Array.from({ length: buckets.nBuckets }, () => 0);
   for (const l of lotes) {
-    if (l.estado !== 'cosechado' || !l.fecha_cosecha) continue;
+    if (l.estado !== 'cosechado' || !l.fecha_cosecha || esRuculaV(l.variedad)) continue;
     const f = new Date(String(l.fecha_cosecha) + 'T12:00:00');
-    if (isNaN(f.getTime()) || f.getFullYear() !== anioActual) continue;
+    if (isNaN(f.getTime())) continue;
+    const b = buckets.bucketDe(f); if (b < 0) continue;
     const desc = Number(l.descarte_reportado) || 0;
     if (desc <= 0) continue;
-    (esRuculaV(l.variedad) ? accDescarte.rucula : accDescarte.lechuga)[f.getMonth()] += desc;
+    accDescarte[b] += desc;
   }
   const evoDescarte = {
-    series: [
-      { nombre: 'Lechuga', color: '#84cc16', puntos: accDescarte.lechuga.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
-      { nombre: 'Rúcula', color: '#134e4a', puntos: accDescarte.rucula.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
-    ],
-    labels: MESES_CORTO_ANIO,
-    hoyIdx: hoy.getMonth(),
+    series: [{ nombre: 'Lechuga', color: '#84cc16', puntos: accDescarte.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) }],
+    labels: buckets.labels, hoyIdx: buckets.hoyIdx,
   };
 
   // ── SIEMBRA DEL MES: real (lotes sembrados) vs. lo que el plan indica ──
@@ -193,7 +221,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   } catch {}
 
   // ── CICLOS POR MESADA + CAPACIDAD PRODUCTIVA ── (lógica compartida en lib/capacidadProductiva.ts)
-  const capProd = calcularCapacidadProductiva(lotes, movimientos, ubicaciones, periodoMesada, naveFilter);
+  const capProd = calcularCapacidadProductiva(lotes, movimientos, ubicaciones, periodo, naveFilter);
   const { ciclosMesadas, filasCapacidad, kpiPorCultivo, kpiTotalTeorica, kpiTotalReal, kpiTotalRealTotalPeriodo, kpiTotalDifPct, resumenGrupos } = capProd;
   // Negativo = se sub-produjo vs. lo teórico; positivo = se superó.
   function colorDif(dif: number | null): string {
@@ -203,7 +231,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   function fmtDif(dif: number | null): string {
     return dif === null ? '—' : `${dif > 0 ? '+' : ''}${dif}%`;
   }
-  const PERIODO_LABEL: Record<typeof periodoMesada, string> = { d90: 'Últimos 90 días', d180: 'Últimos 180 días', anio: 'Año actual' };
+  const PERIODO_LABEL: Record<PeriodoGlobal, string> = { d30: 'Últimos 30 días', d180: 'Últimos 180 días', anio: 'Año actual', historico: 'Histórico' };
 
   // Filas de la tabla: un ciclo F2 por cultivo, ordenadas por cultivo y luego nave
   const filasTabla = ciclosMesadas
@@ -311,16 +339,14 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
   const nombre = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
 
-  // Construye URLs preservando los filtros activos (nave, periodo, evo)
+  // Construye URLs preservando los filtros activos (nave, periodo)
   const buildUrl = (overrides: Record<string, string>) => {
     const p: Record<string, string> = {};
     if (naveFilter !== 'todas') p.nave = naveFilter;
-    if (periodoMesada !== 'anio') p.periodo = periodoMesada;
-    if (evoModo !== 'trimestre') p.evo = evoModo;
+    if (periodo !== 'anio') p.periodo = periodo;
     Object.assign(p, overrides);
     if (p.nave === 'todas') delete p.nave;
     if (p.periodo === 'anio') delete p.periodo;
-    if (p.evo === 'trimestre') delete p.evo;
     const qs = new URLSearchParams(p).toString();
     return `/estadisticas${qs ? '?' + qs : ''}`;
   };
@@ -332,41 +358,42 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
         <h1 className="page-title">Estadísticas</h1>
         <p className="page-subtitle">{nombre}</p>
 
+        {/* Filtro global de período — aplica a toda la información de abajo */}
+        <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'16px', flexWrap:'wrap' }}>
+          <span style={{ fontSize:'12px', fontWeight:700, color:'#6b7280' }}>Período:</span>
+          <div style={{ display:'flex', gap:'4px' }}>
+            {([['d30','Últimos 30 días'],['d180','Últimos 180 días'],['anio','Año actual'],['historico','Histórico']] as const).map(([v,l]) => (
+              <a key={v} href={buildUrl({ periodo:v })}
+                style={{ padding:'4px 10px', borderRadius:'5px', fontSize:'12px', fontWeight:periodo===v?700:400, background:periodo===v?'#374151':'#f3f4f6', color:periodo===v?'white':'#6b7280', textDecoration:'none' }}>
+                {l}
+              </a>
+            ))}
+          </div>
+        </div>
+
         {/* Evolución de ciclos / pesaje / plantas por paquete — 2 por fila */}
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(380px, 1fr))', gap:'12px', marginBottom:'16px' }}>
           <div className="card" style={{ margin:0 }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'10px', flexWrap:'wrap', gap:'8px' }}>
-              <div>
-                <p className="card-title" style={{ margin:'0 0 2px' }}>Evolución de ciclos</p>
-                <p className="card-sub" style={{ margin:0 }}>Días F2 promedio · {evoModo==='trimestre' ? 'semana (últimas 13)' : 'mes'}.</p>
-              </div>
-              <div style={{ display:'flex', gap:'4px' }}>
-                {([['anio','Año'],['trimestre','Trimestre']] as const).map(([v,l]) => (
-                  <a key={v} href={buildUrl({ evo:v })}
-                    style={{ padding:'3px 10px', borderRadius:'5px', fontSize:'11px', fontWeight:evoModo===v?700:400, background:evoModo===v?'#374151':'#f3f4f6', color:evoModo===v?'white':'#6b7280', textDecoration:'none' }}>
-                    {l}
-                  </a>
-                ))}
-              </div>
-            </div>
-            <GraficoEvolucion series={evo.series} pesoSeries={evo.pesoSeries} labels={evo.labels} hoyIdx={evo.hoyIdx} />
+            <p className="card-title" style={{ margin:'0 0 2px' }}>Evolución de ciclos</p>
+            <p className="card-sub" style={{ margin:'0 0 10px' }}>Días F2 promedio · {PERIODO_LABEL[periodo].toLowerCase()}</p>
+            <GraficoEvolucion series={evo.series} labels={evo.labels} hoyIdx={evo.hoyIdx} />
           </div>
 
           <div className="card" style={{ margin:0 }}>
             <p className="card-title">Evolución de pesaje testigo</p>
-            <p className="card-sub">Gramos por paquete · base para conversión KG↔paquetes</p>
+            <p className="card-sub">Gramos por paquete · base para conversión KG↔paquetes · {PERIODO_LABEL[periodo].toLowerCase()}</p>
             <GraficoPesaje puntos={puntosPesaje} />
           </div>
 
           <div className="card" style={{ margin:0 }}>
             <p className="card-title">Plantas por paquete — Rúcula</p>
-            <p className="card-sub">Promedio mensual · {anioActual}</p>
-            <GraficoEvolucion series={evoPlantasPaq.series} labels={evoPlantasPaq.labels} hoyIdx={evoPlantasPaq.hoyIdx} unidad=" pl/paq" />
+            <p className="card-sub">Promedio · {PERIODO_LABEL[periodo].toLowerCase()}</p>
+            <GraficoEvolucion series={evoPlantasPaq.series} labels={evoPlantasPaq.labels} hoyIdx={evoPlantasPaq.hoyIdx} unidad=" pl/paq" yMin={1} yMax={4} />
           </div>
 
           <div className="card" style={{ margin:0 }}>
-            <p className="card-title">Descarte por mes — por cultivo</p>
-            <p className="card-sub">Plantas de diferencia entre lo estimado y lo cosechado (cualquier fase/plantinera) · {anioActual}</p>
+            <p className="card-title">Descartes Lechuga</p>
+            <p className="card-sub">Plantas de diferencia entre lo estimado y lo cosechado (cualquier fase/plantinera) · {PERIODO_LABEL[periodo].toLowerCase()}</p>
             <GraficoEvolucion series={evoDescarte.series} labels={evoDescarte.labels} hoyIdx={evoDescarte.hoyIdx} unidad=" pl" />
           </div>
         </div>
@@ -376,27 +403,16 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'10px', flexWrap:'wrap', gap:'8px' }}>
             <div>
               <p className="card-title" style={{ margin:'0 0 2px' }}>Ciclos promedio por mesada</p>
-              <p className="card-sub" style={{ margin:0 }}>Basado en lotes cosechados · días F1 + F2 sin plantinera</p>
+              <p className="card-sub" style={{ margin:0 }}>Basado en lotes cosechados · días F2 (sin Fase 1) · {PERIODO_LABEL[periodo].toLowerCase()}</p>
             </div>
-            <div style={{ display:'flex', flexDirection:'column', gap:'6px', alignItems:'flex-end' }}>
-              {/* Filtro período */}
-              <div style={{ display:'flex', gap:'4px' }}>
-                {([['d90','Últimos 90 días'],['d180','Últimos 180 días'],['anio','Año actual']] as const).map(([v,l]) => (
-                  <a key={v} href={buildUrl({ periodo:v })}
-                    style={{ padding:'3px 8px', borderRadius:'5px', fontSize:'11px', fontWeight:periodoMesada===v?700:400, background:periodoMesada===v?'#374151':'#f3f4f6', color:periodoMesada===v?'white':'#6b7280', textDecoration:'none' }}>
-                    {l}
-                  </a>
-                ))}
-              </div>
-              {/* Filtro nave */}
-              <div style={{ display:'flex', gap:'4px' }}>
-                {([['todas','Ambas'],['1','Nave 1'],['2','Nave 2']] as const).map(([v,l]) => (
-                  <a key={v} href={buildUrl({ nave:v })}
-                    style={{ padding:'3px 8px', borderRadius:'5px', fontSize:'11px', fontWeight:naveFilter===v?700:400, background:naveFilter===v?'#111827':'#f3f4f6', color:naveFilter===v?'white':'#374151', textDecoration:'none' }}>
-                    {l}
-                  </a>
-                ))}
-              </div>
+            {/* Filtro nave */}
+            <div style={{ display:'flex', gap:'4px' }}>
+              {([['todas','Ambas'],['1','Nave 1'],['2','Nave 2']] as const).map(([v,l]) => (
+                <a key={v} href={buildUrl({ nave:v })}
+                  style={{ padding:'3px 8px', borderRadius:'5px', fontSize:'11px', fontWeight:naveFilter===v?700:400, background:naveFilter===v?'#111827':'#f3f4f6', color:naveFilter===v?'white':'#374151', textDecoration:'none' }}>
+                  {l}
+                </a>
+              ))}
             </div>
           </div>
 
@@ -460,22 +476,12 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
         {/* Capacidad productiva mensual */}
         <div className="card">
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'6px', flexWrap:'wrap', gap:'8px' }}>
-            <div>
-              <p className="card-title" style={{ margin:'0 0 2px' }}>Capacidad productiva mensual</p>
-              <p className="card-sub" style={{ margin:0 }}>
-                Producción teórica = posiciones × (30 / ciclo F2 promedio de la nave+cultivo). Producción real = paquetes
-                cosechados en el período, mensualizados (÷ meses del período) para ser comparables. Mismo filtro de nave que arriba.
-              </p>
-            </div>
-            <div style={{ display:'flex', gap:'4px' }}>
-              {([['d90','Últimos 90 días'],['d180','Últimos 180 días'],['anio','Año actual']] as const).map(([v,l]) => (
-                <a key={v} href={buildUrl({ periodo:v })}
-                  style={{ padding:'3px 8px', borderRadius:'5px', fontSize:'11px', fontWeight:periodoMesada===v?700:400, background:periodoMesada===v?'#374151':'#f3f4f6', color:periodoMesada===v?'white':'#6b7280', textDecoration:'none', whiteSpace:'nowrap' }}>
-                  {l}
-                </a>
-              ))}
-            </div>
+          <div style={{ marginBottom:'6px' }}>
+            <p className="card-title" style={{ margin:'0 0 2px' }}>Capacidad productiva mensual</p>
+            <p className="card-sub" style={{ margin:0 }}>
+              Producción teórica = posiciones × (30 / ciclo F2 promedio de la nave+cultivo). Producción real = paquetes
+              cosechados en el período, mensualizados (÷ meses del período) para ser comparables. Mismo filtro de nave y de período que arriba.
+            </p>
           </div>
 
           {filasCapacidad.length === 0 ? (
@@ -486,7 +492,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
               <div style={{ display:'flex', alignItems:'center', gap:'8px', margin:'14px 0 10px', background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:'7px', padding:'8px 12px' }}>
                 <span style={{ fontSize:'16px' }}>ℹ️</span>
                 <p style={{ margin:0, fontSize:'12px', fontWeight:700, color:'#1e40af' }}>
-                  Todos los números de acá abajo son PROMEDIOS POR MES (no un acumulado) — calculados sobre {PERIODO_LABEL[periodoMesada].toLowerCase()}.
+                  Todos los números de acá abajo son PROMEDIOS POR MES (no un acumulado) — calculados sobre {PERIODO_LABEL[periodo].toLowerCase()}.
                 </p>
               </div>
               <div style={{ display:'grid', gridTemplateColumns: `repeat(${kpiPorCultivo.length}, 1fr) 1fr`, gap:'10px', marginBottom:'18px' }}>
@@ -512,7 +518,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                         </div>
                       </div>
                       <p style={{ margin:'6px 0 0', fontSize:'11px', color:'#9ca3af' }}>
-                        {k.posiciones.toLocaleString('es-AR')} posiciones · {k.realTotalPeriodo.toLocaleString('es-AR')} paq. cosechados EN TOTAL en {PERIODO_LABEL[periodoMesada].toLowerCase()}
+                        {k.posiciones.toLocaleString('es-AR')} posiciones · {k.realTotalPeriodo.toLocaleString('es-AR')} paq. cosechados EN TOTAL en {PERIODO_LABEL[periodo].toLowerCase()}
                       </p>
                     </div>
                   );
@@ -534,7 +540,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                     </div>
                   </div>
                   <p style={{ margin:'6px 0 0', fontSize:'11px', color:'#d1d5db' }}>
-                    {kpiTotalRealTotalPeriodo.toLocaleString('es-AR')} paq. cosechados EN TOTAL en {PERIODO_LABEL[periodoMesada].toLowerCase()}
+                    {kpiTotalRealTotalPeriodo.toLocaleString('es-AR')} paq. cosechados EN TOTAL en {PERIODO_LABEL[periodo].toLowerCase()}
                   </p>
                 </div>
               </div>

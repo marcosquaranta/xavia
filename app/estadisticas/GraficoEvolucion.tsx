@@ -6,8 +6,9 @@ export interface SerieEvo {
   puntos: [number, number][]; // [bucketIndex, valor]
 }
 
-export default function GraficoEvolucion({ series, pesoSeries, labels, hoyIdx, unidad = 'd' }: {
+export default function GraficoEvolucion({ series, pesoSeries, labels, hoyIdx, unidad = 'd', yMin, yMax }: {
   series: SerieEvo[]; pesoSeries?: SerieEvo[]; labels: string[]; hoyIdx: number; unidad?: string;
+  yMin?: number; yMax?: number; // eje Y fijo — si no vienen, se auto-escala al rango real de los datos
 }) {
   const todos = series.flatMap(s => s.puntos.map(p => p[1]));
   if (!todos.length) return (
@@ -23,8 +24,8 @@ export default function GraficoEvolucion({ series, pesoSeries, labels, hoyIdx, u
   const minPeso = hayPeso ? Math.floor(Math.min(...todosPeso) * 0.9 / 10) * 10 : 0;
   const maxPeso = hayPeso ? Math.max(Math.ceil(Math.max(...todosPeso) * 1.1 / 10) * 10, minPeso + 10) : 0;
 
-  const minV = Math.max(0, Math.floor(Math.min(...todos) * 0.9));
-  const maxV = Math.max(Math.ceil(Math.max(...todos) * 1.1), minV + 10, 10);
+  const minV = yMin !== undefined ? yMin : Math.max(0, Math.floor(Math.min(...todos) * 0.9));
+  const maxV = yMax !== undefined ? yMax : Math.max(Math.ceil(Math.max(...todos) * 1.1), minV + 10, 10);
   const n = labels.length;
   const W = 700, H = 300, L = 50, R = hayPeso ? 630 : 660, T = 30, Bot = 240;
   const px = (i: number) => n <= 1 ? (L + R) / 2 : L + i * (R - L) / (n - 1);

@@ -1,7 +1,7 @@
 import type { Lote, Movimiento, Ubicacion } from './types';
 import { calcularDiasPorFase } from './lotes';
 
-export type PeriodoCapacidad = 'd90' | 'd180' | 'anio';
+export type PeriodoCapacidad = 'd30' | 'd180' | 'anio' | 'historico';
 
 export interface CicloMesada {
   nombre: string; nave: number;
@@ -58,10 +58,11 @@ export interface CapacidadProductiva {
 
 export function cosechadosEnPeriodo(lotes: Lote[], periodo: PeriodoCapacidad): Lote[] {
   const todos = lotes.filter(l => l.estado === 'cosechado');
+  if (periodo === 'historico') return todos; // sin límite inferior
   const ahora = new Date();
   let desde: Date;
-  if (periodo === 'd90') {
-    desde = new Date(ahora); desde.setDate(desde.getDate() - 90);
+  if (periodo === 'd30') {
+    desde = new Date(ahora); desde.setDate(desde.getDate() - 30);
   } else if (periodo === 'd180') {
     desde = new Date(ahora); desde.setDate(desde.getDate() - 180);
   } else { // anio
@@ -72,12 +73,21 @@ export function cosechadosEnPeriodo(lotes: Lote[], periodo: PeriodoCapacidad): L
 
 // Cuántos meses (equivalentes en días/30) abarca el período filtrado — para "mensualizar"
 // la producción real y poder compararla contra la teórica (que siempre es una tasa
-// mensual), sin importar qué período haya elegido el usuario.
-function mesesEnPeriodo(periodo: PeriodoCapacidad): number {
+// mensual), sin importar qué período haya elegido el usuario. "Histórico" no tiene un
+// límite fijo, así que se mide desde la cosecha más vieja del propio conjunto filtrado.
+function mesesEnPeriodo(periodo: PeriodoCapacidad, cosechados: Lote[]): number {
   const ahora = new Date();
+  if (periodo === 'historico') {
+    const fechas = cosechados
+      .map(l => new Date(String(l.fecha_cosecha) + 'T12:00:00').getTime())
+      .filter(t => !isNaN(t));
+    if (!fechas.length) return 1;
+    const dias = Math.floor((ahora.getTime() - Math.min(...fechas)) / 86400000) + 1;
+    return Math.max(dias, 1) / 30;
+  }
   let dias: number;
-  if (periodo === 'd90') {
-    dias = 90;
+  if (periodo === 'd30') {
+    dias = 30;
   } else if (periodo === 'd180') {
     dias = 180;
   } else { // anio
@@ -216,7 +226,7 @@ export function calcularCapacidadProductiva(
     return sumaN > 0 ? sumaPonderada / sumaN : 0;
   }
 
-  const meses = mesesEnPeriodo(periodo);
+  const meses = mesesEnPeriodo(periodo, cosechados);
 
   const filasCapacidad: FilaCapacidadProd[] = ciclosMesadas
     .filter(m => {

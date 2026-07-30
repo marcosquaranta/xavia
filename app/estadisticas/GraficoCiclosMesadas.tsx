@@ -1,12 +1,5 @@
 'use client';
-
-interface CicloMesada {
-  nombre: string; nave: number;
-  tipo: 'lechuga' | 'rucula' | 'mixta';
-  lechugaF1: number; lechugaF2: number; lechugaTotal: number; lechugaN: number;
-  ruculaF2: number; ruculaTotal: number; ruculaN: number;
-  pesoGrLechuga: number; pesoGrRucula: number;
-}
+import type { CicloMesada } from '@/lib/capacidadProductiva';
 
 const NAVE_FILL: Record<number, string> = { 1: '#881337', 2: '#7c3aed' };
 
@@ -21,12 +14,18 @@ function SubGrafico({
 }) {
   if (!datos.length) return null;
 
-  const W = 640, H = 230, PL = 40, PR = 46, PT = 28, PB = 58;
+  const W = 640, H = 230, PL = 40, PR = 46, PT = 28, PB = 64;
   const chartW = W - PL - PR;
   const chartH = H - PT - PB;
   const baseY = PT + chartH;
 
-  const maxDias = Math.max(...datos.map(d => d[f2Key] || 0), 20);
+  // Eje ajustado al rango real de los ciclos (no arrancando siempre en 0) — así se ven
+  // mejor las diferencias entre mesadas en vez de quedar todas apretadas arriba.
+  const diasConHistorial = datos.map(d => d[f2Key] || 0).filter(v => v > 0);
+  const maxDiasReal = diasConHistorial.length ? Math.max(...diasConHistorial) : 20;
+  const minDiasReal = diasConHistorial.length ? Math.min(...diasConHistorial) : 0;
+  const minDias = Math.max(0, Math.floor(minDiasReal * 0.9));
+  const maxDias = Math.max(Math.ceil(maxDiasReal * 1.1), minDias + 5);
   const pesoPuntos = datos.map((d, i) => ({ i, gr: d[pesoKey] })).filter(p => p.gr > 0);
   const maxPeso = pesoPuntos.length ? Math.max(...pesoPuntos.map(p => p.gr), 1) : 1;
 
@@ -36,11 +35,11 @@ function SubGrafico({
   const slotW = chartW / datos.length;
   const barW = Math.min(36, slotW * 0.58);
 
-  function yD(d: number) { return baseY - (d / maxDias) * chartH; }
+  function yD(d: number) { return baseY - ((d - minDias) / (maxDias - minDias || 1)) * chartH; }
   function yP(g: number) { return baseY - (g / pesoMax) * chartH; }
   function xC(i: number) { return PL + i * slotW + slotW / 2; }
 
-  const ticksDias = [0, Math.round(maxDias / 2), maxDias];
+  const ticksDias = [minDias, Math.round((minDias + maxDias) / 2), maxDias];
   const ticksPeso = [0, Math.round(pesoMax / 2), pesoMax];
 
   return (
@@ -81,7 +80,7 @@ function SubGrafico({
                 </>
               ) : (
                 <>
-                  <rect x={x0} y={yD(f2)} width={barW} height={(f2 / maxDias) * chartH} fill={f2Color} rx={2} />
+                  <rect x={x0} y={yD(f2)} width={barW} height={baseY - yD(f2)} fill={f2Color} rx={2} />
                   <text x={xC(i)} y={yD(f2) - 4} textAnchor="middle" fontSize={9} fill="#374151" fontWeight={600}>
                     {f2}d
                   </text>
@@ -90,13 +89,14 @@ function SubGrafico({
               {/* Nave badge */}
               <rect x={xC(i) - 10} y={baseY + 6} width={20} height={11} rx={2} fill={NAVE_FILL[d.nave]} />
               <text x={xC(i)} y={baseY + 14.5} textAnchor="middle" fontSize={7} fill="white" fontWeight={700}>N{d.nave}</text>
-              {/* Nombre mesada, rotado */}
+              {/* Nombre mesada, rotado — sin truncar tanto como antes para no perder el
+                  número/letra de la mesada (ej. "2B"), y un poco más grande para leerse mejor. */}
               <text
-                x={xC(i)} y={baseY + 26}
-                textAnchor="end" fontSize={8} fill="#6b7280"
-                transform={`rotate(-38,${xC(i)},${baseY + 26})`}
+                x={xC(i)} y={baseY + 30}
+                textAnchor="end" fontSize={9} fill="#374151" fontWeight={600}
+                transform={`rotate(-40,${xC(i)},${baseY + 30})`}
               >
-                {d.nombre.length > 16 ? d.nombre.slice(0, 16) + '…' : d.nombre}
+                {d.nombre.length > 22 ? d.nombre.slice(0, 22) + '…' : d.nombre}
               </text>
             </g>
           );
@@ -119,9 +119,14 @@ function SubGrafico({
 export default function GraficoCiclosMesadas({ datos }: { datos: CicloMesada[] }) {
   if (!datos.length) return null;
 
+  // Las mesadas de Fase 1 son buffer puro (no cosechan directo, nunca tienen F2) — las
+  // sacamos del gráfico, si no quedan como barras vacías sin ningún sentido acá.
+  const esRucMesada = (d: CicloMesada) => d.tipo === 'rucula' || (d.tipo === 'mixta' && d.ruculaN > 0 && d.lechugaN === 0);
+  const sinBufferF1 = datos.filter(d => esRucMesada(d) || d.sectorFase !== 'fase_1');
+
   // Mostrar TODAS las mesadas del tipo correspondiente, aunque no tengan historial
-  const lechuga = datos.filter(d => d.tipo === 'lechuga' || d.tipo === 'mixta');
-  const rucula  = datos.filter(d => d.tipo === 'rucula'  || d.tipo === 'mixta');
+  const lechuga = sinBufferF1.filter(d => d.tipo === 'lechuga' || d.tipo === 'mixta');
+  const rucula  = sinBufferF1.filter(d => d.tipo === 'rucula'  || d.tipo === 'mixta');
 
   return (
     <div>
