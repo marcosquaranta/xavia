@@ -8,6 +8,8 @@ interface Props { resumen: ResumenEmpleado[]; empleados: Empleado[]; anio: numbe
 
 const fmtN = (n: number) => n.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
+// Horas de más/de menos van siempre en enteras (ya vienen redondeadas desde calcularResumenQuincena) — a diferencia de fmtN, sin decimales.
+const fmtH = (n: number) => Math.round(n).toLocaleString('es-AR');
 
 export default function PersonalManager({ resumen, empleados, anio, mes, quincena }: Props) {
   const router = useRouter();
@@ -90,7 +92,8 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
               <th style={{ textAlign: 'right' }}>Hs. reales</th>
               <th style={{ textAlign: 'right' }}>Hs. teóricas</th>
               <th style={{ textAlign: 'right' }}>Diferencia</th>
-              <th style={{ textAlign: 'right' }}>Hs. de más<br /><span style={{ fontWeight: 400, fontSize: '10px', color: '#9ca3af' }}>(sobre turno 8hs)</span></th>
+              <th style={{ textAlign: 'right' }}>Hs. de más<br /><span style={{ fontWeight: 400, fontSize: '10px', color: '#9ca3af' }}>(vs. esperado)</span></th>
+              <th style={{ textAlign: 'right' }}>Hs. de menos<br /><span style={{ fontWeight: 400, fontSize: '10px', color: '#9ca3af' }}>(vs. esperado)</span></th>
               <th style={{ textAlign: 'right' }}>Sueldo/hora</th>
               <th style={{ textAlign: 'right' }}>Presentismo</th>
               <th style={{ textAlign: 'right' }}>Extras</th>
@@ -153,7 +156,10 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                       {r.diferenciaHoras > 0 ? '+' : ''}{fmtN(r.diferenciaHoras)} hs
                     </td>
                     <td style={{ textAlign: 'right', color: r.horasDeMasTotal > 0 ? '#d97706' : '#9ca3af' }}>
-                      {r.horasDeMasTotal > 0 ? `${fmtN(r.horasDeMasTotal)} hs` : '—'}
+                      {r.horasDeMasTotal > 0 ? `${fmtH(r.horasDeMasTotal)} hs` : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', color: r.horasDeMenosTotal > 0 ? '#dc2626' : '#9ca3af' }}>
+                      {r.horasDeMenosTotal > 0 ? `${fmtH(r.horasDeMenosTotal)} hs` : '—'}
                     </td>
                     <td style={{ textAlign: 'right' }}>{editandoEsta ? (
                       <input type="number" min={0} value={form.sueldo_hora} onChange={(e) => setForm((f) => ({ ...f, sueldo_hora: e.target.value }))}
@@ -213,7 +219,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                   </tr>
                   {editandoEsta && (
                     <tr style={{ background: '#f9fafb' }}>
-                      <td colSpan={12} style={{ padding: '8px 12px', fontSize: '12px', color: '#6b7280' }}>
+                      <td colSpan={13} style={{ padding: '8px 12px', fontSize: '12px', color: '#6b7280' }}>
                         <div style={{ marginBottom: '6px' }}>
                           Horario esperado (para calcular tardanzas):{' '}
                           <input type="time" value={form.hora_entrada_esperada} onChange={(e) => setForm((f) => ({ ...f, hora_entrada_esperada: e.target.value }))} style={{ fontSize: '12px', marginRight: '8px' }} />
@@ -237,7 +243,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                   )}
                   {abierto?.workno === r.workno && abierto.modo === 'tardanzas' && (
                     <tr>
-                      <td colSpan={12} style={{ padding: '8px 12px', background: '#fef2f2' }}>
+                      <td colSpan={13} style={{ padding: '8px 12px', background: '#fef2f2' }}>
                         {diasTarde.length === 0 ? <span style={{ fontSize: '12px', color: '#9ca3af' }}>Sin tardanzas.</span> : (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                             {diasTarde.map((d) => (
@@ -252,18 +258,31 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                   )}
                   {abierto?.workno === r.workno && abierto.modo === 'dias' && (
                     <tr>
-                      <td colSpan={12} style={{ padding: '8px 12px', background: '#fafafa' }}>
+                      <td colSpan={13} style={{ padding: '8px 12px', background: '#fafafa' }}>
                         {r.dias.length === 0 ? <span style={{ fontSize: '12px', color: '#9ca3af' }}>Sin fichajes en el período.</span> : (
                           <table style={{ fontSize: '12px', width: '100%' }}>
-                            <thead><tr><th style={{ textAlign: 'left' }}>Fecha</th><th style={{ textAlign: 'right' }}>Entrada</th><th style={{ textAlign: 'right' }}>Salida</th><th style={{ textAlign: 'right' }}>Horas</th><th style={{ textAlign: 'right' }}>Hs. de más</th><th style={{ textAlign: 'right' }}>Tardanza</th></tr></thead>
+                            <thead><tr>
+                              <th style={{ textAlign: 'left' }}>Fecha</th>
+                              <th style={{ textAlign: 'right' }}>Entrada</th>
+                              <th style={{ textAlign: 'right' }}>Salida</th>
+                              <th style={{ textAlign: 'right' }}>Horas</th>
+                              <th style={{ textAlign: 'right' }}>Correspondían</th>
+                              <th style={{ textAlign: 'right' }}>Hs. de más</th>
+                              <th style={{ textAlign: 'right' }}>Hs. de menos</th>
+                              <th style={{ textAlign: 'right' }}>Tardanza</th>
+                            </tr></thead>
                             <tbody>
                               {r.dias.map((d) => (
-                                <tr key={d.fecha}>
-                                  <td>{d.fecha}</td>
+                                <tr key={d.fecha} style={{ background: d.esDomingo ? '#f5f3ff' : 'transparent' }}>
+                                  <td>{d.fecha} <span style={{ color: d.esDomingo ? '#7c3aed' : '#9ca3af', fontWeight: d.esDomingo ? 700 : 400 }}>({d.diaSemana})</span></td>
                                   <td style={{ textAlign: 'right' }}>{d.entrada}</td>
                                   <td style={{ textAlign: 'right', color: d.incompleto ? '#dc2626' : undefined }}>{d.salida || '— (incompleto)'}</td>
                                   <td style={{ textAlign: 'right' }}>{d.incompleto ? '—' : `${fmtN(d.horas)} hs`}</td>
-                                  <td style={{ textAlign: 'right', color: d.horasDeMas > 0 ? '#d97706' : '#9ca3af' }}>{d.horasDeMas > 0 ? `${fmtN(d.horasDeMas)} hs` : '—'}</td>
+                                  <td style={{ textAlign: 'right', color: '#9ca3af' }}>{d.horasEsperadas !== null ? `${fmtN(d.horasEsperadas)} hs` : '—'}</td>
+                                  <td style={{ textAlign: 'right', color: d.horasDeMas > 0 ? '#d97706' : '#9ca3af' }}>
+                                    {d.horasDeMas > 0 ? `${fmtH(d.horasDeMas)} hs${d.esDomingo ? ' (domingo)' : ''}` : '—'}
+                                  </td>
+                                  <td style={{ textAlign: 'right', color: d.horasDeMenos > 0 ? '#dc2626' : '#9ca3af' }}>{d.horasDeMenos > 0 ? `${fmtH(d.horasDeMenos)} hs` : '—'}</td>
                                   <td style={{ textAlign: 'right', color: d.esTardanza ? '#dc2626' : '#9ca3af' }}>{d.tardanzaMin > 0 ? `${d.tardanzaMin} min${d.esTardanza ? '' : ' (dentro del margen)'}` : '—'}</td>
                                 </tr>
                               ))}
@@ -280,7 +299,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
         </table>
       </div>
       <p style={{ margin: '10px 0 0', fontSize: '11px', color: '#9ca3af' }}>
-        Entrada = primer fichaje del día · Salida = último fichaje del día. Tolerancia de 15 min para tardanzas; un ingreso pasadas las 11 no cuenta (día raro/franco). "Sueldo a pagar" = horas teóricas × sueldo/hora + presentismo (si corresponde) + extras + horas extra × sueldo/hora. Presentismo se pierde por falta o por 2 o más tardanzas en la quincena. "Hs. teóricas (auto)" se calcula sola del calendario si el empleado tiene "horas por día" configuradas; si no, es el número manual de siempre.
+        Entrada = primer fichaje del día · Salida = último fichaje del día. Tolerancia de 15 min para tardanzas (quedan siempre en minutos, sin redondear); un ingreso pasadas las 11 no cuenta (día raro/franco). "Hs. de más"/"Hs. de menos" comparan contra lo esperado ese día según horario configurado (o turno de 8hs si no hay horario cargado) — de más solo cuenta si supera 1 hora, y ambas se redondean a horas enteras. Los domingos no son día programado: cualquier hora trabajada un domingo cuenta directo como "de más" (marcada "domingo"). "Sueldo a pagar" = horas teóricas × sueldo/hora + presentismo (si corresponde) + extras + horas extra × sueldo/hora. Presentismo se pierde por falta o por 2 o más tardanzas en la quincena. "Hs. teóricas (auto)" se calcula sola del calendario si el empleado tiene "horas por día" configuradas; si no, es el número manual de siempre.
       </p>
     </div>
   );

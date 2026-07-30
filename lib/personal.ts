@@ -76,13 +76,17 @@ function agruparPorEmpleadoYDia(registros: RegistroCrossChex[]): Map<string, Map
 
 export interface DiaTrabajado {
   fecha: string;
+  diaSemana: string; // 'lun'..'dom', para mostrar de un vistazo qué día de la semana es
+  esDomingo: boolean; // domingo nunca es día programado — cualquier hora trabajada es "de más"
   entrada: string | null;
   salida: string | null;
   horas: number;
+  horasEsperadas: number | null; // según horas_lv/horas_sabado del empleado; null = sin horario configurado (no se puede comparar, salvo domingo)
   incompleto: boolean;
   tardanzaMin: number; // minutos de atraso reales (aunque no llegue al umbral de tardanza)
   esTardanza: boolean; // ya con el umbral de 15 min aplicado
-  horasDeMas: number; // por encima de un turno de 8hs, ese día puntual
+  horasDeMas: number; // por encima de lo esperado ese día (o de 8hs si no hay horario configurado); solo cuenta si supera 1 hora, redondeado a entero
+  horasDeMenos: number; // por debajo de lo esperado ese día; redondeado a entero
 }
 
 // Ajustes manuales por empleado + quincena puntual (no son atributos permanentes del
@@ -100,7 +104,8 @@ export interface ResumenEmpleado {
   horasReales: number;
   horasTeoricas: number;
   diferenciaHoras: number;
-  horasDeMasTotal: number; // suma de excedentes diarios sobre un turno de 8hs (informativo)
+  horasDeMasTotal: number; // suma de excedentes diarios sobre lo esperado (informativo)
+  horasDeMenosTotal: number; // suma de déficits diarios respecto a lo esperado (informativo)
   sueldoHora: number;
   presentismoConfigurado: number;
   presentismoAplicado: number;
@@ -121,6 +126,7 @@ const LIMITE_ENTRADA_RARA_MIN = 11 * 60;
 // Margen de tolerancia: hasta 15 minutos tarde no cuenta como tardanza.
 const TOLERANCIA_TARDANZA_MIN = 15;
 const HORAS_TURNO = 8;
+const DOW_LABEL = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 
 // Sueldo a pagar = horas TEÓRICAS × sueldo/hora, + presentismo (si corresponde: manual si
 // se cargó, si no automático según tardanzas), + extras $ sueltos, + horas extra × sueldo/hora.
@@ -145,15 +151,23 @@ export function calcularResumenQuincena(
     if (emp && emp.activo !== 'SI') continue;
     const porDia = porEmpleadoDia.get(workno) || new Map<string, string[]>();
     const horasSabEmp = Number(emp?.horas_sabado) || 0;
+    const horasLVEmp = Number(emp?.horas_lv) || 0;
+    const esAuto = horasLVEmp > 0;
     const dias: DiaTrabajado[] = [];
     let faltas = 0;
     for (let d = diasDesde; d <= diasHasta; d++) {
       const fecha = `${anio}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const dow = new Date(anio, mes - 1, d).getDay(); // 0=domingo..6=sábado
+      const diaSemana = DOW_LABEL[dow];
+      const esDomingo = dow === 0;
+      // Horas esperadas ese día: domingo nunca está programado (0), aunque no haya
+      // horario configurado; lunes-a-viernes/sábado solo se conocen si el empleado
+      // tiene horas_lv cargado — si no, queda null (no se puede comparar ese día).
+      const horasEsperadas = esDomingo ? 0 : esAuto ? (dow >= 1 && dow <= 5 ? horasLVEmp : horasSabEmp) : null;
       const checks = (porDia.get(fecha) || []).map((iso) => partesArg(iso).horaMin).sort((a, b) => a - b);
       if (!checks.length) {
         // Falta = día programado (lunes a viernes siempre; sábado solo si el empleado
         // tiene horas de sábado configuradas) sin ningún fichaje ese día.
-        const dow = new Date(anio, mes - 1, d).getDay();
         const diaProgramado = (dow >= 1 && dow <= 5) || (dow === 6 && horasSabEmp > 0);
         if (diaProgramado) faltas++;
         continue;
@@ -164,16 +178,25 @@ export function calcularResumenQuincena(
       const horas = incompleto ? 0 : Math.max(0, (salidaMin - entradaMin) / 60);
       const esperadaMin = emp?.hora_entrada_esperada ? minDeHora(emp.hora_entrada_esperada) : null;
       const tardanzaMin = esperadaMin !== null && entradaMin <= LIMITE_ENTRADA_RARA_MIN ? Math.max(0, entradaMin - esperadaMin) : 0;
+      // De más/de menos: contra lo esperado ese día (o contra un turno de 8hs si no hay
+      // horario configurado, salvo domingo que siempre compara contra 0). "De más" solo
+      // cuenta si supera 1 hora entera; ambos se redondean a horas enteras (los minutos
+      // de tardanza NO se redondean, quedan como están). Si el día quedó incompleto (sin
+      // salida) no se puede saber cuánto trabajó de verdad, así que no se marca "de menos"
+      // — sería un falso "le faltaron N horas" cuando en realidad falta el dato, no el trabajo.
+      const baseEsperada = horasEsperadas !== null ? horasEsperadas : HORAS_TURNO;
+      const masCruda = incompleto ? 0 : Math.max(0, horas - baseEsperada);
+      const menosCruda = incompleto ? 0 : Math.max(0, baseEsperada - horas);
       dias.push({
-        fecha, entrada: fmtHoraMin(entradaMin), salida: salidaMin !== null ? fmtHoraMin(salidaMin) : null,
-        horas: Math.round(horas * 100) / 100, incompleto, tardanzaMin,
+        fecha, diaSemana, esDomingo,
+        entrada: fmtHoraMin(entradaMin), salida: salidaMin !== null ? fmtHoraMin(salidaMin) : null,
+        horas: Math.round(horas * 100) / 100, horasEsperadas, incompleto, tardanzaMin,
         esTardanza: tardanzaMin > TOLERANCIA_TARDANZA_MIN,
-        horasDeMas: Math.round(Math.max(0, horas - HORAS_TURNO) * 100) / 100,
+        horasDeMas: masCruda > 1 ? Math.round(masCruda) : 0,
+        horasDeMenos: Math.round(menosCruda),
       });
     }
     const horasReales = Math.round(dias.reduce((a, d) => a + d.horas, 0) * 100) / 100;
-    const horasLVEmp = Number(emp?.horas_lv) || 0;
-    const esAuto = horasLVEmp > 0;
     const horasTeoricas = esAuto
       ? horasTeoricasAuto(anio, mes, diasDesde, diasHasta, horasLVEmp, horasSabEmp)
       : (Number(emp?.horas_teoricas_quincena) || 46);
@@ -192,7 +215,8 @@ export function calcularResumenQuincena(
       workno, nombre: emp?.nombre || nombresCrossChex.get(workno) || workno,
       dias, horasReales, horasTeoricas,
       diferenciaHoras: Math.round((horasReales - horasTeoricas) * 100) / 100,
-      horasDeMasTotal: Math.round(dias.reduce((a, d) => a + d.horasDeMas, 0) * 100) / 100,
+      horasDeMasTotal: dias.reduce((a, d) => a + d.horasDeMas, 0),
+      horasDeMenosTotal: dias.reduce((a, d) => a + d.horasDeMenos, 0),
       sueldoHora, presentismoConfigurado, presentismoAplicado, presentismoManual,
       extras, horasExtras,
       sueldoAPagar: Math.round((horasTeoricas * sueldoHora + presentismoAplicado + extras + horasExtras * sueldoHora) * 100) / 100,
