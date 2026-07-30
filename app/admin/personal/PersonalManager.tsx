@@ -2,7 +2,7 @@
 import { Fragment, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Empleado } from '@/lib/types';
-import type { ResumenEmpleado } from '@/lib/personal';
+import { horasTeoricasAuto, rangoQuincena, type ResumenEmpleado } from '@/lib/personal';
 
 interface Props { resumen: ResumenEmpleado[]; empleados: Empleado[]; anio: number; mes: number; quincena: 1 | 2; }
 
@@ -26,6 +26,8 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
     setForm({
       sueldo_hora: String(emp?.sueldo_hora || 0),
       horas_teoricas_quincena: String(emp?.horas_teoricas_quincena || 46),
+      horas_lv: String(emp?.horas_lv || 0),
+      horas_sabado: String(emp?.horas_sabado || 0),
       presentismo: String(emp?.presentismo ?? 50000),
       hora_entrada_esperada: emp?.hora_entrada_esperada || '08:00',
       hora_salida_esperada: emp?.hora_salida_esperada || '17:00',
@@ -43,6 +45,8 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
     const campos = {
       sueldo_hora: Number(form.sueldo_hora) || 0,
       horas_teoricas_quincena: Number(form.horas_teoricas_quincena) || 46,
+      horas_lv: Number(form.horas_lv) || 0,
+      horas_sabado: Number(form.horas_sabado) || 0,
       presentismo: Number(form.presentismo) || 0,
       hora_entrada_esperada: form.hora_entrada_esperada,
       hora_salida_esperada: form.hora_salida_esperada,
@@ -101,11 +105,15 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
               const emp = empleados.find((e) => String(e.workno) === r.workno);
               const esNuevo = !emp;
               const editandoEsta = editando === r.workno;
+              const { diasDesde, diasHasta } = rangoQuincena(anio, mes, quincena);
+              const horasTeoricasPreview = editandoEsta && (Number(form.horas_lv) || 0) > 0
+                ? horasTeoricasAuto(anio, mes, diasDesde, diasHasta, Number(form.horas_lv) || 0, Number(form.horas_sabado) || 0)
+                : Number(form.horas_teoricas_quincena) || 0;
               const sueldoPreview = editandoEsta
                 ? (() => {
-                    const cumplioPreview = form.presentismo_manual === 'SI' ? true : form.presentismo_manual === 'NO' ? false : r.tardanzas === 0;
+                    const cumplioPreview = form.presentismo_manual === 'SI' ? true : form.presentismo_manual === 'NO' ? false : (r.tardanzas < 2 && r.faltas === 0);
                     const presentismoPreview = cumplioPreview ? (Number(form.presentismo) || 0) : 0;
-                    return (Number(form.horas_teoricas_quincena) || 0) * (Number(form.sueldo_hora) || 0) + presentismoPreview + (Number(form.extras) || 0) + (Number(form.horas_extras) || 0) * (Number(form.sueldo_hora) || 0);
+                    return horasTeoricasPreview * (Number(form.sueldo_hora) || 0) + presentismoPreview + (Number(form.extras) || 0) + (Number(form.horas_extras) || 0) * (Number(form.sueldo_hora) || 0);
                   })()
                 : r.sueldoAPagar;
               const diasTarde = r.dias.filter((d) => d.esTardanza);
@@ -121,13 +129,26 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                           ⚠ {r.diasIncompletos} incompleto(s)
                         </span>
                       )}
+                      {r.faltas > 0 && (
+                        <span title={`${r.faltas} día(s) programado(s) sin ningún fichaje — pierde el presentismo`} style={{ marginLeft: '6px', fontSize: '10px', background: '#fee2e2', color: '#dc2626', padding: '1px 6px', borderRadius: '3px', fontWeight: 700 }}>
+                          ⚠ {r.faltas} falta(s)
+                        </span>
+                      )}
                       {emp && <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#9ca3af' }}>Horario esperado: {emp.hora_entrada_esperada || '—'} a {emp.hora_salida_esperada || '—'}</p>}
                     </td>
                     <td style={{ textAlign: 'right' }}>{fmtN(r.horasReales)} hs</td>
                     <td style={{ textAlign: 'right', color: '#6b7280' }}>{editandoEsta ? (
-                      <input type="number" min={0} value={form.horas_teoricas_quincena} onChange={(e) => setForm((f) => ({ ...f, horas_teoricas_quincena: e.target.value }))}
-                        style={{ width: '70px', textAlign: 'right', fontSize: '12px' }} />
-                    ) : `${fmtN(r.horasTeoricas)} hs`}</td>
+                      (Number(form.horas_lv) || 0) > 0 ? (
+                        <span title="Se calcula sola del calendario — configurala en 'Horas por día' más abajo">{fmtN(horasTeoricasPreview)} hs</span>
+                      ) : (
+                        <input type="number" min={0} value={form.horas_teoricas_quincena} onChange={(e) => setForm((f) => ({ ...f, horas_teoricas_quincena: e.target.value }))}
+                          style={{ width: '70px', textAlign: 'right', fontSize: '12px' }} />
+                      )
+                    ) : (
+                      <span title={r.horasTeoricasAuto ? 'Calculado solo del calendario (horas por día configuradas)' : 'Número manual — configurá "horas por día" para que se calcule solo'}>
+                        {fmtN(r.horasTeoricas)} hs{r.horasTeoricasAuto && <span style={{ marginLeft: '3px', fontSize: '9px', color: '#a78bfa' }}>(auto)</span>}
+                      </span>
+                    )}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600, color: r.diferenciaHoras < 0 ? '#dc2626' : r.diferenciaHoras > 0 ? '#059669' : '#6b7280' }}>
                       {r.diferenciaHoras > 0 ? '+' : ''}{fmtN(r.diferenciaHoras)} hs
                     </td>
@@ -150,7 +171,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                           </select>
                         </div>
                       ) : (
-                        <span title={r.presentismoManual ? `Forzado a mano: ${r.presentismoManual}` : (r.tardanzas === 0 ? 'Automático: sin tardanzas' : 'Automático: hubo tardanzas')} style={{ color: r.presentismoAplicado > 0 ? '#059669' : '#dc2626' }}>
+                        <span title={r.presentismoManual ? `Forzado a mano: ${r.presentismoManual}` : `Automático: se pierde por falta (${r.faltas}) o por 2+ tardanzas (${r.tardanzas})`} style={{ color: r.presentismoAplicado > 0 ? '#059669' : '#dc2626' }}>
                           {r.presentismoAplicado > 0 ? fmt$(r.presentismoAplicado) : `${fmt$(r.presentismoConfigurado)} (perdido)`}
                           {r.presentismoManual && <span style={{ marginLeft: '4px', fontSize: '10px', color: '#9ca3af' }}>(manual)</span>}
                         </span>
@@ -193,11 +214,24 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                   {editandoEsta && (
                     <tr style={{ background: '#f9fafb' }}>
                       <td colSpan={12} style={{ padding: '8px 12px', fontSize: '12px', color: '#6b7280' }}>
-                        Horario esperado (para calcular tardanzas):{' '}
-                        <input type="time" value={form.hora_entrada_esperada} onChange={(e) => setForm((f) => ({ ...f, hora_entrada_esperada: e.target.value }))} style={{ fontSize: '12px', marginRight: '8px' }} />
-                        a{' '}
-                        <input type="time" value={form.hora_salida_esperada} onChange={(e) => setForm((f) => ({ ...f, hora_salida_esperada: e.target.value }))} style={{ fontSize: '12px' }} />
-                        <span style={{ marginLeft: '10px', color: '#9ca3af' }}>Presentismo, Extras y Hs. extras de esta fila son para ESTA quincena únicamente.</span>
+                        <div style={{ marginBottom: '6px' }}>
+                          Horario esperado (para calcular tardanzas):{' '}
+                          <input type="time" value={form.hora_entrada_esperada} onChange={(e) => setForm((f) => ({ ...f, hora_entrada_esperada: e.target.value }))} style={{ fontSize: '12px', marginRight: '8px' }} />
+                          a{' '}
+                          <input type="time" value={form.hora_salida_esperada} onChange={(e) => setForm((f) => ({ ...f, hora_salida_esperada: e.target.value }))} style={{ fontSize: '12px' }} />
+                        </div>
+                        <div>
+                          Horas por día — lunes a viernes:{' '}
+                          <input type="number" min={0} step={0.5} value={form.horas_lv} onChange={(e) => setForm((f) => ({ ...f, horas_lv: e.target.value }))} style={{ width: '55px', fontSize: '12px', marginRight: '8px' }} />
+                          sábado (horario diferenciado):{' '}
+                          <input type="number" min={0} step={0.5} value={form.horas_sabado} onChange={(e) => setForm((f) => ({ ...f, horas_sabado: e.target.value }))} style={{ width: '55px', fontSize: '12px' }} />
+                          <span style={{ marginLeft: '10px', color: '#9ca3af' }}>
+                            {(Number(form.horas_lv) || 0) > 0
+                              ? `→ Hs. teóricas esta quincena: ${fmtN(horasTeoricasPreview)} hs (se calcula sola)`
+                              : 'Dejalo en 0 para seguir usando el número manual de "Hs. teóricas"'}
+                          </span>
+                        </div>
+                        <p style={{ margin: '6px 0 0', color: '#9ca3af' }}>Presentismo, Extras y Hs. extras de esta fila son para ESTA quincena únicamente.</p>
                       </td>
                     </tr>
                   )}
@@ -246,7 +280,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
         </table>
       </div>
       <p style={{ margin: '10px 0 0', fontSize: '11px', color: '#9ca3af' }}>
-        Entrada = primer fichaje del día · Salida = último fichaje del día. Tolerancia de 15 min para tardanzas; un ingreso pasadas las 11 no cuenta (día raro/franco). "Sueldo a pagar" = horas teóricas × sueldo/hora + presentismo (si corresponde) + extras + horas extra × sueldo/hora.
+        Entrada = primer fichaje del día · Salida = último fichaje del día. Tolerancia de 15 min para tardanzas; un ingreso pasadas las 11 no cuenta (día raro/franco). "Sueldo a pagar" = horas teóricas × sueldo/hora + presentismo (si corresponde) + extras + horas extra × sueldo/hora. Presentismo se pierde por falta o por 2 o más tardanzas en la quincena. "Hs. teóricas (auto)" se calcula sola del calendario si el empleado tiene "horas por día" configuradas; si no, es el número manual de siempre.
       </p>
     </div>
   );

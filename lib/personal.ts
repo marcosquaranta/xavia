@@ -42,6 +42,20 @@ export function rangoQuincena(anio: number, mes: number, quincena: 1 | 2): { des
   };
 }
 
+// Horas teóricas de la quincena calculadas solas a partir del calendario real (cuántos
+// lunes-a-viernes y cuántos sábados caen en ese rango puntual), en vez de un número fijo
+// tipeado a mano — así no hay que corregir a mano cuando una quincena tiene, por ejemplo,
+// un sábado de más que otra.
+export function horasTeoricasAuto(anio: number, mes: number, diasDesde: number, diasHasta: number, horasLV: number, horasSabado: number): number {
+  let total = 0;
+  for (let d = diasDesde; d <= diasHasta; d++) {
+    const dow = new Date(anio, mes - 1, d).getDay(); // 0=domingo .. 6=sábado
+    if (dow >= 1 && dow <= 5) total += horasLV;
+    else if (dow === 6) total += horasSabado;
+  }
+  return Math.round(total * 100) / 100;
+}
+
 // Agrupa fichajes por empleado (workno) y por día (fecha en hora Argentina). CrossChex
 // no distingue de forma confiable entrada/salida vía "checktype" (es más bien el método
 // de verificación) — el criterio acá es: primer fichaje del día = entrada, último =
@@ -96,6 +110,8 @@ export interface ResumenEmpleado {
   sueldoAPagar: number;
   tardanzas: number;
   diasIncompletos: number;
+  faltas: number; // días programados (lunes a viernes, o sábado si trabaja) sin ningún fichaje
+  horasTeoricasAuto: boolean; // true = se calculó sola del calendario (horas_lv configurado), false = número manual
 }
 
 // Umbral por debajo del cual un ingreso NO cuenta como tardanza aunque llegue después
@@ -128,11 +144,20 @@ export function calcularResumenQuincena(
     const emp = empleadosPorWorkno.get(workno);
     if (emp && emp.activo !== 'SI') continue;
     const porDia = porEmpleadoDia.get(workno) || new Map<string, string[]>();
+    const horasSabEmp = Number(emp?.horas_sabado) || 0;
     const dias: DiaTrabajado[] = [];
+    let faltas = 0;
     for (let d = diasDesde; d <= diasHasta; d++) {
       const fecha = `${anio}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       const checks = (porDia.get(fecha) || []).map((iso) => partesArg(iso).horaMin).sort((a, b) => a - b);
-      if (!checks.length) continue;
+      if (!checks.length) {
+        // Falta = día programado (lunes a viernes siempre; sábado solo si el empleado
+        // tiene horas de sábado configuradas) sin ningún fichaje ese día.
+        const dow = new Date(anio, mes - 1, d).getDay();
+        const diaProgramado = (dow >= 1 && dow <= 5) || (dow === 6 && horasSabEmp > 0);
+        if (diaProgramado) faltas++;
+        continue;
+      }
       const entradaMin = checks[0];
       const salidaMin = checks.length > 1 ? checks[checks.length - 1] : null;
       const incompleto = salidaMin === null;
@@ -147,13 +172,19 @@ export function calcularResumenQuincena(
       });
     }
     const horasReales = Math.round(dias.reduce((a, d) => a + d.horas, 0) * 100) / 100;
-    const horasTeoricas = Number(emp?.horas_teoricas_quincena) || 46;
+    const horasLVEmp = Number(emp?.horas_lv) || 0;
+    const esAuto = horasLVEmp > 0;
+    const horasTeoricas = esAuto
+      ? horasTeoricasAuto(anio, mes, diasDesde, diasHasta, horasLVEmp, horasSabEmp)
+      : (Number(emp?.horas_teoricas_quincena) || 46);
     const sueldoHora = Number(emp?.sueldo_hora) || 0;
     const tardanzas = dias.filter((d) => d.esTardanza).length;
     const presentismoConfigurado = Number(emp?.presentismo) || 0;
     const ajuste = ajustes[workno] || {};
     const presentismoManual = ajuste.presentismoManual || '';
-    const cumplioPresentismo = presentismoManual === 'SI' ? true : presentismoManual === 'NO' ? false : tardanzas === 0;
+    // El presentismo se pierde por tener alguna falta, o por acumular 2 o más tardanzas
+    // en la quincena (1 tardanza sola no lo hace perder).
+    const cumplioPresentismo = presentismoManual === 'SI' ? true : presentismoManual === 'NO' ? false : (tardanzas < 2 && faltas === 0);
     const presentismoAplicado = cumplioPresentismo ? presentismoConfigurado : 0;
     const extras = Number(ajuste.extras) || 0;
     const horasExtras = Number(ajuste.horasExtras) || 0;
@@ -167,6 +198,8 @@ export function calcularResumenQuincena(
       sueldoAPagar: Math.round((horasTeoricas * sueldoHora + presentismoAplicado + extras + horasExtras * sueldoHora) * 100) / 100,
       tardanzas,
       diasIncompletos: dias.filter((d) => d.incompleto).length,
+      faltas,
+      horasTeoricasAuto: esAuto,
     });
   }
   return resultados.sort((a, b) => a.nombre.localeCompare(b.nombre));

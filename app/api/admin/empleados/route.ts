@@ -3,7 +3,7 @@ import { isAdmin } from '@/lib/auth';
 import { appendRowObj, asegurarHoja, deleteRow, readSheet, updateRow } from '@/lib/sheets';
 import type { Empleado } from '@/lib/types';
 
-const HEADERS = ['workno', 'nombre', 'sueldo_hora', 'horas_teoricas_quincena', 'presentismo', 'hora_entrada_esperada', 'hora_salida_esperada', 'activo'];
+const HEADERS = ['workno', 'nombre', 'sueldo_hora', 'horas_teoricas_quincena', 'horas_lv', 'horas_sabado', 'presentismo', 'hora_entrada_esperada', 'hora_salida_esperada', 'activo'];
 
 export async function POST(req: NextRequest) {
   if (!(await isAdmin())) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
@@ -20,6 +20,8 @@ export async function POST(req: NextRequest) {
       workno: String(workno), nombre,
       sueldo_hora: Number(body.sueldo_hora) || 0,
       horas_teoricas_quincena: Number(body.horas_teoricas_quincena) || 46,
+      horas_lv: Number(body.horas_lv) || 0,
+      horas_sabado: Number(body.horas_sabado) || 0,
       presentismo: Number(body.presentismo) || 50000,
       hora_entrada_esperada: body.hora_entrada_esperada || '08:00',
       hora_salida_esperada: body.hora_salida_esperada || '17:00',

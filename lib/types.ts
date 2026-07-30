@@ -225,8 +225,11 @@ export interface Empleado {
   workno: string;
   nombre: string;
   sueldo_hora: number | string;
-  horas_teoricas_quincena: number | string; // default 46, editable
-  presentismo: number | string; // monto fijo — se paga solo si no hubo tardanzas en la quincena
+  horas_teoricas_quincena: number | string; // manual — solo se usa si horas_lv está vacío/0 (fallback)
+  horas_lv: number | string;      // horas por día, lunes a viernes — si está cargado, las horas
+                                   // teóricas de la quincena se calculan solas según el calendario
+  horas_sabado: number | string;  // horas por sábado (horario diferenciado) — 0/vacío = no trabaja sábados
+  presentismo: number | string; // monto fijo — se pierde por falta o por 2+ tardanzas en la quincena
   hora_entrada_esperada: string; // "08:00"
   hora_salida_esperada: string;  // "17:00"
   activo: 'SI' | 'NO';
