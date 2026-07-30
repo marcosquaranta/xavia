@@ -5,6 +5,9 @@ import { calcularDiasPorFase } from '@/lib/lotes';
 import { calcularCapacidad, diasCicloDefault } from '@/lib/planificacionServer';
 import { calcularPlan, repartoHelpers, parseReparto, REPARTO_DEFAULT, DIA_SIEMBRA, CUB, planchas } from '@/lib/planificacion';
 import { calcularCapacidadProductiva } from '@/lib/capacidadProductiva';
+import { cosechadoEsteMes } from '@/lib/estadisticas';
+import { getRegistrosCrossChex } from '@/lib/crosschex';
+import { rangoMes, horasHombreEnRango } from '@/lib/personal';
 import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
@@ -42,6 +45,32 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
   const hoy = new Date();
   const nombreMes = hoy.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+
+  // Productividad = paquetes cosechados ÷ horas-hombre reales (CrossChex) — mes en curso
+  // (hasta hoy) vs. mes pasado hasta el mismo día del mes, igual criterio que el resto de
+  // indicadores "al día" de la app. Es un indicador mensual fijo, independiente del filtro
+  // global de período de arriba (igual que "Siembra del mes" más abajo). Si CrossChex
+  // falla, queda en null y la tarjeta simplemente no se muestra.
+  let productividad: { actual: number | null; pasado: number | null } = { actual: null, pasado: null };
+  try {
+    const cosechaMes = cosechadoEsteMes(lotes);
+    const mesAnteriorRef = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+    const rangoActualMes = rangoMes(hoy.getFullYear(), hoy.getMonth() + 1, cosechaMes.diaCorte);
+    const rangoPasadoMes = rangoMes(mesAnteriorRef.getFullYear(), mesAnteriorRef.getMonth() + 1, cosechaMes.diaCorte);
+    const [regActual, regPasado] = await Promise.all([
+      getRegistrosCrossChex(rangoActualMes.desde, rangoActualMes.hasta),
+      getRegistrosCrossChex(rangoPasadoMes.desde, rangoPasadoMes.hasta),
+    ]);
+    const horasActual = horasHombreEnRango(regActual);
+    const horasPasado = horasHombreEnRango(regPasado);
+    productividad = {
+      actual: horasActual > 0 ? Math.round((cosechaMes.actual / horasActual) * 100) / 100 : null,
+      pasado: horasPasado > 0 ? Math.round((cosechaMes.pasado / horasPasado) * 100) / 100 : null,
+    };
+  } catch {}
+  const productividadPct = productividad.actual !== null && productividad.pasado
+    ? Math.round(((productividad.actual - productividad.pasado) / productividad.pasado) * 100)
+    : null;
 
   const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
   const esRuculaV = (v: string) => { const x = String(v).toLowerCase(); return x.includes('rucula') || x.includes('rúcula'); };
@@ -370,6 +399,24 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             ))}
           </div>
         </div>
+
+        {productividad.actual !== null && (
+          <div className="card" style={{ marginBottom:'16px', display:'flex', alignItems:'center', gap:'20px', flexWrap:'wrap' }}>
+            <div>
+              <p style={{ margin:'0 0 2px', fontSize:'13px', fontWeight:700 }}>Productividad — paquetes / hora-hombre</p>
+              <p style={{ margin:0, fontSize:'11px', color:'#9ca3af' }}>Cosecha del mes (paq.) ÷ horas reales trabajadas (CrossChex) · indicador mensual fijo, no cambia con el filtro de arriba</p>
+            </div>
+            <div style={{ display:'flex', alignItems:'baseline', gap:'8px', marginLeft:'auto' }}>
+              <strong style={{ fontSize:'26px', color:'#111827' }}>{productividad.actual.toLocaleString('es-AR')}</strong>
+              <span style={{ fontSize:'12px', color:'#9ca3af' }}>paq/h</span>
+              {productividadPct !== null && (
+                <span style={{ fontSize:'12px', fontWeight:700, color: productividadPct >= 0 ? '#059669' : '#dc2626' }}>
+                  {productividadPct >= 0 ? '↑' : '↓'} {Math.abs(productividadPct)}% vs. mes pasado
+                </span>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Evolución de ciclos / pesaje / plantas por paquete — 2 por fila */}
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(380px, 1fr))', gap:'12px', marginBottom:'16px' }}>

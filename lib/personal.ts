@@ -42,6 +42,20 @@ export function rangoQuincena(anio: number, mes: number, quincena: 1 | 2): { des
   };
 }
 
+// Rango desde el día 1 de un mes hasta un día de corte puntual (o el último día del mes
+// si no se pasa uno), mismo formato -03:00 que rangoQuincena — para el indicador de
+// productividad (paquetes/hora-hombre), que compara "mes en curso hasta hoy" contra
+// "mes pasado hasta el mismo día del mes" (mismo criterio que cosechadoEsteMes).
+export function rangoMes(anio: number, mes: number, diaHastaOverride?: number): { desde: string; hasta: string } {
+  const ultimoDia = new Date(anio, mes, 0).getDate();
+  const diaHasta = diaHastaOverride ? Math.min(diaHastaOverride, ultimoDia) : ultimoDia;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return {
+    desde: `${anio}-${pad(mes)}-01T00:00:00-03:00`,
+    hasta: `${anio}-${pad(mes)}-${pad(diaHasta)}T23:59:59-03:00`,
+  };
+}
+
 // Horas teóricas de la quincena calculadas solas a partir del calendario real (cuántos
 // lunes-a-viernes y cuántos sábados caen en ese rango puntual), en vez de un número fijo
 // tipeado a mano — así no hay que corregir a mano cuando una quincena tiene, por ejemplo,
@@ -72,6 +86,24 @@ function agruparPorEmpleadoYDia(registros: RegistroCrossChex[]): Map<string, Map
     porDia.get(fecha)!.push(r.checktime);
   }
   return out;
+}
+
+// Total de horas-hombre reales trabajadas (todos los empleados, todos los días) en un
+// conjunto de fichajes ya traído de CrossChex para el rango que corresponda — para el
+// indicador de productividad (paquetes cosechados ÷ horas-hombre). Mismo criterio que el
+// resto de Control de Personal: primer fichaje del día = entrada, último = salida; un
+// solo fichaje ese día queda "incompleto" y no aporta horas (no se puede calcular).
+export function horasHombreEnRango(registros: RegistroCrossChex[]): number {
+  const porEmpleadoDia = agruparPorEmpleadoYDia(registros);
+  let total = 0;
+  for (const porDia of porEmpleadoDia.values()) {
+    for (const isos of porDia.values()) {
+      const checks = isos.map((iso) => partesArg(iso).horaMin).sort((a, b) => a - b);
+      if (checks.length < 2) continue;
+      total += Math.max(0, (checks[checks.length - 1] - checks[0]) / 60);
+    }
+  }
+  return Math.round(total * 100) / 100;
 }
 
 export interface DiaTrabajado {

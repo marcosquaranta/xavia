@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
-import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio } from '@/lib/estadisticas';
+import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, cosechadoEsteMes } from '@/lib/estadisticas';
 import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, Empleado, PersonalQuincena } from '@/lib/types';
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
@@ -12,7 +12,7 @@ import { evolucionVentaPorArticulo, resumenMesActual } from '@/lib/estadisticasV
 import { generarAlertas } from '@/lib/alertasPanel';
 import { calcularCamara, diferenciaAjustesMes } from '@/lib/camara';
 import { getRegistrosCrossChex } from '@/lib/crosschex';
-import { calcularResumenQuincena, rangoQuincena, tardanzasDeHoy } from '@/lib/personal';
+import { calcularResumenQuincena, rangoQuincena, rangoMes, tardanzasDeHoy, horasHombreEnRango } from '@/lib/personal';
 import Header from '@/components/Header';
 import FiltrosLotes from '@/components/FiltrosLotes';
 import LoteCard from '@/components/LoteCard';
@@ -196,6 +196,30 @@ export default async function PanelPage({ searchParams }: {
       }
       const resumenPersonal = calcularResumenQuincena(registrosPanel, empleadosPanel, hoy.getFullYear(), hoy.getMonth() + 1, quincenaActual, ajustesMap);
       tardanzasHoy = tardanzasDeHoy(resumenPersonal);
+    } catch {}
+  }
+
+  // Productividad = paquetes cosechados ÷ horas-hombre reales (CrossChex) — mes en curso
+  // (hasta hoy) vs. mes pasado hasta el mismo día del mes, mismo criterio de corte que ya
+  // usa "Venta total mes al día". Solo admin; si CrossChex falla, el indicador queda en null
+  // y esa fila no se muestra en vez de romper el resto del Panel.
+  let productividad: { actual: number | null; pasado: number | null } = { actual: null, pasado: null };
+  if (user.rol === 'admin') {
+    try {
+      const cosechaMes = cosechadoEsteMes(lotes);
+      const mesAnteriorRef = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+      const rangoActualMes = rangoMes(hoy.getFullYear(), hoy.getMonth() + 1, cosechaMes.diaCorte);
+      const rangoPasadoMes = rangoMes(mesAnteriorRef.getFullYear(), mesAnteriorRef.getMonth() + 1, cosechaMes.diaCorte);
+      const [regActual, regPasado] = await Promise.all([
+        getRegistrosCrossChex(rangoActualMes.desde, rangoActualMes.hasta),
+        getRegistrosCrossChex(rangoPasadoMes.desde, rangoPasadoMes.hasta),
+      ]);
+      const horasActual = horasHombreEnRango(regActual);
+      const horasPasado = horasHombreEnRango(regPasado);
+      productividad = {
+        actual: horasActual > 0 ? Math.round((cosechaMes.actual / horasActual) * 100) / 100 : null,
+        pasado: horasPasado > 0 ? Math.round((cosechaMes.pasado / horasPasado) * 100) / 100 : null,
+      };
     } catch {}
   }
 
@@ -445,6 +469,10 @@ export default async function PanelPage({ searchParams }: {
                   pct: faltanteMesTotalPasado || faltanteMesTotal ? faltanteMesTotal - faltanteMesTotalPasado : null, mejorSiSube: true, sufijo: 'paq' as const },
                 { label: 'Ocupación N1', valor: `${ocupNaves.find((n:any)=>n.nave===1)?.pct ?? 0}%`, pct: null, mejorSiSube: true },
                 { label: 'Ocupación N2', valor: `${ocupNaves.find((n:any)=>n.nave===2)?.pct ?? 0}%`, pct: null, mejorSiSube: true },
+                ...(user.rol === 'admin' && productividad.actual !== null ? [{
+                  label: 'Productividad (paq/hs hombre)', valor: `${productividad.actual.toLocaleString('es-AR')} paq/h`,
+                  pct: productividad.pasado !== null ? pctVs(productividad.actual, productividad.pasado) : null, mejorSiSube: true,
+                }] : []),
               ].map((it: any) => {
                 const bueno = it.pct === null ? null : it.mejorSiSube ? it.pct > 0 : it.pct < 0;
                 return (
