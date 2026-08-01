@@ -9,7 +9,6 @@ interface Props {
   rucula: ResultadoCamara;
   lechugaCrespa: ResultadoCamara;
   lechugaRoble: ResultadoCamara;
-  isAdmin: boolean;
   valorizacionActual: number;
 }
 
@@ -23,8 +22,8 @@ function SemaforoDias({ dias }: { dias: number }) {
   );
 }
 
-function CardCamara({ datos, cultivo, cultivoKey, isAdmin, onSaved }: {
-  datos: ResultadoCamara; cultivo: string; cultivoKey: string; isAdmin: boolean; onSaved: () => void;
+function CardCamara({ datos, cultivo, cultivoKey, onSaved }: {
+  datos: ResultadoCamara; cultivo: string; cultivoKey: string; onSaved: () => void;
 }) {
   const [mostrarForm, setMostrarForm] = useState(false);
   const [tipo, setTipo] = useState<'inicial' | 'ajuste'>('ajuste');
@@ -84,7 +83,7 @@ function CardCamara({ datos, cultivo, cultivoKey, isAdmin, onSaved }: {
         </p>
       )}
 
-      {isAdmin && !mostrarForm && (
+      {!mostrarForm && (
         <button type="button" className="btn" style={{ marginTop: '10px', width: '100%', fontSize: '12.5px', fontWeight: 700, padding: '7px 12px' }}
           onClick={() => setMostrarForm(true)}>
           📦 {datos.base ? 'Registrar ajuste' : 'Cargar stock inicial'}
@@ -128,13 +127,13 @@ function CardCamara({ datos, cultivo, cultivoKey, isAdmin, onSaved }: {
   );
 }
 
-export default function StockCamaraCards({ rucula, lechugaCrespa, lechugaRoble, isAdmin, valorizacionActual }: Props) {
+export default function StockCamaraCards({ rucula, lechugaCrespa, lechugaRoble, valorizacionActual }: Props) {
   const router = useRouter();
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '20px' }}>
-      <CardCamara datos={rucula} cultivo="Rúcula" cultivoKey="rucula" isAdmin={isAdmin} onSaved={() => router.refresh()} />
-      <CardCamara datos={lechugaCrespa} cultivo="Lechuga Crespa" cultivoKey="lechuga_crespa" isAdmin={isAdmin} onSaved={() => router.refresh()} />
-      <CardCamara datos={lechugaRoble} cultivo="Lechuga Hoja de Roble" cultivoKey="lechuga_roble" isAdmin={isAdmin} onSaved={() => router.refresh()} />
+      <CardCamara datos={rucula} cultivo="Rúcula" cultivoKey="rucula" onSaved={() => router.refresh()} />
+      <CardCamara datos={lechugaCrespa} cultivo="Lechuga Crespa" cultivoKey="lechuga_crespa" onSaved={() => router.refresh()} />
+      <CardCamara datos={lechugaRoble} cultivo="Lechuga Hoja de Roble" cultivoKey="lechuga_roble" onSaved={() => router.refresh()} />
       <div style={{ background: '#111827', borderRadius: '10px', padding: '12px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
           <span style={{ fontSize: '10px', fontWeight: 800, color: '#d1d5db', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Stock valorizado</span>

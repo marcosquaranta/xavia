@@ -330,25 +330,56 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
     return PK_ALL.every(k=>(Number(q(id_control,sucursal,k))||0)===fact.sum[k]);
   }
 
+  // Venta comprometida de los próximos días (pedidos fijos recurrentes que van a caer en
+  // los próximos 7 días desde hoy, sin contar hoy — eso ya se ve en la carga del día).
+  // Es lo único con lo que se puede proyectar un compromiso a futuro sin depender de que
+  // alguien haya cargado ventas con fecha futura (acá se cargan día a día, no de antemano).
+  const DIAS_COMPROMETIDO = 7;
+  function ventaComprometidaProximosDias(): SV {
+    const acc: SV = { rucula: 0, lechuga_crespa: 0, hoja_roble: 0 };
+    const base = new Date();
+    for (let i = 1; i <= DIAS_COMPROMETIDO; i++) {
+      const d = new Date(base); d.setDate(d.getDate() + i);
+      const dow = d.getDay();
+      for (const pf of pedidosFijos) {
+        if (Number(pf.dia_semana) !== dow) continue;
+        acc.rucula += Number(pf.rucula) || 0;
+        acc.lechuga_crespa += Number(pf.lechuga_crespa) || 0;
+        acc.hoja_roble += Number(pf.hoja_roble) || 0;
+      }
+    }
+    return acc;
+  }
+  const comprometido = ventaComprometidaProximosDias();
+
   return (
     <div>
       {/* Stock disponible hoy (unidades) */}
       <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'8px',padding:'8px 14px',marginBottom:'12px'}}>
         <p style={{margin:'0 0 8px',fontSize:'12px',fontWeight:700,color:'#166534'}}>🥬 Disponible para vender hoy</p>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))',gap:'10px'}}>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))',gap:'10px'}}>
           {(['rucula','lechuga_crespa','lechuga_roble'] as const).map(cultivo=>{
             const sc = stockCamara?.[cultivo]?.stockActual ?? 0;
             const estCosecha = estimCosecha?.[cultivo] ?? 0;
+            const compKey = cultivo === 'lechuga_roble' ? 'hoja_roble' : cultivo;
+            const comp = comprometido[compKey as keyof SV] ?? 0;
+            const disponibleParaVenta = sc + estCosecha - comp;
             const label  = cultivo==='rucula'?'Rúcula':cultivo==='lechuga_crespa'?'Lechuga Crespa':'Lechuga Roble';
             const color  = cultivo==='rucula'?'#b45309':cultivo==='lechuga_crespa'?'#4d7c0f':'#166534';
             const bg     = cultivo==='rucula'?'#fffbeb':cultivo==='lechuga_crespa'?'#f7fee7':'#f0fdf4';
             const border = cultivo==='rucula'?'#fde68a':cultivo==='lechuga_crespa'?'#d9f99d':'#bbf7d0';
             return (
-              <div key={cultivo} style={{background:bg,border:`1px solid ${border}`,borderRadius:'8px',padding:'8px 12px',display:'flex',justifyContent:'space-between',alignItems:'center',gap:'8px'}}>
-                <span style={{fontSize:'12px',fontWeight:700,color}}>{label}</span>
-                <div style={{display:'flex',gap:'14px',alignItems:'baseline'}}>
-                  <span style={{fontSize:'11px',color:'#6b7280'}}>Stock al día: <strong style={{fontSize:'15px',color:'#111827'}}>{sc} u</strong></span>
-                  <span style={{fontSize:'11px',color:'#6b7280'}}>Cosecha hoy/mañana: <strong style={{fontSize:'15px',color:'#111827'}}>{estCosecha} u</strong></span>
+              <div key={cultivo} style={{background:bg,border:`1px solid ${border}`,borderRadius:'8px',padding:'8px 12px',display:'flex',flexDirection:'column',gap:'4px'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline'}}>
+                  <span style={{fontSize:'12px',fontWeight:700,color}}>{label}</span>
+                  <span style={{fontSize:'11px',color:'#6b7280'}}>
+                    Disp. para venta: <strong style={{fontSize:'15px',color: disponibleParaVenta<0?'#dc2626':'#111827'}}>{disponibleParaVenta} u</strong>
+                  </span>
+                </div>
+                <div style={{display:'flex',gap:'12px',alignItems:'baseline',flexWrap:'wrap'}}>
+                  <span style={{fontSize:'10.5px',color:'#6b7280'}}>Stock al día: <strong style={{color:'#111827'}}>{sc}</strong></span>
+                  <span style={{fontSize:'10.5px',color:'#6b7280'}}>+ Cosecha hoy/mañana: <strong style={{color:'#111827'}}>{estCosecha}</strong></span>
+                  <span style={{fontSize:'10.5px',color:'#6b7280'}}>− Comprometido {DIAS_COMPROMETIDO}d: <strong style={{color:'#111827'}}>{comp}</strong></span>
                 </div>
               </div>
             );

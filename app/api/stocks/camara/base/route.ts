@@ -6,7 +6,6 @@ import type { StockCamara } from '@/lib/types';
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
-  if (user.rol !== 'admin') return NextResponse.json({ error: 'solo_admin' }, { status: 403 });
 
   try {
     const { cultivo, fecha, tipo, cantidad_paq, notas } = await req.json();

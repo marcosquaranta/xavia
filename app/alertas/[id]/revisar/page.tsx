@@ -25,8 +25,15 @@ export default async function RevisarAlertaPage({ params }: { params: { id: stri
           <table><tbody>
             <tr><td style={{ color: '#6b7280', width: '180px' }}>Unidades cosechadas</td><td>{mov.unidades_cosechadas}</td></tr>
             <tr><td style={{ color: '#6b7280' }}>Descarte calculado</td><td>{mov.descarte_calculado}</td></tr>
-            <tr><td style={{ color: '#6b7280' }}>Desvío</td><td><strong>+{mov.desvio_porcentaje}%</strong></td></tr>
-            <tr><td style={{ color: '#6b7280' }}>Nivel</td><td><span className="pill" style={{ background: mov.nivel_alerta === 'rojo' ? '#fee2e2' : '#fef3c7', color: mov.nivel_alerta === 'rojo' ? '#7f1d1d' : '#78350f' }}>{mov.nivel_alerta}</span></td></tr>
+            {Number(mov.plantas_por_unidad_real) > 0 && (
+              <tr><td style={{ color: '#6b7280' }}>Plantas por paquete</td><td>{mov.plantas_por_unidad_real}</td></tr>
+            )}
+            {mov.nivel_alerta && (
+              <>
+                <tr><td style={{ color: '#6b7280' }}>Desvío</td><td><strong>+{mov.desvio_porcentaje}%</strong></td></tr>
+                <tr><td style={{ color: '#6b7280' }}>Nivel</td><td><span className="pill" style={{ background: mov.nivel_alerta === 'rojo' ? '#fee2e2' : '#fef3c7', color: mov.nivel_alerta === 'rojo' ? '#7f1d1d' : '#78350f' }}>{mov.nivel_alerta}</span></td></tr>
+              </>
+            )}
           </tbody></table>
         </div>
         <form action="/api/alertas/revisar" method="POST" className="card">

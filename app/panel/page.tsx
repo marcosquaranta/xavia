@@ -4,7 +4,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
 import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, cosechadoEsteMes } from '@/lib/estadisticas';
-import { aplicarFiltros3, contarPorFiltro, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
+import { aplicarFiltros3, contarPorFiltro, codigoCultivo, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, Empleado, PersonalQuincena } from '@/lib/types';
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
 import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
@@ -223,21 +223,32 @@ export default async function PanelPage({ searchParams }: {
     } catch {}
   }
 
-  // Desvíos de cosecha (antes en la sección "Alertas" propia, ahora solo en el home) —
-  // solo admin, últimos 30 días, sin revisar primero.
-  const cosechasConAlerta = movimientos.filter((m) => {
-    if (m.tipo !== 'cosecha') return false;
-    if (m.nivel_alerta !== 'amarillo' && m.nivel_alerta !== 'rojo') return false;
-    try { const f = new Date(String(m.fecha)); return (hoy.getTime() - f.getTime()) / 86400000 <= 30; } catch { return true; }
-  }).sort((a, b) => {
-    const aRev = a.alerta_revisada === 'SI', bRev = b.alerta_revisada === 'SI';
-    if (aRev !== bRev) return aRev ? 1 : -1;
-    if (a.nivel_alerta !== b.nivel_alerta) return a.nivel_alerta === 'rojo' ? -1 : 1;
-    return String(b.fecha || '').localeCompare(String(a.fecha || ''));
-  });
-
-  // ── ÚLTIMOS MOVIMIENTOS, separados por tipo ──
+  // ── ÚLTIMOS MOVIMIENTOS, separados por tipo (definido acá arriba porque también
+  // hace falta para clasificar cultivo en "Desvíos de cosecha", justo abajo) ──
   const lotesMap = new Map(lotes.map(l => [l.id_lote, l]));
+
+  // Desvíos de cosecha (antes en la sección "Alertas" propia, ahora solo en el home) —
+  // solo admin, últimos 30 días, sin revisar primero. Además del desvío de cantidad
+  // (nivel_alerta ya calculado en /api/lotes/cosecha), suma dos alertas de calidad
+  // puntuales pedidas explícitamente: descarte de lechuga > 10 plantas, y rúcula
+  // armada con más de 3 plantas por paquete (paquetes más chicos/de menor calidad).
+  const cosechasConAlerta: { mov: Movimiento; motivo: 'desvio' | 'descarte' | 'densidad' }[] = movimientos
+    .filter((m) => m.tipo === 'cosecha')
+    .map((m) => {
+      if (m.nivel_alerta === 'amarillo' || m.nivel_alerta === 'rojo') return { mov: m, motivo: 'desvio' as const };
+      const esR = codigoCultivo(lotesMap.get(String(m.id_lote || ''))?.variedad) === 'R';
+      if (!esR && Number(m.descarte_calculado) > 10) return { mov: m, motivo: 'descarte' as const };
+      if (esR && Number(m.plantas_por_unidad_real) > 3) return { mov: m, motivo: 'densidad' as const };
+      return null;
+    })
+    .filter((x): x is { mov: Movimiento; motivo: 'desvio' | 'descarte' | 'densidad' } => x !== null)
+    .filter(({ mov }) => { try { const f = new Date(String(mov.fecha)); return (hoy.getTime() - f.getTime()) / 86400000 <= 30; } catch { return true; } })
+    .sort((a, b) => {
+      const aRev = a.mov.alerta_revisada === 'SI', bRev = b.mov.alerta_revisada === 'SI';
+      if (aRev !== bRev) return aRev ? 1 : -1;
+      if (a.mov.nivel_alerta !== b.mov.nivel_alerta) return a.mov.nivel_alerta === 'rojo' ? -1 : 1;
+      return String(b.mov.fecha || '').localeCompare(String(a.mov.fecha || ''));
+    });
   const movsOrdenados = [...movimientos]
     .filter(m => m.fecha)
     .sort((a,b) => String(b.fecha||'').localeCompare(String(a.fecha||'')));
@@ -376,21 +387,27 @@ export default async function PanelPage({ searchParams }: {
             </div>
             {user.rol === 'admin' && cosechasConAlerta.length > 0 && (
               <div style={{ background:'white', borderRadius:'7px', padding:'10px 12px', border:'1px solid #e5e7eb', marginBottom:'10px' }}>
-                <p style={{ margin:'0 0 8px', fontSize:'13px', fontWeight:700 }}>⚠️ Desvíos de cosecha <span style={{ fontWeight:400, fontSize:'11px', color:'#9ca3af' }}>(30 días)</span></p>
+                <p style={{ margin:'0 0 8px', fontSize:'13px', fontWeight:700 }}>⚠️ Desvíos y calidad de cosecha <span style={{ fontWeight:400, fontSize:'11px', color:'#9ca3af' }}>(30 días)</span></p>
                 <div style={{ display:'flex', flexDirection:'column', gap:'6px', maxHeight:'220px', overflowY:'auto' }}>
-                  {cosechasConAlerta.map((m) => {
-                    const esRoja = m.nivel_alerta === 'rojo';
+                  {cosechasConAlerta.map(({ mov: m, motivo }) => {
+                    const esRoja = motivo === 'descarte' || m.nivel_alerta === 'rojo';
                     const esRev = m.alerta_revisada === 'SI';
+                    const badgeTxt = motivo === 'descarte' ? `${Number(m.descarte_calculado)||0} desc.`
+                      : motivo === 'densidad' ? `${Number(m.plantas_por_unidad_real)||0} pl/paq`
+                      : `+${Math.round(Number(m.desvio_porcentaje) || 0)}%`;
+                    const detalleTxt = motivo === 'descarte' ? `descarte alto (>10)`
+                      : motivo === 'densidad' ? `rúcula con más de 3 plantas/paquete`
+                      : `${Number(m.descarte_calculado)||0} s/id`;
                     return (
                       <div key={m.id_movimiento} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'6px 8px', borderRadius:'6px', background: esRev ? '#f9fafb' : esRoja ? '#fef2f2' : '#fffbeb', opacity: esRev ? 0.7 : 1 }}>
                         <span style={{ background: esRev ? '#e5e7eb' : esRoja ? '#dc2626' : '#d97706', color: esRev ? '#6b7280' : 'white', padding:'1px 7px', borderRadius:'8px', fontSize:'10px', fontWeight:700, flexShrink:0 }}>
-                          +{Math.round(Number(m.desvio_porcentaje) || 0)}%
+                          {badgeTxt}
                         </span>
                         <Link href={`/cultivos/${encodeURIComponent(String(m.id_lote||''))}`} style={{ textDecoration:'none', fontFamily:'monospace', fontWeight:700, fontSize:'11px', color:'#111827' }}>
                           {m.id_lote}
                         </Link>
                         <span style={{ fontSize:'11px', color:'#6b7280', flex:1 }}>
-                          {fmtFecha(String(m.fecha||''))} · {Number(m.unidades_cosechadas)||0}u · {Number(m.descarte_calculado)||0} s/id
+                          {fmtFecha(String(m.fecha||''))} · {Number(m.unidades_cosechadas)||0}u · {detalleTxt}
                           {esRev && <span style={{ color:'#059669', marginLeft:'6px' }}>✓ Revisada</span>}
                         </span>
                         {!esRev && <Link href={'/alertas/' + m.id_movimiento + '/revisar'} className="btn secondary small" style={{ flexShrink:0 }}>Revisar</Link>}
@@ -443,7 +460,6 @@ export default async function PanelPage({ searchParams }: {
                 rucula={{ actual: camaraRucula.stockActual, ajusteMes: ajusteMesRucula.acumulado }}
                 lechugaCrespa={{ actual: camaraLechugaCrespa.stockActual, ajusteMes: ajusteMesLechugaCrespa.acumulado }}
                 lechugaRoble={{ actual: camaraLechugaRoble.stockActual, ajusteMes: ajusteMesLechugaRoble.acumulado }}
-                esAdmin={user.rol === 'admin'}
               />
             </div>
           </div>

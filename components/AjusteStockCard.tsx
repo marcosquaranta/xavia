@@ -4,8 +4,8 @@ import type { CultivoCamara } from '@/lib/camara';
 
 interface CultivoStock { actual: number; ajusteMes: number }
 
-export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, esAdmin }: {
-  rucula: CultivoStock; lechugaCrespa: CultivoStock; lechugaRoble: CultivoStock; esAdmin: boolean;
+export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble }: {
+  rucula: CultivoStock; lechugaCrespa: CultivoStock; lechugaRoble: CultivoStock;
 }) {
   const [abierto, setAbierto] = useState<CultivoCamara | null>(null);
   const [cantidad, setCantidad] = useState('');
@@ -64,7 +64,7 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, e
               Dif. acumulada mes: {c.data.ajusteMes > 0 ? '+' : ''}{c.data.ajusteMes} paq
             </p>
 
-            {esAdmin && (abierto === c.key ? (
+            {abierto === c.key ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <input type="number" placeholder="Cantidad real (paq)" value={cantidad} onChange={e => setCantidad(e.target.value)} disabled={loading}
                   style={{ fontSize: '12px', padding: '4px 6px', border: '1px solid #d1d5db', borderRadius: '5px' }} />
@@ -91,7 +91,7 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, e
                 style={{ fontSize: '11px', padding: '4px 10px', background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer', color: '#374151' }}>
                 Registrar ajuste
               </button>
-            ))}
+            )}
           </div>
         ))}
       </div>
