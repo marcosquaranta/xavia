@@ -31,8 +31,10 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
   const plantasPorPaqReal = useMemo(() => esPorPaquete && paquetes > 0 ? Math.round((plantasEst / paquetes) * 10) / 10 : 0, [esPorPaquete, plantasEst, paquetes]);
 
   // Alertas de calidad — mismo umbral que el Panel ("Desvíos y calidad de cosecha"):
-  // lechuga con descarte > 10 plantas, o rúcula armada a más de 3 plantas por paquete.
-  const descarteAlto = !esPorPaquete && descarteAuto > 10;
+  // lechuga con descarte > 5% de la cosecha del lote, o rúcula armada a más de 3
+  // plantas por paquete.
+  const descartePct = plantasEst > 0 ? Math.round((descarteAuto / plantasEst) * 1000) / 10 : 0;
+  const descarteAlto = !esPorPaquete && plantasEst > 0 && descarteAuto / plantasEst > 0.05;
   const densidadAlta = esPorPaquete && esRucula && plantasPorPaqReal > 3;
 
   async function handleSubmit(e: React.FormEvent) {
@@ -42,7 +44,7 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
     if (esPorPaquete && paquetes <= 0) { setError('Ingresá la cantidad de paquetes armados'); setLoading(false); return; }
     if (esPorPaquete && pesoPaqGr <= 0) { setError('Ingresá el pesaje testigo (peso del paquete en gramos)'); setLoading(false); return; }
     if (parcial && (plantasQuedan <= 0 || plantasQuedan >= plantasEst)) { setError(`En cosecha parcial, las plantas que quedan deben ser entre 1 y ${plantasEst - 1}`); setLoading(false); return; }
-    if (descarteAlto && !window.confirm(`Descarte alto: ${descarteAuto} plantas (más de 10). ¿Confirmás registrar la cosecha igual?`)) { setLoading(false); return; }
+    if (descarteAlto && !window.confirm(`Descarte alto: ${descarteAuto} plantas, ${descartePct}% de la cosecha (más de 5%). ¿Confirmás registrar la cosecha igual?`)) { setLoading(false); return; }
     if (densidadAlta && !window.confirm(`Rúcula armada a ${plantasPorPaqReal} plantas/paquete (más de 3, paquetes más chicos de lo normal). ¿Confirmás registrar la cosecha igual?`)) { setLoading(false); return; }
     try {
       const res = await fetch('/api/lotes/cosecha', {
@@ -107,7 +109,7 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
           )}
           {descarteAlto && (
             <div style={{ marginTop: '10px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '10px 12px', fontSize: '12px', color: '#7f1d1d', fontWeight: 600 }}>
-              ⚠️ Descarte alto: {descarteAuto} plantas (más de 10) — va a quedar marcado en Alertas del panel.
+              ⚠️ Descarte alto: {descarteAuto} plantas, {descartePct}% de la cosecha (más de 5%) — va a quedar marcado en Alertas del panel.
             </div>
           )}
         </div>

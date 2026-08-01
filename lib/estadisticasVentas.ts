@@ -224,27 +224,33 @@ export function resumenMesActual(
   const clienteMap = new Map(clientes.map((c) => [c.id_control, c]));
 
   const PRICE_KEYS = [...KEYS_RUCULA, ...KEYS_LECHUGA, 'albahaca'] as const;
-  // rucula_kg/lechuga_kg (ventas por cajón) quedan afuera de "unidades": no solo es otra
-  // unidad de venta (mismo motivo por el que ya se excluían del precio promedio), sino que
-  // esos clientes suelen cargarse en uno o dos lotes grandes en vez de a diario. Si entran
-  // a la suma, un cajón grande caído del lado equivocado del corte (día 15, fin de mes...)
-  // dispara el % de "venta al día"/"proyectada" de forma completamente errática, aunque la
-  // conversión a paquete-equivalente sea matemáticamente correcta — el problema no es la
-  // conversión, es que ese volumen no se reparte día a día como el resto.
-  const KEYS_EXCLUIDAS_UNIDADES = ['rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
+  // rucula_kg/lechuga_kg (ventas por cajón) quedan afuera del precio promedio (otra unidad
+  // de venta, no comparable a paquete/planta — mismo motivo que evolucionPrecioPromedio),
+  // pero SÍ suman a "unidades" convertidas a paquete-equivalente (mismo criterio y mismos
+  // factores que el gráfico "Evolución de venta por artículo") para que ambos totales
+  // coincidan. Se convierte una sola vez sobre el total del mes (no por venta individual)
+  // para no arrastrar error de redondeo fila por fila.
+  const KEYS_KG_UNIDADES = ['rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
   let unidades = 0, ingresosComparables = 0, unidadesComparables = 0;
+  let ruculaKgTotal = 0, lechugaKgTotal = 0;
   for (const v of delMes) {
     const cliente = clienteMap.get(v.id_control);
     for (const key of PROD_KEYS) {
       const qty = Number((v as any)[key]) || 0;
       if (qty <= 0) continue;
-      if (!(KEYS_EXCLUIDAS_UNIDADES as readonly string[]).includes(key)) unidades += qty;
+      if ((KEYS_KG_UNIDADES as readonly string[]).includes(key)) {
+        if (key === 'rucula_kg') ruculaKgTotal += qty;
+        else lechugaKgTotal += qty; // lechuga_kg (legacy) + lechuga_kg_crespa + lechuga_kg_roble
+      } else {
+        unidades += qty;
+      }
       if ((PRICE_KEYS as readonly string[]).includes(key)) {
         ingresosComparables += qty * precioFinal(precios, v.id_control, v.sucursal, key, cliente);
         unidadesComparables += qty;
       }
     }
   }
+  unidades += Math.round((ruculaKgTotal * 1000) / GR_PAQ_RUCULA) + Math.round((lechugaKgTotal * 1000) / GR_PAQ_LECHUGA);
 
   const diasEnMes = new Date(fechaRef.getFullYear(), fechaRef.getMonth() + 1, 0).getDate();
   const proyeccionMes = corte > 0 ? Math.round((unidades / corte) * diasEnMes) : 0;

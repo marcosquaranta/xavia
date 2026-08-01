@@ -118,6 +118,7 @@ export default function LoteCard({ lote, movimientos, ubicaciones, variedades, c
         <span>Plantinera: <strong style={{ color: '#374151' }}>{dias.plantinera}d</strong></span>
         {dias.fase_1 !== null && <span>F1: <strong style={{ color: '#374151' }}>{dias.fase_1}d</strong></span>}
         {dias.fase_2 > 0 && <span>F2: <strong style={{ color: '#374151' }}>{dias.fase_2}d</strong></span>}
+        {Number(lote.peso_muestra_kg) > 0 && <span>Peso muestra: <strong style={{ color: '#374151' }}>{Math.round(Number(lote.peso_muestra_kg) * 1000)}g</strong></span>}
       </div>
     </div>
   );
