@@ -4,7 +4,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
 import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, cosechadoEsteMes } from '@/lib/estadisticas';
-import { aplicarFiltros3, contarPorFiltro, codigoCultivo, type FiltroCultivo, type FiltroFase, type FiltroNave } from '@/lib/lotes';
+import { codigoCultivo } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, Empleado, PersonalQuincena } from '@/lib/types';
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
 import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
@@ -14,8 +14,6 @@ import { calcularCamara, diferenciaAjustesMes } from '@/lib/camara';
 import { getRegistrosCrossChex } from '@/lib/crosschex';
 import { calcularResumenQuincena, rangoQuincena, rangoMes, tardanzasDeHoy, horasHombreEnRango } from '@/lib/personal';
 import Header from '@/components/Header';
-import FiltrosLotes from '@/components/FiltrosLotes';
-import LoteCard from '@/components/LoteCard';
 import GraficoCiclosSemanas from '@/components/GraficoCiclosSemanas';
 import GraficoDistribucionMesadas from '@/components/GraficoDistribucionMesadas';
 import BuscadorLote from '@/components/BuscadorLote';
@@ -24,8 +22,6 @@ import AjusteStockCard from '@/components/AjusteStockCard';
 import { GraficoVentaPorArticulo } from '@/app/ventas/VentasEvolucionCharts';
 
 export const dynamic = 'force-dynamic';
-
-const LOTES_POR_PAGINA = 4;
 
 const TIPO_LABEL: Record<string, { label: string; color: string; bg: string }> = {
   siembra:    { label: 'Siembra',    color: '#92400e', bg: '#fef9c3' },
@@ -44,19 +40,9 @@ function diasAtras(s: any) {
   try { const diff = Math.round((Date.now() - new Date(String(s||'').split(/[\sT]/)[0]+'T12:00:00').getTime())/86400000); if (diff===0) return 'Hoy'; if (diff===1) return 'Ayer'; return `Hace ${diff}d`; } catch { return ''; }
 }
 
-export default async function PanelPage({ searchParams }: {
-  searchParams: { cultivo?: string; fase?: string; nave?: string; mesada?: string; tiempo?: string; q?: string; p?: string }
-}) {
+export default async function PanelPage() {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
-
-  const cultivo = (searchParams.cultivo || 'todos') as FiltroCultivo;
-  const fase    = (searchParams.fase    || 'todas') as FiltroFase;
-  const nave    = (searchParams.nave    || 'todas') as FiltroNave;
-  const mesada  = searchParams.mesada  || 'todas';
-  const tiempo  = (searchParams.tiempo || 'todos') as any;
-  const query   = (searchParams.q || '').trim().toLowerCase();
-  const pagina  = Math.max(1, parseInt(searchParams.p || '1'));
 
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [], variedades: Variedad[] = [];
   let ventasPanel: VentaDia[] = [], clientesPanel: ClienteVenta[] = [], preciosPanel: PrecioVenta[] = [], historicasPanel: VentaHistorica[] = [];
@@ -301,26 +287,6 @@ export default async function PanelPage({ searchParams }: {
   const ultimoLechugaF2 = ciclosSemanas.filter((s:any) => s.lechugaF2 > 0).slice(-1)[0]?.lechugaF2;
   const ultimoRuculaF2  = ciclosSemanas.filter((s:any) => s.rucula > 0).slice(-1)[0]?.rucula;
 
-  // ── LOTES FILTRADOS CON PAGINACIÓN ──
-  const conteos = contarPorFiltro(lotes, nave, ubicaciones);
-  const lotesFiltrados = query
-    ? lotes.filter(l => String(l.id_lote||'').toLowerCase().includes(query))
-    : aplicarFiltros3(lotes, cultivo, fase, nave, mesada, tiempo, ubicaciones);
-  const totalPaginas = Math.ceil(lotesFiltrados.length / LOTES_POR_PAGINA);
-  const lotesEnPagina = lotesFiltrados.slice((pagina-1)*LOTES_POR_PAGINA, pagina*LOTES_POR_PAGINA);
-
-  function urlPagina(p: number) {
-    const params = new URLSearchParams();
-    if (cultivo !== 'todos') params.set('cultivo', cultivo);
-    if (fase !== 'todas') params.set('fase', fase);
-    if (nave !== 'todas') params.set('nave', nave);
-    if (mesada !== 'todas') params.set('mesada', mesada);
-    if (tiempo !== 'todos') params.set('tiempo', tiempo);
-    if (p > 1) params.set('p', String(p));
-    const s = params.toString();
-    return `/panel${s ? '?' + s : ''}`;
-  }
-
   const hoyStr = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
   // Recordatorio de stock físico en cámara — sábados, lunes y miércoles.
   const diaSemanaHoy = new Date().getDay(); // 0=domingo..6=sábado
@@ -332,6 +298,8 @@ export default async function PanelPage({ searchParams }: {
       <div className="container">
         <h1 className="page-title">Panel de control</h1>
         <p className="page-subtitle">{hoyStr.charAt(0).toUpperCase()+hoyStr.slice(1)} · Bienvenido, {user.nombre}</p>
+
+        <BuscadorLote baseUrl="/cultivos" />
 
         {tardanzasHoy.length > 0 && (
           <div style={{ background:'#fef2f2', border:'2px solid #dc2626', borderRadius:'10px', padding:'16px 18px', marginBottom:'14px', display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }}>
@@ -645,50 +613,6 @@ export default async function PanelPage({ searchParams }: {
           </div>
         </div>
 
-        {/* ══ LOTES CON FILTROS Y PAGINACIÓN ══ */}
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px' }}>
-          <h2 style={{ margin:0, fontSize:'16px', fontWeight:600 }}>
-            Cultivos activos {lotesFiltrados.length > 0 && `(${lotesFiltrados.length})`}
-          </h2>
-          {lotesFiltrados.length > 0 && (
-            <Link href="/cultivos" style={{ fontSize:'12px', color:'#6b7280', textDecoration:'none' }}>Ver todos →</Link>
-          )}
-        </div>
-        <BuscadorLote baseUrl="/panel" />
-        {!query && (
-          <FiltrosLotes cultivoActivo={cultivo} faseActiva={fase} naveActiva={nave} mesadaActiva={mesada}
-            tiempoActivo={tiempo} conteos={conteos} ubicaciones={ubicaciones} baseUrl="/panel" />
-        )}
-        {query && <p style={{ fontSize:'12px', color:'#6b7280', marginBottom:'10px' }}>{lotesFiltrados.length} resultado{lotesFiltrados.length!==1?'s':''} para "{searchParams.q}"</p>}
-
-        {lotesFiltrados.length === 0 ? (
-          <div className="card" style={{ textAlign:'center', padding:'40px' }}>
-            <p style={{ margin:0, color:'#6b7280' }}>No hay lotes con este filtro.</p>
-            <Link href="/cultivos/nuevo" className="btn" style={{ marginTop:'14px', display:'inline-block' }}>+ Crear lote</Link>
-          </div>
-        ) : (
-          <>
-            {lotesEnPagina.map(lote => (
-              <LoteCard key={lote.id_lote} lote={lote} movimientos={movimientos} ubicaciones={ubicaciones} variedades={variedades} ciclosReales={ciclosRealesMap} />
-            ))}
-
-            {/* Paginación */}
-            {totalPaginas > 1 && (
-              <div style={{ display:'flex', justifyContent:'center', alignItems:'center', gap:'8px', marginTop:'16px', paddingTop:'16px', borderTop:'1px solid #f3f4f6' }}>
-                {pagina > 1 && (
-                  <Link href={urlPagina(pagina-1)} className="btn secondary" style={{ fontSize:'12px', padding:'6px 14px' }}>← Anterior</Link>
-                )}
-                <span style={{ fontSize:'12px', color:'#6b7280' }}>
-                  Página {pagina} de {totalPaginas} · {lotesFiltrados.length} lotes
-                </span>
-                {pagina < totalPaginas && (
-                  <Link href={urlPagina(pagina+1)} className="btn secondary" style={{ fontSize:'12px', padding:'6px 14px' }}>Siguiente →</Link>
-                )}
-                <Link href="/cultivos" className="btn secondary" style={{ fontSize:'12px', padding:'6px 14px' }}>Ver todos</Link>
-              </div>
-            )}
-          </>
-        )}
       </div>
     </>
   );
