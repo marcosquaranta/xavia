@@ -72,7 +72,14 @@ export default async function PanelPage() {
     const cfgRep = configRows.find(i => i.clave === 'plan_reparto');
     const reparto = cfgRep ? parseReparto(cfgRep.valor) : REPARTO_DEFAULT;
     const diaSemana = new Date().getDay();
-    tareasHoy = tareasDelDia(plan, reparto, diaSemana);
+    // "Cosechar ~X plantas" (🥬/🌿) es una ESTIMACIÓN teórica del reparto semanal
+    // configurado (cuánto tocaría cosechar hoy según el plan), mientras que el cuadro
+    // "🌾 Cosechar" de abajo (gruposCosecha) son los LOTES REALES que ya están listos —
+    // dos cosas distintas que no tienen por qué coincidir en cantidad ni en lotes. En el
+    // home mostrar las dos juntas confundía ("por qué habla de lotes distintos"), así que
+    // acá solo queda la estimación teórica si no es de cosecha (ej. el aviso de stock de
+    // los sábados); el detalle de la estimación semanal completa sigue en Planificación.
+    tareasHoy = tareasDelDia(plan, reparto, diaSemana).filter(t => t.icon !== '🥬' && t.icon !== '🌿');
     siembraHoy = siembraDelDia(plan, reparto, diaSemana);
     if (diaSemana >= 1 && diaSemana <= 6) {
       gruposTrasplante = trasplantesAgrupados(lotes, movimientos);
