@@ -1,4 +1,4 @@
-import type { Lote, Articulo, StockMes } from './types';
+import type { Lote, Articulo, StockMes, Movimiento } from './types';
 import { calcularUsoTeorico, type DriversMes } from './usoTeorico';
 
 // categoria 'lote_atraso' = atraso puntual de trasplante/cosecha de un lote — ese detalle
@@ -8,6 +8,19 @@ export interface Alerta { tipo: 'error' | 'warn' | 'info'; msg: string; lote?: s
 
 function safeDate(s: any): Date | null {
   try { const str = String(s || '').split(/[\sT]/)[0]; return str ? new Date(str + 'T12:00:00') : null; } catch { return null; }
+}
+
+// ── Motivo de alerta de calidad de una cosecha puntual — compartido entre el Panel
+// ("Desvíos y calidad de cosecha") y la ficha del lote, para no duplicar los umbrales. ──
+export type MotivoAlertaCosecha = 'desvio' | 'descarte' | 'densidad';
+export const UMBRAL_DESCARTE_PCT = 0.05;
+export function motivoAlertaCosecha(mov: Movimiento, esRucula: boolean): MotivoAlertaCosecha | null {
+  if (mov.tipo !== 'cosecha') return null;
+  if (mov.nivel_alerta === 'amarillo' || mov.nivel_alerta === 'rojo') return 'desvio';
+  const plantasEstMov = Number(mov.plantas_estimadas) || 0;
+  if (!esRucula && plantasEstMov > 0 && Number(mov.descarte_calculado) / plantasEstMov > UMBRAL_DESCARTE_PCT) return 'descarte';
+  if (esRucula && Number(mov.plantas_por_unidad_real) > 3) return 'densidad';
+  return null;
 }
 
 // Alertas de producción del Panel (home) — extraído acá para poder reutilizarlo también

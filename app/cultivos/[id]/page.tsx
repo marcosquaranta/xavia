@@ -3,8 +3,9 @@ import { Fragment } from 'react';
 import { notFound, redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import { calcularDiasPorFase, claseVariedad } from '@/lib/lotes';
+import { calcularDiasPorFase, claseVariedad, codigoCultivo } from '@/lib/lotes';
 import { diasPromedioPorVariedad } from '@/lib/estadisticas';
+import { motivoAlertaCosecha } from '@/lib/alertasPanel';
 import type { Lote, Movimiento, Variedad } from '@/lib/types';
 import Header from '@/components/Header';
 import AccionesLote from './AccionesLote';
@@ -24,6 +25,14 @@ export default async function DetalleLotePage({ params }: { params: { id: string
   catch { dias = { plantinera: 0, fase_1: null, fase_2: 0, total: 0, fechas: { siembra: lote.fecha_siembra, fase_1_inicio: null, fase_2_inicio: null, cosecha: null } }; }
   const movsLote = movimientos.filter((m) => m.id_lote === idLote).sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
   const ult = movsLote[movsLote.length - 1];
+  // Cosechas de este lote con alerta de calidad (desvío de cantidad, descarte alto o
+  // densidad de rúcula) todavía sin revisar — se revisan acá mismo, con toda la ficha
+  // del lote a la vista, en vez de en una página aparte sin contexto.
+  const esRuculaLote = codigoCultivo(lote.variedad) === 'R';
+  const alertasCosechaLote = movsLote
+    .filter((m) => m.alerta_revisada !== 'SI')
+    .map((m) => ({ mov: m, motivo: motivoAlertaCosecha(m, esRuculaLote) }))
+    .filter((x): x is { mov: Movimiento; motivo: NonNullable<ReturnType<typeof motivoAlertaCosecha>> } => x.motivo !== null);
   const variedad = variedades.find((v) => v.variedad === lote.variedad);
   // Días estimados por fase = promedio real de la variedad (últimos cosechados)
   let est: any = null;
@@ -77,6 +86,32 @@ export default async function DetalleLotePage({ params }: { params: { id: string
           ))}
         </div>
         <AccionesLote idLote={lote.id_lote} faseActual={String(lote.fase_actual)} estado={String(lote.estado)} esAdmin={user.rol === 'admin'} ultimoMovId={ult?.id_movimiento} ultimoMovTipo={String(ult?.tipo || '')} ultimoMovFecha={fmt(String(ult?.fecha || ''))} />
+        {user.rol === 'admin' && alertasCosechaLote.length > 0 && (
+          <div className="card" style={{ background: '#fef2f2', border: '1px solid #fecaca' }}>
+            <p className="card-title" style={{ color: '#991b1b' }}>⚠️ Revisar alerta de cosecha</p>
+            {alertasCosechaLote.map(({ mov: m, motivo }) => {
+              const descartePct = Number(m.plantas_estimadas) > 0 ? Math.round((Number(m.descarte_calculado) / Number(m.plantas_estimadas)) * 100) : 0;
+              const motivoTxt = motivo === 'descarte' ? `Descarte del ${descartePct}% de la cosecha (más de 5%)`
+                : motivo === 'densidad' ? `Rúcula armada a ${m.plantas_por_unidad_real} plantas/paquete (más de 3)`
+                : `Desvío del ${m.desvio_porcentaje}% en la cantidad cosechada (nivel ${m.nivel_alerta})`;
+              return (
+                <div key={m.id_movimiento} style={{ marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px dashed #fecaca' }}>
+                  <table style={{ marginBottom: '10px' }}><tbody>
+                    <tr><td style={{ color: '#7f1d1d', width: '160px' }}>Cosecha del</td><td>{fmtFull(String(m.fecha || ''))}</td></tr>
+                    <tr><td style={{ color: '#7f1d1d' }}>Unidades cosechadas</td><td>{m.unidades_cosechadas}</td></tr>
+                    <tr><td style={{ color: '#7f1d1d' }}>Motivo</td><td style={{ fontWeight: 700 }}>{motivoTxt}</td></tr>
+                  </tbody></table>
+                  <form action="/api/alertas/revisar" method="POST">
+                    <input type="hidden" name="id_movimiento" value={m.id_movimiento} />
+                    <input type="hidden" name="volver" value={`/cultivos/${encodeURIComponent(idLote)}`} />
+                    <textarea name="comentario" rows={2} required placeholder="Comentario: causa o resolución" style={{ width: '100%', resize: 'vertical', marginBottom: '8px' }} />
+                    <button type="submit" className="btn" style={{ fontSize: '12px' }}>Marcar como revisada</button>
+                  </form>
+                </div>
+              );
+            })}
+          </div>
+        )}
         <div className="card">
           <p className="card-title">Historial de movimientos</p>
           {movsLote.length === 0 ? <p style={{ color: '#9ca3af', fontSize: '13px', textAlign: 'center' }}>Sin movimientos</p> : (
