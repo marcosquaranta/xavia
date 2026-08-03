@@ -6,10 +6,13 @@ import {
   calcularPlan, repartoHelpers, tareasDelDia, siembraDelDia, planchas,
   type Cultivo, type Slot, type NavesCap, type Dias,
 } from '@/lib/planificacion';
-import type { GrupoLotes } from '@/lib/planificacionServer';
+import type { GrupoLotes, CosechaSemanalReal, CicloRealReciente } from '@/lib/planificacionServer';
 import GruposLotes from '@/components/GruposLotes';
 
-interface Props { naves: NavesCap; defaults: Dias; repartoInicial: Slot[]; gruposTrasplante: GrupoLotes[]; gruposCosecha: GrupoLotes[] }
+interface Props {
+  naves: NavesCap; defaults: Dias; repartoInicial: Slot[]; gruposTrasplante: GrupoLotes[]; gruposCosecha: GrupoLotes[];
+  cosechaReal: CosechaSemanalReal[]; ciclosReales: CicloRealReciente; ocupacionF2Real: number;
+}
 
 const fmt = (n: number) => Math.round(n).toLocaleString('es-AR');
 const ROCKET = '#ca8a04', LEAF = '#4d7c0f';
@@ -17,7 +20,7 @@ const inp: React.CSSProperties = { width: '80px', textAlign: 'center', fontFamil
 const card: React.CSSProperties = { background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px', marginBottom: '16px' };
 const sel: React.CSSProperties = { fontSize: '13px', border: '1px solid #d1d5db', borderRadius: '6px', padding: '5px 8px', background: 'white' };
 
-export default function PlanificacionManager({ naves, defaults, repartoInicial, gruposTrasplante, gruposCosecha }: Props) {
+export default function PlanificacionManager({ naves, defaults, repartoInicial, gruposTrasplante, gruposCosecha, cosechaReal, ciclosReales, ocupacionF2Real }: Props) {
   const [tab, setTab] = useState<'calc' | 'crono'>('calc');
   const [rucDias, setRucDias] = useState(defaults.rucDias);
   const [lecF2Dias, setLecF2Dias] = useState(defaults.lecF2Dias);
@@ -45,6 +48,30 @@ export default function PlanificacionManager({ naves, defaults, repartoInicial, 
   const plan = calcularPlan(naves, { rucDias, lecF2Dias, lecF1Dias });
   const { n1, n2, rl, f2l, f1l, totRucPaq, totRucPl, totLecPlantas, totLecPl } = plan;
   const h = repartoHelpers(plan, reparto);
+
+  // ── Plan vs. Real ── promedio de las últimas semanas COMPLETAS cosechadas, comparado
+  // contra lo que dice la calculadora en este momento (reacciona a los inputs de arriba).
+  const nSemReal = cosechaReal.length;
+  const realRuculaProm = nSemReal > 0 ? Math.round(cosechaReal.reduce((a, s) => a + s.ruculaPaq, 0) / nSemReal) : 0;
+  const realLechugaProm = nSemReal > 0 ? Math.round(cosechaReal.reduce((a, s) => a + s.lechugaPlantas, 0) / nSemReal) : 0;
+  const difRucula = totRucPaq > 0 ? Math.round(((realRuculaProm - totRucPaq) / totRucPaq) * 100) : null;
+  const difLechuga = totLecPlantas > 0 ? Math.round(((realLechugaProm - totLecPlantas) / totLecPlantas) * 100) : null;
+
+  // Posibles causas — comparan los inputs de la calculadora contra lo que realmente
+  // viene pasando en los últimos lotes cosechados y la ocupación real de mesadas F2.
+  const causas: string[] = [];
+  if (ciclosReales.rucula.muestras > 0 && ciclosReales.rucula.dias > rucDias * 1.1) {
+    causas.push(`El ciclo real de rúcula (últimos lotes cosechados) es de ${ciclosReales.rucula.dias}d, pero acá arriba estás calculando con ${rucDias}d — con un ciclo más largo cada lote tarda más en liberar el perfil, así que el rendimiento real queda por debajo del plan.`);
+  }
+  if (ciclosReales.lechuga.muestras > 0 && ciclosReales.lechuga.fase2 > lecF2Dias * 1.1) {
+    causas.push(`El ciclo real de lechuga en Fase 2 es de ${ciclosReales.lechuga.fase2}d, pero estás calculando con ${lecF2Dias}d.`);
+  }
+  if (ciclosReales.lechuga.muestras > 0 && ciclosReales.lechuga.fase1 > 0 && ciclosReales.lechuga.fase1 > lecF1Dias * 1.1) {
+    causas.push(`El ciclo real de lechuga en Fase 1 es de ${ciclosReales.lechuga.fase1}d, pero estás calculando con ${lecF1Dias}d.`);
+  }
+  if (ocupacionF2Real > 0 && ocupacionF2Real < 90) {
+    causas.push(`La ocupación real de mesadas F2 es del ${ocupacionF2Real}% — la calculadora asume el 100% de la capacidad siempre ocupada, así que con menos ocupación real se cosecha menos de lo que dice el plan.`);
+  }
 
   // Mano de obra
   const hRuc = totRucPaq / Math.max(1, ritmoRuc / 2);
@@ -190,6 +217,46 @@ export default function PlanificacionManager({ naves, defaults, repartoInicial, 
             <Tot v={String(planchas(totLecPl))} l="PLANCHAS LECHUGA" c={LEAF} />
             <Tot v={fmt(totLecPlantas)} l="PLANTAS/SEM" c={LEAF} />
           </div>
+        </div>
+
+        <div style={card}>
+          <p style={{ margin: '0 0 4px', fontSize: '15px', fontWeight: 700 }}>📊 Plan vs. Real</p>
+          <p style={{ margin: '0 0 14px', fontSize: '12px', color: '#6b7280' }}>
+            {nSemReal > 0
+              ? <>Promedio real cosechado en las últimas <strong>{nSemReal} semanas completas</strong>, contra lo que dice el plan de arriba (reacciona a los días de ciclo que uses).</>
+              : 'Todavía no hay suficientes semanas de cosecha registradas para comparar.'}
+          </p>
+          {nSemReal > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '14px', marginBottom: causas.length > 0 ? '14px' : 0 }}>
+              {([
+                { label: 'Rúcula', unidad: 'paq/sem', plan: totRucPaq, real: realRuculaProm, dif: difRucula, color: ROCKET, bg: '#fffbeb', border: '#fde68a' },
+                { label: 'Lechuga', unidad: 'plantas/sem', plan: totLecPlantas, real: realLechugaProm, dif: difLechuga, color: LEAF, bg: '#f0fdf4', border: '#bbf7d0' },
+              ] as const).map((r) => (
+                <div key={r.label} style={{ background: r.bg, border: `1px solid ${r.border}`, borderRadius: '8px', padding: '12px' }}>
+                  <p style={{ margin: '0 0 8px', fontSize: '12px', fontWeight: 700, color: r.color, textTransform: 'uppercase' }}>● {r.label}</p>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '4px' }}>
+                    <span style={{ color: '#6b7280' }}>Plan</span><strong>{fmt(r.plan)} {r.unidad}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '8px' }}>
+                    <span style={{ color: '#6b7280' }}>Real (promedio)</span><strong>{fmt(r.real)} {r.unidad}</strong>
+                  </div>
+                  {r.dif !== null && (
+                    <p style={{ margin: 0, fontSize: '12px', fontWeight: 700, color: r.dif >= 0 ? '#059669' : '#dc2626', borderTop: '1px dashed rgba(0,0,0,0.1)', paddingTop: '6px' }}>
+                      {r.dif >= 0 ? '↑' : '↓'} {Math.abs(r.dif)}% vs. plan
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {causas.length > 0 && (
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '12px 14px' }}>
+              <p style={{ margin: '0 0 6px', fontSize: '12px', fontWeight: 700, color: '#991b1b' }}>Posibles causas de la diferencia</p>
+              <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#7f1d1d', lineHeight: 1.6 }}>
+                {causas.map((c, i) => <li key={i}>{c}</li>)}
+              </ul>
+            </div>
+          )}
         </div>
 
         <div style={card}>

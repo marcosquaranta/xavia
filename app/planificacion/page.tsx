@@ -2,7 +2,8 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { parseReparto, REPARTO_DEFAULT, type Slot } from '@/lib/planificacion';
-import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
+import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, cosechaRealUltimasSemanas, ciclosRealesRecientes, type GrupoLotes } from '@/lib/planificacionServer';
+import { tubosPorMesada } from '@/lib/ocupacion';
 import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
 import PlanificacionManager from './PlanificacionManager';
@@ -33,9 +34,19 @@ export default async function PlanificacionPage() {
   const defaults = diasCicloDefault(lotes, movimientos);
   let gruposTrasplante: GrupoLotes[] = [];
   let gruposCosecha: GrupoLotes[] = [];
+  let cosechaReal: ReturnType<typeof cosechaRealUltimasSemanas> = [];
+  let ciclosReales: ReturnType<typeof ciclosRealesRecientes> = { rucula: { dias: 0, muestras: 0 }, lechuga: { fase1: 0, fase2: 0, muestras: 0 } };
+  let ocupacionF2Real = 0;
   try {
     gruposTrasplante = trasplantesAgrupados(lotes, movimientos);
     gruposCosecha = cosechasAgrupadas(lotes, movimientos);
+    cosechaReal = cosechaRealUltimasSemanas(lotes, movimientos);
+    ciclosReales = ciclosRealesRecientes(lotes, movimientos);
+    const tubosMesadas = tubosPorMesada(ubicaciones, lotes);
+    const mesadasF2 = tubosMesadas.flatMap((n: any) => (n.mesadas || []).filter((m: any) => m.sector_fase !== 'fase_1'));
+    ocupacionF2Real = mesadasF2.length > 0
+      ? Math.round(mesadasF2.reduce((a: number, m: any) => a + m.tubos_ocupados, 0) / Math.max(1, mesadasF2.reduce((a: number, m: any) => a + m.tubos_totales, 0)) * 100)
+      : 0;
   } catch {}
 
   return (
@@ -44,7 +55,8 @@ export default async function PlanificacionPage() {
       <div className="container">
         <h1 className="page-title">Planificación y Producción</h1>
         <p className="page-subtitle">Cuánto sembrar por semana según el ciclo, alimentado por la capacidad real de las naves y el último cultivo cosechado.</p>
-        <PlanificacionManager naves={naves} defaults={defaults} repartoInicial={reparto} gruposTrasplante={gruposTrasplante} gruposCosecha={gruposCosecha} />
+        <PlanificacionManager naves={naves} defaults={defaults} repartoInicial={reparto} gruposTrasplante={gruposTrasplante} gruposCosecha={gruposCosecha}
+          cosechaReal={cosechaReal} ciclosReales={ciclosReales} ocupacionF2Real={ocupacionF2Real} />
       </div>
     </>
   );

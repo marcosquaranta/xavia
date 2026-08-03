@@ -201,3 +201,60 @@ export function diasCicloDefault(lotes: Lote[], movimientos: Movimiento[]): Dias
     lecFuente: ultimoLechuga ? `último lote ${ultimoLechuga.id_lote} · cosechado ${fmtFechaCorta(ultimoLechuga.fecha_cosecha)}` : 'sin cosechas registradas, valor por defecto',
   };
 }
+
+// ── Comparación Plan vs. Real, para entender por qué difieren ──
+
+// Cosecha real por semana calendario (lunes a domingo), últimas N semanas COMPLETAS
+// (la semana en curso queda afuera del promedio por estar incompleta y subestimar el
+// ritmo real). Rúcula en paquetes, lechuga en plantas — mismas unidades que el total
+// semanal que calcula la calculadora (totRucPaq/totLecPlantas).
+export interface CosechaSemanalReal { semanaLabel: string; ruculaPaq: number; lechugaPlantas: number }
+export function cosechaRealUltimasSemanas(lotes: Lote[], movimientos: Movimiento[], nSemanas = 6): CosechaSemanalReal[] {
+  const lotesMap = new Map(lotes.map(l => [l.id_lote, l]));
+  const hoy = new Date();
+  const lunesDeSemana = (d: Date) => { const r = new Date(d); const dow = r.getDay(); r.setDate(r.getDate() - (dow === 0 ? 6 : dow - 1)); r.setHours(0, 0, 0, 0); return r; };
+  const lunesActual = lunesDeSemana(hoy);
+  const out: CosechaSemanalReal[] = [];
+  for (let i = nSemanas; i >= 1; i--) {
+    const inicio = new Date(lunesActual); inicio.setDate(inicio.getDate() - i * 7);
+    const fin = new Date(inicio); fin.setDate(fin.getDate() + 7);
+    let ruculaPaq = 0, lechugaPlantas = 0;
+    for (const m of movimientos) {
+      if (m.tipo !== 'cosecha' || !m.fecha) continue;
+      const f = new Date(String(m.fecha).split(/[T ]/)[0] + 'T12:00:00');
+      if (isNaN(f.getTime()) || f < inicio || f >= fin) continue;
+      const lote = lotesMap.get(String(m.id_lote || ''));
+      const u = Number(m.unidades_cosechadas) || 0;
+      if (esRuculaVar(lote?.variedad || '')) ruculaPaq += u; else lechugaPlantas += u;
+    }
+    out.push({ semanaLabel: i === 1 ? 'Sem. pasada' : `S-${i}`, ruculaPaq, lechugaPlantas });
+  }
+  return out;
+}
+
+// Ciclo real reciente (últimos N días) por cultivo — para comparar contra los días que
+// el usuario está usando en la calculadora ("Días en perfil"). Si el ciclo real quedó
+// más largo que el configurado, el plan sobreestima el rendimiento real.
+export interface CicloRealReciente { rucula: { dias: number; muestras: number }; lechuga: { fase1: number; fase2: number; muestras: number } }
+export function ciclosRealesRecientes(lotes: Lote[], movimientos: Movimiento[], ultimosNDias = 60): CicloRealReciente {
+  const limite = new Date(); limite.setDate(limite.getDate() - ultimosNDias);
+  const cosechados = lotes.filter(l => {
+    if (l.estado !== 'cosechado' || !l.fecha_cosecha) return false;
+    const f = new Date(String(l.fecha_cosecha).split(/[T ]/)[0] + 'T12:00:00');
+    return !isNaN(f.getTime()) && f >= limite;
+  });
+  const diasDe = (l: Lote) => { try { return calcularDiasPorFase(l, movimientos); } catch { return null; } };
+  const prom = (xs: number[]) => xs.length > 0 ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0;
+
+  const ruculaDias = cosechados.filter(l => esRuculaVar(l.variedad)).map(diasDe)
+    .filter((d): d is NonNullable<typeof d> => d !== null).map(d => d.fase_2 || d.total).filter(d => d > 0);
+  const lechugaDias = cosechados.filter(l => !esRuculaVar(l.variedad)).map(diasDe)
+    .filter((d): d is NonNullable<typeof d> => d !== null);
+  const lechugaF1 = lechugaDias.map(d => d.fase_1).filter((d): d is number => d !== null && d > 0);
+  const lechugaF2 = lechugaDias.map(d => d.fase_2).filter(d => d > 0);
+
+  return {
+    rucula: { dias: prom(ruculaDias), muestras: ruculaDias.length },
+    lechuga: { fase1: prom(lechugaF1), fase2: prom(lechugaF2), muestras: lechugaF2.length },
+  };
+}
