@@ -95,7 +95,7 @@ export interface StockMes {
   fecha_carga: string;
 }
 
-export type CategoriaGasto = 'insumos' | 'gastos_generales' | 'sueldos' | 'mantenimiento' | 'inversion_equipamiento' | 'inversion_nave3' | 'abonos';
+export type CategoriaGasto = 'insumos' | 'gastos_generales' | 'sueldos' | 'mantenimiento' | 'inversion_equipamiento' | 'inversion_nave3' | 'abonos' | 'impuestos';
 export const CATEGORIAS_GASTO: { value: CategoriaGasto; label: string }[] = [
   { value: 'gastos_generales', label: 'Gastos generales' },
   { value: 'insumos', label: 'Insumos' },
@@ -104,6 +104,7 @@ export const CATEGORIAS_GASTO: { value: CategoriaGasto; label: string }[] = [
   { value: 'inversion_equipamiento', label: 'Inversión en equipamiento' },
   { value: 'inversion_nave3', label: 'Inversión 3ra Nave' },
   { value: 'abonos', label: 'Abonos' },
+  { value: 'impuestos', label: 'Impuestos' },
 ];
 export type MedioPagoGasto = 'Brubank' | 'Macro' | 'Caja MQ' | 'Caja FL' | 'Caja Marce' | 'Caja JP';
 export const MEDIOS_PAGO: MedioPagoGasto[] = ['Brubank', 'Macro', 'Caja MQ', 'Caja FL', 'Caja Marce', 'Caja JP'];
