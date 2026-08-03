@@ -22,7 +22,9 @@ export default function TrasplanteForm({
   const [fecha, setFecha] = useState(HOY);
   const [ubicId, setUbicId] = useState(ubicacionesDestino[0]?.id_ubicacion || '');
   const [descarte, setDescarte] = useState(0);
-  const [destinoRestante, setDestinoRestante] = useState<'queda' | 'descartar'>('queda');
+  // Sin selección por defecto — antes quedaba pre-marcado "queda en plantinera" y era
+  // fácil confirmar el trasplante sin pensarlo, perdiendo el registro de la pérdida real.
+  const [destinoRestante, setDestinoRestante] = useState<'queda' | 'descartar' | null>(null);
 
   const [tubos, setTubos] = useState(0);
   const [posiciones, setPosiciones] = useState(0);
@@ -76,6 +78,8 @@ export default function TrasplanteForm({
   const seDivide = plantasQueQuedan > 0 && plantines > 0;
   const superaDisponibles = plantines + descarte > cantidadActual;
   const faltante = Math.max(0, plantines + descarte - cantidadActual);
+  const descartePct = cantidadActual > 0 ? (descarte / cantidadActual) * 100 : 0;
+  const descarteAlto = descartePct > 5;
 
   // Cuánto SÍ alcanza a llenar con lo disponible, para sugerir una corrección
   const maxPosiciones = orificios > 0 ? Math.floor(cantidadActual / factor) : 0;
@@ -88,6 +92,22 @@ export default function TrasplanteForm({
     if (plantines <= 0) { setError('Ingresá tubos, posiciones, o la cantidad de plantines a trasplantar'); setLoading(false); return; }
     if (plantines + descarte > cantidadActual) {
       setError('Estás trasplantando ' + (plantines + descarte) + ' pero solo tenés ' + cantidadActual + ' disponibles.');
+      setLoading(false); return;
+    }
+    // Si queda algo sin trasplantar, hay que decidir explícitamente qué pasó con eso
+    // (antes quedaba pre-marcado "queda en plantinera" y se podía confirmar sin pensarlo,
+    // perdiendo el registro real de la pérdida).
+    if (hayRestante && destinoRestante === null) {
+      setError(`Decidí qué pasa con los ${restante} plantines que no vas a trasplantar ahora.`);
+      setLoading(false); return;
+    }
+    // Sin restante y sin descarte cargado: confirmar a propósito que no hubo ninguna
+    // pérdida, en vez de asumirlo en silencio — es el caso más común de por qué no
+    // quedaba registrado ningún descarte en plantín→F1 ni F1→F2.
+    if (!hayRestante && descarte === 0 && !window.confirm('No cargaste descarte. ¿Confirmás que no se perdió NINGÚN plantín en este trasplante (100% llegó sano)?')) {
+      setLoading(false); return;
+    }
+    if (descarteAlto && !window.confirm(`Descarte alto: ${descarte} plantines, ${Math.round(descartePct)}% de los disponibles (más de 5%). ¿Confirmás registrar el trasplante igual?`)) {
       setLoading(false); return;
     }
     try {
@@ -218,9 +238,19 @@ export default function TrasplanteForm({
       )}
 
       {/* Descarte */}
-      <div style={{ marginBottom: '14px', maxWidth: '220px' }}>
-        <label>Descarte al trasplantar</label>
-        <NumberInput value={descarte} onChange={setDescarte} min={0} disabled={loading} />
+      <div style={{ marginBottom: '14px', padding: '14px 16px', background: descarteAlto ? '#fef2f2' : '#fafafa', border: `1px solid ${descarteAlto ? '#fecaca' : '#e5e7eb'}`, borderRadius: '8px' }}>
+        <label style={{ color: descarteAlto ? '#991b1b' : undefined }}>Plantines perdidos en este trasplante (descarte)</label>
+        <p style={{ margin: '0 0 8px', fontSize: '11px', color: '#6b7280' }}>
+          Contá los plantines que <strong>no</strong> vas a trasplantar y tampoco quedan sanos en la mesada — muertos, débiles, sin cuajar, etc. No lo dejes en blanco por costumbre: si no hubo pérdida, va a quedar en 0 y te lo vamos a confirmar antes de guardar.
+        </p>
+        <div style={{ maxWidth: '160px' }}>
+          <NumberInput value={descarte} onChange={setDescarte} min={0} disabled={loading} />
+        </div>
+        {descarte > 0 && (
+          <p style={{ margin: '8px 0 0', fontSize: '12px', fontWeight: 700, color: descarteAlto ? '#dc2626' : '#92400e' }}>
+            {descarteAlto ? '⚠️ ' : ''}{Math.round(descartePct)}% de los {cantidadActual} disponibles{descarteAlto ? ' (más de 5%)' : ''}
+          </p>
+        )}
       </div>
 
       {/* Resumen */}
@@ -255,14 +285,14 @@ export default function TrasplanteForm({
 
       {/* Destino del restante */}
       {hayRestante && (
-        <div style={{ padding: '14px 16px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', marginBottom: '14px' }}>
-          <p style={{ margin: '0 0 10px', fontWeight: 600, fontSize: '13px', color: '#78350f' }}>
-            ¿Qué hacemos con los {restante} plantines restantes?
+        <div style={{ padding: '14px 16px', background: destinoRestante ? '#fffbeb' : '#fef2f2', border: `1px solid ${destinoRestante ? '#fde68a' : '#fecaca'}`, borderRadius: '8px', marginBottom: '14px' }}>
+          <p style={{ margin: '0 0 10px', fontWeight: 600, fontSize: '13px', color: destinoRestante ? '#78350f' : '#991b1b' }}>
+            {destinoRestante ? '' : '⚠️ '}¿Qué pasó con los {restante} plantines que no vas a trasplantar ahora? — elegí una opción
           </p>
           <div style={{ display: 'flex', gap: '8px', flexDirection: 'column' }}>
             {[
-              ['queda', `Quedan en plantinera (el lote sigue con ${restante} plantines)`],
-              ['descartar', 'Descarte — el lote se cierra con 0'],
+              ['queda', `Siguen sanos en la plantinera (el lote sigue activo con ${restante} plantines, para trasplantar después)`],
+              ['descartar', `Se perdieron / no sirven — se suman al descarte y el lote se cierra con 0`],
             ].map(([val, label]: any) => (
               <label key={val} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', padding: '8px 12px', background: destinoRestante === val ? (val === 'queda' ? '#fef3c7' : '#fee2e2') : 'transparent', borderRadius: '6px', fontSize: '13px', textTransform: 'none', letterSpacing: 'normal', margin: 0, color: '#1f2937' }}>
                 <input type="radio" name="destRest" value={val} checked={destinoRestante === val} onChange={() => setDestinoRestante(val as 'queda' | 'descartar')} disabled={loading} style={{ width: 'auto' }} />
