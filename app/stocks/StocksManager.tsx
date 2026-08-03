@@ -294,7 +294,12 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
       const esReferencia = usoTeorico === null && usoReferencia !== null;
       const precio = precioUltimoConocido(art.id_articulo, num(vals.precio));
       const valorizado = precio !== null ? fin * precio : null;
-      return { art, ini, comp, fin, usoReal, usoTeorico, diff, pct, usoReferencia, esReferencia, precio, valorizado };
+      // Uso del mes pasado (real, ya cerrado) — para comparar contra el uso real de este
+      // mes y ver de un vistazo si se usó más o menos, sin depender de que haya fórmula
+      // de uso teórico configurada.
+      const usoMesPasado = getUso(art.id_articulo, anioPrev, mesPrev);
+      const pctVsMesPasado = usoMesPasado !== null && usoMesPasado !== 0 ? ((usoReal - usoMesPasado) / Math.abs(usoMesPasado)) * 100 : null;
+      return { art, ini, comp, fin, usoReal, usoTeorico, diff, pct, usoReferencia, esReferencia, precio, valorizado, usoMesPasado, pctVsMesPasado };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [artActivos, editValues, stockMes, drivers, driversMesAnterior, stocks, anio, mes, anioPrev, mesPrev]);
@@ -692,6 +697,7 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                       <th style={{ textAlign: 'right', width: '90px' }}>Precio compra</th>
                       <th style={{ textAlign: 'right', width: '100px' }}>Stock final</th>
                       <th style={{ textAlign: 'right', width: '80px', color: '#059669', fontWeight: 700 }}>Uso real</th>
+                      <th style={{ textAlign: 'right', width: '100px', fontWeight: 700 }} title="Uso real del mes anterior, ya cerrado — verde si este mes se usó menos, rojo si se usó más">Uso mes pasado</th>
                       <th style={{ textAlign: 'right', width: '80px', color: '#6b7280', fontWeight: 700 }} title="≈ = referencia estimada (sin fórmula configurada), no un target preciso">Uso teórico</th>
                       <th style={{ textAlign: 'right', width: '100px', fontWeight: 700 }}>Dif. real vs teórico</th>
                       <th style={{ textAlign: 'right', width: '100px', fontWeight: 700 }}>Stock final valorizado</th>
@@ -743,6 +749,18 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                           <td style={{ textAlign: 'right', fontWeight: 700, color: r.usoReal > 0 ? '#059669' : r.usoReal < 0 ? '#dc2626' : '#9ca3af', fontSize: '13px' }}>
                             {(r.ini || r.comp || r.fin) ? fmt(r.usoReal) : '—'}
                           </td>
+                          <td style={{ textAlign: 'right', fontSize: '12px' }}>
+                            {r.usoMesPasado !== null ? (
+                              <>
+                                <span style={{ color: '#6b7280' }}>{fmt(r.usoMesPasado)}</span>
+                                {(r.ini || r.comp || r.fin) && r.pctVsMesPasado !== null && (
+                                  <span style={{ marginLeft: '4px', fontWeight: 700, color: r.pctVsMesPasado <= 0 ? '#059669' : '#dc2626' }}>
+                                    {r.pctVsMesPasado > 0 ? '↑' : r.pctVsMesPasado < 0 ? '↓' : '·'} {fmt(Math.abs(r.pctVsMesPasado), 0)}%
+                                  </span>
+                                )}
+                              </>
+                            ) : '—'}
+                          </td>
                           <td style={{ textAlign: 'right', color: '#6b7280', fontSize: '13px' }}>
                             {r.usoTeorico !== null ? (
                               fmt(r.usoTeorico)
@@ -776,7 +794,7 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                         </tr>
                         {comprandoAqui && (
                           <tr style={{ background: '#eff6ff' }}>
-                            <td colSpan={11} style={{ padding: '10px 12px' }}>
+                            <td colSpan={12} style={{ padding: '10px 12px' }}>
                               <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
                                 <p style={{ margin: 0, fontSize: '12px', fontWeight: 700, color: '#1e40af', width: '100%' }}>
                                   🛒 Ingresar compra — {art.articulo}
@@ -841,7 +859,7 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                     })}
                     {artscat.some((a) => resumenArticulos.find((x) => x.art.id_articulo === a.id_articulo)?.valorizado) && (
                       <tr style={{ borderTop: '2px solid #e5e7eb' }}>
-                        <td colSpan={9} style={{ textAlign: 'right', fontSize: '11px', color: '#6b7280', fontWeight: 700, padding: '6px 8px' }}>Subtotal valorizado {cat}</td>
+                        <td colSpan={10} style={{ textAlign: 'right', fontSize: '11px', color: '#6b7280', fontWeight: 700, padding: '6px 8px' }}>Subtotal valorizado {cat}</td>
                         <td style={{ textAlign: 'right', fontSize: '12px', fontWeight: 800, padding: '6px 8px' }}>
                           ${fmt(artscat.reduce((acc, a) => acc + (resumenArticulos.find((x) => x.art.id_articulo === a.id_articulo)?.valorizado ?? 0), 0), 0)}
                         </td>
