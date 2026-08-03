@@ -33,6 +33,8 @@ export async function POST(req: NextRequest) {
 
     let mesPrev = Number(mes) - 1, anioPrev = Number(anio);
     if (mesPrev === 0) { mesPrev = 12; anioPrev--; }
+    let mesSig = Number(mes) + 1, anioSig = Number(anio);
+    if (mesSig === 13) { mesSig = 1; anioSig++; }
 
     const actualizaciones: { keyValue: string; updates: Record<string, any> }[] = [];
     const nuevasFilas: any[][] = [];
@@ -74,6 +76,24 @@ export async function POST(req: NextRequest) {
         obj.uso_calculado = (Number(obj.stock_inicial) || 0) + (Number(obj.compras) || 0) - (Number(obj.stock_final) || 0);
         nuevasFilas.push(headers.map((h) => (obj[h] !== undefined ? obj[h] : '')));
         creados++;
+      }
+
+      // Si estamos cargando "stock final" y el mes siguiente YA tiene una fila propia,
+      // su stock_inicial quedó fotografiado al momento en que se creó — hay que
+      // repropagar el nuevo valor para adelante, si no queda desactualizado (o en 0)
+      // aunque este mes ya esté bien. Mismo criterio en /api/stocks/guardar.
+      if (columna === 'stock_final') {
+        const stockSiguiente = stocks.find((s) =>
+          s.id_articulo === item.id_articulo && String(s.anio) === String(anioSig) && String(s.mes) === String(mesSig)
+        );
+        if (stockSiguiente && Number(stockSiguiente.stock_inicial) !== comp) {
+          const compSig = Number(stockSiguiente.compras) || 0;
+          const finSig = Number(stockSiguiente.stock_final) || 0;
+          actualizaciones.push({
+            keyValue: stockSiguiente.id_stock,
+            updates: { stock_inicial: comp, uso_calculado: comp + compSig - finSig },
+          });
+        }
       }
     }
 

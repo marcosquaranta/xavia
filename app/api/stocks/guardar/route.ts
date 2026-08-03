@@ -38,6 +38,25 @@ export async function POST(req: NextRequest) {
 
     const fechaCarga = new Date().toISOString().split('T')[0];
 
+    // Si el mes siguiente ya tiene una fila cargada, su stock_inicial quedó "fotografiado"
+    // en el momento en que se creó — si acá corregimos el stock_final DESPUÉS de eso, hay
+    // que repropagarlo para adelante, si no el mes siguiente queda con un stock_inicial
+    // viejo (o en 0) aunque este mes ya esté bien. Mismo criterio en /compras-masivas.
+    async function propagarAlMesSiguiente() {
+      let mesSig = Number(mes) + 1, anioSig = Number(anio);
+      if (mesSig === 13) { mesSig = 1; anioSig = Number(anio) + 1; }
+      const stockSiguiente = stocks.find((s) =>
+        s.id_articulo === id_articulo && String(s.anio) === String(anioSig) && String(s.mes) === String(mesSig)
+      );
+      if (stockSiguiente && Number(stockSiguiente.stock_inicial) !== fin) {
+        const compSig = Number(stockSiguiente.compras) || 0;
+        const finSig = Number(stockSiguiente.stock_final) || 0;
+        await updateRow('Stocks', 'id_stock', stockSiguiente.id_stock, {
+          stock_inicial: fin, uso_calculado: fin + compSig - finSig,
+        });
+      }
+    }
+
     if (existente) {
       const updates: Record<string, any> = {
         stock_inicial: ini, compras: comp, stock_final: fin,
@@ -46,6 +65,7 @@ export async function POST(req: NextRequest) {
       // Solo pisa el precio si se cargó uno nuevo — conserva el último precio conocido si se deja vacío.
       if (precio > 0) updates.precio_unitario = precio;
       await updateRow('Stocks', 'id_stock', existente.id_stock, updates);
+      await propagarAlMesSiguiente();
       return NextResponse.json({ ok: true, accion: 'actualizado' });
     }
 
@@ -61,6 +81,7 @@ export async function POST(req: NextRequest) {
       anio, mes, stock_inicial: ini, compras: comp, stock_final: fin, uso_calculado: uso,
       precio_unitario: precio || '', notas: notas || '', usuario: user.email, fecha_carga: fechaCarga,
     });
+    await propagarAlMesSiguiente();
 
     return NextResponse.json({ ok: true, accion: 'creado', id_stock: idNuevo });
   } catch (err: any) {
