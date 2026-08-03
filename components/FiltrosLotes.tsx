@@ -114,8 +114,9 @@ export default function FiltrosLotes({ cultivoActivo, faseActiva, naveActiva, me
         ))}
       </div>
 
-      {/* Fila 4: Mesada — filtrada por cultivo */}
-      {mesadas.length > 0 && (
+      {/* Fila 4: Mesada — filtrada por cultivo, solo tiene sentido con una Nave elegida
+          (si son "Ambas" las mesadas de las dos naves se mezclan sin poder distinguirlas) */}
+      {naveActiva !== 'todas' && mesadas.length > 0 && (
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.3px', minWidth: '52px' }}>Mesada</span>
           <Link href={url(cultivoActivo, faseValidada, naveActiva, 'todas')} style={{ textDecoration: 'none' }}>
