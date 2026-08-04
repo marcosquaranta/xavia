@@ -332,9 +332,7 @@ export default async function PanelPage() {
         <div style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)', border:'1px solid #bfdbfe', borderRadius:'10px', padding:'14px', marginBottom:'14px' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'8px', flexWrap:'wrap', gap:'4px' }}>
               <p style={{ margin:0, fontSize:'14px', fontWeight:800 }}>📋 Tareas de hoy</p>
-              {user.rol === 'admin' && (
-                <Link href="/planificacion" style={{ fontSize:'11px', color:'#6b7280', textDecoration:'none' }}>Planificación →</Link>
-              )}
+              <Link href="/planificacion" style={{ fontSize:'11px', color:'#6b7280', textDecoration:'none' }}>Planificación →</Link>
             </div>
             <div style={{ background:'white', borderRadius:'7px', padding:'10px 12px', border:'1px solid #e5e7eb', marginBottom:'10px' }}>
                 <p style={{ margin:'0 0 8px', fontSize:'13px', fontWeight:700 }}>⚠️ Alertas</p>
