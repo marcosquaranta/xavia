@@ -225,3 +225,40 @@ export function tubosPorMesada(ubicaciones: Ubicacion[], lotes: Lote[]): Resumen
     };
   });
 }
+
+// ── Ocupación promedio por nave en los últimos N días, a partir del snapshot diario
+// (hoja "OcupacionHistorial" que carga el cron) ── para el análisis mensual: no es la
+// ocupación de HOY sino el promedio real del período, ponderado por tubos (no un
+// promedio simple de los % de cada mesada, que pesaría igual una mesada chica que una
+// grande).
+export interface OcupacionHistorialRow { fecha: string; mesada: string; nave: string | number; tubos_totales: string | number; tubos_ocupados: string | number; pct: string | number; }
+export function ocupacionPromedioPorNave(rows: OcupacionHistorialRow[], dias = 30): { nave: number; pctPromedio: number; diasConDato: number }[] {
+  const hoy = new Date();
+  const limite = new Date(hoy); limite.setDate(limite.getDate() - dias);
+  const limiteStr = limite.toISOString().split('T')[0];
+
+  const porFechaNave = new Map<string, { tot: number; ocu: number }>();
+  for (const r of rows) {
+    if (!r.fecha || r.fecha < limiteStr) continue;
+    const nave = Number(r.nave);
+    const key = `${r.fecha}||${nave}`;
+    const cur = porFechaNave.get(key) || { tot: 0, ocu: 0 };
+    cur.tot += Number(r.tubos_totales) || 0;
+    cur.ocu += Number(r.tubos_ocupados) || 0;
+    porFechaNave.set(key, cur);
+  }
+  const porNave = new Map<number, number[]>();
+  for (const [key, { tot, ocu }] of porFechaNave) {
+    const nave = Number(key.split('||')[1]);
+    const pctDia = tot > 0 ? (ocu / tot) * 100 : 0;
+    if (!porNave.has(nave)) porNave.set(nave, []);
+    porNave.get(nave)!.push(pctDia);
+  }
+  return Array.from(porNave.entries())
+    .map(([nave, pcts]) => ({
+      nave,
+      pctPromedio: pcts.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : 0,
+      diasConDato: pcts.length,
+    }))
+    .sort((a, b) => a.nave - b.nave);
+}

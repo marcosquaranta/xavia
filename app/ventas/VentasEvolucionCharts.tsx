@@ -62,9 +62,15 @@ export function GraficoVentaPorArticulo({ datos }: { datos: PuntoArticulo[] }) {
           <YAxis tick={{ fontSize: 11, fill: INK_MUTED }} axisLine={false} tickLine={false} tickFormatter={fmtMiles} width={36} />
           <Tooltip content={<TooltipCard formatter={fmtEntero} />} />
           <Legend wrapperStyle={{ fontSize: '12px', color: INK_SECUNDARIA }} iconType="circle" iconSize={8} />
-          <Bar dataKey="rucula" name="Rúcula (paq.)" stackId="a" fill={CATEGORICOS[0]} stroke="#fff" strokeWidth={2} />
-          <Bar dataKey="lechuga" name="Lechuga (pl.)" stackId="a" fill={CATEGORICOS[1]} stroke="#fff" strokeWidth={2} />
-          <Bar dataKey="albahaca" name="Albahaca (pl.)" stackId="a" fill={CATEGORICOS[2]} stroke="#fff" strokeWidth={2} radius={[4, 4, 0, 0]} />
+          <Bar dataKey="rucula" name="Rúcula (paq.)" stackId="a" fill={CATEGORICOS[0]} stroke="#fff" strokeWidth={2}>
+            <LabelList dataKey="rucula" position="inside" fill="#fff" fontSize={10} fontWeight={700} formatter={(v: number) => v > 0 ? fmtEntero(v) : ''} />
+          </Bar>
+          <Bar dataKey="lechuga" name="Lechuga (pl.)" stackId="a" fill={CATEGORICOS[1]} stroke="#fff" strokeWidth={2}>
+            <LabelList dataKey="lechuga" position="inside" fill="#fff" fontSize={10} fontWeight={700} formatter={(v: number) => v > 0 ? fmtEntero(v) : ''} />
+          </Bar>
+          <Bar dataKey="albahaca" name="Albahaca (pl.)" stackId="a" fill={CATEGORICOS[2]} stroke="#fff" strokeWidth={2} radius={[4, 4, 0, 0]}>
+            <LabelList dataKey="albahaca" position="inside" fill="#111827" fontSize={10} fontWeight={700} formatter={(v: number) => v > 0 ? fmtEntero(v) : ''} />
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
       <TablaToggle>
@@ -81,22 +87,24 @@ export function GraficoVentaPorArticulo({ datos }: { datos: PuntoArticulo[] }) {
   );
 }
 
-export function GraficoVentaPorCliente({ semanal, mensual }: { semanal: EvolucionClientes; mensual: EvolucionClientes }) {
-  const [modo, setModo] = useState<'semana' | 'mes'>('semana');
-  const datos = modo === 'semana' ? semanal : mensual;
+export function GraficoVentaPorCliente({ semanal, mensual, ocultarToggle = false }: { semanal?: EvolucionClientes; mensual: EvolucionClientes; ocultarToggle?: boolean }) {
+  const [modo, setModo] = useState<'semana' | 'mes'>(ocultarToggle ? 'mes' : 'semana');
+  const datos = modo === 'semana' ? (semanal ?? mensual) : mensual;
   const data = datos.meses.map((m, i) => ({ label: m.label, ...datos.puntos[i] }));
   return (
     <div style={cardStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
-        <p style={{ ...titleStyle, margin: 0 }}>Evolución de venta por cliente <span style={{ fontWeight: 400, color: '#9ca3af' }}>· top {datos.series.length} · unidades totales</span></p>
-        <div style={{ display: 'flex', gap: '4px' }}>
-          {([['semana', 'Por semana'], ['mes', 'Por mes']] as const).map(([v, l]) => (
-            <button key={v} onClick={() => setModo(v)}
-              style={{ padding: '3px 10px', borderRadius: '5px', fontSize: '11px', fontWeight: modo === v ? 700 : 400, background: modo === v ? '#111827' : '#f3f4f6', color: modo === v ? 'white' : '#6b7280', border: 'none', cursor: 'pointer' }}>
-              {l}
-            </button>
-          ))}
-        </div>
+        <p style={{ ...titleStyle, margin: 0 }}>Evolución de venta por cliente <span style={{ fontWeight: 400, color: '#9ca3af' }}>· top {datos.series.length} · unidades totales{ocultarToggle ? ' · por mes' : ''}</span></p>
+        {!ocultarToggle && (
+          <div style={{ display: 'flex', gap: '4px' }}>
+            {([['semana', 'Por semana'], ['mes', 'Por mes']] as const).map(([v, l]) => (
+              <button key={v} onClick={() => setModo(v)}
+                style={{ padding: '3px 10px', borderRadius: '5px', fontSize: '11px', fontWeight: modo === v ? 700 : 400, background: modo === v ? '#111827' : '#f3f4f6', color: modo === v ? 'white' : '#6b7280', border: 'none', cursor: 'pointer' }}>
+                {l}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <ResponsiveContainer width="100%" height={280}>
         <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>

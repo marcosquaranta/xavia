@@ -18,6 +18,11 @@ function partesArg(iso: string): { fecha: string; horaMin: number } {
 export function hoyArg(): string {
   return partesArg(new Date().toISOString()).fecha;
 }
+// Fecha (YYYY-MM-DD) en Argentina de un fichaje puntual — para agrupar fichajes por
+// semana/día fuera de este archivo (ver lib/productividad.ts) sin duplicar el parseo TZ.
+export function fechaArg(iso: string): string {
+  return partesArg(iso).fecha;
+}
 function fmtHoraMin(min: number): string {
   const h = Math.floor(min / 60), m = min % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;

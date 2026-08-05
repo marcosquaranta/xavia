@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { calcularDiasPorFase } from '@/lib/lotes';
@@ -6,8 +7,9 @@ import { calcularCapacidad, diasCicloDefault } from '@/lib/planificacionServer';
 import { calcularPlan, repartoHelpers, parseReparto, REPARTO_DEFAULT, DIA_SIEMBRA, CUB, planchas } from '@/lib/planificacion';
 import { calcularCapacidadProductiva } from '@/lib/capacidadProductiva';
 import { cosechadoEsteMes } from '@/lib/estadisticas';
-import { getRegistrosCrossChex } from '@/lib/crosschex';
+import { getRegistrosCrossChex, type RegistroCrossChex } from '@/lib/crosschex';
 import { rangoMes, horasHombreEnRango } from '@/lib/personal';
+import { productividadPorSemana } from '@/lib/productividad';
 import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
@@ -68,6 +70,23 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
       pasado: horasPasado > 0 ? Math.round((cosechaMes.pasado / horasPasado) * 100) / 100 : null,
     };
   } catch {}
+  // Productividad por semana (últimas 12 semanas) — un solo fetch a CrossChex para todo
+  // el rango, independiente del indicador puntual de arriba (usa cortes de calendario
+  // distintos: semana lunes-domingo vs. mes con corte a hoy).
+  let productividadSemanal: ReturnType<typeof productividadPorSemana> = [];
+  try {
+    const NSEM = 12;
+    const desdeSem = new Date(hoy); desdeSem.setDate(desdeSem.getDate() - 7 * NSEM);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const isoDesdeSem = `${desdeSem.getFullYear()}-${pad(desdeSem.getMonth() + 1)}-${pad(desdeSem.getDate())}T00:00:00-03:00`;
+    const isoHastaSem = `${hoy.getFullYear()}-${pad(hoy.getMonth() + 1)}-${pad(hoy.getDate())}T23:59:59-03:00`;
+    const registrosSem: RegistroCrossChex[] = await getRegistrosCrossChex(isoDesdeSem, isoHastaSem);
+    productividadSemanal = productividadPorSemana(lotes, registrosSem, NSEM);
+  } catch {}
+  const evoProductividadSemanal = {
+    series: [{ nombre: 'Paquetes/hora-hombre', color: '#2563eb', puntos: productividadSemanal.map((p, i) => [i, p.productividad ?? 0] as [number, number]).filter(p => p[1] > 0) }],
+    labels: productividadSemanal.map(p => p.semanaLabel), hoyIdx: productividadSemanal.length - 1,
+  };
   const productividadPct = productividad.actual !== null && productividad.pasado
     ? Math.round(((productividad.actual - productividad.pasado) / productividad.pasado) * 100)
     : null;
@@ -393,8 +412,13 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     <>
       <Header user={user} current="estadisticas" />
       <div className="container">
-        <h1 className="page-title">Estadísticas</h1>
-        <p className="page-subtitle">{nombre}</p>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', flexWrap:'wrap', gap:'8px' }}>
+          <div>
+            <h1 className="page-title">Estadísticas</h1>
+            <p className="page-subtitle">{nombre}</p>
+          </div>
+          <Link href="/estadisticas/mensual" className="btn secondary" style={{ fontSize:'12px' }}>📧 Análisis mensual (para mail) →</Link>
+        </div>
 
         {/* Filtro global de período — aplica a toda la información de abajo */}
         <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'16px', flexWrap:'wrap' }}>
@@ -451,6 +475,14 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             <p className="card-title">Descartes Lechuga</p>
             <p className="card-sub">Plantas de diferencia entre lo estimado y lo cosechado (cualquier fase/plantinera) · {PERIODO_LABEL[periodo].toLowerCase()}</p>
             <GraficoEvolucion series={evoDescarte.series} labels={evoDescarte.labels} hoyIdx={evoDescarte.hoyIdx} unidad=" pl" />
+          </div>
+
+          <div className="card" style={{ margin:0 }}>
+            <p className="card-title" style={{ margin:'0 0 2px' }}>Productividad — paquetes / hora-hombre</p>
+            <p className="card-sub" style={{ margin:'0 0 10px' }}>Por semana · últimas 12 semanas · indicador fijo, no cambia con el filtro de arriba</p>
+            {evoProductividadSemanal.series[0].puntos.length > 0
+              ? <GraficoEvolucion series={evoProductividadSemanal.series} labels={evoProductividadSemanal.labels} hoyIdx={evoProductividadSemanal.hoyIdx} unidad=" paq/h" />
+              : <p style={{ color:'#9ca3af', fontSize:'13px', textAlign:'center', padding:'20px' }}>Sin datos de CrossChex disponibles para este período.</p>}
           </div>
         </div>
 

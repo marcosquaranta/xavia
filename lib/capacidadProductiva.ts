@@ -301,3 +301,37 @@ export function calcularCapacidadProductiva(
 
   return { ciclosMesadas, filasCapacidad, kpiPorNave, kpiPorCultivo, kpiTotalTeorica, kpiTotalReal, kpiTotalRealTotalPeriodo, kpiTotalDifPct, resumenGrupos };
 }
+
+// ── Resumen de ciclos SOLO por cultivo y nave (sin el detalle por mesada) — para el
+// análisis mensual, donde no hace falta la tabla completa de "Ciclos promedio por
+// mesada", solo el promedio de cada nave y el total del cultivo. ──
+export interface ResumenCicloNave { nave: number; f1: number; f2: number; total: number; plantasPorPaq: number; peso: number; n: number }
+export interface ResumenCicloCultivo { cultivo: 'Lechuga' | 'Rúcula'; porNave: ResumenCicloNave[]; total: ResumenCicloNave }
+
+export function resumenCiclosPorCultivoYNave(ciclosMesadas: CicloMesada[]): ResumenCicloCultivo[] {
+  const filas = ciclosMesadas.map(m => {
+    const esRuc = m.tipo === 'rucula' || (m.tipo === 'mixta' && m.ruculaN > 0 && m.lechugaN === 0);
+    return {
+      nave: m.nave, cultivo: (esRuc ? 'Rúcula' : 'Lechuga') as 'Lechuga' | 'Rúcula',
+      f1: esRuc ? 0 : m.lechugaF1, f2: esRuc ? m.ruculaF2 : m.lechugaF2, total: esRuc ? m.ruculaTotal : m.lechugaTotal,
+      plantasPorPaq: esRuc ? m.plantasPaqRucula : m.plantasPaqLechuga, peso: esRuc ? m.pesoGrRucula : m.pesoGrLechuga,
+      n: esRuc ? m.ruculaN : m.lechugaN,
+    };
+  });
+  function prom(arr: typeof filas, campo: 'f1' | 'f2' | 'total' | 'plantasPorPaq' | 'peso'): number {
+    const vals = arr.filter(f => f[campo] > 0).map(f => f[campo]);
+    return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+  }
+  function filaProm(arr: typeof filas, nave: number): ResumenCicloNave {
+    return { nave, f1: prom(arr, 'f1'), f2: prom(arr, 'f2'), total: prom(arr, 'total'), plantasPorPaq: prom(arr, 'plantasPorPaq'), peso: prom(arr, 'peso'), n: arr.reduce((a, f) => a + f.n, 0) };
+  }
+  return (['Lechuga', 'Rúcula'] as const).map((cultivo) => {
+    const deCultivo = filas.filter(f => f.cultivo === cultivo);
+    const naves = Array.from(new Set(deCultivo.map(f => f.nave))).sort((a, b) => a - b);
+    return {
+      cultivo,
+      porNave: naves.map(nv => filaProm(deCultivo.filter(f => f.nave === nv), nv)),
+      total: filaProm(deCultivo, 0),
+    };
+  }).filter(c => c.total.n > 0);
+}
