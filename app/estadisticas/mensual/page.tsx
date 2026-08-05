@@ -19,20 +19,21 @@ export const dynamic = 'force-dynamic';
 
 const esRuculaV = (v: string) => { const x = String(v || '').toLowerCase(); return x.includes('rucula') || x.includes('rúcula'); };
 const esCrespaV = (v: string) => String(v || '').toLowerCase().includes('crespa');
+const MESES_LARGO = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
-// Buckets fijos de 30 días (diarios) y 180 días (semanales) — mismo criterio que el
-// filtro global de Estadísticas, pero acá el análisis mensual siempre usa estas dos
-// ventanas puntuales, no un selector.
-function buckets30(hoy: Date) {
+// Buckets fijos de 30 días (diarios) y 180 días (semanales), anclados al final del
+// período seleccionado (no siempre "hoy") — así al elegir un mes pasado, las ventanas
+// cuentan para atrás desde el cierre de ESE mes, sin asomar datos de meses posteriores.
+function buckets30(hasta: Date) {
   const nBuckets = 30;
-  const start = new Date(hoy); start.setDate(start.getDate() - (nBuckets - 1)); start.setHours(0, 0, 0, 0);
+  const start = new Date(hasta); start.setDate(start.getDate() - (nBuckets - 1)); start.setHours(0, 0, 0, 0);
   const bucketDe = (f: Date) => { const idx = Math.floor((f.getTime() - start.getTime()) / 86400000); return idx >= 0 && idx < nBuckets ? idx : -1; };
   const labels = Array.from({ length: nBuckets }, (_, i) => { const d = new Date(start); d.setDate(d.getDate() + i); return `${d.getDate()}/${d.getMonth() + 1}`; });
   return { nBuckets, labels, hoyIdx: nBuckets - 1, bucketDe };
 }
-function buckets180(hoy: Date) {
+function buckets180(hasta: Date) {
   const nBuckets = 26;
-  const start = new Date(hoy); start.setDate(start.getDate() - 7 * (nBuckets - 1)); start.setHours(0, 0, 0, 0);
+  const start = new Date(hasta); start.setDate(start.getDate() - 7 * (nBuckets - 1)); start.setHours(0, 0, 0, 0);
   const bucketDe = (f: Date) => { const idx = Math.floor((f.getTime() - start.getTime()) / (7 * 86400000)); return idx >= 0 && idx < nBuckets ? idx : -1; };
   const labels = Array.from({ length: nBuckets }, (_, i) => { const d = new Date(start); d.setDate(d.getDate() + i * 7); return `${d.getDate()}/${d.getMonth() + 1}`; });
   return { nBuckets, labels, hoyIdx: nBuckets - 1, bucketDe };
@@ -103,11 +104,41 @@ function evolucionDescartes(lotes: Lote[], b: Buckets) {
   };
 }
 
+// Unidades vendidas por cliente en el mes seleccionado, con variación % vs. el mes
+// anterior y % que representa sobre el total vendido ese mes — para el cuadro que
+// acompaña a "Evolución de precio promedio".
+const PROD_KEYS_CLI = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
+function totalVenta(v: VentaDia): number { return PROD_KEYS_CLI.reduce((a, k) => a + (Number((v as any)[k]) || 0), 0); }
+function sumaPorClienteEnMes(ventas: VentaDia[], anio: number, mes: number): Map<string, number> {
+  const mk = `${anio}-${String(mes).padStart(2, '0')}`;
+  const map = new Map<string, number>();
+  for (const v of ventas) {
+    if (String(v.fecha || '').slice(0, 7) !== mk) continue;
+    const t = totalVenta(v); if (t <= 0) continue;
+    map.set(v.id_control, (map.get(v.id_control) || 0) + t);
+  }
+  return map;
+}
+function clientesMesConVariacion(ventas: VentaDia[], clientes: ClienteVenta[], anio: number, mes: number, topN = 8) {
+  let mesPrev = mes - 1, anioPrev = anio; if (mesPrev === 0) { mesPrev = 12; anioPrev--; }
+  const actual = sumaPorClienteEnMes(ventas, anio, mes);
+  const pasado = sumaPorClienteEnMes(ventas, anioPrev, mesPrev);
+  const nombreMap = new Map(clientes.map(c => [c.id_control, c.nombre_display || c.nombre_xubio || c.id_control]));
+  const totalMes = Array.from(actual.values()).reduce((a, b) => a + b, 0);
+  const filas = Array.from(actual.entries()).map(([id_control, total]) => {
+    const prev = pasado.get(id_control) || 0;
+    const variacionPct = prev > 0 ? Math.round(((total - prev) / prev) * 100) : null;
+    const pctTotal = totalMes > 0 ? Math.round((total / totalMes) * 100) : 0;
+    return { id_control, nombre: nombreMap.get(id_control) || id_control, total, variacionPct, pctTotal };
+  }).sort((a, b) => b.total - a.total).slice(0, topN);
+  return { filas, totalMes };
+}
+
 const cardStyle: React.CSSProperties = { background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px', marginBottom: '14px' };
 const tituloSeccion: React.CSSProperties = { fontSize: '16px', fontWeight: 800, margin: '28px 0 12px', color: '#111827', borderBottom: '2px solid #e5e7eb', paddingBottom: '6px' };
 const fmt = (n: number) => Math.round(n).toLocaleString('es-AR');
 
-export default async function AnalisisMensualPage() {
+export default async function AnalisisMensualPage({ searchParams }: { searchParams: { anio?: string; mes?: string } }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
   if (user.rol !== 'admin') redirect('/panel');
@@ -135,24 +166,53 @@ export default async function AnalisisMensualPage() {
     </>
   );
 
+  // ── Mes seleccionado — por defecto el actual. Si se elige un mes pasado, todo el
+  // análisis (ventanas de 30/180 días, ventas, stocks) se calcula "hasta el cierre de
+  // ese mes", sin mostrar nada de meses posteriores. ──
   const hoy = new Date();
-  const nombreMes = hoy.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
-  const b30 = buckets30(hoy), b180 = buckets180(hoy);
+  const anioSel = Number(searchParams.anio) || hoy.getFullYear();
+  const mesSel = Number(searchParams.mes) || (hoy.getMonth() + 1);
+  const esMesActual = anioSel === hoy.getFullYear() && mesSel === (hoy.getMonth() + 1);
+  const finMesSel = new Date(anioSel, mesSel, 0, 23, 59, 59);
+  const refDate = esMesActual ? hoy : finMesSel;
+
+  let mesAnteriorNav = mesSel - 1, anioAnteriorNav = anioSel;
+  if (mesAnteriorNav === 0) { mesAnteriorNav = 12; anioAnteriorNav--; }
+  let mesSiguienteNav = mesSel + 1, anioSiguienteNav = anioSel;
+  if (mesSiguienteNav === 13) { mesSiguienteNav = 1; anioSiguienteNav++; }
+  const haySiguiente = anioSiguienteNav < hoy.getFullYear() || (anioSiguienteNav === hoy.getFullYear() && mesSiguienteNav <= hoy.getMonth() + 1);
+  const hrefMes = (a: number, m: number) => `/estadisticas/mensual?anio=${a}&mes=${m}`;
+
+  const nombre = `${MESES_LARGO[mesSel - 1]} ${anioSel}`.replace(/^./, c => c.toUpperCase());
+
+  // Lotes/ventas "hasta el cierre del mes seleccionado" — se filtran acá una sola vez y
+  // se reutilizan en todos los cálculos de abajo, así ningún gráfico se asoma a datos de
+  // meses posteriores al elegido.
+  const lotesRep = lotes.filter(l => l.estado !== 'cosechado' || !l.fecha_cosecha || (() => {
+    const f = new Date(String(l.fecha_cosecha) + 'T12:00:00'); return isNaN(f.getTime()) || f <= refDate;
+  })());
+  const ventasRep = ventas.filter(v => {
+    const f = new Date(String(v.fecha || '').split(/[T ]/)[0] + 'T12:00:00');
+    return isNaN(f.getTime()) || f <= refDate;
+  });
+
+  const b30 = buckets30(refDate), b180 = buckets180(refDate);
 
   // ── 1. VENTAS ──
-  const evolArticulo = evolucionVentaPorArticulo(ventas, 12, historicas);
-  const evolClienteMensual = evolucionVentaPorCliente(ventas, clientes, 6, 6);
-  const evolPrecio = evolucionPrecioPromedio(ventas, precios, clientes, 12);
+  const evolArticulo = evolucionVentaPorArticulo(ventasRep, 12, historicas);
+  const evolClienteMensual = evolucionVentaPorCliente(ventasRep, clientes, 6, 6);
+  const evolPrecio = evolucionPrecioPromedio(ventasRep, precios, clientes, 12);
+  const clientesMes = clientesMesConVariacion(ventas, clientes, anioSel, mesSel, 8);
 
   // ── 2. PRODUCCIÓN ──
-  const evoCiclos30 = evolucionCiclos(lotes, movimientos, b30);
-  const evoCiclos180 = evolucionCiclos(lotes, movimientos, b180);
-  const evoPlantasPaq30 = evolucionPlantasPorPaquete(lotes, b30);
-  const evoDescartes30 = evolucionDescartes(lotes, b30);
+  const evoCiclos30 = evolucionCiclos(lotesRep, movimientos, b30);
+  const evoCiclos180 = evolucionCiclos(lotesRep, movimientos, b180);
+  const evoPlantasPaq30 = evolucionPlantasPorPaquete(lotesRep, b30);
+  const evoDescartes30 = evolucionDescartes(lotesRep, b30);
 
-  // Pesaje testigo — últimos 180 días (sin buckets, son puntos individuales de cosecha)
-  const hace180 = new Date(hoy); hace180.setDate(hace180.getDate() - 180);
-  const puntosPesaje180 = lotes
+  // Pesaje testigo — últimos 180 días hasta el cierre del mes elegido
+  const hace180 = new Date(refDate); hace180.setDate(hace180.getDate() - 180);
+  const puntosPesaje180 = lotesRep
     .filter(l => l.estado === 'cosechado' && l.fecha_cosecha && (Number(l.peso_muestra_paquete_gr) > 0 || Number(l.peso_muestra_kg) > 0))
     .filter(l => { const f = new Date(String(l.fecha_cosecha) + 'T12:00:00'); return !isNaN(f.getTime()) && f >= hace180; })
     .map(l => ({
@@ -162,44 +222,48 @@ export default async function AnalisisMensualPage() {
     }))
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
 
-  // Productividad semanal — últimas 12 semanas, un solo fetch a CrossChex para todo el rango.
+  // Productividad semanal — últimas 12 semanas hasta el cierre del mes elegido, un solo
+  // fetch a CrossChex para todo el rango.
   let productividadSemanal: ReturnType<typeof productividadPorSemana> = [];
   try {
     const NSEM = 12;
-    const desde = new Date(hoy); desde.setDate(desde.getDate() - 7 * NSEM);
+    const desde = new Date(refDate); desde.setDate(desde.getDate() - 7 * NSEM);
     const pad = (n: number) => String(n).padStart(2, '0');
     const isoDesde = `${desde.getFullYear()}-${pad(desde.getMonth() + 1)}-${pad(desde.getDate())}T00:00:00-03:00`;
-    const isoHasta = `${hoy.getFullYear()}-${pad(hoy.getMonth() + 1)}-${pad(hoy.getDate())}T23:59:59-03:00`;
+    const isoHasta = `${refDate.getFullYear()}-${pad(refDate.getMonth() + 1)}-${pad(refDate.getDate())}T23:59:59-03:00`;
     const registros: RegistroCrossChex[] = await getRegistrosCrossChex(isoDesde, isoHasta);
-    productividadSemanal = productividadPorSemana(lotes, registros, NSEM);
+    productividadSemanal = productividadPorSemana(lotesRep, registros, NSEM);
   } catch {}
   const evoProductividad = {
     series: [{ nombre: 'Paquetes/hora-hombre', color: '#2563eb', puntos: productividadSemanal.map((p, i) => [i, p.productividad ?? 0] as [number, number]).filter(p => p[1] > 0) }],
     labels: productividadSemanal.map(p => p.semanaLabel), hoyIdx: productividadSemanal.length - 1,
   };
 
-  // Ciclos promedio por mesada — solo resumen por cultivo y nave (año actual)
-  const capProd = calcularCapacidadProductiva(lotes, movimientos, ubicaciones, 'anio', 'todas');
+  // Ciclos promedio por mesada — solo resumen por cultivo y nave (año del mes elegido)
+  const capProd = calcularCapacidadProductiva(lotesRep, movimientos, ubicaciones, 'anio', 'todas');
   const resumenCiclos = resumenCiclosPorCultivoYNave(capProd.ciclosMesadas);
 
-  // Ocupación promedio últimos 30 días por nave
+  // Ocupación promedio 30 días por nave — sobre el historial diario (siempre relativo a
+  // hoy: es un snapshot físico, no tiene sentido "rebobinarlo" a un mes viejo)
   const ocupacionProm30 = ocupacionPromedioPorNave(ocupHistRows, 30);
 
   // ── 3. STOCKS ──
   const camaraRucula = calcularCamara('rucula', registrosCamara, lotes, ventas);
   const camaraLechugaCrespa = calcularCamara('lechuga_crespa', registrosCamara, lotes, ventas);
   const camaraLechugaRoble = calcularCamara('lechuga_roble', registrosCamara, lotes, ventas);
-  const faltanteRucula = diferenciaAjustesMes('rucula', registrosCamara, lotes, ventas, hoy);
-  const faltanteCrespa = diferenciaAjustesMes('lechuga_crespa', registrosCamara, lotes, ventas, hoy);
-  const faltanteRoble = diferenciaAjustesMes('lechuga_roble', registrosCamara, lotes, ventas, hoy);
+  const faltanteRucula = diferenciaAjustesMes('rucula', registrosCamara, lotes, ventas, refDate);
+  const faltanteCrespa = diferenciaAjustesMes('lechuga_crespa', registrosCamara, lotes, ventas, refDate);
+  const faltanteRoble = diferenciaAjustesMes('lechuga_roble', registrosCamara, lotes, ventas, refDate);
   const faltantesStock = [
     { label: 'Rúcula', color: '#134e4a', actual: camaraRucula.stockActual, ajusteMes: faltanteRucula.acumulado },
     { label: 'Lechuga Crespa', color: '#84cc16', actual: camaraLechugaCrespa.stockActual, ajusteMes: faltanteCrespa.acumulado },
     { label: 'Lechuga Roble', color: '#4d7c0f', actual: camaraLechugaRoble.stockActual, ajusteMes: faltanteRoble.acumulado },
   ];
 
-  // Uso real vs. uso teórico — Bolsas (Packaging), Semillas y Espuma Fenólica
-  const driversActual = calcularDriversMes(lotes, ventas, precios, clientes, hoy.getFullYear(), hoy.getMonth() + 1);
+  // Uso real vs. uso teórico — Bolsas (Packaging), Semillas y Espuma Fenólica, del MES
+  // SELECCIONADO: toma el stock_inicial/compras/stock_final de esa fila puntual de
+  // Stocks (anio/mes elegidos), no siempre el mes en curso.
+  const driversMesSel = calcularDriversMes(lotes, ventas, precios, clientes, anioSel, mesSel);
   const catMatch = (cat: string, kw: string) => String(cat || '').toLowerCase().includes(kw);
   const gruposUso = [
     { titulo: 'Bolsas (Packaging)', kw: 'packaging' },
@@ -208,16 +272,17 @@ export default async function AnalisisMensualPage() {
   ].map(({ titulo, kw }) => {
     const arts = articulos.filter(a => a.activo === 'SI' && catMatch(a.categoria, kw));
     const filas = arts.map(art => {
-      const stockRow = stocks.find(s => s.id_articulo === art.id_articulo && String(s.anio) === String(hoy.getFullYear()) && String(s.mes) === String(hoy.getMonth() + 1));
+      const stockRow = stocks.find(s => s.id_articulo === art.id_articulo && String(s.anio) === String(anioSel) && String(s.mes) === String(mesSel));
       const usoReal = stockRow ? Number(stockRow.uso_calculado) || 0 : null;
-      const usoTeorico = art.formula_uso ? calcularUsoTeorico(art.formula_uso, Number(art.factor_uso) || 0, driversActual) : null;
+      const usoTeorico = art.formula_uso ? calcularUsoTeorico(art.formula_uso, Number(art.factor_uso) || 0, driversMesSel) : null;
       const diff = usoReal !== null && usoTeorico !== null ? usoReal - usoTeorico : null;
-      return { articulo: art.articulo, unidad: art.unidad_medida, usoReal, usoTeorico, diff };
+      return {
+        articulo: art.articulo, unidad: art.unidad_medida, usoReal, usoTeorico, diff,
+        detalle: stockRow ? `ini ${fmt(Number(stockRow.stock_inicial) || 0)} + compras ${fmt(Number(stockRow.compras) || 0)} − final ${fmt(Number(stockRow.stock_final) || 0)}` : null,
+      };
     }).filter(f => f.usoReal !== null || f.usoTeorico !== null);
     return { titulo, filas };
   }).filter(g => g.filas.length > 0);
-
-  const nombre = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
 
   return (
     <>
@@ -226,9 +291,19 @@ export default async function AnalisisMensualPage() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
           <div>
             <h1 className="page-title">Análisis mensual</h1>
-            <p className="page-subtitle">{nombre} · pensado para ver acá y copiar/pegar en un mail</p>
+            <p className="page-subtitle">pensado para ver acá y copiar/pegar en un mail</p>
           </div>
           <Link href="/estadisticas" style={{ fontSize: '12px', color: '#6b7280', textDecoration: 'none' }}>← Volver a Estadísticas</Link>
+        </div>
+
+        {/* Selector de mes */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '10px 0 4px' }}>
+          <Link href={hrefMes(anioAnteriorNav, mesAnteriorNav)} className="btn secondary" style={{ fontSize: '13px', padding: '5px 12px' }}>‹ Mes anterior</Link>
+          <span style={{ fontSize: '15px', fontWeight: 800, color: '#111827', minWidth: '160px', textAlign: 'center' }}>{nombre}</span>
+          {haySiguiente
+            ? <Link href={hrefMes(anioSiguienteNav, mesSiguienteNav)} className="btn secondary" style={{ fontSize: '13px', padding: '5px 12px' }}>Mes siguiente ›</Link>
+            : <span className="btn secondary" style={{ fontSize: '13px', padding: '5px 12px', opacity: 0.4, cursor: 'not-allowed' }}>Mes siguiente ›</span>}
+          {!esMesActual && <span style={{ fontSize: '11px', color: '#9ca3af' }}>(mes cerrado — no incluye datos posteriores)</span>}
         </div>
 
         {/* ══ 1. VENTAS ══ */}
@@ -237,7 +312,42 @@ export default async function AnalisisMensualPage() {
           <GraficoVentaPorArticulo datos={evolArticulo} />
           <GraficoVentaPorCliente mensual={evolClienteMensual} ocultarToggle />
         </div>
-        <GraficoPrecioPromedio datos={evolPrecio} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '14px', marginBottom: '14px' }}>
+          <GraficoPrecioPromedio datos={evolPrecio} />
+          <div style={cardStyle}>
+            <p className="card-title" style={{ margin: '0 0 2px' }}>Venta por cliente — {nombre}</p>
+            <p className="card-sub" style={{ margin: '0 0 10px' }}>Unidades del mes · variación vs. mes anterior · % del total</p>
+            {clientesMes.filas.length === 0 ? (
+              <p style={{ color: '#9ca3af', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin ventas cargadas este mes.</p>
+            ) : (
+              <table style={{ fontSize: '12px', width: '100%' }}>
+                <thead><tr>
+                  <th style={{ textAlign: 'left' }}>Cliente</th>
+                  <th style={{ textAlign: 'right' }}>Unidades</th>
+                  <th style={{ textAlign: 'right' }}>% vs. mes ant.</th>
+                  <th style={{ textAlign: 'right' }}>% del total</th>
+                </tr></thead>
+                <tbody>
+                  {clientesMes.filas.map(c => (
+                    <tr key={c.id_control} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                      <td>{c.nombre}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmt(c.total)}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 600, color: c.variacionPct === null ? '#9ca3af' : c.variacionPct >= 0 ? '#059669' : '#dc2626' }}>
+                        {c.variacionPct !== null ? `${c.variacionPct >= 0 ? '↑' : '↓'} ${Math.abs(c.variacionPct)}%` : '—'}
+                      </td>
+                      <td style={{ textAlign: 'right', color: '#6b7280' }}>{c.pctTotal}%</td>
+                    </tr>
+                  ))}
+                  <tr style={{ fontWeight: 700, background: '#f8fafc' }}>
+                    <td>Total</td>
+                    <td style={{ textAlign: 'right' }}>{fmt(clientesMes.totalMes)}</td>
+                    <td></td><td style={{ textAlign: 'right' }}>100%</td>
+                  </tr>
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
 
         {/* ══ 2. PRODUCCIÓN ══ */}
         <h2 style={tituloSeccion}>2. Producción</h2>
@@ -351,7 +461,7 @@ export default async function AnalisisMensualPage() {
                 <p style={{ margin: '4px 0 0', fontSize: '20px', fontWeight: 800, color: c.ajusteMes < 0 ? '#dc2626' : c.ajusteMes > 0 ? '#059669' : '#9ca3af' }}>
                   {c.ajusteMes >= 0 ? '+' : ''}{c.ajusteMes} paq
                 </p>
-                <p style={{ margin: 0, fontSize: '10px', color: '#9ca3af' }}>diferencia acumulada del mes</p>
+                <p style={{ margin: 0, fontSize: '10px', color: '#9ca3af' }}>diferencia acumulada de {nombre.toLowerCase()}</p>
               </div>
             ))}
           </div>
@@ -360,11 +470,11 @@ export default async function AnalisisMensualPage() {
         <div style={cardStyle}>
           <p className="card-title" style={{ margin: '0 0 10px' }}>Uso real vs. uso teórico — {nombre}</p>
           {gruposUso.length === 0 ? (
-            <p style={{ color: '#9ca3af', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin artículos con datos este mes en estas categorías.</p>
+            <p style={{ color: '#9ca3af', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin artículos con datos cargados este mes en estas categorías.</p>
           ) : gruposUso.map(g => (
             <div key={g.titulo} style={{ marginBottom: '14px' }}>
               <p style={{ margin: '0 0 6px', fontSize: '13px', fontWeight: 700, color: '#374151' }}>{g.titulo}</p>
-              <table style={{ fontSize: '12px', width: '100%', maxWidth: '560px' }}>
+              <table style={{ fontSize: '12px', width: '100%', maxWidth: '640px' }}>
                 <thead><tr>
                   <th style={{ textAlign: 'left' }}>Artículo</th>
                   <th style={{ textAlign: 'right' }}>Uso real</th>
@@ -374,7 +484,9 @@ export default async function AnalisisMensualPage() {
                 <tbody>
                   {g.filas.map(f => (
                     <tr key={f.articulo} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                      <td>{f.articulo} <span style={{ color: '#9ca3af', fontSize: '10px' }}>{f.unidad}</span></td>
+                      <td>{f.articulo} <span style={{ color: '#9ca3af', fontSize: '10px' }}>{f.unidad}</span>
+                        {f.detalle && <div style={{ fontSize: '10px', color: '#9ca3af' }}>{f.detalle}</div>}
+                      </td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: '#059669' }}>{f.usoReal !== null ? fmt(f.usoReal) : '—'}</td>
                       <td style={{ textAlign: 'right', color: '#6b7280' }}>{f.usoTeorico !== null ? fmt(f.usoTeorico) : '—'}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: f.diff === null ? '#9ca3af' : f.diff > 0 ? '#dc2626' : '#059669' }}>
