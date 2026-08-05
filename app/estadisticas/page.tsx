@@ -74,6 +74,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
   const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
   const esRuculaV = (v: string) => { const x = String(v).toLowerCase(); return x.includes('rucula') || x.includes('rúcula'); };
+  const esCrespaV = (v: string) => String(v).toLowerCase().includes('crespa');
 
   // Fecha desde la que arranca el filtro global elegido — null = histórico, sin límite.
   function desdeDePeriodo(p: PeriodoGlobal): Date | null {
@@ -150,10 +151,11 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     }))
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
 
-  // ── EVOLUCIÓN DE CICLOS (F2 promedio) ── una línea de lechuga (promedio de todas las
-  // variedades) y una de rúcula, sobre los buckets del filtro global.
+  // ── EVOLUCIÓN DE CICLOS (F2 promedio) ── lechuga desglosada en Crespa/Roble, más rúcula,
+  // sobre los buckets del filtro global.
   const acc = {
-    lechuga: Array.from({ length: buckets.nBuckets }, () => [] as number[]),
+    lechugaCrespa: Array.from({ length: buckets.nBuckets }, () => [] as number[]),
+    lechugaRoble: Array.from({ length: buckets.nBuckets }, () => [] as number[]),
     rucula: Array.from({ length: buckets.nBuckets }, () => [] as number[]),
   };
   for (const l of lotes) {
@@ -161,15 +163,17 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     const f = new Date(String(l.fecha_cosecha) + 'T12:00:00');
     if (isNaN(f.getTime())) continue;
     const b = buckets.bucketDe(f); if (b < 0) continue;
-    const esR = esRuculaV(l.variedad);
     let f2 = 0; try { f2 = calcularDiasPorFase(l, movimientos).fase_2; } catch {}
-    if (f2 > 0) (esR ? acc.rucula : acc.lechuga)[b].push(f2);
+    if (f2 <= 0) continue;
+    if (esRuculaV(l.variedad)) acc.rucula[b].push(f2);
+    else (esCrespaV(l.variedad) ? acc.lechugaCrespa : acc.lechugaRoble)[b].push(f2);
   }
   const avgArr = (a: number[][]) => a.map(xs => xs.length ? Math.round(xs.reduce((p, c) => p + c, 0) / xs.length) : 0);
-  const lech = avgArr(acc.lechuga), ruc = avgArr(acc.rucula);
+  const lechCrespa = avgArr(acc.lechugaCrespa), lechRoble = avgArr(acc.lechugaRoble), ruc = avgArr(acc.rucula);
   const evo = {
     series: [
-      { nombre: 'Lechuga F2', color: '#84cc16', puntos: lech.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+      { nombre: 'Lechuga Crespa F2', color: '#84cc16', puntos: lechCrespa.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+      { nombre: 'Lechuga Roble F2', color: '#4d7c0f', puntos: lechRoble.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
       { nombre: 'Rúcula F2', color: '#134e4a', puntos: ruc.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
     ],
     labels: buckets.labels, hoyIdx: buckets.hoyIdx,
@@ -192,11 +196,13 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     labels: buckets.labels, hoyIdx: buckets.hoyIdx,
   };
 
-  // ── DESCARTE POR MES, LECHUGA ── descarte_reportado es la diferencia entre lo
-  // estimado (al sembrar/trasplantar) y lo realmente cosechado — agrupa cualquier fase
-  // donde se haya perdido (plantinera, F1 o F2), no hay desglose por etapa hoy. Solo
-  // lechuga: en rúcula el descarte no se declara acá (ver nota en Lote.descarte_reportado).
-  const accDescarte: number[] = Array.from({ length: buckets.nBuckets }, () => 0);
+  // ── DESCARTE POR MES, LECHUGA (desglosado Crespa/Roble) ── descarte_reportado es la
+  // diferencia entre lo estimado (al sembrar/trasplantar) y lo realmente cosechado —
+  // agrupa cualquier fase donde se haya perdido (plantinera, F1 o F2), no hay desglose
+  // por etapa hoy. Solo lechuga: en rúcula el descarte no se declara acá (ver nota en
+  // Lote.descarte_reportado).
+  const accDescarteCrespa: number[] = Array.from({ length: buckets.nBuckets }, () => 0);
+  const accDescarteRoble: number[] = Array.from({ length: buckets.nBuckets }, () => 0);
   for (const l of lotes) {
     if (l.estado !== 'cosechado' || !l.fecha_cosecha || esRuculaV(l.variedad)) continue;
     const f = new Date(String(l.fecha_cosecha) + 'T12:00:00');
@@ -204,10 +210,13 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     const b = buckets.bucketDe(f); if (b < 0) continue;
     const desc = Number(l.descarte_reportado) || 0;
     if (desc <= 0) continue;
-    accDescarte[b] += desc;
+    (esCrespaV(l.variedad) ? accDescarteCrespa : accDescarteRoble)[b] += desc;
   }
   const evoDescarte = {
-    series: [{ nombre: 'Lechuga', color: '#84cc16', puntos: accDescarte.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) }],
+    series: [
+      { nombre: 'Lechuga Crespa', color: '#84cc16', puntos: accDescarteCrespa.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+      { nombre: 'Lechuga Roble', color: '#4d7c0f', puntos: accDescarteRoble.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+    ],
     labels: buckets.labels, hoyIdx: buckets.hoyIdx,
   };
 

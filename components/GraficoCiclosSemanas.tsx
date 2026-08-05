@@ -5,6 +5,8 @@ export interface DatoSemana {
   lechugaF1: number;
   lechugaF2: number;
   rucula: number;
+  lechugaCrespaF2: number;
+  lechugaRobleF2: number;
 }
 
 interface Props { datos: DatoSemana[] }
@@ -16,15 +18,17 @@ export default function GraficoCiclosSemanas({ datos }: Props) {
     </div>
   );
 
-  const maxDias = Math.max(...datos.flatMap(d => [d.lechugaF2, d.rucula]), 1);
+  const maxDias = Math.max(...datos.flatMap(d => [d.lechugaCrespaF2, d.lechugaRobleF2, d.rucula]), 1);
   const W = 560, H = 260, PL = 36, PR = 12, PT = 16, PB = 28;
   const chartW = W - PL - PR, chartH = H - PT - PB;
   const slotW = chartW / datos.length;
-  const barW = Math.min(32, slotW * 0.38);
-  const gap = barW * 0.3;
+  const barW = Math.min(22, slotW * 0.24);
+  const gap = barW * 0.25;
 
-  function xL(i: number) { return PL + i * slotW + slotW / 2 - gap / 2 - barW; }
-  function xR(i: number) { return PL + i * slotW + slotW / 2 + gap / 2; }
+  // 3 barras por semana: Crespa · Roble · Rúcula, centradas en el slot.
+  function xC(i: number) { return PL + i * slotW + slotW / 2 - barW * 1.5 - gap; }
+  function xB(i: number) { return PL + i * slotW + slotW / 2 - barW / 2; }
+  function xR(i: number) { return PL + i * slotW + slotW / 2 + barW / 2 + gap; }
   function yH(d: number) { return (d / maxDias) * chartH; }
   const baseY = PT + chartH;
 
@@ -35,7 +39,10 @@ export default function GraficoCiclosSemanas({ datos }: Props) {
       {/* Leyenda */}
       <div style={{ display: 'flex', gap: '14px', marginBottom: '8px', fontSize: '11px', flexWrap: 'wrap' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span style={{ width: 12, height: 12, background: '#84cc16', borderRadius: 2, display: 'inline-block' }} />Lechuga F2
+          <span style={{ width: 12, height: 12, background: '#84cc16', borderRadius: 2, display: 'inline-block' }} />Lechuga Crespa F2
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span style={{ width: 12, height: 12, background: '#4d7c0f', borderRadius: 2, display: 'inline-block' }} />Lechuga Roble F2
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           <span style={{ width: 12, height: 12, background: '#134e4a', borderRadius: 2, display: 'inline-block' }} />Rúcula
@@ -54,17 +61,22 @@ export default function GraficoCiclosSemanas({ datos }: Props) {
 
         {/* Barras */}
         {datos.map((d, i) => {
-          const hF2 = yH(d.lechugaF2);
-          const hR  = yH(d.rucula);
+          const hC = yH(d.lechugaCrespaF2);
+          const hB = yH(d.lechugaRobleF2);
+          const hR = yH(d.rucula);
           return (
             <g key={i}>
-              {/* Lechuga F2 */}
-              {hF2 > 0 && <rect x={xL(i)} y={baseY - hF2} width={barW} height={hF2} fill="#84cc16" rx={2} />}
-              {d.lechugaF2 > 0 && <text x={xL(i) + barW / 2} y={baseY - hF2 - 3} textAnchor="middle" fontSize={9} fill="#374151" fontWeight={500}>{d.lechugaF2}d</text>}
+              {/* Lechuga Crespa F2 */}
+              {hC > 0 && <rect x={xC(i)} y={baseY - hC} width={barW} height={hC} fill="#84cc16" rx={2} />}
+              {d.lechugaCrespaF2 > 0 && <text x={xC(i) + barW / 2} y={baseY - hC - 3} textAnchor="middle" fontSize={8} fill="#374151" fontWeight={500}>{d.lechugaCrespaF2}d</text>}
+
+              {/* Lechuga Roble F2 */}
+              {hB > 0 && <rect x={xB(i)} y={baseY - hB} width={barW} height={hB} fill="#4d7c0f" rx={2} />}
+              {d.lechugaRobleF2 > 0 && <text x={xB(i) + barW / 2} y={baseY - hB - 3} textAnchor="middle" fontSize={8} fill="#374151" fontWeight={500}>{d.lechugaRobleF2}d</text>}
 
               {/* Rúcula */}
               {hR > 0 && <rect x={xR(i)} y={baseY - hR} width={barW} height={hR} fill="#134e4a" rx={2} />}
-              {hR > 0 && <text x={xR(i) + barW / 2} y={baseY - hR - 3} textAnchor="middle" fontSize={9} fill="#374151" fontWeight={500}>{d.rucula}d</text>}
+              {hR > 0 && <text x={xR(i) + barW / 2} y={baseY - hR - 3} textAnchor="middle" fontSize={8} fill="#374151" fontWeight={500}>{d.rucula}d</text>}
 
               {/* Label semana */}
               <text x={PL + i * slotW + slotW / 2} y={baseY + 14} textAnchor="middle" fontSize={9} fill="#9ca3af">{d.semana}</text>

@@ -274,19 +274,20 @@ export default async function PanelPage() {
     );
   }
 
-  // ── KPIs F2 ──
-  const ultSem = ciclosSemanas.filter((s:any) => s.lechugaF2>0||s.rucula>0).slice(-1)[0];
-  const antSem = ciclosSemanas.filter((s:any) => s.lechugaF2>0||s.rucula>0).slice(-2,-1)[0];
+  // ── KPIs F2 — rúcula y lechuga desglosada en Crespa/Roble (cada una con su propia
+  // última semana con datos, no una sola pareja compartida) ──
   function varPctSem(a:number,b:number){if(!b||!a)return null;return Math.round(((a-b)/b)*100);}
+  function ultimoYAnterior(campo: 'rucula'|'lechugaCrespaF2'|'lechugaRobleF2') {
+    const conDato = ciclosSemanas.filter((s:any) => s[campo] > 0);
+    return { ult: conDato.slice(-1)[0], ant: conDato.slice(-2,-1)[0] };
+  }
+  const { ult: ultSemRucula, ant: antSemRucula } = ultimoYAnterior('rucula');
+  const { ult: ultSemCrespa, ant: antSemCrespa } = ultimoYAnterior('lechugaCrespaF2');
+  const { ult: ultSemRoble, ant: antSemRoble } = ultimoYAnterior('lechugaRobleF2');
   // Respaldo cuando no hay comparación semana a semana (0 cosechas esa semana puntual —
   // muy común en lechuga, que tiene un ciclo mucho más largo que rúcula): comparar contra
   // el promedio del mes pasado en vez de dejar el indicador sin ningún %.
   const cicloMesPasado = cicloMesPromedio(lotes, movimientos, mesPasadoRef);
-  // Última semana CON cosechas de cada cultivo (puede no ser "esta semana" — 0 cosechas
-  // puntuales de lechuga esa semana es normal por su ciclo largo). Evita que la tarjeta
-  // de "Lechuga F2"/"Rúcula F2" desaparezca entera cuando esta semana puntual da 0.
-  const ultimoLechugaF2 = ciclosSemanas.filter((s:any) => s.lechugaF2 > 0).slice(-1)[0]?.lechugaF2;
-  const ultimoRuculaF2  = ciclosSemanas.filter((s:any) => s.rucula > 0).slice(-1)[0]?.rucula;
 
   const hoyStr = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
   // Recordatorio de stock físico en cámara — sábados, lunes y miércoles.
@@ -442,16 +443,20 @@ export default async function PanelPage() {
                   pct: pctVs(resumenMesPanel.unidadesMes, ventaEsperadaAlDia), mejorSiSube: true },
                 { label: 'Venta total mes proyectada', valor: `${resumenMesPanel.proyeccionMes.toLocaleString('es-AR')} u`,
                   pct: pctVs(resumenMesPanel.proyeccionMes, resumenMesPasadoCompleto.unidadesMes), mejorSiSube: true },
-                { label: 'Ciclo actual rúcula', valor: ultSem?.rucula ? `${ultSem.rucula}d` : '—',
-                  pct: varPctSem(ultSem?.rucula, antSem?.rucula) ?? varPctSem(ultSem?.rucula, cicloMesPasado.rucula), mejorSiSube: false },
-                { label: 'Ciclo actual lechuga', valor: ultSem?.lechugaF2 ? `${ultSem.lechugaF2}d` : '—',
-                  pct: varPctSem(ultSem?.lechugaF2, antSem?.lechugaF2) ?? varPctSem(ultSem?.lechugaF2, cicloMesPasado.lechuga), mejorSiSube: false },
+                { label: 'Ciclo actual rúcula', valor: ultSemRucula?.rucula ? `${ultSemRucula.rucula}d` : '—',
+                  pct: varPctSem(ultSemRucula?.rucula, antSemRucula?.rucula) ?? varPctSem(ultSemRucula?.rucula, cicloMesPasado.rucula), mejorSiSube: false },
+                { label: 'Ciclo actual lechuga crespa', valor: ultSemCrespa?.lechugaCrespaF2 ? `${ultSemCrespa.lechugaCrespaF2}d` : '—',
+                  pct: varPctSem(ultSemCrespa?.lechugaCrespaF2, antSemCrespa?.lechugaCrespaF2) ?? varPctSem(ultSemCrespa?.lechugaCrespaF2, cicloMesPasado.lechugaCrespa), mejorSiSube: false },
+                { label: 'Ciclo actual lechuga hoja de roble', valor: ultSemRoble?.lechugaRobleF2 ? `${ultSemRoble.lechugaRobleF2}d` : '—',
+                  pct: varPctSem(ultSemRoble?.lechugaRobleF2, antSemRoble?.lechugaRobleF2) ?? varPctSem(ultSemRoble?.lechugaRobleF2, cicloMesPasado.lechugaRoble), mejorSiSube: false },
                 { label: 'Precio promedio actual', valor: `$${Math.round(resumenMesPanel.precioPromedioMes).toLocaleString('es-AR')}`,
                   pct: pctVs(resumenMesPanel.precioPromedioMes, resumenMesPasadoCompleto.precioPromedioMes), mejorSiSube: true },
                 { label: 'Peso promedio rúcula (paq)', valor: pesoMesPanel.rucula > 0 ? `${pesoMesPanel.rucula}g` : '—',
                   pct: pctVs(pesoMesPanel.rucula, pesoMesPasadoPanel.rucula), mejorSiSube: true },
-                { label: 'Peso promedio lechuga (paq)', valor: pesoMesPanel.lechuga > 0 ? `${pesoMesPanel.lechuga}g` : '—',
-                  pct: pctVs(pesoMesPanel.lechuga, pesoMesPasadoPanel.lechuga), mejorSiSube: true },
+                { label: 'Peso promedio lechuga crespa (paq)', valor: pesoMesPanel.lechugaCrespa > 0 ? `${pesoMesPanel.lechugaCrespa}g` : '—',
+                  pct: pctVs(pesoMesPanel.lechugaCrespa, pesoMesPasadoPanel.lechugaCrespa), mejorSiSube: true },
+                { label: 'Peso promedio lechuga hoja de roble (paq)', valor: pesoMesPanel.lechugaRoble > 0 ? `${pesoMesPanel.lechugaRoble}g` : '—',
+                  pct: pctVs(pesoMesPanel.lechugaRoble, pesoMesPasadoPanel.lechugaRoble), mejorSiSube: true },
                 { label: 'Faltante de stock (mes)', valor: `${faltanteMesTotal>=0?'+':''}${faltanteMesTotal} paq`,
                   pct: faltanteMesTotalPasado || faltanteMesTotal ? faltanteMesTotal - faltanteMesTotalPasado : null, mejorSiSube: true, sufijo: 'paq' as const },
                 { label: 'Ocupación N1', valor: `${ocupNaves.find((n:any)=>n.nave===1)?.pct ?? 0}%`, pct: null, mejorSiSube: true },
@@ -487,45 +492,36 @@ export default async function PanelPage() {
               <p className="card-title">Ciclos en mesadas — 8 semanas</p>
               <p className="card-sub">Días promedio F2 por semana · sin plantinera</p>
               <GraficoCiclosSemanas datos={ciclosSemanas} />
-              {ultSem && (() => {
-                const lechugaEsEstaSem = ultSem.lechugaF2 > 0;
-                const lechugaVal = lechugaEsEstaSem ? ultSem.lechugaF2 : ultimoLechugaF2;
-                const lechugaPct = lechugaEsEstaSem
-                  ? (varPctSem(ultSem.lechugaF2, antSem?.lechugaF2) ?? varPctSem(ultSem.lechugaF2, cicloMesPasado.lechuga))
-                  : null;
-                const ruculaEsEstaSem = ultSem.rucula > 0;
-                const ruculaVal = ruculaEsEstaSem ? ultSem.rucula : ultimoRuculaF2;
-                const ruculaPct = ruculaEsEstaSem
-                  ? (varPctSem(ultSem.rucula, antSem?.rucula) ?? varPctSem(ultSem.rucula, cicloMesPasado.rucula))
-                  : null;
+              {(() => {
+                const semanaActual = ciclosSemanas[ciclosSemanas.length - 1];
+                // Cada serie usa su propia "última semana con cosecha" (no una compartida) —
+                // el % solo se muestra si esa última cosecha fue justo esta semana; si es de
+                // una semana más vieja, se avisa en vez de mostrar un % que compararía dos
+                // semanas salteadas entre sí.
+                const crespaPct = ultSemCrespa === semanaActual ? (varPctSem(ultSemCrespa?.lechugaCrespaF2, antSemCrespa?.lechugaCrespaF2) ?? varPctSem(ultSemCrespa?.lechugaCrespaF2, cicloMesPasado.lechugaCrespa)) : null;
+                const roblePct = ultSemRoble === semanaActual ? (varPctSem(ultSemRoble?.lechugaRobleF2, antSemRoble?.lechugaRobleF2) ?? varPctSem(ultSemRoble?.lechugaRobleF2, cicloMesPasado.lechugaRoble)) : null;
+                const ruculaPct = ultSemRucula === semanaActual ? (varPctSem(ultSemRucula?.rucula, antSemRucula?.rucula) ?? varPctSem(ultSemRucula?.rucula, cicloMesPasado.rucula)) : null;
+                const badges = [
+                  { key: 'crespa', label: 'Lechuga Crespa F2', val: ultSemCrespa?.lechugaCrespaF2 ?? 0, pct: crespaPct, bg: '#f7fee7', color: '#4d7c0f' },
+                  { key: 'roble', label: 'Lechuga Roble F2', val: ultSemRoble?.lechugaRobleF2 ?? 0, pct: roblePct, bg: '#f0fdf4', color: '#166534' },
+                  { key: 'rucula', label: 'Rúcula F2', val: ultSemRucula?.rucula ?? 0, pct: ruculaPct, bg: '#ecfdf5', color: '#065f46' },
+                ].filter(b => b.val > 0);
+                if (!badges.length) return null;
                 return (
                   <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))', gap:'8px', marginTop:'10px', paddingTop:'10px', borderTop:'1px solid #f3f4f6' }}>
-                    {lechugaVal > 0 && (
-                      <div style={{ textAlign:'center', padding:'8px', background:'#f7fee7', borderRadius:'7px' }}>
-                        <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#4d7c0f', fontWeight:700 }}>Lechuga F2</p>
-                        <p style={{ margin:'0 0 1px', fontSize:'22px', fontWeight:800, color:'#14532d' }}>{lechugaVal}d</p>
-                        {lechugaPct !== null ? (
-                          <p style={{ margin:0, fontSize:'10px', fontWeight:600, color:lechugaPct<=0?'#059669':'#dc2626' }}>
-                            {lechugaPct<=0?'↓':'↑'} {Math.abs(lechugaPct)}%
+                    {badges.map(b => (
+                      <div key={b.key} style={{ textAlign:'center', padding:'8px', background:b.bg, borderRadius:'7px' }}>
+                        <p style={{ margin:'0 0 1px', fontSize:'10px', color:b.color, fontWeight:700 }}>{b.label}</p>
+                        <p style={{ margin:'0 0 1px', fontSize:'22px', fontWeight:800, color:'#14532d' }}>{b.val}d</p>
+                        {b.pct !== null ? (
+                          <p style={{ margin:0, fontSize:'10px', fontWeight:600, color:b.pct<=0?'#059669':'#dc2626' }}>
+                            {b.pct<=0?'↓':'↑'} {Math.abs(b.pct)}%
                           </p>
                         ) : (
                           <p style={{ margin:0, fontSize:'10px', color:'#9ca3af' }}>sin cosecha esta sem.</p>
                         )}
                       </div>
-                    )}
-                    {ruculaVal > 0 && (
-                      <div style={{ textAlign:'center', padding:'8px', background:'#f0fdf4', borderRadius:'7px' }}>
-                        <p style={{ margin:'0 0 1px', fontSize:'10px', color:'#166534', fontWeight:700 }}>Rúcula F2</p>
-                        <p style={{ margin:'0 0 1px', fontSize:'22px', fontWeight:800, color:'#14532d' }}>{ruculaVal}d</p>
-                        {ruculaPct !== null ? (
-                          <p style={{ margin:0, fontSize:'10px', fontWeight:600, color:ruculaPct<=0?'#059669':'#dc2626' }}>
-                            {ruculaPct<=0?'↓':'↑'} {Math.abs(ruculaPct)}%
-                          </p>
-                        ) : (
-                          <p style={{ margin:0, fontSize:'10px', color:'#9ca3af' }}>sin cosecha esta sem.</p>
-                        )}
-                      </div>
-                    )}
+                    ))}
                   </div>
                 );
               })()}

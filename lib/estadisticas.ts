@@ -576,6 +576,8 @@ export function getCicloReal(ciclosReales: Map<string, number>, variedad: string
 }
 
 // === CICLOS POR SEMANA (últimas 8 semanas) ===
+// lechugaF1/lechugaF2/cosechasLechuga quedan como el combinado crespa+roble (compatibilidad
+// con lo que ya los usaba) — lechugaCrespa*/lechugaRoble* son el desglose por tipo.
 export interface CicloSemana {
   semana: string;
   lechugaF1: number;
@@ -583,7 +585,15 @@ export interface CicloSemana {
   rucula: number;
   cosechasLechuga: number;
   cosechasRucula: number;
+  lechugaCrespaF1: number;
+  lechugaCrespaF2: number;
+  cosechasLechugaCrespa: number;
+  lechugaRobleF1: number;
+  lechugaRobleF2: number;
+  cosechasLechugaRoble: number;
 }
+
+const esCrespaVarEst = (v: string) => String(v || '').toLowerCase().includes('crespa');
 
 export function ciclosPorSemana(lotes: Lote[], movimientos: import('./types').Movimiento[]): CicloSemana[] {
   const hoy = new Date();
@@ -608,6 +618,8 @@ export function ciclosPorSemana(lotes: Lote[], movimientos: import('./types').Mo
       const v = String(l.variedad || '').toLowerCase();
       return !v.includes('rucula') && !v.includes('rúcula');
     });
+    const lechugaCrespa = lechuga.filter((l) => esCrespaVarEst(l.variedad));
+    const lechugaRoble = lechuga.filter((l) => !esCrespaVarEst(l.variedad));
     const ruculaLotes = cosechadosSemana.filter((l) => {
       const v = String(l.variedad || '').toLowerCase();
       return v.includes('rucula') || v.includes('rúcula');
@@ -629,6 +641,12 @@ export function ciclosPorSemana(lotes: Lote[], movimientos: import('./types').Mo
       rucula: promF2(ruculaLotes),
       cosechasLechuga: lechuga.length,
       cosechasRucula: ruculaLotes.length,
+      lechugaCrespaF1: promF1(lechugaCrespa),
+      lechugaCrespaF2: promF2(lechugaCrespa),
+      cosechasLechugaCrespa: lechugaCrespa.length,
+      lechugaRobleF1: promF1(lechugaRoble),
+      lechugaRobleF2: promF2(lechugaRoble),
+      cosechasLechugaRoble: lechugaRoble.length,
     });
   }
   return semanas;
@@ -689,7 +707,8 @@ export function ciclosPorMesYAnioDetalle(
 // ── Peso promedio de cosecha por cultivo (gr/paquete) en un mes, para la tarjeta de
 // Indicadores. `fechaRef` fija el mes objetivo; `diaCorte` recorta ese mes hasta un día
 // puntual (para comparar contra el mismo tramo del mes pasado). ──
-export interface PesoPromedioMes { rucula: number; lechuga: number }
+// lechuga = combinado crespa+roble (compatibilidad); lechugaCrespa/lechugaRoble = desglose.
+export interface PesoPromedioMes { rucula: number; lechuga: number; lechugaCrespa: number; lechugaRoble: number }
 export function pesoPromedioMes(lotes: Lote[], fechaRef: Date = new Date(), diaCorte?: number): PesoPromedioMes {
   const corte = diaCorte ?? fechaRef.getDate();
   const desde = new Date(fechaRef.getFullYear(), fechaRef.getMonth(), 1);
@@ -700,7 +719,7 @@ export function pesoPromedioMes(lotes: Lote[], fechaRef: Date = new Date(), diaC
 // Igual que pesoPromedioMes pero para un rango de fechas explícito (usado por el
 // reporte semanal para "peso promedio de esta semana").
 export function pesoPromedioRango(lotes: Lote[], desde: Date, hasta: Date): PesoPromedioMes {
-  const acc = { rucula: [] as number[], lechuga: [] as number[] };
+  const acc = { rucula: [] as number[], lechuga: [] as number[], lechugaCrespa: [] as number[], lechugaRoble: [] as number[] };
   for (const l of lotes) {
     if (l.estado !== 'cosechado' || !l.fecha_cosecha) continue;
     const f = safeParseDate(l.fecha_cosecha);
@@ -710,18 +729,20 @@ export function pesoPromedioRango(lotes: Lote[], desde: Date, hasta: Date): Peso
       : Number(l.peso_muestra_kg) > 0 ? Math.round(Number(l.peso_muestra_kg) * 1000) : 0;
     if (gr <= 0) continue;
     const v = String(l.variedad || '').toLowerCase();
-    (v.includes('rucula') || v.includes('rúcula') ? acc.rucula : acc.lechuga).push(gr);
+    if (v.includes('rucula') || v.includes('rúcula')) { acc.rucula.push(gr); continue; }
+    acc.lechuga.push(gr);
+    (esCrespaVarEst(v) ? acc.lechugaCrespa : acc.lechugaRoble).push(gr);
   }
   const avg = (xs: number[]) => xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0;
-  return { rucula: avg(acc.rucula), lechuga: avg(acc.lechuga) };
+  return { rucula: avg(acc.rucula), lechuga: avg(acc.lechuga), lechugaCrespa: avg(acc.lechugaCrespa), lechugaRoble: avg(acc.lechugaRoble) };
 }
 
 // Ciclo F2 promedio por cultivo de los lotes cosechados en el mes de `fechaRef` — se usa
 // como referencia de respaldo cuando la comparación semana a semana no tiene datos (p. ej.
 // lechuga, que al tener un ciclo mucho más largo puede no tener ninguna cosecha en una
 // semana puntual de comparación).
-export function cicloMesPromedio(lotes: Lote[], movimientos: Movimiento[], fechaRef: Date): { rucula: number; lechuga: number } {
-  const acc = { rucula: [] as number[], lechuga: [] as number[] };
+export function cicloMesPromedio(lotes: Lote[], movimientos: Movimiento[], fechaRef: Date): { rucula: number; lechuga: number; lechugaCrespa: number; lechugaRoble: number } {
+  const acc = { rucula: [] as number[], lechuga: [] as number[], lechugaCrespa: [] as number[], lechugaRoble: [] as number[] };
   for (const l of lotes) {
     if (l.estado !== 'cosechado' || !l.fecha_cosecha) continue;
     const f = safeParseDate(l.fecha_cosecha);
@@ -730,8 +751,10 @@ export function cicloMesPromedio(lotes: Lote[], movimientos: Movimiento[], fecha
     try { f2 = calcularDiasPorFase(l, movimientos).fase_2; } catch { continue; }
     if (f2 <= 0) continue;
     const v = String(l.variedad || '').toLowerCase();
-    (v.includes('rucula') || v.includes('rúcula') ? acc.rucula : acc.lechuga).push(f2);
+    if (v.includes('rucula') || v.includes('rúcula')) { acc.rucula.push(f2); continue; }
+    acc.lechuga.push(f2);
+    (esCrespaVarEst(v) ? acc.lechugaCrespa : acc.lechugaRoble).push(f2);
   }
   const avg = (xs: number[]) => xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0;
-  return { rucula: avg(acc.rucula), lechuga: avg(acc.lechuga) };
+  return { rucula: avg(acc.rucula), lechuga: avg(acc.lechuga), lechugaCrespa: avg(acc.lechugaCrespa), lechugaRoble: avg(acc.lechugaRoble) };
 }
