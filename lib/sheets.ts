@@ -127,6 +127,11 @@ export async function batchUpdateRows(
       newRow[colIdx] = val;
     }
     while (newRow.length < headers.length) newRow.push('');
+    // Si la fila leída traía datos sueltos en columnas más allá de las que define el
+    // encabezado (una edición manual vieja, una columna borrada hace tiempo, etc.), hay
+    // que descartarlos acá — si no, el ancho de la fila termina siendo mayor al rango
+    // declarado (A:última columna del encabezado) y Sheets rechaza toda la escritura.
+    newRow.length = headers.length;
     data.push({ range: `${sheetName}!A${rowIndex + 1}:${colLetter(headers.length)}${rowIndex + 1}`, values: [newRow] });
   }
   if (!data.length) return;
@@ -151,6 +156,10 @@ function updateRowWithRawData(
     newRow[colIdx] = val;
   }
   while (newRow.length < headers.length) newRow.push('');
+  // Truncar columnas sueltas más allá del encabezado (ver mismo comentario en
+  // batchUpdateRows) — si no, el ancho de la fila supera el rango declarado y Sheets
+  // rechaza toda la escritura.
+  newRow.length = headers.length;
   return sheets.spreadsheets.values.update({
     spreadsheetId: SHEET_ID,
     range: `${sheetName}!A${rowIndex + 1}:${colLetter(headers.length)}${rowIndex + 1}`,
