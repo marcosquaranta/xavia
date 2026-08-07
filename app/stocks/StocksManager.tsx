@@ -60,6 +60,7 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
   const [mes, setMes] = useState(HOY.getMonth() + 1);
   const [vista, setVista] = useState<'carga' | 'informe'>('carga');
   const [saving, setSaving] = useState<string | null>(null);
+  const [errorGuardado, setErrorGuardado] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, { ini: string; comp: string; fin: string; precio: string; notas: string }>>({});
   const [mostrarUsos, setMostrarUsos] = useState(false);
   const [copiado, setCopiado] = useState<string | null>(null);
@@ -235,10 +236,10 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
   }
 
   async function guardar(art: Articulo) {
-    setSaving(art.id_articulo);
+    setSaving(art.id_articulo); setErrorGuardado(null);
     const vals = getEdit(art.id_articulo);
     try {
-      await fetch('/api/stocks/guardar', {
+      const res = await fetch('/api/stocks/guardar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -247,10 +248,19 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
           stock_final: vals.fin, precio_unitario: vals.precio, notas: vals.notas,
         }),
       });
+      const j = await res.json().catch(() => ({}));
+      // Antes no se chequeaba res.ok: si el guardado fallaba en el servidor (ej. un error
+      // de Sheets), igual se borraba la marca de "sin guardar" acá abajo y quedaba como
+      // si hubiera funcionado — el usuario nunca se enteraba de que en realidad no se
+      // guardó nada (reportado con "editar el precio de compra no queda guardado").
+      if (!res.ok) throw new Error(j.error || 'Error al guardar');
       setEditValues((prev) => { const n = { ...prev }; delete n[art.id_articulo]; return n; });
       router.refresh();
-    } catch {}
-    setSaving(null);
+    } catch (err: any) {
+      setErrorGuardado(`${art.articulo}: ${err.message || 'no se pudo guardar'}`);
+    } finally {
+      setSaving(null);
+    }
   }
 
   // Informe: últimos 6 meses por artículo
@@ -402,6 +412,13 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
           </button>
         )}
       </div>
+
+      {errorGuardado && (
+        <div className="alert-box error" style={{ marginBottom: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+          <span>⚠️ No se guardó: {errorGuardado}</span>
+          <button onClick={() => setErrorGuardado(null)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '16px', lineHeight: 1 }}>×</button>
+        </div>
+      )}
 
       {/* ===== VISTA: CARGA MENSUAL ===== */}
       {vista === 'carga' && (
