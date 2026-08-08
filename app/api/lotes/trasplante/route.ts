@@ -42,7 +42,10 @@ export async function POST(req: NextRequest) {
     // Descarte declarado en el trasplante (mismo criterio que el resto del formulario:
     // rúcula entra en plantines, se pasa a plantas reales ÷2) — se acumula en
     // Lote.descarte_reportado para que Estadísticas (descarte por mes/cultivo) refleje
-    // también lo perdido en plantinera→F1 y F1→F2, no solo en la cosecha.
+    // también lo perdido en plantinera→F1 y F1→F2, no solo en la cosecha. También se
+    // escribe en plantas reales (no plantines) en Movimiento.descarte_calculado, para que
+    // quede en la MISMA unidad que Movimiento.plantas_estimadas — si no, el % de descarte
+    // por transición de fase (ficha del lote) salía mal en rúcula (÷2 de más).
     const descarteReal = Math.round((Number(descarte) || 0) / factorPlantines);
     const seDivide = plantas_quedan > 0 && plantas_trasplantadas > 0;
 
@@ -104,7 +107,7 @@ if (nuevoId !== lote.id_lote) {
         lote.fase_actual, fase_destino,
         lote.ubicacion_actual, ubicDestino.nombre,
         tubos_ocupados, plantasReales,
-        '', '', '', '', descarte || 0, descarte || 0,
+        '', '', '', '', descarteReal || 0, descarteReal || 0,
         '', '', '', '', '', user.email, '',
         `Trasplante: ${tubos_ocupados} tubos, ${plantasReales} plantas`,
       ]);
