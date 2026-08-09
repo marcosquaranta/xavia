@@ -221,6 +221,18 @@ export interface CajonMovimiento {
   notas: string;
 }
 
+// Lectura puntual del odómetro de un vehículo (km TOTALES acumulados, no el recorrido de
+// la semana) — cada fila es UNA lectura en una fecha; el km recorrido por semana se
+// calcula como la diferencia entre lecturas consecutivas (ver lib/kilometraje.ts).
+export interface KilometrajeVehiculo {
+  id_km: string;
+  fecha: string;
+  vehiculo: string;
+  km_acumulado: number | string;
+  notas: string;
+  usuario: string;
+}
+
 export interface StockCamara {
   id_registro: string;
   // 'lechuga' queda solo por compatibilidad con registros viejos (antes del split

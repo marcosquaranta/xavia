@@ -11,7 +11,8 @@ import { getRegistrosCrossChex, type RegistroCrossChex } from '@/lib/crosschex';
 import { rangoMes, horasHombreEnRango } from '@/lib/personal';
 import { productividadPorSemana } from '@/lib/productividad';
 import { obtenerTemperaturasRosario, temperaturaPromedioPorMes } from '@/lib/clima';
-import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
+import { kmPorSemana, VEHICULO_PARTNER } from '@/lib/kilometraje';
+import type { Lote, Movimiento, Ubicacion, KilometrajeVehiculo } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
 import GraficoCiclosMesadas from './GraficoCiclosMesadas';
@@ -30,12 +31,14 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [];
   let configRows: { clave: string; valor: any }[] = [];
+  let registrosKm: KilometrajeVehiculo[] = [];
   let err: string | null = null;
   try {
-    [lotes, movimientos, ubicaciones, configRows] = await Promise.all([
+    [lotes, movimientos, ubicaciones, configRows, registrosKm] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<Ubicacion>('Ubicaciones'),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
+      readSheet<KilometrajeVehiculo>('Kilometraje').catch(() => []),
     ]);
   } catch (e: any) { err = e?.message || 'Error cargando datos'; }
 
@@ -139,6 +142,14 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     ],
     tempSeries: [{ nombre: 'Temp. Rosario', color: '#ea580c', puntos: temperaturaMensual.map((v, i) => [i, v] as [number, number | null]).filter((p): p is [number, number] => p[1] !== null) }],
     labels: mesesClimaLabels, hoyIdx: NMESES_CLIMA - 1,
+  };
+
+  // ── Kilometraje semanal del Partner — diferencia entre lecturas de odómetro
+  // consecutivas (se cargan los sábados desde el Panel), no semanas calendario forzadas.
+  const puntosKm = kmPorSemana(registrosKm, VEHICULO_PARTNER, 12).filter(p => p.kmSemana !== null);
+  const evoKmSemana = {
+    series: [{ nombre: 'Km recorridos', color: '#0891b2', puntos: puntosKm.map((p, i) => [i, p.kmSemana as number] as [number, number]) }],
+    labels: puntosKm.map(p => p.label), hoyIdx: puntosKm.length - 1,
   };
 
   // Fecha desde la que arranca el filtro global elegido — null = histórico, sin límite.
@@ -535,6 +546,14 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             <p className="card-title" style={{ margin:'0 0 2px' }}>Clima (Rosario) vs. ciclos</p>
             <p className="card-sub" style={{ margin:'0 0 10px' }}>Días F2 promedio (izq.) y temperatura promedio (der.) · por mes · últimos 12 meses · indicador fijo, no cambia con el filtro de arriba</p>
             <GraficoEvolucion series={evoClimaCiclos.series} pesoSeries={evoClimaCiclos.tempSeries} labels={evoClimaCiclos.labels} hoyIdx={evoClimaCiclos.hoyIdx} unidadSecundaria="°C" labelSecundaria="temp →" />
+          </div>
+
+          <div className="card" style={{ margin:0 }}>
+            <p className="card-title" style={{ margin:'0 0 2px' }}>Kilometraje — Vehículo Partner</p>
+            <p className="card-sub" style={{ margin:'0 0 10px' }}>Km recorridos entre lecturas del odómetro (se cargan los sábados) · indicador fijo, no cambia con el filtro de arriba</p>
+            {evoKmSemana.series[0].puntos.length > 0
+              ? <GraficoEvolucion series={evoKmSemana.series} labels={evoKmSemana.labels} hoyIdx={evoKmSemana.hoyIdx} unidad=" km" />
+              : <p style={{ color:'#9ca3af', fontSize:'13px', textAlign:'center', padding:'20px' }}>Todavía no hay dos lecturas de kilometraje cargadas para calcular la diferencia semanal.</p>}
           </div>
         </div>
 

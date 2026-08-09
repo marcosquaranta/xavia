@@ -5,13 +5,14 @@ import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
 import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, cosechadoEsteMes } from '@/lib/estadisticas';
 import { codigoCultivo } from '@/lib/lotes';
-import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, Empleado, PersonalQuincena, CajonMovimiento } from '@/lib/types';
+import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, Empleado, PersonalQuincena, CajonMovimiento, KilometrajeVehiculo } from '@/lib/types';
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
 import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
 import { evolucionVentaPorArticulo, resumenMesActual } from '@/lib/estadisticasVentas';
 import { generarAlertas, motivoAlertaCosecha, type MotivoAlertaCosecha } from '@/lib/alertasPanel';
 import { calcularCamara, diferenciaAjustesMes } from '@/lib/camara';
 import { saldoPorCliente, alertasCajones } from '@/lib/cajones';
+import { faltaCargarEstaSemana, ultimaLectura, VEHICULO_PARTNER } from '@/lib/kilometraje';
 import { getRegistrosCrossChex } from '@/lib/crosschex';
 import { calcularResumenQuincena, rangoQuincena, rangoMes, tardanzasDeHoy, horasHombreEnRango } from '@/lib/personal';
 import Header from '@/components/Header';
@@ -20,6 +21,7 @@ import GraficoDistribucionMesadas from '@/components/GraficoDistribucionMesadas'
 import BuscadorLote from '@/components/BuscadorLote';
 import GruposLotes from '@/components/GruposLotes';
 import AjusteStockCard from '@/components/AjusteStockCard';
+import KilometrajeReminder from '@/components/KilometrajeReminder';
 import { GraficoVentaPorArticulo } from '@/app/ventas/VentasEvolucionCharts';
 
 export const dynamic = 'force-dynamic';
@@ -50,8 +52,9 @@ export default async function PanelPage() {
   let configRows: { clave: string; valor: any }[] = [];
   let registrosCamara: StockCamara[] = [];
   let movimientosCajones: CajonMovimiento[] = [];
+  let registrosKm: KilometrajeVehiculo[] = [];
   try {
-    [lotes, movimientos, ubicaciones, variedades, ventasPanel, clientesPanel, preciosPanel, historicasPanel, configRows, registrosCamara, movimientosCajones] = await Promise.all([
+    [lotes, movimientos, ubicaciones, variedades, ventasPanel, clientesPanel, preciosPanel, historicasPanel, configRows, registrosCamara, movimientosCajones, registrosKm] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<Ubicacion>('Ubicaciones'), readSheet<Variedad>('Variedades'),
       readSheet<VentaDia>('Ventas'),
@@ -61,6 +64,7 @@ export default async function PanelPage() {
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
       readSheet<StockCamara>('StockCamara').catch(() => []),
       readSheet<CajonMovimiento>('CajonesMovimientos').catch(() => []),
+      readSheet<KilometrajeVehiculo>('Kilometraje').catch(() => []),
     ]);
   } catch {}
 
@@ -313,6 +317,11 @@ export default async function PanelPage() {
   const horaArg = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Argentina/Buenos_Aires', hour: 'numeric', hour12: false }).format(new Date()));
   const esDiaStockCamara = horaArg >= 12;
 
+  // Recordatorio de kilometraje del Partner — se pide los sábados, y queda pendiente
+  // (se sigue mostrando) todos los días de la semana hasta que se cargue una lectura.
+  const faltaKm = faltaCargarEstaSemana(registrosKm, VEHICULO_PARTNER, hoy);
+  const ultimaLecturaKm = ultimaLectura(registrosKm, VEHICULO_PARTNER);
+
   return (
     <>
       <Header user={user} current="panel" />
@@ -346,6 +355,13 @@ export default async function PanelPage() {
             </div>
             <a href="#stock-camara" className="btn secondary" style={{ fontSize:'12px', whiteSpace:'nowrap' }}>Ir a Stock en cámara ↓</a>
           </div>
+        )}
+
+        {faltaKm && (
+          <KilometrajeReminder
+            ultimoKm={ultimaLecturaKm ? Number(ultimaLecturaKm.km_acumulado) : null}
+            ultimaFecha={ultimaLecturaKm ? ultimaLecturaKm.fecha : null}
+          />
         )}
 
         {/* ══ TAREAS DE HOY ══ */}
