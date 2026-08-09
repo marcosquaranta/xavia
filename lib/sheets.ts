@@ -18,8 +18,14 @@ function getClient(): sheets_v4.Sheets {
 
 export async function readSheet<T = Record<string, any>>(sheetName: string): Promise<T[]> {
   const sheets = getClient();
+  // valueRenderOption: 'UNFORMATTED_VALUE' — sin esto, Sheets devuelve el valor
+  // FORMATEADO como texto (default de la API). Una celda numérica con separador de
+  // miles (formato argentino, ej. 1.850) volvía como el string "1.850", y Number(...)
+  // la interpreta como 1.85 (punto = decimal en JS) — achicaba cualquier cantidad
+  // ≥1000 en una celda con ese formato por 1000. Los campos de fecha no se ven
+  // afectados porque ya se cargan como texto plano, no como fecha de Sheets.
   const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`,
+    spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`, valueRenderOption: 'UNFORMATTED_VALUE',
   });
   const rows = response.data.values;
   if (!rows || rows.length < 2) return [];
@@ -76,7 +82,7 @@ export async function appendRows(sheetName: string, rows: any[][]): Promise<void
 // Lee las filas crudas (array posicional) incluyendo el header.
 export async function readRaw(sheetName: string): Promise<string[][]> {
   const sheets = getClient();
-  const resp = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH` });
+  const resp = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`, valueRenderOption: 'UNFORMATTED_VALUE' });
   return (resp.data.values as string[][]) || [];
 }
 
@@ -93,7 +99,7 @@ export async function setRowByHeader(sheetName: string, rowNumber: number, heade
 
 export async function updateRow(sheetName: string, keyColumn: string, keyValue: string, updates: Record<string, any>): Promise<boolean> {
   const sheets = getClient();
-  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH` });
+  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`, valueRenderOption: 'UNFORMATTED_VALUE' });
   const rows = response.data.values;
   if (!rows || rows.length < 2) return false;
   const headers = rows[0];
@@ -109,7 +115,7 @@ export async function batchUpdateRows(
 ): Promise<void> {
   if (!updates.length) return;
   const sheets = getClient();
-  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH` });
+  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`, valueRenderOption: 'UNFORMATTED_VALUE' });
   const rows = response.data.values;
   if (!rows || rows.length < 2) return;
   const headers = rows[0];
@@ -179,7 +185,7 @@ export async function deleteRow(sheetName: string, keyColumn: string, keyValue: 
   const sheet = sheetMeta.data.sheets?.find((s) => s.properties?.title === sheetName);
   if (!sheet) throw new Error(`Pestaña ${sheetName} no encontrada`);
   const sheetId = sheet.properties?.sheetId;
-  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH` });
+  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`, valueRenderOption: 'UNFORMATTED_VALUE' });
   const rows = response.data.values;
   if (!rows || rows.length < 2) return false;
   const headers = rows[0];
