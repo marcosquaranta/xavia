@@ -5,12 +5,13 @@ import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
 import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, cosechadoEsteMes } from '@/lib/estadisticas';
 import { codigoCultivo } from '@/lib/lotes';
-import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, Empleado, PersonalQuincena } from '@/lib/types';
+import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, Empleado, PersonalQuincena, CajonMovimiento } from '@/lib/types';
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
 import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
 import { evolucionVentaPorArticulo, resumenMesActual } from '@/lib/estadisticasVentas';
 import { generarAlertas, motivoAlertaCosecha, type MotivoAlertaCosecha } from '@/lib/alertasPanel';
 import { calcularCamara, diferenciaAjustesMes } from '@/lib/camara';
+import { saldoPorCliente, alertasCajones } from '@/lib/cajones';
 import { getRegistrosCrossChex } from '@/lib/crosschex';
 import { calcularResumenQuincena, rangoQuincena, rangoMes, tardanzasDeHoy, horasHombreEnRango } from '@/lib/personal';
 import Header from '@/components/Header';
@@ -48,8 +49,9 @@ export default async function PanelPage() {
   let ventasPanel: VentaDia[] = [], clientesPanel: ClienteVenta[] = [], preciosPanel: PrecioVenta[] = [], historicasPanel: VentaHistorica[] = [];
   let configRows: { clave: string; valor: any }[] = [];
   let registrosCamara: StockCamara[] = [];
+  let movimientosCajones: CajonMovimiento[] = [];
   try {
-    [lotes, movimientos, ubicaciones, variedades, ventasPanel, clientesPanel, preciosPanel, historicasPanel, configRows, registrosCamara] = await Promise.all([
+    [lotes, movimientos, ubicaciones, variedades, ventasPanel, clientesPanel, preciosPanel, historicasPanel, configRows, registrosCamara, movimientosCajones] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<Ubicacion>('Ubicaciones'), readSheet<Variedad>('Variedades'),
       readSheet<VentaDia>('Ventas'),
@@ -58,6 +60,7 @@ export default async function PanelPage() {
       readSheet<VentaHistorica>('VentasHistoricas').catch(() => []),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
       readSheet<StockCamara>('StockCamara').catch(() => []),
+      readSheet<CajonMovimiento>('CajonesMovimientos').catch(() => []),
     ]);
   } catch {}
 
@@ -166,7 +169,21 @@ export default async function PanelPage() {
   // detalle ya se ve más abajo en "Cosechar"/"Trasplantar", con su propio color por
   // tiempo transcurrido. El resto (mesadas vacías, sin siembras recientes, ocupación, etc.)
   // sí se muestra acá.
-  const alertas = generarAlertas(lotes, tubosMesadas, ciclosRealesMap, ocGlobal).filter(a => a.categoria !== 'lote_atraso');
+  let alertas = generarAlertas(lotes, tubosMesadas, ciclosRealesMap, ocGlobal).filter(a => a.categoria !== 'lote_atraso');
+  // Cajones que un cliente debe hace más de 7 días sin registrar movimiento — pedido
+  // explícito para que salte en las Alertas del home, no solo en la sección Cajones.
+  try {
+    const saldosCajones = saldoPorCliente(movimientosCajones, clientesPanel, hoy);
+    const alertasCajonesPanel = alertasCajones(saldosCajones, 7);
+    alertas = [
+      ...alertas,
+      ...alertasCajonesPanel.map(a => ({
+        tipo: 'warn' as const,
+        msg: `${a.nombre} debe ${a.saldo} cajones — sin movimiento hace ${a.diasSinMovimiento}d`,
+        categoria: 'general' as const,
+      })),
+    ];
+  } catch {}
 
   // Tardanzas DE HOY (no de toda la quincena) (CrossChex) — solo admin, banner grande en
   // el home. Envuelto en try/catch: si CrossChex está caído o faltan credenciales, no debe
@@ -290,9 +307,11 @@ export default async function PanelPage() {
   const cicloMesPasado = cicloMesPromedio(lotes, movimientos, mesPasadoRef);
 
   const hoyStr = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
-  // Recordatorio de stock físico en cámara — sábados, lunes y miércoles.
-  const diaSemanaHoy = new Date().getDay(); // 0=domingo..6=sábado
-  const esDiaStockCamara = diaSemanaHoy === 6 || diaSemanaHoy === 1 || diaSemanaHoy === 3;
+  // Recordatorio de stock físico en cámara (paquetes) — todos los días, después del
+  // mediodía. Se calcula la hora en huso de Argentina explícitamente (no new Date().
+  // getHours(), que en el server corre en UTC y dispararía 3 horas antes de tiempo).
+  const horaArg = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Argentina/Buenos_Aires', hour: 'numeric', hour12: false }).format(new Date()));
+  const esDiaStockCamara = horaArg >= 12;
 
   return (
     <>
@@ -320,9 +339,9 @@ export default async function PanelPage() {
           <div style={{ background:'#fef3c7', border:'2px solid #f59e0b', borderRadius:'10px', padding:'16px 18px', marginBottom:'14px', display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }}>
             <span style={{ fontSize:'28px', lineHeight:1 }}>📦</span>
             <div style={{ flex:1, minWidth:'260px' }}>
-              <p style={{ margin:'0 0 4px', fontSize:'15px', fontWeight:800, color:'#92400e' }}>Hoy toca hacer stock de plantas en cámara</p>
+              <p style={{ margin:'0 0 4px', fontSize:'15px', fontWeight:800, color:'#92400e' }}>Recordá hacer el stock de paquetes en cámara</p>
               <p style={{ margin:0, fontSize:'12.5px', color:'#78350f' }}>
-                Hacelo <strong>antes de cargar las cosechas/ventas del día</strong> (a primera hora) o <strong>después de cargarlas</strong> (al cierre) — nunca a la mitad, porque el conteo queda comparado contra un stock esperado a medio actualizar.
+                Hacelo <strong>una vez que ya se cargaron las cosechas/ventas del día</strong> — nunca a la mitad, porque el conteo queda comparado contra un stock esperado a medio actualizar.
               </p>
             </div>
             <a href="#stock-camara" className="btn secondary" style={{ fontSize:'12px', whiteSpace:'nowrap' }}>Ir a Stock en cámara ↓</a>

@@ -207,6 +207,20 @@ export interface VentaHistorica {
   lechuga: string;
 }
 
+// Movimiento de cajones plásticos reutilizables: se entregan con la mercadería y hay que
+// recuperarlos — cada fila es UN evento (una entrega o una devolución puntual), el saldo
+// por cliente se calcula sumando (ver lib/cajones.ts).
+export interface CajonMovimiento {
+  id_movimiento: string;
+  fecha: string;
+  id_control: string;
+  nombre_cliente: string;
+  tipo: 'entrega' | 'devolucion';
+  cantidad: number | string;
+  usuario: string;
+  notas: string;
+}
+
 export interface StockCamara {
   id_registro: string;
   // 'lechuga' queda solo por compatibilidad con registros viejos (antes del split
