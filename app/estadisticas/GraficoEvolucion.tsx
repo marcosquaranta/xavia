@@ -6,9 +6,10 @@ export interface SerieEvo {
   puntos: [number, number][]; // [bucketIndex, valor]
 }
 
-export default function GraficoEvolucion({ series, pesoSeries, labels, hoyIdx, unidad = 'd', yMin, yMax }: {
+export default function GraficoEvolucion({ series, pesoSeries, labels, hoyIdx, unidad = 'd', yMin, yMax, unidadSecundaria = 'g', labelSecundaria = 'peso →' }: {
   series: SerieEvo[]; pesoSeries?: SerieEvo[]; labels: string[]; hoyIdx: number; unidad?: string;
   yMin?: number; yMax?: number; // eje Y fijo — si no vienen, se auto-escala al rango real de los datos
+  unidadSecundaria?: string; labelSecundaria?: string; // eje derecho (pesoSeries) — por defecto gramos, pero sirve para cualquier otra magnitud (ej. °C)
 }) {
   const todos = series.flatMap(s => s.puntos.map(p => p[1]));
   if (!todos.length) return (
@@ -20,9 +21,12 @@ export default function GraficoEvolucion({ series, pesoSeries, labels, hoyIdx, u
   const todosPeso = (pesoSeries || []).flatMap(s => s.puntos.map(p => p[1]));
   const hayPeso = todosPeso.length > 0;
   // Eje ajustado al rango real de los datos (no siempre arrancando en 0) — así las
-  // variaciones se ven mejor en vez de quedar todas apretadas arriba del gráfico.
-  const minPeso = hayPeso ? Math.floor(Math.min(...todosPeso) * 0.9 / 10) * 10 : 0;
-  const maxPeso = hayPeso ? Math.max(Math.ceil(Math.max(...todosPeso) * 1.1 / 10) * 10, minPeso + 10) : 0;
+  // variaciones se ven mejor en vez de quedar todas apretadas arriba del gráfico. El paso
+  // de redondeo se adapta a la magnitud (de a 10 para gramos, de a 1 para algo como °C
+  // que se mueve en un rango mucho más chico) para no perder toda la resolución del eje.
+  const pesoStep = hayPeso && Math.max(...todosPeso) < 50 ? 1 : 10;
+  const minPeso = hayPeso ? Math.floor(Math.min(...todosPeso) * 0.9 / pesoStep) * pesoStep : 0;
+  const maxPeso = hayPeso ? Math.max(Math.ceil(Math.max(...todosPeso) * 1.1 / pesoStep) * pesoStep, minPeso + pesoStep) : 0;
 
   const minV = yMin !== undefined ? yMin : Math.max(0, Math.floor(Math.min(...todos) * 0.9));
   const maxV = yMax !== undefined ? yMax : Math.max(Math.ceil(Math.max(...todos) * 1.1), minV + 10, 10);
@@ -65,10 +69,10 @@ export default function GraficoEvolucion({ series, pesoSeries, labels, hoyIdx, u
         {hayPeso && (
           <>
             {yRefsPeso.map((v, i) => (
-              <text key={i} x={R + 6} y={pyPeso(v) + 4} textAnchor="start" fontSize={9} fill="#9ca3af">{v}g</text>
+              <text key={i} x={R + 6} y={pyPeso(v) + 4} textAnchor="start" fontSize={9} fill="#9ca3af">{v}{unidadSecundaria}</text>
             ))}
             <line x1={R} x2={R} y1={T} y2={Bot} stroke="#f3f4f6" strokeWidth={1} strokeDasharray="3 2" />
-            <text x={W - 4} y={T - 8} textAnchor="end" fontSize={8} fill="#9ca3af" fontWeight={600}>peso →</text>
+            <text x={W - 4} y={T - 8} textAnchor="end" fontSize={8} fill="#9ca3af" fontWeight={600}>{labelSecundaria}</text>
           </>
         )}
 
@@ -120,7 +124,7 @@ export default function GraficoEvolucion({ series, pesoSeries, labels, hoyIdx, u
               <line x1={0} y1={5} x2={24} y2={5} stroke={s.color} strokeWidth={2} strokeDasharray="5 4" />
               <circle cx={12} cy={5} r={3} fill="white" stroke={s.color} strokeWidth={1.5} />
             </svg>
-            <span style={{ color: '#374151' }}>{s.nombre} (g, eje derecho)</span>
+            <span style={{ color: '#374151' }}>{s.nombre} ({unidadSecundaria}, eje derecho)</span>
           </div>
         ))}
       </div>

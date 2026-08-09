@@ -10,6 +10,7 @@ import { cosechadoEsteMes } from '@/lib/estadisticas';
 import { getRegistrosCrossChex, type RegistroCrossChex } from '@/lib/crosschex';
 import { rangoMes, horasHombreEnRango } from '@/lib/personal';
 import { productividadPorSemana } from '@/lib/productividad';
+import { obtenerTemperaturasRosario, temperaturaPromedioPorMes } from '@/lib/clima';
 import type { Lote, Movimiento, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
@@ -94,6 +95,51 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
   const esRuculaV = (v: string) => { const x = String(v).toLowerCase(); return x.includes('rucula') || x.includes('rúcula'); };
   const esCrespaV = (v: string) => String(v).toLowerCase().includes('crespa');
+
+  // ── Clima (Rosario) vs. ciclos promedio, por mes — últimos 12 meses ── temperatura de
+  // Open-Meteo (API pública, sin key) en el eje derecho, ciclo F2 de lechuga (combinada,
+  // sin desglose crespa/roble acá) y rúcula en el izquierdo. Si el servicio de clima
+  // falla, el gráfico se muestra igual sin la línea de temperatura.
+  const NMESES_CLIMA = 12;
+  const mesesClimaLabels: string[] = [];
+  const mesesClimaKeys: string[] = [];
+  for (let i = NMESES_CLIMA - 1; i >= 0; i--) {
+    const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+    mesesClimaLabels.push(`${MESES_CORTO[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`);
+    mesesClimaKeys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  const accCicloLechuga: number[][] = Array.from({ length: NMESES_CLIMA }, () => []);
+  const accCicloRucula: number[][] = Array.from({ length: NMESES_CLIMA }, () => []);
+  for (const l of lotes) {
+    if (l.estado !== 'cosechado' || !l.fecha_cosecha) continue;
+    const mk = String(l.fecha_cosecha).slice(0, 7);
+    const idx = mesesClimaKeys.indexOf(mk); if (idx < 0) continue;
+    let f2 = 0; try { f2 = calcularDiasPorFase(l, movimientos).fase_2; } catch {}
+    if (f2 <= 0) continue;
+    (esRuculaV(l.variedad) ? accCicloRucula : accCicloLechuga)[idx].push(f2);
+  }
+  const avgArrClima = (a: number[][]) => a.map(xs => xs.length ? Math.round(xs.reduce((p, c) => p + c, 0) / xs.length) : 0);
+  const cicloLechugaMensual = avgArrClima(accCicloLechuga);
+  const cicloRuculaMensual = avgArrClima(accCicloRucula);
+
+  let temperaturaMensual: (number | null)[] = mesesClimaKeys.map(() => null);
+  try {
+    const desdeClima = `${mesesClimaKeys[0]}-01`;
+    const hastaClimaDate = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
+    const hastaClima = hastaClimaDate < hoy ? hastaClimaDate.toISOString().slice(0, 10) : hoy.toISOString().slice(0, 10);
+    const diasTemp = await obtenerTemperaturasRosario(desdeClima, hastaClima);
+    const promPorMes = temperaturaPromedioPorMes(diasTemp);
+    temperaturaMensual = mesesClimaKeys.map(mk => promPorMes.get(mk) ?? null);
+  } catch {}
+
+  const evoClimaCiclos = {
+    series: [
+      { nombre: 'Lechuga F2', color: '#84cc16', puntos: cicloLechugaMensual.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+      { nombre: 'Rúcula F2', color: '#134e4a', puntos: cicloRuculaMensual.map((v, i) => [i, v] as [number, number]).filter(p => p[1] > 0) },
+    ],
+    tempSeries: [{ nombre: 'Temp. Rosario', color: '#ea580c', puntos: temperaturaMensual.map((v, i) => [i, v] as [number, number | null]).filter((p): p is [number, number] => p[1] !== null) }],
+    labels: mesesClimaLabels, hoyIdx: NMESES_CLIMA - 1,
+  };
 
   // Fecha desde la que arranca el filtro global elegido — null = histórico, sin límite.
   function desdeDePeriodo(p: PeriodoGlobal): Date | null {
@@ -483,6 +529,12 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             {evoProductividadSemanal.series[0].puntos.length > 0
               ? <GraficoEvolucion series={evoProductividadSemanal.series} labels={evoProductividadSemanal.labels} hoyIdx={evoProductividadSemanal.hoyIdx} unidad=" paq/h" />
               : <p style={{ color:'#9ca3af', fontSize:'13px', textAlign:'center', padding:'20px' }}>Sin datos de CrossChex disponibles para este período.</p>}
+          </div>
+
+          <div className="card" style={{ margin:0 }}>
+            <p className="card-title" style={{ margin:'0 0 2px' }}>Clima (Rosario) vs. ciclos</p>
+            <p className="card-sub" style={{ margin:'0 0 10px' }}>Días F2 promedio (izq.) y temperatura promedio (der.) · por mes · últimos 12 meses · indicador fijo, no cambia con el filtro de arriba</p>
+            <GraficoEvolucion series={evoClimaCiclos.series} pesoSeries={evoClimaCiclos.tempSeries} labels={evoClimaCiclos.labels} hoyIdx={evoClimaCiclos.hoyIdx} unidadSecundaria="°C" labelSecundaria="temp →" />
           </div>
         </div>
 
