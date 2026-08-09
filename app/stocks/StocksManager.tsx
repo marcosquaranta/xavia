@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { Articulo, StockMes, Lote, VentaDia, PrecioVenta, ClienteVenta, Gasto } from '@/lib/types';
@@ -14,6 +14,15 @@ function copiarTSV(filas: (string | number)[][]) {
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const HOY = new Date();
+
+// Orden fijo de categorías pedido explícitamente (no alfabético) — lo que no está en esta
+// lista se muestra al final, alfabético. Comparación sin tildes/mayúsculas para no
+// depender de cómo esté tipeada la categoría en la planilla.
+const ORDEN_CATEGORIAS = ['Acido','Packaging','Cajones Plasticos','Espuma Fenolica','Fertilizantes','Fletes','Foliares','Semillas','Energia + Agua','Insumos Limpieza','Cultivos de Reventa','Varios'];
+function normalizarCategoria(s: string) {
+  return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+}
+const ORDEN_CATEGORIAS_NORM = ORDEN_CATEGORIAS.map(normalizarCategoria);
 
 interface Props {
   articulos: Articulo[]; stocks: StockMes[]; lotes: Lote[];
@@ -124,38 +133,10 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
   const [compraMedioPago, setCompraMedioPago] = useState('');
   const [guardandoCompra, setGuardandoCompra] = useState(false);
   const [errorCompra, setErrorCompra] = useState<string | null>(null);
-  // Corrección directa del total de "Compras" ya acumulado (sin generar un gasto nuevo) —
-  // vive dentro del mismo formulario, para casos de error de carga.
-  const [correccionCompras, setCorreccionCompras] = useState('');
-  const [guardandoCorreccion, setGuardandoCorreccion] = useState(false);
-  const [errorCorreccion, setErrorCorreccion] = useState<string | null>(null);
 
   function abrirCompra(id_articulo: string) {
     setComprandoPara(id_articulo);
     setCompraCantidad(''); setCompraPrecio(''); setCompraMedioPago(''); setErrorCompra(null);
-    setCorreccionCompras(getEdit(id_articulo).comp); setErrorCorreccion(null);
-  }
-  async function guardarCorreccionCompras(art: Articulo) {
-    setGuardandoCorreccion(true); setErrorCorreccion(null);
-    try {
-      const vals = getEdit(art.id_articulo);
-      const res = await fetch('/api/stocks/guardar', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id_articulo: art.id_articulo, anio, mes,
-          stock_inicial: vals.ini, compras: correccionCompras,
-          stock_final: vals.fin, precio_unitario: vals.precio, notas: vals.notas,
-        }),
-      });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.error || 'Error');
-      setComprandoPara(null);
-      router.refresh();
-    } catch (err: any) {
-      setErrorCorreccion(err.message || 'No se pudo guardar la corrección');
-    } finally {
-      setGuardandoCorreccion(false);
-    }
   }
   async function confirmarCompra(art: Articulo) {
     const cant = Number(compraCantidad), precio = Number(compraPrecio);
@@ -179,7 +160,17 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
     }
   }
 
-  const categorias = useMemo(() => Array.from(new Set(articulos.map((a) => a.categoria))).sort(), [articulos]);
+  const categorias = useMemo(() => {
+    const todas = Array.from(new Set(articulos.map((a) => a.categoria)));
+    return todas.sort((a, b) => {
+      const ia = ORDEN_CATEGORIAS_NORM.indexOf(normalizarCategoria(a));
+      const ib = ORDEN_CATEGORIAS_NORM.indexOf(normalizarCategoria(b));
+      if (ia === -1 && ib === -1) return a.localeCompare(b);
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    });
+  }, [articulos]);
 
   // Drivers de producción/ventas del mes seleccionado — alimentan el Uso Teórico configurado por artículo.
   const drivers = useMemo(() => calcularDriversMes(lotes, ventas, precios, clientes, anio, mes), [lotes, ventas, precios, clientes, anio, mes]);
@@ -233,6 +224,20 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
   function setField(id: string, field: string, val: string) {
     const cur = getEdit(id);
     setEditValues((prev) => ({ ...prev, [id]: { ...cur, [field]: val } }));
+  }
+
+  // Autoguardado: no se espera un click en "✓" — al salir de una celda (blur) se guarda
+  // solo, si quedó algo sin guardar. Con un pequeño debounce por artículo para no disparar
+  // un guardado por cada campo de la misma fila si el usuario va tabulando rápido entre
+  // Stock inicial → Compras → Precio → Stock final.
+  const autosaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  function autoguardar(id_articulo: string) {
+    if (editValues[id_articulo] === undefined) return; // sin cambios pendientes, nada que guardar
+    if (autosaveTimers.current[id_articulo]) clearTimeout(autosaveTimers.current[id_articulo]);
+    autosaveTimers.current[id_articulo] = setTimeout(() => {
+      const art = artActivos.find((a) => a.id_articulo === id_articulo);
+      if (art) guardar(art);
+    }, 400);
   }
 
   async function guardar(art: Articulo) {
@@ -710,7 +715,7 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                       <th>Artículo</th>
                       <th style={{ textAlign: 'center', width: '50px' }}>U.</th>
                       <th style={{ textAlign: 'right', width: '100px' }}>Stock inicial</th>
-                      <th style={{ textAlign: 'right', width: '100px' }}>Compras</th>
+                      <th style={{ textAlign: 'right', width: '160px' }}>Compras</th>
                       <th style={{ textAlign: 'right', width: '90px' }}>Precio compra</th>
                       <th style={{ textAlign: 'right', width: '100px' }}>Stock final</th>
                       <th style={{ textAlign: 'right', width: '80px', color: '#059669', fontWeight: 700 }}>Uso real</th>
@@ -737,17 +742,19 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                           <td style={{ textAlign: 'center', color: '#9ca3af', fontSize: '11px' }}>{art.unidad_medida}</td>
                           <td style={{ padding: '2px 4px' }}>
                             <input type="number" value={vals.ini} onChange={(e) => setField(art.id_articulo, 'ini', e.target.value)}
+                              onBlur={() => autoguardar(art.id_articulo)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                               style={{ width: '100%', textAlign: 'right', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '3px 6px' }}
                               min={0} step={0.001} />
                           </td>
                           <td style={{ padding: '2px 4px' }}>
                             <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                              <input type="number" value={vals.comp} disabled readOnly
-                                title="Solo se edita desde el botón 🛒 (Ingresar compra)"
-                                style={{ width: '100%', textAlign: 'right', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '3px 6px', background: '#f9fafb', color: '#6b7280' }}
+                              <input type="number" value={vals.comp} onChange={(e) => setField(art.id_articulo, 'comp', e.target.value)}
+                                onBlur={() => autoguardar(art.id_articulo)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                                title="Editable directo — para dejar registrada una compra CON gasto y medio de pago, usá el botón 🛒"
+                                style={{ width: '100%', textAlign: 'right', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '3px 6px' }}
                                 min={0} step={0.001} />
                               <button onClick={() => comprandoAqui ? setComprandoPara(null) : abrirCompra(art.id_articulo)}
-                                title="Ingresar compra (cantidad, precio y medio de pago)"
+                                title="Registrar compra con gasto asociado (medio de pago) — opcional, para contabilidad"
                                 className={comprandoAqui ? 'btn' : 'btn secondary'} style={{ fontSize: '11px', padding: '3px 7px', flexShrink: 0 }}>
                                 🛒
                               </button>
@@ -755,11 +762,13 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                           </td>
                           <td style={{ padding: '2px 4px' }}>
                             <input type="number" value={vals.precio} onChange={(e) => setField(art.id_articulo, 'precio', e.target.value)}
+                              onBlur={() => autoguardar(art.id_articulo)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                               style={{ width: '100%', textAlign: 'right', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '3px 6px' }}
                               min={0} step={0.01} placeholder={r.precio !== null ? fmt(r.precio, 2) : '—'} />
                           </td>
                           <td style={{ padding: '2px 4px' }}>
                             <input type="number" value={vals.fin} onChange={(e) => setField(art.id_articulo, 'fin', e.target.value)}
+                              onBlur={() => autoguardar(art.id_articulo)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                               style={{ width: '100%', textAlign: 'right', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '3px 6px' }}
                               min={0} step={0.001} />
                           </td>
@@ -798,15 +807,13 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                             {r.valorizado !== null ? `$${fmt(r.valorizado, 0)}` : '—'}
                           </td>
                           <td style={{ textAlign: 'center' }}>
-                            {modificado && (
-                              <button onClick={() => guardar(art)} disabled={saving === art.id_articulo}
-                                style={{ background: '#059669', color: 'white', border: 'none', borderRadius: '4px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: 600 }}>
-                                {saving === art.id_articulo ? '…' : '✓'}
-                              </button>
-                            )}
-                            {!modificado && guardado && (
-                              <span style={{ fontSize: '10px', color: '#9ca3af' }}>✓</span>
-                            )}
+                            {saving === art.id_articulo ? (
+                              <span style={{ fontSize: '10px', color: '#6b7280' }}>Guardando…</span>
+                            ) : modificado ? (
+                              <span style={{ fontSize: '10px', color: '#d97706' }} title="Se guarda solo al salir del campo">● sin guardar</span>
+                            ) : guardado ? (
+                              <span style={{ fontSize: '10px', color: '#9ca3af' }}>✓ guardado</span>
+                            ) : null}
                           </td>
                         </tr>
                         {comprandoAqui && (
@@ -848,25 +855,8 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                               </div>
                               {errorCompra && <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#dc2626' }}>{errorCompra}</p>}
                               <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#6b7280' }}>
-                                Esto suma la cantidad a "Compras" de este mes y crea el gasto correspondiente (categoría Insumos) en la planilla de Gastos.
-                              </p>
-
-                              <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px dashed #bfdbfe', display: 'flex', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                                <p style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: '#6b7280', width: '100%' }}>
-                                  ✏️ Corregir compras acumuladas de este mes
-                                </p>
-                                <div>
-                                  <label style={{ fontSize: '10px' }}>Total de compras ({art.unidad_medida})</label>
-                                  <input type="number" min={0} step={0.001} value={correccionCompras} onChange={(e) => setCorreccionCompras(e.target.value)}
-                                    style={{ width: '110px', fontSize: '12px', padding: '5px 8px' }} disabled={guardandoCorreccion} />
-                                </div>
-                                <button onClick={() => guardarCorreccionCompras(art)} disabled={guardandoCorreccion} className="btn secondary" style={{ fontSize: '12px', padding: '6px 14px' }}>
-                                  {guardandoCorreccion ? 'Guardando…' : 'Guardar corrección'}
-                                </button>
-                              </div>
-                              {errorCorreccion && <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#dc2626' }}>{errorCorreccion}</p>}
-                              <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#6b7280' }}>
-                                Esto NO genera un gasto nuevo — solo corrige el número de Compras si hubo un error de carga.
+                                Esto suma la cantidad a "Compras" de este mes y crea el gasto correspondiente (categoría Insumos, medio de pago obligatorio) en la planilla de Gastos.
+                                Para cargar o corregir Compras sin que quede como gasto/salida de fondos — solo control de stock — editá el campo "Compras" directo en la fila, se guarda solo al salir del campo.
                               </p>
                             </td>
                           </tr>
