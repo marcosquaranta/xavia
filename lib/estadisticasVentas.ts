@@ -149,7 +149,17 @@ function construirEvolucionCliente(
   for (const v of ventas) {
     const k = keyFn(v.fecha);
     if (!claves.includes(k)) continue;
-    const total = PROD_KEYS.reduce((a, kk) => a + (Number((v as any)[kk]) || 0), 0);
+    // Los campos _kg (venta por cajón) se convierten a paquete/planta-equivalente antes
+    // de sumar — si no, un cliente que compra 50kg quedaba con "total" = 50, invisible
+    // al lado de clientes que compran cientos/miles de paquetes, aunque en volumen real
+    // fuera un cliente grande. Antes esto directamente los sacaba del top N del gráfico.
+    const total = PROD_KEYS.reduce((a, kk) => {
+      const qty = Number((v as any)[kk]) || 0;
+      if (qty <= 0) return a;
+      if (kk === 'rucula_kg') return a + (qty * 1000) / GR_PAQ_RUCULA;
+      if (kk === 'lechuga_kg' || kk === 'lechuga_kg_crespa' || kk === 'lechuga_kg_roble') return a + (qty * 1000) / GR_PAQ_LECHUGA;
+      return a + qty;
+    }, 0);
     if (total <= 0) continue;
     if (!porCliente.has(v.id_control)) porCliente.set(v.id_control, {});
     const rec = porCliente.get(v.id_control)!;
