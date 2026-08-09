@@ -16,14 +16,28 @@ function getClient(): sheets_v4.Sheets {
   return _client;
 }
 
+// Convierte un serial de fecha de Google Sheets (días desde 1899-12-30, el mismo epoch
+// que usa Excel) a texto ISO "YYYY-MM-DD". Con UNFORMATTED_VALUE, cualquier celda que
+// Sheets haya detectado/guardado como fecha (aunque se haya tipeado "2026-08-09") vuelve
+// como este número en vez del texto formateado — sin esta conversión, todo lo que
+// compara fechas como string (slice(0,7)==='YYYY-MM', etc.) deja de matchear y esas
+// filas "desaparecen" en silencio de reportes filtrados por mes/fecha.
+function serialFechaAISO(serial: number): string {
+  const ms = Date.UTC(1899, 11, 30) + Math.round(serial) * 86400000;
+  const d = new Date(ms);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 export async function readSheet<T = Record<string, any>>(sheetName: string): Promise<T[]> {
   const sheets = getClient();
   // valueRenderOption: 'UNFORMATTED_VALUE' — sin esto, Sheets devuelve el valor
   // FORMATEADO como texto (default de la API). Una celda numérica con separador de
   // miles (formato argentino, ej. 1.850) volvía como el string "1.850", y Number(...)
   // la interpreta como 1.85 (punto = decimal en JS) — achicaba cualquier cantidad
-  // ≥1000 en una celda con ese formato por 1000. Los campos de fecha no se ven
-  // afectados porque ya se cargan como texto plano, no como fecha de Sheets.
+  // ≥1000 en una celda con ese formato por 1000.
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`, valueRenderOption: 'UNFORMATTED_VALUE',
   });
@@ -34,12 +48,14 @@ export async function readSheet<T = Record<string, any>>(sheetName: string): Pro
     const obj: Record<string, any> = {};
     headers.forEach((header, idx) => {
       const raw = row[idx];
+      const esFecha = /fecha/i.test(header);
       // Google Sheets devuelve los números con el separador decimal de la config
       // regional de la planilla — con configuración en español eso es COMA, no punto
       // ("0,201" en vez de "0.201"). Sin este segundo caso, esos valores quedaban como
       // texto y cualquier Number(...) sobre ellos daba NaN en silencio (comparaciones
       // ">0", sumas, etc. — ej. el pesaje testigo de un lote "desaparecía" de golpe).
       if (raw === undefined || raw === null || raw === '') { obj[header] = ''; }
+      else if (esFecha && typeof raw === 'number') { obj[header] = serialFechaAISO(raw); }
       else if (typeof raw === 'string' && /^-?\d+(\.\d+)?$/.test(raw)) { obj[header] = parseFloat(raw); }
       else if (typeof raw === 'string' && /^-?\d+,\d+$/.test(raw)) { obj[header] = parseFloat(raw.replace(',', '.')); }
       else { obj[header] = raw; }
