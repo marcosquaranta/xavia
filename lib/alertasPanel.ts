@@ -158,9 +158,17 @@ export function alertasStockBajo(
     const diasDeUso = stockActual / usoPorDia;
     if (diasDeUso < umbralDias) {
       const diasTxt = Math.max(0, Math.round(diasDeUso));
+      const fmt = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: 1 });
+      const u = art.unidad_medida;
+      // Se muestra la cuenta completa, no solo el resultado — a pedido explícito, para
+      // poder revisar de un vistazo si el número raro viene de un stock inicial mal
+      // cargado, de una fórmula de uso teórico desviada, o si es real.
+      const cuenta = finManual > 0
+        ? `stock final cargado ${fmt(finManual)} ${u} (conteo manual)`
+        : `stock inicial ${fmt(ini)} ${u}${comp > 0 ? ` + compras ${fmt(comp)} ${u}` : ''} − uso teórico al día ${diasTranscurridos} (${fmt(usoTeoricoActual ?? 0)} ${u}) = stock teórico ${fmt(stockActual)} ${u}`;
       alertas.push({
         tipo: 'error',
-        msg: `${art.articulo}: stock estimado para ~${diasTxt}d (${stockActual.toLocaleString('es-AR', { maximumFractionDigits: 1 })} ${art.unidad_medida}) — reponer`,
+        msg: `${art.articulo}: ${cuenta} · ritmo ${fmt(usoPorDia)} ${u}/día → dura ~${diasTxt}d más — reponer`,
       });
     }
   }
