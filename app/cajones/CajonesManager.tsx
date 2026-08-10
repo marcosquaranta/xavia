@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import type { CajonMovimiento, ClienteVenta } from '@/lib/types';
 import type { SaldoCajonCliente, AlertaCajon, TeoricoCajonCliente } from '@/lib/cajones';
@@ -8,9 +8,9 @@ import NumberInput from '@/components/NumberInput';
 const HOY = new Date().toISOString().split('T')[0];
 const fmt = (n: number) => Math.round(n).toLocaleString('es-AR');
 
-export default function CajonesManager({ saldos, teorico, alertas, clientes, movimientos, unidadesPorCajon, esAdmin }: {
+export default function CajonesManager({ saldos, teorico, alertas, clientes, movimientos, unidadesPorCajonRucula, unidadesPorCajonLechuga, esAdmin }: {
   saldos: SaldoCajonCliente[]; teorico: Record<string, TeoricoCajonCliente>; alertas: AlertaCajon[];
-  clientes: ClienteVenta[]; movimientos: CajonMovimiento[]; unidadesPorCajon: number; esAdmin: boolean;
+  clientes: ClienteVenta[]; movimientos: CajonMovimiento[]; unidadesPorCajonRucula: number; unidadesPorCajonLechuga: number; esAdmin: boolean;
 }) {
   const router = useRouter();
   const [idControl, setIdControl] = useState('');
@@ -23,7 +23,8 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
   const [msgOk, setMsgOk] = useState<string | null>(null);
 
   const [editandoConfig, setEditandoConfig] = useState(false);
-  const [nuevoConfig, setNuevoConfig] = useState(String(unidadesPorCajon));
+  const [nuevoRucula, setNuevoRucula] = useState(String(unidadesPorCajonRucula));
+  const [nuevoLechuga, setNuevoLechuga] = useState(String(unidadesPorCajonLechuga));
   const [guardandoConfig, setGuardandoConfig] = useState(false);
 
   const [verHistorial, setVerHistorial] = useState(false);
@@ -32,6 +33,16 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
   const clientesConSaldo = saldos.filter(s => s.saldo > 0).length;
 
   const nombreCliente = (id: string) => clientes.find(c => c.id_control === id)?.nombre_display || clientes.find(c => c.id_control === id)?.nombre_xubio || id;
+
+  // Info del cliente elegido en el formulario — aparece apenas se selecciona, para que
+  // quien carga la entrega/devolución pueda chequear contra el teórico al toque, sin
+  // tener que ir a buscarlo en el cuadro de abajo.
+  const infoCliente = useMemo(() => {
+    if (!idControl) return null;
+    const s = saldos.find(x => x.id_control === idControl) || null;
+    const t = teorico[idControl] || null;
+    return { saldo: s, teorico: t };
+  }, [idControl, saldos, teorico]);
 
   async function registrar() {
     if (!idControl) { setError('Elegí un cliente.'); return; }
@@ -55,13 +66,13 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
   }
 
   async function guardarConfig() {
-    const valor = Number(nuevoConfig);
-    if (!(valor > 0)) return;
+    const valorRucula = Number(nuevoRucula), valorLechuga = Number(nuevoLechuga);
+    if (!(valorRucula > 0) || !(valorLechuga > 0)) return;
     setGuardandoConfig(true);
     try {
       const res = await fetch('/api/cajones/config', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ unidades_por_cajon: valor }),
+        body: JSON.stringify({ unidades_por_cajon_rucula: valorRucula, unidades_por_cajon_lechuga: valorLechuga }),
       });
       if (!res.ok) throw new Error('Error al guardar');
       setEditandoConfig(false);
@@ -94,16 +105,27 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
         <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px' }}>
           <p style={{ margin: '0 0 6px', fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', fontWeight: 700 }}>Unidades por cajón</p>
           {esAdmin && editandoConfig ? (
-            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-              <input type="number" value={nuevoConfig} onChange={e => setNuevoConfig(e.target.value)} style={{ width: '80px', fontSize: '18px', padding: '4px 6px' }} disabled={guardandoConfig} />
-              <button onClick={guardarConfig} className="btn" style={{ fontSize: '11px', padding: '5px 8px' }} disabled={guardandoConfig}>✓</button>
-              <button onClick={() => { setEditandoConfig(false); setNuevoConfig(String(unidadesPorCajon)); }} className="btn secondary" style={{ fontSize: '11px', padding: '5px 8px' }}>×</button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                <span style={{ fontSize: '11px', color: '#6b7280', width: '52px' }}>Rúcula</span>
+                <input type="number" value={nuevoRucula} onChange={e => setNuevoRucula(e.target.value)} style={{ width: '70px', fontSize: '15px', padding: '4px 6px' }} disabled={guardandoConfig} />
+              </div>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                <span style={{ fontSize: '11px', color: '#6b7280', width: '52px' }}>Lechuga</span>
+                <input type="number" value={nuevoLechuga} onChange={e => setNuevoLechuga(e.target.value)} style={{ width: '70px', fontSize: '15px', padding: '4px 6px' }} disabled={guardandoConfig} />
+              </div>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button onClick={guardarConfig} className="btn" style={{ fontSize: '11px', padding: '5px 8px' }} disabled={guardandoConfig}>✓ Guardar</button>
+                <button onClick={() => { setEditandoConfig(false); setNuevoRucula(String(unidadesPorCajonRucula)); setNuevoLechuga(String(unidadesPorCajonLechuga)); }} className="btn secondary" style={{ fontSize: '11px', padding: '5px 8px' }}>×</button>
+              </div>
             </div>
           ) : (
-            <p style={{ margin: 0, fontSize: '32px', fontWeight: 800, color: '#111827', display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-              {fmt(unidadesPorCajon)}
-              {esAdmin && <button onClick={() => setEditandoConfig(true)} style={{ fontSize: '11px', color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 400 }}>editar</button>}
-            </p>
+            <div>
+              <p style={{ margin: 0, fontSize: '20px', fontWeight: 800, color: '#111827' }}>
+                {unidadesPorCajonRucula} <span style={{ fontSize: '11px', fontWeight: 400, color: '#9ca3af' }}>rúc.</span> · {unidadesPorCajonLechuga} <span style={{ fontSize: '11px', fontWeight: 400, color: '#9ca3af' }}>lech.</span>
+              </p>
+              {esAdmin && <button onClick={() => setEditandoConfig(true)} style={{ fontSize: '11px', color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 400, padding: 0 }}>editar</button>}
+            </div>
           )}
           <p style={{ margin: '4px 0 0', fontSize: '10px', color: '#9ca3af' }}>usadas para el cálculo teórico</p>
         </div>
@@ -149,6 +171,27 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
             <input type="text" value={notas} onChange={e => setNotas(e.target.value)} disabled={guardando} />
           </div>
         </div>
+
+        {/* Info instantánea del cliente elegido — para chequear contra el teórico antes de confirmar */}
+        {infoCliente && (
+          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '10px 14px', marginBottom: '12px', display: 'flex', gap: '20px', flexWrap: 'wrap', fontSize: '12.5px' }}>
+            <span>
+              <strong style={{ color: '#1e40af' }}>{infoCliente.saldo ? fmt(infoCliente.saldo.saldo) : 0}</strong>
+              <span style={{ color: '#6b7280' }}> en la calle ahora</span>
+            </span>
+            <span>
+              <strong style={{ color: '#1e40af' }}>{infoCliente.teorico ? fmt(infoCliente.teorico.teorico) : '—'}</strong>
+              <span style={{ color: '#6b7280' }}> teóricos</span>
+              {infoCliente.teorico && (
+                <span style={{ color: '#9ca3af' }}> ({fmt(infoCliente.teorico.teoricoRucula)} rúc. + {fmt(infoCliente.teorico.teoricoLechuga)} lech.)</span>
+              )}
+            </span>
+            <span style={{ color: '#6b7280' }}>
+              Último movimiento: {infoCliente.saldo?.ultimoMovimiento ? `${infoCliente.saldo.ultimoMovimiento} (hace ${infoCliente.saldo.diasSinMovimiento}d)` : 'nunca'}
+            </span>
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: '6px' }}>
             <button onClick={() => setTipo('entrega')} disabled={guardando}
@@ -179,7 +222,7 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
                 <th style={{ textAlign: 'right' }}>Entregados</th>
                 <th style={{ textAlign: 'right' }}>Devueltos</th>
                 <th style={{ textAlign: 'right' }}>En la calle</th>
-                <th style={{ textAlign: 'right' }} title="Estimado según lo vendido ÷ unidades por cajón">Teórico</th>
+                <th style={{ textAlign: 'right' }} title="Estimado según lo vendido ÷ unidades por cajón, por cultivo">Teórico</th>
                 <th style={{ textAlign: 'right' }} title="Entregados reales − teórico">Diferencia</th>
                 <th style={{ textAlign: 'right' }}>Último mov.</th>
               </tr></thead>
@@ -194,7 +237,7 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
                       <td style={{ textAlign: 'right' }}>{fmt(s.entregados)}</td>
                       <td style={{ textAlign: 'right' }}>{fmt(s.devueltos)}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: s.saldo > 0 ? '#d97706' : '#9ca3af' }}>{fmt(s.saldo)}</td>
-                      <td style={{ textAlign: 'right', color: '#6b7280' }}>{t ? fmt(t.teorico) : '—'}</td>
+                      <td style={{ textAlign: 'right', color: '#6b7280' }} title={t ? `${fmt(t.teoricoRucula)} rúcula + ${fmt(t.teoricoLechuga)} lechuga` : ''}>{t ? fmt(t.teorico) : '—'}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600, color: diff === null ? '#9ca3af' : diff > 0 ? '#059669' : diff < 0 ? '#dc2626' : '#9ca3af' }}>
                         {diff !== null ? `${diff > 0 ? '+' : ''}${fmt(diff)}` : '—'}
                       </td>
@@ -208,7 +251,7 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
             </table>
           </div>
         )}
-        <p style={{ margin: '10px 0 0', fontSize: '10px', color: '#9ca3af' }}>Teórico = unidades vendidas históricas al cliente ÷ unidades por cajón — una estimación para comparar, no un conteo exacto.</p>
+        <p style={{ margin: '10px 0 0', fontSize: '10px', color: '#9ca3af' }}>Teórico = unidades vendidas históricas al cliente ÷ unidades por cajón de cada cultivo — una estimación para comparar, no un conteo exacto.</p>
       </div>
 
       {/* Historial */}

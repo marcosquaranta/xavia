@@ -5,7 +5,10 @@ import { GR_PAQ_RUCULA, GR_PAQ_LECHUGA } from './estadisticasVentas';
 // puede exportar handlers HTTP y un puñado de opciones conocidas (GET, POST, config,
 // revalidate, etc.) — cualquier otro export ahí rompe la validación de tipos de rutas
 // que Next genera en el build.
-export const DEFAULT_UNIDADES_POR_CAJON = 500;
+// Rúcula y lechuga entran distinto en un cajón (rúcula en paquetes chicos, lechuga en
+// cabezas más grandes) — por eso son dos ratios configurables, no uno solo.
+export const DEFAULT_UNIDADES_POR_CAJON_RUCULA = 20;
+export const DEFAULT_UNIDADES_POR_CAJON_LECHUGA = 10;
 
 export interface SaldoCajonCliente {
   id_control: string;
@@ -47,34 +50,48 @@ function m_nombreFallback(movimientos: CajonMovimiento[], id_control: string): s
   return movimientos.find(m => m.id_control === id_control)?.nombre_cliente || null;
 }
 
-// Unidades vendidas a un cliente (paquetes de rúcula + plantas de lechuga + kg
-// convertidos a paquete/planta-equivalente con los mismos factores que el resto de la
-// app) — base para estimar cuántos cajones "deberían" haber salido, dado un ratio
-// configurable de unidades por cajón.
-function unidadesVenta(v: VentaDia): number {
-  const directas = (Number(v.rucula) || 0) + (Number(v.lechuga_crespa) || 0) + (Number(v.hoja_roble) || 0) + (Number(v.bandeja_rucula) || 0) + (Number(v.albahaca) || 0);
-  const ruculaKgEnPaq = ((Number(v.rucula_kg) || 0) * 1000) / GR_PAQ_RUCULA;
-  const lechugaKgEnPaq = (((Number(v.lechuga_kg) || 0) + (Number(v.lechuga_kg_crespa) || 0) + (Number(v.lechuga_kg_roble) || 0)) * 1000) / GR_PAQ_LECHUGA;
-  return directas + ruculaKgEnPaq + lechugaKgEnPaq;
+// Unidades vendidas a un cliente, separadas por rúcula y lechuga (paquetes/plantas +
+// kg convertidos a paquete/planta-equivalente con los mismos factores que el resto de la
+// app) — base para estimar cuántos cajones "deberían" haber salido, con un ratio
+// configurable por cultivo (rúcula y lechuga entran distinto en un cajón). Albahaca se
+// cuenta del lado de lechuga (mismo tipo de cajón/volumen), no tiene ratio propio.
+function unidadesRuculaVenta(v: VentaDia): number {
+  const directas = (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0);
+  const kgEnPaq = ((Number(v.rucula_kg) || 0) * 1000) / GR_PAQ_RUCULA;
+  return directas + kgEnPaq;
+}
+function unidadesLechugaVenta(v: VentaDia): number {
+  const directas = (Number(v.lechuga_crespa) || 0) + (Number(v.hoja_roble) || 0) + (Number(v.albahaca) || 0);
+  const kgEnPaq = (((Number(v.lechuga_kg) || 0) + (Number(v.lechuga_kg_crespa) || 0) + (Number(v.lechuga_kg_roble) || 0)) * 1000) / GR_PAQ_LECHUGA;
+  return directas + kgEnPaq;
 }
 
-export interface TeoricoCajonCliente { id_control: string; unidadesVendidas: number; teorico: number }
+export interface TeoricoCajonCliente {
+  id_control: string;
+  unidadesRucula: number; unidadesLechuga: number;
+  teoricoRucula: number; teoricoLechuga: number;
+  teorico: number; // total = teoricoRucula + teoricoLechuga
+}
 
 // Cajones TEÓRICOS que debieron salir hacia cada cliente, según todo lo que se le vendió
-// históricamente ÷ unidades por cajón configuradas — para comparar contra lo realmente
-// registrado en "entregas" y detectar entregas no anotadas (o al revés).
-export function teoricoPorCliente(ventas: VentaDia[], unidadesPorCajon: number): Map<string, TeoricoCajonCliente> {
-  const acc = new Map<string, number>();
+// históricamente ÷ unidades por cajón configuradas para cada cultivo — para comparar
+// contra lo realmente registrado en "entregas" y detectar entregas no anotadas (o al revés).
+export function teoricoPorCliente(ventas: VentaDia[], unidadesPorCajonRucula: number, unidadesPorCajonLechuga: number): Map<string, TeoricoCajonCliente> {
+  const acc = new Map<string, { rucula: number; lechuga: number }>();
   for (const v of ventas) {
     const id = String(v.id_control || '');
     if (!id) continue;
-    const u = unidadesVenta(v);
-    if (u <= 0) continue;
-    acc.set(id, (acc.get(id) || 0) + u);
+    const r = unidadesRuculaVenta(v), l = unidadesLechugaVenta(v);
+    if (r <= 0 && l <= 0) continue;
+    if (!acc.has(id)) acc.set(id, { rucula: 0, lechuga: 0 });
+    const cur = acc.get(id)!;
+    cur.rucula += r; cur.lechuga += l;
   }
   const out = new Map<string, TeoricoCajonCliente>();
-  for (const [id_control, unidadesVendidas] of acc) {
-    out.set(id_control, { id_control, unidadesVendidas, teorico: unidadesPorCajon > 0 ? Math.round(unidadesVendidas / unidadesPorCajon) : 0 });
+  for (const [id_control, { rucula, lechuga }] of acc) {
+    const teoricoRucula = unidadesPorCajonRucula > 0 ? Math.round(rucula / unidadesPorCajonRucula) : 0;
+    const teoricoLechuga = unidadesPorCajonLechuga > 0 ? Math.round(lechuga / unidadesPorCajonLechuga) : 0;
+    out.set(id_control, { id_control, unidadesRucula: rucula, unidadesLechuga: lechuga, teoricoRucula, teoricoLechuga, teorico: teoricoRucula + teoricoLechuga });
   }
   return out;
 }
