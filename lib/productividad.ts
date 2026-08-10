@@ -95,3 +95,41 @@ export function productividadDeMes(lotes: Lote[], registros: RegistroCrossChex[]
     paquetes, horas, productividad: horas > 0 ? Math.round((paquetes / horas) * 100) / 100 : null,
   };
 }
+
+export interface PuntoProductividadPlantasMes {
+  mes: string; label: string;
+  plantas: number; horas: number; productividad: number | null; // plantas cosechadas / hora-persona
+}
+
+// Variante en PLANTAS (no paquetes) del indicador de arriba — es el KPI operativo que
+// sigue Marcelo ("plantas cosechadas al mes por hora-persona totales"), pensado para
+// comparar cultivos entre sí sin que el paso de empaque de rúcula (paquetes) lo distorsione.
+// Rúcula cosechada en paquetes se reconvierte a plantas con plantas_por_unidad_real
+// (fallback 3, mismo factor que el resto de la app); lechuga ya está en plantas.
+// Pendiente de definir con Marcelo (no resuelto en la conversación): si esto cuenta solo
+// el corte o corte + armado/empaque, y si conviene separar rúcula de lechuga — por ahora
+// es cosecha total (todo lo que pasa por Movimientos tipo "cosecha"), sin desglosar.
+export function productividadPlantasDeMes(lotes: Lote[], registros: RegistroCrossChex[], anio: number, mes: number, diaHasta?: number): PuntoProductividadPlantasMes {
+  const ultimoDia = new Date(anio, mes, 0).getDate();
+  const hasta = diaHasta ? Math.min(diaHasta, ultimoDia) : ultimoDia;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const desdeStr = `${anio}-${pad(mes)}-01`;
+  const hastaStr = `${anio}-${pad(mes)}-${pad(hasta)}`;
+
+  let plantas = 0;
+  for (const l of lotes) {
+    if (l.estado !== 'cosechado') continue;
+    const f = String(l.fecha_cosecha || l.fecha_ult_movimiento || '').split(/[T ]/)[0];
+    if (!f || f < desdeStr || f > hastaStr) continue;
+    const v = String(l.variedad || '').toLowerCase();
+    const esRucula = v.includes('rucula') || v.includes('rúcula');
+    plantas += esRucula
+      ? (Number(l.unidades_cosechadas) || 0) * (Number(l.plantas_por_unidad_real) || 3)
+      : (Number(l.unidades_cosechadas) || 0);
+  }
+  const horas = horasHombreEnRango(registros);
+  return {
+    mes: `${anio}-${pad(mes)}`, label: `${MESES_CORTO[mes - 1]} ${String(anio).slice(2)}`,
+    plantas, horas, productividad: horas > 0 ? Math.round((plantas / horas) * 100) / 100 : null,
+  };
+}

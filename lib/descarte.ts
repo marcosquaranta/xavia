@@ -8,7 +8,7 @@ const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Se
 // catch-all de lechuga (hoja de roble + cualquier variedad de lechuga sin clasificar
 // explícitamente como crespa) — así nunca se pierde descarte de una variedad rara.
 // Albahaca (u otro cultivo fuera de estos 3) queda afuera, no tiene columna acá.
-function clasificar(variedad: string): CultivoDescarte | null {
+export function clasificarCultivoDescarte(variedad: string): CultivoDescarte | null {
   const v = String(variedad || '').toLowerCase();
   if (v.includes('rucula') || v.includes('rúcula')) return 'rucula';
   if (v.includes('albahaca')) return null;
@@ -44,7 +44,7 @@ export function descartePorFaseMes(lotes: Lote[], movimientos: Movimiento[], nMe
 
   for (const m of movimientos) {
     const lote = lotesMap.get(String(m.id_lote || '')); if (!lote) continue;
-    const cultivo = clasificar(lote.variedad); if (!cultivo) continue;
+    const cultivo = clasificarCultivoDescarte(lote.variedad); if (!cultivo) continue;
     const mk = String(m.fecha || '').slice(0, 7);
     const idx = idxPorMes.get(mk); if (idx === undefined) continue;
     const descarte = Number(m.descarte_calculado) || 0;

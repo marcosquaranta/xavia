@@ -12,6 +12,9 @@ import { productividadDeMes } from '@/lib/productividad';
 import { obtenerTemperaturasRosario, temperaturaPromedioPorMes } from '@/lib/clima';
 import { kmPorSemana, VEHICULO_PARTNER } from '@/lib/kilometraje';
 import { descartePorFaseMes, resumenDescartePorCultivo, type CultivoDescarte } from '@/lib/descarte';
+import { ocupacionMensualPorCultivo, eficienciaSiembraCosechaPorMes } from '@/lib/kpisOperativos';
+import { productividadPlantasDeMes } from '@/lib/productividad';
+import type { OcupacionHistorialRow } from '@/lib/ocupacion';
 import type { Lote, Movimiento, Ubicacion, KilometrajeVehiculo } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
@@ -33,13 +36,15 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [];
   let configRows: { clave: string; valor: any }[] = [];
   let registrosKm: KilometrajeVehiculo[] = [];
+  let ocupacionHistorial: OcupacionHistorialRow[] = [];
   let err: string | null = null;
   try {
-    [lotes, movimientos, ubicaciones, configRows, registrosKm] = await Promise.all([
+    [lotes, movimientos, ubicaciones, configRows, registrosKm, ocupacionHistorial] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<Ubicacion>('Ubicaciones'),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
       readSheet<KilometrajeVehiculo>('Kilometraje').catch(() => []),
+      readSheet<OcupacionHistorialRow>('OcupacionHistorial').catch(() => []),
     ]);
   } catch (e: any) { err = e?.message || 'Error cargando datos'; }
 
@@ -60,6 +65,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   // bien) es la granularidad que se sabe que anda.
   const NMESES_PROD = 12;
   let productividadMensual: ReturnType<typeof productividadDeMes>[] = [];
+  let productividadPlantasMensual: ReturnType<typeof productividadPlantasDeMes>[] = [];
   try {
     const mesesProd: { anio: number; mes: number; diaHasta?: number }[] = [];
     for (let i = NMESES_PROD - 1; i >= 0; i--) {
@@ -67,15 +73,58 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
       const esMesActual = d.getFullYear() === hoy.getFullYear() && d.getMonth() === hoy.getMonth();
       mesesProd.push({ anio: d.getFullYear(), mes: d.getMonth() + 1, diaHasta: esMesActual ? hoy.getDate() : undefined });
     }
+    // Un solo fetch a CrossChex por mes, reutilizado para las 2 variantes (paquetes y
+    // plantas) — no hace falta pedirle a CrossChex los mismos registros dos veces.
     const registrosPorMes = await Promise.all(mesesProd.map(({ anio, mes, diaHasta }) => {
       const r = rangoMes(anio, mes, diaHasta);
       return getRegistrosCrossChex(r.desde, r.hasta);
     }));
     productividadMensual = mesesProd.map(({ anio, mes, diaHasta }, i) => productividadDeMes(lotes, registrosPorMes[i], anio, mes, diaHasta));
+    productividadPlantasMensual = mesesProd.map(({ anio, mes, diaHasta }, i) => productividadPlantasDeMes(lotes, registrosPorMes[i], anio, mes, diaHasta));
   } catch {}
   const evoProductividadMensual = {
     series: [{ nombre: 'Paquetes/hora-hombre', color: '#2563eb', puntos: productividadMensual.map((p, i) => [i, p.productividad ?? 0] as [number, number]).filter(p => p[1] > 0) }],
     labels: productividadMensual.map(p => p.label), hoyIdx: productividadMensual.length - 1,
+  };
+  const evoProductividadPlantas = {
+    series: [{ nombre: 'Plantas/hora-persona', color: '#7c3aed', puntos: productividadPlantasMensual.map((p, i) => [i, p.productividad ?? 0] as [number, number]).filter(p => p[1] > 0) }],
+    labels: productividadPlantasMensual.map(p => p.label), hoyIdx: productividadPlantasMensual.length - 1,
+  };
+  const productividadPlantasUltimoMes = [...productividadPlantasMensual].reverse().find((p) => p.productividad !== null) ?? null;
+
+  // ── KPI 1: Ocupación de posiciones — promedio mensual, por cultivo (últimos 6 meses) ──
+  const ocupacionMensual = ocupacionMensualPorCultivo(ocupacionHistorial, ubicaciones, 6);
+  const ocupacionUltimoMes = [...ocupacionMensual].reverse().find((m) => m.total.pct !== null) ?? null;
+
+  // ── KPI 2: Eficiencia Siembra → Cosecha — promedio mensual, por cultivo (últimos 6 meses) ──
+  const eficienciaMensual = eficienciaSiembraCosechaPorMes(lotes, 6);
+  const eficienciaUltimoMes = (() => {
+    for (let i = eficienciaMensual.length - 1; i >= 0; i--) {
+      const m = eficienciaMensual[i];
+      const vivaTot = m.rucula.viva + m.lechuga_crespa.viva + m.lechuga_roble.viva;
+      const descarteTot = m.rucula.descarte + m.lechuga_crespa.descarte + m.lechuga_roble.descarte;
+      const base = vivaTot + descarteTot;
+      if (base > 0) return { mes: m, pctGlobal: Math.round((vivaTot / base) * 1000) / 10 };
+    }
+    return null;
+  })();
+
+  // Gráficos "mes a mes" de los 3 KPIs operativos, para la sección destacada de más abajo.
+  const puntosPct = (arr: (number | null)[]) => arr.map((v, i) => [i, v] as [number, number | null]).filter((p): p is [number, number] => p[1] !== null);
+  const evoOcupacionCultivo = {
+    series: [
+      { nombre: 'Rúcula', color: '#134e4a', puntos: puntosPct(ocupacionMensual.map((m) => m.rucula.pct)) },
+      { nombre: 'Lechuga', color: '#84cc16', puntos: puntosPct(ocupacionMensual.map((m) => m.lechuga.pct)) },
+    ],
+    labels: ocupacionMensual.map((m) => m.label), hoyIdx: ocupacionMensual.length - 1,
+  };
+  const evoEficienciaCultivo = {
+    series: [
+      { nombre: 'Rúcula', color: '#134e4a', puntos: puntosPct(eficienciaMensual.map((m) => m.rucula.pct)) },
+      { nombre: 'Lechuga Crespa', color: '#84cc16', puntos: puntosPct(eficienciaMensual.map((m) => m.lechuga_crespa.pct)) },
+      { nombre: 'Lechuga Roble', color: '#4d7c0f', puntos: puntosPct(eficienciaMensual.map((m) => m.lechuga_roble.pct)) },
+    ],
+    labels: eficienciaMensual.map((m) => m.label), hoyIdx: eficienciaMensual.length - 1,
   };
 
   const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -498,6 +547,86 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
           </div>
         </div>
 
+        {/* ══ INDICADORES OPERATIVOS MARCE — KPIs acordados con Marcelo para su rol,
+            ver conclusión completa en /produccion/puesto ══ */}
+        <div id="indicadores-marce" style={{ background: 'linear-gradient(135deg, #1e293b, #0f172a)', borderRadius: '14px', padding: '22px 22px 24px', marginBottom: '20px', scrollMarginTop: '16px' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:'10px', marginBottom:'18px' }}>
+            <div>
+              <p style={{ margin:0, fontSize:'11px', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.6px' }}>KPIs de gestión</p>
+              <h2 style={{ margin:'2px 0 0', fontSize:'26px', fontWeight:900, color:'white' }}>Indicadores Operativos Marce</h2>
+            </div>
+            <Link href="/produccion/puesto" style={{ fontSize:'12px', color:'#e2e8f0', textDecoration:'underline', fontWeight:600, whiteSpace:'nowrap' }}>
+              Ver descripción completa del puesto →
+            </Link>
+          </div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(300px, 1fr))', gap:'16px' }}>
+            {/* KPI 1 — Ocupación de posiciones */}
+            <div className="card" style={{ margin:0 }}>
+              <p style={{ margin:'0 0 2px', fontSize:'12.5px', fontWeight:700 }}>1. Ocupación de posiciones</p>
+              <p style={{ margin:'0 0 10px', fontSize:'11px', color:'#9ca3af' }}>Objetivo: 95% promedio mensual, por cultivo — promedio del mes, no foto puntual</p>
+              <div style={{ display:'flex', alignItems:'baseline', gap:'8px', marginBottom:'6px' }}>
+                <strong style={{ fontSize:'30px', color: ocupacionUltimoMes?.total.pct !== null && ocupacionUltimoMes?.total.pct !== undefined ? (ocupacionUltimoMes.total.pct >= 95 ? '#059669' : '#d97706') : '#9ca3af' }}>
+                  {ocupacionUltimoMes?.total.pct !== null && ocupacionUltimoMes?.total.pct !== undefined ? `${ocupacionUltimoMes.total.pct}%` : '—'}
+                </strong>
+                <span style={{ fontSize:'11px', color:'#9ca3af' }}>{ocupacionUltimoMes?.label ?? 'sin datos aún'}</span>
+              </div>
+              {ocupacionUltimoMes && (
+                <p style={{ margin:'0 0 10px', fontSize:'11px', color:'#6b7280' }}>
+                  Rúcula {ocupacionUltimoMes.rucula.pct ?? '—'}% · Lechuga {ocupacionUltimoMes.lechuga.pct ?? '—'}%
+                </p>
+              )}
+              {evoOcupacionCultivo.series.some((s) => s.puntos.length > 0) ? (
+                <GraficoEvolucion series={evoOcupacionCultivo.series} labels={evoOcupacionCultivo.labels} hoyIdx={evoOcupacionCultivo.hoyIdx} unidad="%" yMin={0} yMax={100} />
+              ) : (
+                <p style={{ color:'#9ca3af', fontSize:'12px', textAlign:'center', padding:'16px' }}>Sin histórico de ocupación todavía.</p>
+              )}
+              <Link href="/ocupacion" style={{ fontSize:'11px', color:'#2563eb', textDecoration:'none', fontWeight:600, display:'inline-block', marginTop:'8px' }}>Ver detalle en Ocupación →</Link>
+            </div>
+
+            {/* KPI 2 — Eficiencia Siembra → Cosecha */}
+            <div className="card" style={{ margin:0 }}>
+              <p style={{ margin:'0 0 2px', fontSize:'12.5px', fontWeight:700 }}>2. Eficiencia Siembra → Cosecha</p>
+              <p style={{ margin:'0 0 10px', fontSize:'11px', color:'#9ca3af' }}>% de plantines que llega vivo a cosecha, según el descarte de las 3 etapas — sin ventas ni cámara. Sin objetivo numérico fijado aún</p>
+              <div style={{ display:'flex', alignItems:'baseline', gap:'8px', marginBottom:'6px' }}>
+                <strong style={{ fontSize:'30px', color:'#111827' }}>
+                  {eficienciaUltimoMes ? `${eficienciaUltimoMes.pctGlobal}%` : '—'}
+                </strong>
+                <span style={{ fontSize:'11px', color:'#9ca3af' }}>{eficienciaUltimoMes?.mes.label ?? 'sin datos aún'}</span>
+              </div>
+              {eficienciaUltimoMes && (
+                <p style={{ margin:'0 0 10px', fontSize:'11px', color:'#6b7280' }}>
+                  Rúcula {eficienciaUltimoMes.mes.rucula.pct ?? '—'}% · Crespa {eficienciaUltimoMes.mes.lechuga_crespa.pct ?? '—'}% · Roble {eficienciaUltimoMes.mes.lechuga_roble.pct ?? '—'}%
+                </p>
+              )}
+              {evoEficienciaCultivo.series.some((s) => s.puntos.length > 0) ? (
+                <GraficoEvolucion series={evoEficienciaCultivo.series} labels={evoEficienciaCultivo.labels} hoyIdx={evoEficienciaCultivo.hoyIdx} unidad="%" yMin={0} yMax={100} />
+              ) : (
+                <p style={{ color:'#9ca3af', fontSize:'12px', textAlign:'center', padding:'16px' }}>Sin lotes cosechados en el período.</p>
+              )}
+              <a href="#descarte-por-fase" style={{ fontSize:'11px', color:'#2563eb', textDecoration:'none', fontWeight:600, display:'inline-block', marginTop:'8px' }}>Ver desglose de descarte por fase ↓</a>
+            </div>
+
+            {/* KPI 3 — Productividad (plantas cosechadas / hora-persona) */}
+            <div className="card" style={{ margin:0 }}>
+              <p style={{ margin:'0 0 2px', fontSize:'12.5px', fontWeight:700 }}>3. Productividad de empleados</p>
+              <p style={{ margin:'0 0 10px', fontSize:'11px', color:'#9ca3af' }}>Plantas cosechadas al mes por hora-persona total. En medición — objetivo a fijar con 6-8 mediciones contra el propio baseline</p>
+              <div style={{ display:'flex', alignItems:'baseline', gap:'8px', marginBottom:'10px' }}>
+                <strong style={{ fontSize:'30px', color:'#111827' }}>
+                  {productividadPlantasUltimoMes ? productividadPlantasUltimoMes.productividad!.toLocaleString('es-AR') : '—'}
+                </strong>
+                <span style={{ fontSize:'11px', color:'#9ca3af' }}>pl/h · {productividadPlantasUltimoMes?.label ?? 'sin datos aún'}</span>
+              </div>
+              {evoProductividadPlantas.series[0].puntos.length > 0 ? (
+                <GraficoEvolucion series={evoProductividadPlantas.series} labels={evoProductividadPlantas.labels} hoyIdx={evoProductividadPlantas.hoyIdx} unidad=" pl/h" />
+              ) : (
+                <p style={{ color:'#9ca3af', fontSize:'12px', textAlign:'center', padding:'16px' }}>Sin datos de CrossChex disponibles.</p>
+              )}
+              <a href="#productividad" style={{ fontSize:'11px', color:'#2563eb', textDecoration:'none', fontWeight:600, display:'inline-block', marginTop:'8px' }}>Ver evolución en paquetes/hora →</a>
+            </div>
+          </div>
+        </div>
+
         {/* Evolución de ciclos / pesaje / plantas por paquete — 2 por fila */}
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(380px, 1fr))', gap:'12px', marginBottom:'16px' }}>
           <div className="card" style={{ margin:0 }}>
@@ -524,7 +653,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             <GraficoEvolucion series={evoDescarte.series} labels={evoDescarte.labels} hoyIdx={evoDescarte.hoyIdx} unidad=" pl" />
           </div>
 
-          <div className="card" style={{ margin:0 }}>
+          <div id="productividad" className="card" style={{ margin:0, scrollMarginTop:'16px' }}>
             <p className="card-title" style={{ margin:'0 0 2px' }}>Productividad — paquetes / hora-hombre</p>
             <p className="card-sub" style={{ margin:'0 0 10px' }}>Por mes · últimos 12 meses · indicador fijo, no cambia con el filtro de arriba</p>
             {evoProductividadMensual.series[0].puntos.length > 0
@@ -548,7 +677,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
         </div>
 
         {/* Descarte por fase — columna apilada por mes, un gráfico por cultivo + resumen en % */}
-        <div className="card" style={{ marginBottom:'16px' }}>
+        <div id="descarte-por-fase" className="card" style={{ marginBottom:'16px', scrollMarginTop:'16px' }}>
           <p className="card-title" style={{ margin:'0 0 2px' }}>Descarte por fase</p>
           <p className="card-sub" style={{ margin:'0 0 12px' }}>Plantines descartados por mes, divididos en Plantín→F1 / F1→F2 / F2→Cosecha · últimos 12 meses · indicador fijo, no cambia con el filtro de arriba</p>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(320px, 1fr))', gap:'16px', marginBottom:'16px' }}>
