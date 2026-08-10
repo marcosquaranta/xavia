@@ -12,11 +12,13 @@ import { rangoMes, horasHombreEnRango } from '@/lib/personal';
 import { productividadPorSemana } from '@/lib/productividad';
 import { obtenerTemperaturasRosario, temperaturaPromedioPorMes } from '@/lib/clima';
 import { kmPorSemana, VEHICULO_PARTNER } from '@/lib/kilometraje';
+import { descartePorFaseMes, resumenDescartePorCultivo, type CultivoDescarte } from '@/lib/descarte';
 import type { Lote, Movimiento, Ubicacion, KilometrajeVehiculo } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
 import GraficoCiclosMesadas from './GraficoCiclosMesadas';
 import GraficoPesaje from './GraficoPesaje';
+import GraficoBarrasApiladas from '@/components/GraficoBarrasApiladas';
 export const dynamic = 'force-dynamic';
 
 type PeriodoGlobal = 'd30' | 'd180' | 'anio' | 'historico';
@@ -151,6 +153,23 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     series: [{ nombre: 'Km recorridos', color: '#0891b2', puntos: puntosKm.map((p, i) => [i, p.kmSemana as number] as [number, number]) }],
     labels: puntosKm.map(p => p.label), hoyIdx: puntosKm.length - 1,
   };
+
+  // ── Descarte por fase (columna apilada), por mes — últimos 12 meses, indicador fijo,
+  // no cambia con el filtro de arriba (igual criterio que Productividad/Clima/Km). Un
+  // gráfico por cultivo, cada columna dividida en Plantín→F1, F1→F2 y F2→Cosecha.
+  const NMESES_DESCARTE = 12;
+  const mesesDescarte = descartePorFaseMes(lotes, movimientos, NMESES_DESCARTE);
+  const resumenDescarte = resumenDescartePorCultivo(mesesDescarte);
+  const COLOR_FASE = { plantinF1: '#fbbf24', f1F2: '#f97316', f2Cosecha: '#dc2626' };
+  const labelsDescarteMeses = mesesDescarte.map(m => m.label);
+  function serieDescarte(cultivo: CultivoDescarte) {
+    return [
+      { nombre: 'Plantín→F1', color: COLOR_FASE.plantinF1, valores: mesesDescarte.map(m => m[cultivo].plantinF1) },
+      { nombre: 'F1→F2', color: COLOR_FASE.f1F2, valores: mesesDescarte.map(m => m[cultivo].f1F2) },
+      { nombre: 'F2→Cosecha', color: COLOR_FASE.f2Cosecha, valores: mesesDescarte.map(m => m[cultivo].f2Cosecha) },
+    ];
+  }
+  const CULTIVO_LABEL: Record<CultivoDescarte, string> = { rucula: 'Rúcula', lechuga_crespa: 'Lechuga Crespa', lechuga_roble: 'Lechuga Hoja de Roble' };
 
   // Fecha desde la que arranca el filtro global elegido — null = histórico, sin límite.
   function desdeDePeriodo(p: PeriodoGlobal): Date | null {
@@ -562,6 +581,42 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             {evoKmSemana.series[0].puntos.length > 0
               ? <GraficoEvolucion series={evoKmSemana.series} labels={evoKmSemana.labels} hoyIdx={evoKmSemana.hoyIdx} unidad=" km" />
               : <p style={{ color:'#9ca3af', fontSize:'13px', textAlign:'center', padding:'20px' }}>Todavía no hay dos lecturas de kilometraje cargadas para calcular la diferencia semanal.</p>}
+          </div>
+        </div>
+
+        {/* Descarte por fase — columna apilada por mes, un gráfico por cultivo + resumen en % */}
+        <div className="card" style={{ marginBottom:'16px' }}>
+          <p className="card-title" style={{ margin:'0 0 2px' }}>Descarte por fase</p>
+          <p className="card-sub" style={{ margin:'0 0 12px' }}>Plantines descartados por mes, divididos en Plantín→F1 / F1→F2 / F2→Cosecha · últimos 12 meses · indicador fijo, no cambia con el filtro de arriba</p>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(320px, 1fr))', gap:'16px', marginBottom:'16px' }}>
+            {(['rucula', 'lechuga_crespa', 'lechuga_roble'] as CultivoDescarte[]).map((cultivo) => (
+              <div key={cultivo}>
+                <p style={{ margin:'0 0 6px', fontSize:'12px', fontWeight:700, color:'#374151' }}>{CULTIVO_LABEL[cultivo]}</p>
+                <GraficoBarrasApiladas labels={labelsDescarteMeses} series={serieDescarte(cultivo)} unidad=" pl" />
+              </div>
+            ))}
+          </div>
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ fontSize:'12px', width:'100%' }}>
+              <thead><tr>
+                <th style={{ textAlign:'left' }}>Cultivo</th>
+                <th style={{ textAlign:'right' }}>Plantín→F1</th>
+                <th style={{ textAlign:'right' }}>F1→F2</th>
+                <th style={{ textAlign:'right' }}>F2→Cosecha</th>
+                <th style={{ textAlign:'right' }}>Total descartado</th>
+              </tr></thead>
+              <tbody>
+                {resumenDescarte.map((r) => (
+                  <tr key={r.cultivo} style={{ borderTop:'1px solid #f3f4f6' }}>
+                    <td style={{ fontWeight:600, padding:'4px 0' }}>{CULTIVO_LABEL[r.cultivo]}</td>
+                    <td style={{ textAlign:'right' }}>{r.plantinF1.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctPlantinF1}%)</span></td>
+                    <td style={{ textAlign:'right' }}>{r.f1F2.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctF1F2}%)</span></td>
+                    <td style={{ textAlign:'right' }}>{r.f2Cosecha.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctF2Cosecha}%)</span></td>
+                    <td style={{ textAlign:'right', fontWeight:700 }}>{r.total.toLocaleString('es-AR')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
 
