@@ -162,8 +162,11 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   const desdeFiltro = desdeDePeriodo(periodo);
 
   // Buckets del eje X compartidos por los 3 gráficos de evolución de abajo, según el
-  // filtro global elegido: días (30d), semanas (180d), meses del año actual (Año actual),
-  // o meses desde la cosecha más vieja registrada hasta hoy (Histórico).
+  // filtro global elegido: días (30d), meses (180d en adelante — 180 días ya son ~6
+  // meses, semana a semana queda ilegible), meses del año actual (Año actual), o meses
+  // desde la cosecha más vieja registrada hasta hoy (Histórico). A partir de 180 días
+  // el eje X SIEMPRE es por mes, nunca por semana — mismo criterio en todos los gráficos
+  // que comparten estos buckets.
   function construirBuckets(p: PeriodoGlobal): { nBuckets: number; labels: string[]; hoyIdx: number; bucketDe: (f: Date) => number } {
     const ahora = hoy;
     if (p === 'd30') {
@@ -174,10 +177,15 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
       return { nBuckets, labels, hoyIdx: nBuckets - 1, bucketDe };
     }
     if (p === 'd180') {
-      const nBuckets = 26; // ~180 días en semanas
-      const start = new Date(ahora); start.setDate(start.getDate() - 7 * (nBuckets - 1)); start.setHours(0, 0, 0, 0);
-      const bucketDe = (f: Date) => { const idx = Math.floor((f.getTime() - start.getTime()) / (7 * 86400000)); return idx >= 0 && idx < nBuckets ? idx : -1; };
-      const labels = Array.from({ length: nBuckets }, (_, i) => { const d = new Date(start); d.setDate(d.getDate() + i * 7); return `${d.getDate()}/${d.getMonth() + 1}`; });
+      const nBuckets = 6; // ~180 días en meses
+      const inicioMes0 = ahora.getMonth() - (nBuckets - 1);
+      const startYear = ahora.getFullYear() + Math.floor(inicioMes0 / 12);
+      const startMonth = ((inicioMes0 % 12) + 12) % 12;
+      const bucketDe = (f: Date) => (f.getFullYear() - startYear) * 12 + (f.getMonth() - startMonth);
+      const labels = Array.from({ length: nBuckets }, (_, i) => {
+        const m = (startMonth + i) % 12, y = startYear + Math.floor((startMonth + i) / 12);
+        return `${MESES_CORTO[m]} ${String(y).slice(2)}`;
+      });
       return { nBuckets, labels, hoyIdx: nBuckets - 1, bucketDe };
     }
     if (p === 'anio') {

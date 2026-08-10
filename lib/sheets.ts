@@ -31,6 +31,19 @@ function serialFechaAISO(serial: number): string {
   return `${y}-${m}-${day}`;
 }
 
+// Convierte una fracción de día de Google Sheets (celda con formato HORA, ej. "07:00" se
+// guarda como 0.291666... = 7/24) a texto "HH:MM". Mismo problema que las fechas: con
+// UNFORMATTED_VALUE una celda que Sheets reconoció como hora (aunque se haya tipeado
+// "08:00") vuelve como esta fracción en vez del texto formateado — sin convertir, el
+// cálculo de tardanzas (minDeHora en lib/personal.ts) leía la fracción como si fuera un
+// número de horas cualquiera y todo el cómputo de "minutos tarde" quedaba desquiciado.
+function fraccionDiaAHora(fraccion: number): string {
+  const totalMin = Math.round(fraccion * 24 * 60);
+  const hh = String(Math.floor(totalMin / 60) % 24).padStart(2, '0');
+  const mm = String(totalMin % 60).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
 export async function readSheet<T = Record<string, any>>(sheetName: string): Promise<T[]> {
   const sheets = getClient();
   // valueRenderOption: 'UNFORMATTED_VALUE' — sin esto, Sheets devuelve el valor
@@ -49,14 +62,28 @@ export async function readSheet<T = Record<string, any>>(sheetName: string): Pro
     headers.forEach((header, idx) => {
       const raw = row[idx];
       const esFecha = /fecha/i.test(header);
+      // "hora_" (singular) = un horario puntual tipo "08:00" (hora_entrada_esperada,
+      // hora_salida_esperada). NO matchea "horas_" (plural, con 's' antes del guión) —
+      // esos son cantidades de horas (horas_lv, horas_teoricas_quincena, etc.), un
+      // número común, no una fracción de día.
+      const esHoraDelDia = /^hora_/i.test(header);
+      if (raw === undefined || raw === null || raw === '') { obj[header] = ''; }
+      else if (esFecha && typeof raw === 'number') { obj[header] = serialFechaAISO(raw); }
+      else if (esHoraDelDia && typeof raw === 'number') { obj[header] = fraccionDiaAHora(raw); }
+      // Celda cargada como TEXTO (no como número nativo de Sheets — típicamente tipeada
+      // directo en la planilla, o pegada desde Excel) con formato argentino de miles:
+      // punto separando de a 3 dígitos, ej. "1.850" o "1.234.567". Hay que revisar esto
+      // ANTES que la rama de abajo — si no, "1.850" cae en /^-?\d+(\.\d+)?$/ y
+      // parseFloat lo interpreta como 1.85 (punto = decimal en JS), achicando por 1000
+      // cualquier cantidad así tipeada (ej. stock en cámara "1850" mostrado como "1.85").
+      else if (typeof raw === 'string' && /^-?\d{1,3}(\.\d{3})+,\d+$/.test(raw)) { obj[header] = parseFloat(raw.replace(/\./g, '').replace(',', '.')); }
+      else if (typeof raw === 'string' && /^-?\d{1,3}(\.\d{3})+$/.test(raw)) { obj[header] = parseInt(raw.replace(/\./g, ''), 10); }
+      else if (typeof raw === 'string' && /^-?\d+(\.\d+)?$/.test(raw)) { obj[header] = parseFloat(raw); }
       // Google Sheets devuelve los números con el separador decimal de la config
       // regional de la planilla — con configuración en español eso es COMA, no punto
       // ("0,201" en vez de "0.201"). Sin este segundo caso, esos valores quedaban como
       // texto y cualquier Number(...) sobre ellos daba NaN en silencio (comparaciones
       // ">0", sumas, etc. — ej. el pesaje testigo de un lote "desaparecía" de golpe).
-      if (raw === undefined || raw === null || raw === '') { obj[header] = ''; }
-      else if (esFecha && typeof raw === 'number') { obj[header] = serialFechaAISO(raw); }
-      else if (typeof raw === 'string' && /^-?\d+(\.\d+)?$/.test(raw)) { obj[header] = parseFloat(raw); }
       else if (typeof raw === 'string' && /^-?\d+,\d+$/.test(raw)) { obj[header] = parseFloat(raw.replace(',', '.')); }
       else { obj[header] = raw; }
     });
