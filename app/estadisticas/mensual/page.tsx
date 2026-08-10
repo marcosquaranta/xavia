@@ -7,8 +7,9 @@ import { calcularCapacidadProductiva, resumenCiclosPorCultivoYNave } from '@/lib
 import { calcularCamara, diferenciaAjustesMes } from '@/lib/camara';
 import { calcularDriversMes, calcularUsoTeorico } from '@/lib/usoTeorico';
 import { ocupacionPromedioPorNave, type OcupacionHistorialRow } from '@/lib/ocupacion';
-import { productividadPorSemana } from '@/lib/productividad';
-import { getRegistrosCrossChex, type RegistroCrossChex } from '@/lib/crosschex';
+import { productividadDeMes } from '@/lib/productividad';
+import { rangoMes } from '@/lib/personal';
+import { getRegistrosCrossChex } from '@/lib/crosschex';
 import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionPrecioPromedio } from '@/lib/estadisticasVentas';
 import type { Lote, Movimiento, Ubicacion, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, Articulo, StockMes, StockCamara } from '@/lib/types';
 import Header from '@/components/Header';
@@ -222,21 +223,27 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
     }))
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
 
-  // Productividad semanal — últimas 12 semanas hasta el cierre del mes elegido, un solo
-  // fetch a CrossChex para todo el rango.
-  let productividadSemanal: ReturnType<typeof productividadPorSemana> = [];
+  // Productividad por mes — últimos 12 meses hasta el cierre del mes elegido. Un fetch a
+  // CrossChex POR MES (~30 días cada uno) en vez de todo el rango de una sola vez — pedirle
+  // a CrossChex varias semanas/meses juntos no devolvía los datos completos.
+  let productividadMensualRep: ReturnType<typeof productividadDeMes>[] = [];
   try {
-    const NSEM = 12;
-    const desde = new Date(refDate); desde.setDate(desde.getDate() - 7 * NSEM);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const isoDesde = `${desde.getFullYear()}-${pad(desde.getMonth() + 1)}-${pad(desde.getDate())}T00:00:00-03:00`;
-    const isoHasta = `${refDate.getFullYear()}-${pad(refDate.getMonth() + 1)}-${pad(refDate.getDate())}T23:59:59-03:00`;
-    const registros: RegistroCrossChex[] = await getRegistrosCrossChex(isoDesde, isoHasta);
-    productividadSemanal = productividadPorSemana(lotesRep, registros, NSEM);
+    const NMESES = 12;
+    const mesesProd: { anio: number; mes: number; diaHasta?: number }[] = [];
+    for (let i = NMESES - 1; i >= 0; i--) {
+      const d = new Date(refDate.getFullYear(), refDate.getMonth() - i, 1);
+      const esUltimoMes = d.getFullYear() === refDate.getFullYear() && d.getMonth() === refDate.getMonth();
+      mesesProd.push({ anio: d.getFullYear(), mes: d.getMonth() + 1, diaHasta: esUltimoMes ? refDate.getDate() : undefined });
+    }
+    const registrosPorMes = await Promise.all(mesesProd.map(({ anio, mes, diaHasta }) => {
+      const r = rangoMes(anio, mes, diaHasta);
+      return getRegistrosCrossChex(r.desde, r.hasta);
+    }));
+    productividadMensualRep = mesesProd.map(({ anio, mes, diaHasta }, i) => productividadDeMes(lotesRep, registrosPorMes[i], anio, mes, diaHasta));
   } catch {}
   const evoProductividad = {
-    series: [{ nombre: 'Paquetes/hora-hombre', color: '#2563eb', puntos: productividadSemanal.map((p, i) => [i, p.productividad ?? 0] as [number, number]).filter(p => p[1] > 0) }],
-    labels: productividadSemanal.map(p => p.semanaLabel), hoyIdx: productividadSemanal.length - 1,
+    series: [{ nombre: 'Paquetes/hora-hombre', color: '#2563eb', puntos: productividadMensualRep.map((p, i) => [i, p.productividad ?? 0] as [number, number]).filter(p => p[1] > 0) }],
+    labels: productividadMensualRep.map(p => p.label), hoyIdx: productividadMensualRep.length - 1,
   };
 
   // Ciclos promedio por mesada — solo resumen por cultivo y nave (año del mes elegido)
@@ -364,7 +371,7 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
           </div>
           <div style={cardStyle}>
             <p className="card-title" style={{ margin: '0 0 2px' }}>Productividad — paquetes / hora-hombre</p>
-            <p className="card-sub" style={{ margin: '0 0 10px' }}>Por semana · últimas 12 semanas</p>
+            <p className="card-sub" style={{ margin: '0 0 10px' }}>Por mes · últimos 12 meses</p>
             {evoProductividad.series[0].puntos.length > 0
               ? <GraficoEvolucion series={evoProductividad.series} labels={evoProductividad.labels} hoyIdx={evoProductividad.hoyIdx} unidad=" paq/h" />
               : <p style={{ color: '#9ca3af', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin datos de CrossChex disponibles para este período.</p>}
