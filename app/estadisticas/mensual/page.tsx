@@ -7,7 +7,8 @@ import { calcularCapacidadProductiva, resumenCiclosPorCultivoYNave } from '@/lib
 import { calcularCamara, diferenciaAjustesMes } from '@/lib/camara';
 import { calcularDriversMes, calcularUsoTeorico } from '@/lib/usoTeorico';
 import { ocupacionPromedioPorNave, type OcupacionHistorialRow } from '@/lib/ocupacion';
-import { productividadDeMes } from '@/lib/productividad';
+import { productividadDeMes, productividadPlantasDeMes } from '@/lib/productividad';
+import { ocupacionMensualPorCultivo, eficienciaSiembraCosechaPorMes } from '@/lib/kpisOperativos';
 import { rangoMes } from '@/lib/personal';
 import { getRegistrosCrossChex } from '@/lib/crosschex';
 import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionPrecioPromedio } from '@/lib/estadisticasVentas';
@@ -227,6 +228,7 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
   // CrossChex POR MES (~30 días cada uno) en vez de todo el rango de una sola vez — pedirle
   // a CrossChex varias semanas/meses juntos no devolvía los datos completos.
   let productividadMensualRep: ReturnType<typeof productividadDeMes>[] = [];
+  let productividadPlantasMensualRep: ReturnType<typeof productividadPlantasDeMes>[] = [];
   try {
     const NMESES = 12;
     const mesesProd: { anio: number; mes: number; diaHasta?: number }[] = [];
@@ -235,15 +237,54 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
       const esUltimoMes = d.getFullYear() === refDate.getFullYear() && d.getMonth() === refDate.getMonth();
       mesesProd.push({ anio: d.getFullYear(), mes: d.getMonth() + 1, diaHasta: esUltimoMes ? refDate.getDate() : undefined });
     }
+    // Un solo fetch a CrossChex por mes, reutilizado para las 2 variantes (paquetes y plantas).
     const registrosPorMes = await Promise.all(mesesProd.map(({ anio, mes, diaHasta }) => {
       const r = rangoMes(anio, mes, diaHasta);
       return getRegistrosCrossChex(r.desde, r.hasta);
     }));
     productividadMensualRep = mesesProd.map(({ anio, mes, diaHasta }, i) => productividadDeMes(lotesRep, registrosPorMes[i], anio, mes, diaHasta));
+    productividadPlantasMensualRep = mesesProd.map(({ anio, mes, diaHasta }, i) => productividadPlantasDeMes(lotesRep, registrosPorMes[i], anio, mes, diaHasta));
   } catch {}
   const evoProductividad = {
     series: [{ nombre: 'Paquetes/hora-hombre', color: '#2563eb', puntos: productividadMensualRep.map((p, i) => [i, p.productividad ?? 0] as [number, number]).filter(p => p[1] > 0) }],
     labels: productividadMensualRep.map(p => p.label), hoyIdx: productividadMensualRep.length - 1,
+  };
+  const evoProductividadPlantasRep = {
+    series: [{ nombre: 'Plantas/hora-persona', color: '#7c3aed', puntos: productividadPlantasMensualRep.map((p, i) => [i, p.productividad ?? 0] as [number, number]).filter(p => p[1] > 0) }],
+    labels: productividadPlantasMensualRep.map(p => p.label), hoyIdx: productividadPlantasMensualRep.length - 1,
+  };
+  const productividadPlantasUltimoMesRep = [...productividadPlantasMensualRep].reverse().find((p) => p.productividad !== null) ?? null;
+
+  // ── KPI 1: Ocupación de posiciones — promedio mensual por cultivo, hasta el cierre del mes elegido ──
+  const ocupacionMensualRep = ocupacionMensualPorCultivo(ocupHistRows, ubicaciones, 6, refDate);
+  const ocupacionUltimoMesRep = [...ocupacionMensualRep].reverse().find((m) => m.total.pct !== null) ?? null;
+  const evoOcupacionCultivoRep = {
+    series: [
+      { nombre: 'Rúcula', color: '#134e4a', puntos: ocupacionMensualRep.map((m, i) => [i, m.rucula.pct] as [number, number | null]).filter((p): p is [number, number] => p[1] !== null) },
+      { nombre: 'Lechuga', color: '#84cc16', puntos: ocupacionMensualRep.map((m, i) => [i, m.lechuga.pct] as [number, number | null]).filter((p): p is [number, number] => p[1] !== null) },
+    ],
+    labels: ocupacionMensualRep.map((m) => m.label), hoyIdx: ocupacionMensualRep.length - 1,
+  };
+
+  // ── KPI 2: Eficiencia Siembra → Cosecha — promedio mensual por cultivo, hasta el cierre del mes elegido ──
+  const eficienciaMensualRep = eficienciaSiembraCosechaPorMes(lotesRep, 6, refDate);
+  const eficienciaUltimoMesRep = (() => {
+    for (let i = eficienciaMensualRep.length - 1; i >= 0; i--) {
+      const m = eficienciaMensualRep[i];
+      const vivaTot = m.rucula.viva + m.lechuga_crespa.viva + m.lechuga_roble.viva;
+      const descarteTot = m.rucula.descarte + m.lechuga_crespa.descarte + m.lechuga_roble.descarte;
+      const base = vivaTot + descarteTot;
+      if (base > 0) return { mes: m, pctGlobal: Math.round((vivaTot / base) * 1000) / 10 };
+    }
+    return null;
+  })();
+  const evoEficienciaCultivoRep = {
+    series: [
+      { nombre: 'Rúcula', color: '#134e4a', puntos: eficienciaMensualRep.map((m, i) => [i, m.rucula.pct] as [number, number | null]).filter((p): p is [number, number] => p[1] !== null) },
+      { nombre: 'Lechuga Crespa', color: '#84cc16', puntos: eficienciaMensualRep.map((m, i) => [i, m.lechuga_crespa.pct] as [number, number | null]).filter((p): p is [number, number] => p[1] !== null) },
+      { nombre: 'Lechuga Roble', color: '#4d7c0f', puntos: eficienciaMensualRep.map((m, i) => [i, m.lechuga_roble.pct] as [number, number | null]).filter((p): p is [number, number] => p[1] !== null) },
+    ],
+    labels: eficienciaMensualRep.map((m) => m.label), hoyIdx: eficienciaMensualRep.length - 1,
   };
 
   // Ciclos promedio por mesada — solo resumen por cultivo y nave (año del mes elegido)
@@ -313,6 +354,72 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
           {!esMesActual && <span style={{ fontSize: '11px', color: '#9ca3af' }}>(mes cerrado — no incluye datos posteriores)</span>}
         </div>
 
+        {/* ══ INDICADORES OPERATIVOS MARCE — mismos 3 KPIs que en Estadísticas, acá
+            recalculados hasta el cierre del mes elegido ══ */}
+        <div style={{ background: 'linear-gradient(135deg, #1e293b, #0f172a)', borderRadius: '14px', padding: '20px 20px 22px', margin: '14px 0 18px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px', marginBottom: '16px' }}>
+            <div>
+              <p style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.6px' }}>KPIs de gestión — {nombre}</p>
+              <h2 style={{ margin: '2px 0 0', fontSize: '22px', fontWeight: 900, color: 'white' }}>Indicadores Operativos Marce</h2>
+            </div>
+            <Link href="/produccion/puesto" style={{ fontSize: '12px', color: '#e2e8f0', textDecoration: 'underline', fontWeight: 600, whiteSpace: 'nowrap' }}>
+              Ver descripción completa del puesto →
+            </Link>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
+            <div style={{ ...cardStyle, margin: 0 }}>
+              <p style={{ margin: '0 0 2px', fontSize: '12.5px', fontWeight: 700 }}>1. Ocupación de posiciones</p>
+              <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#9ca3af' }}>Objetivo: 95% promedio mensual, por cultivo</p>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '6px' }}>
+                <strong style={{ fontSize: '28px', color: ocupacionUltimoMesRep?.total.pct !== null && ocupacionUltimoMesRep?.total.pct !== undefined ? (ocupacionUltimoMesRep.total.pct >= 95 ? '#059669' : '#d97706') : '#9ca3af' }}>
+                  {ocupacionUltimoMesRep?.total.pct !== null && ocupacionUltimoMesRep?.total.pct !== undefined ? `${ocupacionUltimoMesRep.total.pct}%` : '—'}
+                </strong>
+                <span style={{ fontSize: '11px', color: '#9ca3af' }}>{ocupacionUltimoMesRep?.label ?? 'sin datos'}</span>
+              </div>
+              {ocupacionUltimoMesRep && (
+                <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#6b7280' }}>
+                  Rúcula {ocupacionUltimoMesRep.rucula.pct ?? '—'}% · Lechuga {ocupacionUltimoMesRep.lechuga.pct ?? '—'}%
+                </p>
+              )}
+              {evoOcupacionCultivoRep.series.some((s) => s.puntos.length > 0)
+                ? <GraficoEvolucion series={evoOcupacionCultivoRep.series} labels={evoOcupacionCultivoRep.labels} hoyIdx={evoOcupacionCultivoRep.hoyIdx} unidad="%" yMin={0} yMax={100} />
+                : <p style={{ color: '#9ca3af', fontSize: '12px', textAlign: 'center', padding: '16px' }}>Sin histórico de ocupación todavía.</p>}
+              <Link href="/ocupacion" style={{ fontSize: '11px', color: '#2563eb', textDecoration: 'none', fontWeight: 600, display: 'inline-block', marginTop: '8px' }}>Ver detalle en Ocupación →</Link>
+            </div>
+
+            <div style={{ ...cardStyle, margin: 0 }}>
+              <p style={{ margin: '0 0 2px', fontSize: '12.5px', fontWeight: 700 }}>2. Eficiencia Siembra → Cosecha</p>
+              <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#9ca3af' }}>% que llega vivo a cosecha, según descarte de las 3 etapas — sin ventas ni cámara. Sin objetivo fijado aún</p>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '6px' }}>
+                <strong style={{ fontSize: '28px', color: '#111827' }}>{eficienciaUltimoMesRep ? `${eficienciaUltimoMesRep.pctGlobal}%` : '—'}</strong>
+                <span style={{ fontSize: '11px', color: '#9ca3af' }}>{eficienciaUltimoMesRep?.mes.label ?? 'sin datos'}</span>
+              </div>
+              {eficienciaUltimoMesRep && (
+                <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#6b7280' }}>
+                  Rúcula {eficienciaUltimoMesRep.mes.rucula.pct ?? '—'}% · Crespa {eficienciaUltimoMesRep.mes.lechuga_crespa.pct ?? '—'}% · Roble {eficienciaUltimoMesRep.mes.lechuga_roble.pct ?? '—'}%
+                </p>
+              )}
+              {evoEficienciaCultivoRep.series.some((s) => s.puntos.length > 0)
+                ? <GraficoEvolucion series={evoEficienciaCultivoRep.series} labels={evoEficienciaCultivoRep.labels} hoyIdx={evoEficienciaCultivoRep.hoyIdx} unidad="%" yMin={0} yMax={100} />
+                : <p style={{ color: '#9ca3af', fontSize: '12px', textAlign: 'center', padding: '16px' }}>Sin lotes cosechados en el período.</p>}
+              <Link href="/estadisticas#descarte-por-fase" style={{ fontSize: '11px', color: '#2563eb', textDecoration: 'none', fontWeight: 600, display: 'inline-block', marginTop: '8px' }}>Ver desglose de descarte por fase →</Link>
+            </div>
+
+            <div style={{ ...cardStyle, margin: 0 }}>
+              <p style={{ margin: '0 0 2px', fontSize: '12.5px', fontWeight: 700 }}>3. Productividad de empleados</p>
+              <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#9ca3af' }}>Plantas cosechadas al mes por hora-persona total. En medición — sin objetivo aún</p>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '10px' }}>
+                <strong style={{ fontSize: '28px', color: '#111827' }}>{productividadPlantasUltimoMesRep ? productividadPlantasUltimoMesRep.productividad!.toLocaleString('es-AR') : '—'}</strong>
+                <span style={{ fontSize: '11px', color: '#9ca3af' }}>pl/h · {productividadPlantasUltimoMesRep?.label ?? 'sin datos'}</span>
+              </div>
+              {evoProductividadPlantasRep.series[0].puntos.length > 0
+                ? <GraficoEvolucion series={evoProductividadPlantasRep.series} labels={evoProductividadPlantasRep.labels} hoyIdx={evoProductividadPlantasRep.hoyIdx} unidad=" pl/h" />
+                : <p style={{ color: '#9ca3af', fontSize: '12px', textAlign: 'center', padding: '16px' }}>Sin datos de CrossChex disponibles.</p>}
+              <a href="#productividad-paq" style={{ fontSize: '11px', color: '#2563eb', textDecoration: 'none', fontWeight: 600, display: 'inline-block', marginTop: '8px' }}>Ver evolución en paquetes/hora ↓</a>
+            </div>
+          </div>
+        </div>
+
         {/* ══ 1. VENTAS ══ */}
         <h2 style={tituloSeccion}>1. Ventas</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '14px', marginBottom: '14px' }}>
@@ -369,7 +476,7 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
             <p className="card-sub" style={{ margin: '0 0 10px' }}>Días F2 promedio, por semana</p>
             <GraficoEvolucion series={evoCiclos180.series} labels={evoCiclos180.labels} hoyIdx={evoCiclos180.hoyIdx} />
           </div>
-          <div style={cardStyle}>
+          <div id="productividad-paq" style={{ ...cardStyle, scrollMarginTop: '16px' }}>
             <p className="card-title" style={{ margin: '0 0 2px' }}>Productividad — paquetes / hora-hombre</p>
             <p className="card-sub" style={{ margin: '0 0 10px' }}>Por mes · últimos 12 meses</p>
             {evoProductividad.series[0].puntos.length > 0

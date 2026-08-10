@@ -32,7 +32,7 @@ function normBaseMesada(s: string): string {
 // chica que una grande) — el histórico diario (OcupacionHistorial, cargado por el cron)
 // SÍ contempla los huecos entre cosecha y trasplante, a diferencia de una foto puntual de
 // "ahora": si una mesada estuvo vacía 4 de 30 días, esos 4 días bajan el promedio del mes.
-export function ocupacionMensualPorCultivo(historial: OcupacionHistorialRow[], ubicaciones: Ubicacion[], nMeses = 6): OcupacionMesCultivo[] {
+export function ocupacionMensualPorCultivo(historial: OcupacionHistorialRow[], ubicaciones: Ubicacion[], nMeses = 6, hastaRef: Date = new Date()): OcupacionMesCultivo[] {
   // Solo mesadas F2 — mismo alcance que el cron que carga el histórico (sector_fase !== 'fase_1')
   const mesadas = ubicaciones.filter((u) => u.tipo === 'mesada');
   const cultivoDeMesada = new Map<string, CultivoOcupacion>();
@@ -47,7 +47,7 @@ export function ocupacionMensualPorCultivo(historial: OcupacionHistorialRow[], u
     return cultivoDeMesada.get(key1) ?? cultivoDeMesada.get(key2) ?? null;
   }
 
-  const hoy = new Date();
+  const hoy = hastaRef;
   const meses: OcupacionMesCultivo[] = [];
   for (let i = nMeses - 1; i >= 0; i--) {
     const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
@@ -100,8 +100,8 @@ export interface EficienciaMesCultivo {
   lechuga_roble: { viva: number; descarte: number; pct: number | null };
 }
 
-export function eficienciaSiembraCosechaPorMes(lotes: Lote[], nMeses = 6): EficienciaMesCultivo[] {
-  const hoy = new Date();
+export function eficienciaSiembraCosechaPorMes(lotes: Lote[], nMeses = 6, hastaRef: Date = new Date()): EficienciaMesCultivo[] {
+  const hoy = hastaRef;
   const meses: EficienciaMesCultivo[] = [];
   for (let i = nMeses - 1; i >= 0; i--) {
     const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
