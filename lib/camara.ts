@@ -10,6 +10,43 @@ function parseDate(s: any): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+// ── Regla del mediodía ──────────────────────────────────────────────────────────────
+// Las entregas de venta salen de 8 a 12hs, y la cosecha del día se hace a la mañana —
+// así que una venta o cosecha fechada HOY recién se considera "ya afuera/adentro de
+// cámara" a partir del mediodía; antes de esa hora, el pedido/la cosecha de hoy todavía
+// no impactó el stock físico real. Eventos de días anteriores siempre cuentan, sin
+// importar la hora. Se calcula en huso horario de Argentina explícitamente — new Date().
+// getHours() en el server (Vercel) corre en UTC y dispararía la regla 3 horas antes de
+// tiempo (mismo problema que ya se corrigió en el recordatorio de "hacer stock" del Panel).
+const HORA_CORTE_MEDIODIA = 12;
+function horaArgentina(momento: Date): number {
+  return Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Argentina/Buenos_Aires', hour: 'numeric', hour12: false }).format(momento));
+}
+function fechaArgentina(momento: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric', month: '2-digit', day: '2-digit' }).format(momento);
+}
+function yaConcretado(fechaEvento: any, momentoRef: Date): boolean {
+  const str = String(fechaEvento || '').split(/[\sT]/)[0];
+  if (!str) return false;
+  const diaRef = fechaArgentina(momentoRef);
+  if (str < diaRef) return true;
+  if (str > diaRef) return false; // fecha futura respecto al momento de referencia — no cuenta
+  return horaArgentina(momentoRef) >= HORA_CORTE_MEDIODIA;
+}
+
+// Momento REAL en que se cargó un registro de StockCamara — usa momento_carga (ms desde
+// epoch) si está disponible; en registros viejos (de antes de este campo) se asume fin
+// del día de su fecha, para no alterar retroactivamente cálculos ya hechos con el
+// criterio anterior (que siempre contaba el mismo día como ya concretado).
+function momentoDeRegistro(r: { momento_carga?: any; fecha_carga?: any; fecha: any }): Date {
+  const ms = Number(r.momento_carga);
+  if (ms > 0) return new Date(ms);
+  const base = String(r.fecha_carga || '').trim() || String(r.fecha || '');
+  const str = base.split(/[\sT]/)[0];
+  const d = new Date(`${str}T23:59:59-03:00`);
+  return isNaN(d.getTime()) ? new Date() : d;
+}
+
 function esRucula(variedad: string) {
   const v = String(variedad || '').toLowerCase();
   return v.includes('rucula') || v.includes('rúcula');
@@ -26,30 +63,34 @@ function matchCultivo(cultivo: CultivoCamara, variedad: string): boolean {
   return cultivo === 'lechuga_crespa' ? esCrespa(variedad) : !esCrespa(variedad);
 }
 
-// Paquetes cosechados de `cultivo` con fecha en (desde, hasta] — mismo criterio que
-// calcularCamara, pero acotado a un rango (no siempre "hasta hoy").
-function cosechadoEntre(cultivo: CultivoCamara, lotes: Lote[], desde: Date, hasta: Date): number {
+// Paquetes cosechados de `cultivo` con fecha posterior a `desde` y ya concretados
+// (regla del mediodía) respecto a `momentoRef`.
+function cosechadoEntre(cultivo: CultivoCamara, lotes: Lote[], desde: Date, momentoRef: Date): number {
   return lotes
     .filter(l => {
       if (l.estado !== 'cosechado') return false;
       if (!matchCultivo(cultivo, l.variedad)) return false;
-      const f = parseDate(l.fecha_cosecha || l.fecha_ult_movimiento);
-      return f && f > desde && f <= hasta;
+      const fechaCosecha = l.fecha_cosecha || l.fecha_ult_movimiento;
+      const f = parseDate(fechaCosecha);
+      if (!f || !(f > desde)) return false;
+      return yaConcretado(fechaCosecha, momentoRef);
     })
     .reduce((a, l) => a + (Number(l.unidades_cosechadas) || 0), 0);
 }
 
-// Paquetes vendidos (exportados a Xubio) de `cultivo` con fecha en (desde, hasta].
-// El export marca `exportado` con el id de exportación (ej. "EXP-20260619-1430"),
-// NO con el literal 'SI'. Por eso se descuenta cualquier venta con exportado no vacío.
-// lechuga_crespa/hoja_roble ya son campos separados en Ventas — no hace falta
-// clasificar por texto de variedad como con las cosechas.
-function vendidoEntre(cultivo: CultivoCamara, ventas: VentaDia[], desde: Date, hasta: Date): number {
+// Paquetes vendidos (exportados a Xubio) de `cultivo` con fecha posterior a `desde` y ya
+// concretados (regla del mediodía) respecto a `momentoRef`. El export marca `exportado`
+// con el id de exportación (ej. "EXP-20260619-1430"), NO con el literal 'SI'. Por eso se
+// descuenta cualquier venta con exportado no vacío. lechuga_crespa/hoja_roble ya son
+// campos separados en Ventas — no hace falta clasificar por texto de variedad como con
+// las cosechas.
+function vendidoEntre(cultivo: CultivoCamara, ventas: VentaDia[], desde: Date, momentoRef: Date): number {
   return ventas
     .filter(v => {
       if (!v.exportado || String(v.exportado).trim() === '') return false;
       const f = parseDate(v.fecha);
-      return f && f > desde && f <= hasta;
+      if (!f || !(f > desde)) return false;
+      return yaConcretado(v.fecha, momentoRef);
     })
     .reduce((acc, v) => {
       if (cultivo === 'rucula') return acc + (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0);
@@ -96,13 +137,18 @@ export function calcularCamara(
 
   const cantidadBase = Number(base.cantidad_paq) || 0;
 
-  // Cosechas desde fechaBase (exclusive: solo posteriores a la base)
+  // Cosechas desde fechaBase (exclusive: solo posteriores a la base), con la regla del
+  // mediodía aplicada respecto a "ahora" — antes esto no tenía límite superior alguno,
+  // así que una cosecha de HOY a la mañana ya sumaba al stock aunque el conteo se
+  // estuviera haciendo antes de que termine la jornada de cosecha.
   const cosechas = lotes
     .filter(l => {
       if (l.estado !== 'cosechado') return false;
       if (!matchCultivo(cultivo, l.variedad)) return false;
-      const f = parseDate(l.fecha_cosecha || l.fecha_ult_movimiento);
-      return f && f > fechaBase;
+      const fechaCosecha = l.fecha_cosecha || l.fecha_ult_movimiento;
+      const f = parseDate(fechaCosecha);
+      if (!f || !(f > fechaBase)) return false;
+      return yaConcretado(fechaCosecha, hoy);
     })
     .map(l => ({ fecha: parseDate(l.fecha_cosecha || l.fecha_ult_movimiento)!, cantidad: Number(l.unidades_cosechadas) || 0 }))
     .filter(e => e.cantidad > 0);
@@ -153,9 +199,9 @@ export function diferenciaAjuste(
 ): number {
   const anteriores = [...registros]
     .filter(r => r.cultivo === cultivo)
-    .map(r => ({ ...r, _f: parseDate(r.fecha) }))
-    .filter((r): r is StockCamara & { _f: Date } => !!r._f && r._f <= fecha)
-    .sort((a, b) => a._f.getTime() - b._f.getTime());
+    .map(r => ({ ...r, _f: parseDate(r.fecha), _m: momentoDeRegistro(r) }))
+    .filter((r): r is StockCamara & { _f: Date; _m: Date } => !!r._f && r._m <= fecha)
+    .sort((a, b) => a._m.getTime() - b._m.getTime());
   const prev = anteriores[anteriores.length - 1];
   if (!prev) return 0; // sin base previa, no hay con qué comparar
 
@@ -168,7 +214,11 @@ export function diferenciaAjuste(
 export interface DiferenciaAjustesMes { acumulado: number; cantidadAjustes: number }
 
 // Suma las diferencias reveladas por cada ajuste cargado en el mes de `fechaRef`
-// (por defecto el mes en curso) — "cuánto se corrigió" acumulado ese mes.
+// (por defecto el mes en curso) — "cuánto se corrigió" acumulado ese mes. La secuencia
+// prev→curr y el corte de cosechado/vendido usan el momento REAL de carga de cada
+// registro (momento_carga), no solo su fecha de negocio — así un ajuste cargado a la
+// mañana (antes del mediodía) no se compara contra las ventas del día como si ya
+// hubieran salido, igual criterio que calcularCamara().
 export function diferenciaAjustesMes(
   cultivo: CultivoCamara,
   registros: StockCamara[],
@@ -178,9 +228,9 @@ export function diferenciaAjustesMes(
 ): DiferenciaAjustesMes {
   const ordenados = [...registros]
     .filter(r => r.cultivo === cultivo)
-    .map(r => ({ ...r, _f: parseDate(r.fecha) }))
-    .filter((r): r is StockCamara & { _f: Date } => !!r._f)
-    .sort((a, b) => a._f.getTime() - b._f.getTime());
+    .map(r => ({ ...r, _f: parseDate(r.fecha), _m: momentoDeRegistro(r) }))
+    .filter((r): r is StockCamara & { _f: Date; _m: Date } => !!r._f)
+    .sort((a, b) => a._m.getTime() - b._m.getTime());
 
   let acumulado = 0, cantidadAjustes = 0;
   for (let i = 1; i < ordenados.length; i++) {
@@ -188,8 +238,8 @@ export function diferenciaAjustesMes(
     if (curr.tipo !== 'ajuste') continue;
     if (curr._f.getFullYear() !== fechaRef.getFullYear() || curr._f.getMonth() !== fechaRef.getMonth()) continue;
     const prev = ordenados[i - 1];
-    const cosechado = cosechadoEntre(cultivo, lotes, prev._f, curr._f);
-    const vendido = vendidoEntre(cultivo, ventas, prev._f, curr._f);
+    const cosechado = cosechadoEntre(cultivo, lotes, prev._f, curr._m);
+    const vendido = vendidoEntre(cultivo, ventas, prev._f, curr._m);
     const teorico = Math.max(0, (Number(prev.cantidad_paq) || 0) + cosechado - vendido);
     acumulado += Number(curr.cantidad_paq) - teorico;
     cantidadAjustes++;

@@ -244,6 +244,11 @@ export interface StockCamara {
   notas: string;
   usuario: string;
   fecha_carga: string;
+  // Momento REAL de carga (ms desde epoch, Date.now()) — a diferencia de fecha_carga
+  // (solo fecha), esto permite saber si el conteo se cargó antes o después del mediodía
+  // el mismo día en que se registró, para las entregas (8-12hs) del día en curso. Vacío
+  // en registros viejos, de antes de este campo — ver lib/camara.ts::momentoDeRegistro.
+  momento_carga: number | string;
 }
 
 // Configuración por empleado para Control de personal (horas/CrossChex) — workno es el

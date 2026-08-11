@@ -261,6 +261,21 @@ export async function asegurarHoja(nombre: string, headers: string[]): Promise<v
   });
 }
 
+// Agrega una columna al final del encabezado de una hoja YA EXISTENTE si todavía no
+// está — para sumarle un campo nuevo a una hoja vieja sin pedirle al usuario que edite
+// la planilla a mano. Idempotente (no hace nada si la columna ya existe).
+export async function asegurarColumna(nombre: string, columna: string): Promise<void> {
+  const sheets = getClient();
+  const resp = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${nombre}!1:1` });
+  const headers: string[] = (resp.data.values?.[0] as string[]) || [];
+  if (headers.includes(columna)) return;
+  const nuevaCol = colLetter(headers.length + 1);
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SHEET_ID, range: `${nombre}!${nuevaCol}1`,
+    valueInputOption: 'RAW', requestBody: { values: [[columna]] },
+  });
+}
+
 export async function readConfig(clave: string): Promise<string | number | null> {
   const items = await readSheet<{ clave: string; valor: any }>('Configuracion');
   const item = items.find((i) => i.clave === clave);
