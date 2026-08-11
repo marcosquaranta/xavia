@@ -73,11 +73,21 @@ export function calcularCamara(
 ): ResultadoCamara {
   const hoy = new Date();
 
-  // Último registro base para este cultivo
-  const base = [...registros]
-    .filter(r => r.cultivo === cultivo)
-    .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))
-    .find(() => true) ?? null;
+  // Último registro base para este cultivo — si dos registros caen en la MISMA fecha
+  // (ej. dos ajustes cargados el mismo día), hay que quedarse con el que se cargó
+  // DESPUÉS, no con cualquiera de los dos al azar. Array.sort es estable, así que un
+  // sort descendente por fecha con .find(() => true) (= tomar el primero) en realidad
+  // devolvía el más VIEJO de ese empate (el que apareció primero en la hoja, no el
+  // último cargado) — un segundo ajuste el mismo día quedaba "invisible": la carga se
+  // guardaba bien pero el stock mostrado no cambiaba, como si el click no hubiera hecho
+  // nada. Se desempata explícitamente por índice original (el cargado después gana).
+  const base = registros
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => r.cultivo === cultivo)
+    .sort((a, b) => {
+      const cmp = String(b.r.fecha).localeCompare(String(a.r.fecha));
+      return cmp !== 0 ? cmp : b.i - a.i;
+    })[0]?.r ?? null;
 
   if (!base) return { cultivo, stockActual: 0, diasPromedio: 0, base: null };
 
