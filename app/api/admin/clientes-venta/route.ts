@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
-import { appendRow, readSheet, updateRow } from '@/lib/sheets';
+import { appendRow, asegurarColumna, readSheet, updateRow } from '@/lib/sheets';
 import type { ClienteVenta } from '@/lib/types';
 
 export async function PATCH(req: NextRequest) {
@@ -8,6 +8,9 @@ export async function PATCH(req: NextRequest) {
   try {
     const { id_control, ...fields } = await req.json();
     if (!id_control) return NextResponse.json({ error: 'id_control requerido' }, { status: 400 });
+    // "orden" es un campo nuevo — se agrega solo a la hoja si todavía no existe, para
+    // no romper el guardado la primera vez que se usa.
+    if ('orden' in fields) await asegurarColumna('Clientes', 'orden');
     const updated = await updateRow('Clientes', 'id_control', String(id_control), fields);
     if (!updated) return NextResponse.json({ error: 'cliente_no_encontrado' }, { status: 404 });
     return NextResponse.json({ ok: true });

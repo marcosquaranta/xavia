@@ -85,6 +85,7 @@ function ClienteRow({ c, precios, onSaved }: { c: ClienteVenta; precios: PrecioV
     punto_venta: String(c.punto_venta || ''),
     sucursales: c.sucursales || '',
     unidad: String(c.unidad || 'paq'),
+    orden: String(c.orden || ''),
   });
 
   const sucursalesArr = fields.sucursales ? fields.sucursales.split('|').map(s => s.trim()).filter(Boolean) : [];
@@ -124,6 +125,7 @@ function ClienteRow({ c, precios, onSaved }: { c: ClienteVenta; precios: PrecioV
         <td style={{ fontWeight: 500 }}>{c.nombre_xubio}</td>
         <td style={{ color: '#6b7280', fontSize: '12px' }}>{c.alias || c.nombre_display}</td>
         <td style={{ fontSize: '11px', color: '#6b7280' }}>{c.sucursales || '—'}</td>
+        <td style={{ textAlign: 'center', fontSize: '12px', color: c.orden ? '#111827' : '#d1d5db' }}>{c.orden || '—'}</td>
         <td style={{ textAlign: 'center' }}>
           <span style={{ background: c.tipo_factura === 'A' ? '#dbeafe' : '#f3f4f6', color: c.tipo_factura === 'A' ? '#1e40af' : '#374151', padding: '1px 7px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>
             {c.tipo_factura}
@@ -137,7 +139,7 @@ function ClienteRow({ c, precios, onSaved }: { c: ClienteVenta; precios: PrecioV
 
       {open && (
         <tr>
-          <td colSpan={7} style={{ padding: '0 0 12px', background: '#fafafa' }}>
+          <td colSpan={8} style={{ padding: '0 0 12px', background: '#fafafa' }}>
             <div style={{ padding: '14px', borderTop: '1px solid #f3f4f6' }}>
 
               {/* Datos del cliente */}
@@ -176,6 +178,10 @@ function ClienteRow({ c, precios, onSaved }: { c: ClienteVenta; precios: PrecioV
                     <option value="paq">Paquetes</option>
                     <option value="kg">KG (cajón) — ej. Select Food</option>
                   </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '11px' }}>Orden en carga de Ventas</label>
+                  <input type="number" value={fields.orden} onChange={e => setFields(f => ({ ...f, orden: e.target.value }))} disabled={saving} placeholder="sin fijar = por frecuencia" />
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center' }}>
@@ -287,6 +293,7 @@ export default function ClientesVentaManager({ clientes, precios }: Props) {
               <th>Nombre Xubio</th>
               <th>Alias / Display</th>
               <th>Sucursales</th>
+              <th style={{ textAlign: 'center', width: '55px' }} title="Orden en la carga de Ventas">Orden</th>
               <th style={{ textAlign: 'center' }}>Fact.</th>
               <th style={{ textAlign: 'right' }}>Rúcula</th>
               <th style={{ width: '30px' }}></th>
@@ -296,7 +303,7 @@ export default function ClientesVentaManager({ clientes, precios }: Props) {
             {activos.map(c => <ClienteRow key={c.id_control} c={c} precios={precios} onSaved={() => router.refresh()} />)}
             {inactivos.length > 0 && (
               <>
-                <tr><td colSpan={7} style={{ padding: '8px 6px 4px', fontSize: '11px', color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase' }}>Inactivos</td></tr>
+                <tr><td colSpan={8} style={{ padding: '8px 6px 4px', fontSize: '11px', color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase' }}>Inactivos</td></tr>
                 {inactivos.map(c => <ClienteRow key={c.id_control} c={c} precios={precios} onSaved={() => router.refresh()} />)}
               </>
             )}

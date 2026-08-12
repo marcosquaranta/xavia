@@ -55,14 +55,25 @@ const EQ_KG: Record<KGK,string> = { rucula_kg:'', lechuga_kg_crespa:'', lechuga_
 
 function mkFilas(cs: ClienteVenta[], freq: Record<string,number>): Fila[] {
   const out: Fila[] = [];
+  const ordenMap: Record<string,number> = {};
   for (const c of cs) {
     if (c.activo!=='SI') continue;
+    ordenMap[c.id_control] = Number(c.orden) || 0;
     const unidad = c.unidad || 'paq';
     const sucs = c.sucursales ? c.sucursales.split('|').map(s=>s.trim()).filter(Boolean) : [];
     if (!sucs.length) { out.push({id_control:c.id_control,nombre_cliente:c.nombre_xubio,sucursal:c.nombre_xubio,nombre_display:c.nombre_display||c.nombre_xubio,tipo:c.tipo_factura,unidad}); }
     else { for (const s of sucs) out.push({id_control:c.id_control,nombre_cliente:c.nombre_xubio,sucursal:s,nombre_display:`${c.nombre_display||c.nombre_xubio} · ${s.split(' ').slice(-1)[0]}`,tipo:c.tipo_factura,unidad}); }
   }
-  return out.sort((a,b)=>(freq[b.id_control]||0)-(freq[a.id_control]||0));
+  // Orden manual (Admin → Clientes de venta) tiene prioridad si está fijado — más bajo
+  // primero. Sin orden fijado (0), cae al criterio de siempre: frecuencia de compra
+  // descendente. Un cliente con orden fijado siempre va antes que uno sin fijar.
+  return out.sort((a,b)=>{
+    const oa=ordenMap[a.id_control]||0, ob=ordenMap[b.id_control]||0;
+    if (oa>0 && ob>0) return oa-ob;
+    if (oa>0) return -1;
+    if (ob>0) return 1;
+    return (freq[b.id_control]||0)-(freq[a.id_control]||0);
+  });
 }
 
 export default function VentasManager({clientes,precios,frecuencias,stats,estimCosecha,pedidosFijos,initialFecha}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;estimCosecha:EstimacionCosechaCercana;pedidosFijos:PedidoFijo[];initialFecha?:string}) {

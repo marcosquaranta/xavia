@@ -133,6 +133,10 @@ export interface ClienteVenta {
   activo: string;
   unidad: 'paq' | 'kg' | '';  // 'kg' para clientes que compran por KG (cajón)
   email: string;  // para enviarle el detalle de venta cuando es Factura B
+  // Orden manual en la carga de Ventas — más bajo aparece primero. Vacío/0 = sin orden
+  // fijado, el cliente cae al final ordenado por frecuencia de compra (comportamiento
+  // de siempre). Ver mkFilas() en app/ventas/VentasManager.tsx.
+  orden: number | string;
 }
 
 // Pedido recurrente de un cliente para un día fijo de la semana (0=domingo..6=sábado,
