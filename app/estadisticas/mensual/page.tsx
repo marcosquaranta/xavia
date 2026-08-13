@@ -17,6 +17,7 @@ import Header from '@/components/Header';
 import GraficoEvolucion from '../GraficoEvolucion';
 import GraficoPesaje from '../GraficoPesaje';
 import { GraficoVentaPorArticulo, GraficoVentaPorCliente, GraficoPrecioPromedio } from '@/app/ventas/VentasEvolucionCharts';
+import CopiarInformeBoton from './CopiarInformeBoton';
 export const dynamic = 'force-dynamic';
 
 const esRuculaV = (v: string) => { const x = String(v || '').toLowerCase(); return x.includes('rucula') || x.includes('rúcula'); };
@@ -390,6 +391,14 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
           {!esMesActual && <span style={{ fontSize: '11px', color: '#9ca3af' }}>(mes cerrado — no incluye datos posteriores)</span>}
         </div>
 
+        <CopiarInformeBoton contenedorId="informe-contenido" />
+
+        {/* Todo lo de acá para abajo es lo que copia el botón de arriba — ver
+            CopiarInformeBoton: clona este div, convierte los gráficos SVG a imagen PNG
+            (los mails no renderizan SVG de forma confiable) y lo manda al portapapeles
+            como HTML enriquecido, para pegar directo en Gmail/Outlook con Ctrl+V. */}
+        <div id="informe-contenido">
+
         {/* ══ INDICADORES OPERATIVOS MARCE — mismos 3 KPIs que en Estadísticas, acá
             recalculados hasta el cierre del mes elegido ══ */}
         <div style={{ background: 'linear-gradient(135deg, #1e293b, #0f172a)', borderRadius: '14px', padding: '20px 20px 22px', margin: '14px 0 18px' }}>
@@ -649,6 +658,8 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
             </div>
           ))}
         </div>
+
+        </div>{/* /#informe-contenido */}
       </div>
     </>
   );
