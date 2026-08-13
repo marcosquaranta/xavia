@@ -22,10 +22,12 @@ export const dynamic = 'force-dynamic';
 const esRuculaV = (v: string) => { const x = String(v || '').toLowerCase(); return x.includes('rucula') || x.includes('rúcula'); };
 const esCrespaV = (v: string) => String(v || '').toLowerCase().includes('crespa');
 const MESES_LARGO = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
-// Buckets fijos de 30 días (diarios) y 180 días (semanales), anclados al final del
-// período seleccionado (no siempre "hoy") — así al elegir un mes pasado, las ventanas
-// cuentan para atrás desde el cierre de ESE mes, sin asomar datos de meses posteriores.
+// Buckets fijos de 30 días (diarios) y 180 días (mensuales — 180 días son ~6 meses,
+// semana a semana queda ilegible), anclados al final del período seleccionado (no
+// siempre "hoy") — así al elegir un mes pasado, las ventanas cuentan para atrás desde
+// el cierre de ESE mes, sin asomar datos de meses posteriores.
 function buckets30(hasta: Date) {
   const nBuckets = 30;
   const start = new Date(hasta); start.setDate(start.getDate() - (nBuckets - 1)); start.setHours(0, 0, 0, 0);
@@ -34,11 +36,22 @@ function buckets30(hasta: Date) {
   return { nBuckets, labels, hoyIdx: nBuckets - 1, bucketDe };
 }
 function buckets180(hasta: Date) {
-  const nBuckets = 26;
-  const start = new Date(hasta); start.setDate(start.getDate() - 7 * (nBuckets - 1)); start.setHours(0, 0, 0, 0);
-  const bucketDe = (f: Date) => { const idx = Math.floor((f.getTime() - start.getTime()) / (7 * 86400000)); return idx >= 0 && idx < nBuckets ? idx : -1; };
-  const labels = Array.from({ length: nBuckets }, (_, i) => { const d = new Date(start); d.setDate(d.getDate() + i * 7); return `${d.getDate()}/${d.getMonth() + 1}`; });
-  return { nBuckets, labels, hoyIdx: nBuckets - 1, bucketDe };
+  const nBuckets = 6; // ~180 días en meses
+  const inicioMes0 = hasta.getMonth() - (nBuckets - 1);
+  const startYear = hasta.getFullYear() + Math.floor(inicioMes0 / 12);
+  const startMonth = ((inicioMes0 % 12) + 12) % 12;
+  const bucketDe = (f: Date) => (f.getFullYear() - startYear) * 12 + (f.getMonth() - startMonth);
+  const labels = Array.from({ length: nBuckets }, (_, i) => {
+    const m = (startMonth + i) % 12, y = startYear + Math.floor((startMonth + i) / 12);
+    return `${MESES_CORTO[m]} ${String(y).slice(2)}`;
+  });
+  // "YYYY-MM" por bucket, para poder armar una fecha sintética ordenable/agrupable en
+  // otros cálculos que agregan por este mismo bucket (ver puntosPesaje180).
+  const mesesISO = Array.from({ length: nBuckets }, (_, i) => {
+    const m = (startMonth + i) % 12, y = startYear + Math.floor((startMonth + i) / 12);
+    return `${y}-${String(m + 1).padStart(2, '0')}`;
+  });
+  return { nBuckets, labels, hoyIdx: nBuckets - 1, bucketDe, mesesISO };
 }
 type Buckets = ReturnType<typeof buckets30>;
 
@@ -212,17 +225,40 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
   const evoPlantasPaq30 = evolucionPlantasPorPaquete(lotesRep, b30);
   const evoDescartes30 = evolucionDescartes(lotesRep, b30);
 
-  // Pesaje testigo — últimos 180 días hasta el cierre del mes elegido
-  const hace180 = new Date(refDate); hace180.setDate(hace180.getDate() - 180);
-  const puntosPesaje180 = lotesRep
-    .filter(l => l.estado === 'cosechado' && l.fecha_cosecha && (Number(l.peso_muestra_paquete_gr) > 0 || Number(l.peso_muestra_kg) > 0))
-    .filter(l => { const f = new Date(String(l.fecha_cosecha) + 'T12:00:00'); return !isNaN(f.getTime()) && f >= hace180; })
-    .map(l => ({
-      fecha: String(l.fecha_cosecha), variedad: l.variedad,
-      peso_gr: Number(l.peso_muestra_paquete_gr) > 0 ? Number(l.peso_muestra_paquete_gr) : Math.round(Number(l.peso_muestra_kg) * 1000),
-      paquetes: Number(l.unidades_cosechadas) || 0,
-    }))
-    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+  // Pesaje testigo — últimos 180 días hasta el cierre del mes elegido, agregado POR MES
+  // (b180 arma 6 buckets mensuales) — antes era un punto por cosecha individual, que con
+  // 180 días de datos quedaba ilegible; ahora es un promedio por mes y cultivo. La fecha
+  // sintética de cada punto es "YYYY-MM" (mesesISO del bucket), no una cosecha real — así
+  // GraficoPesaje (que agrupa/ordena por fecha exacta) colapsa cada bucket a un único punto.
+  const puntosPesaje180 = (() => {
+    const esRuculaPeso = (v: string) => { const x = String(v || '').toLowerCase(); return x.includes('rucula') || x.includes('rúcula'); };
+    const acc = new Map<string, number[]>(); // key = `${bucketIdx}|${cultivo}`
+    for (const l of lotesRep) {
+      if (l.estado !== 'cosechado' || !l.fecha_cosecha) continue;
+      if (!(Number(l.peso_muestra_paquete_gr) > 0 || Number(l.peso_muestra_kg) > 0)) continue;
+      const f = new Date(String(l.fecha_cosecha) + 'T12:00:00');
+      if (isNaN(f.getTime())) continue;
+      const idx = b180.bucketDe(f);
+      if (idx < 0 || idx >= b180.nBuckets) continue;
+      const cultivo = esRuculaPeso(l.variedad) ? 'rucula' : 'lechuga';
+      const peso = Number(l.peso_muestra_paquete_gr) > 0 ? Number(l.peso_muestra_paquete_gr) : Math.round(Number(l.peso_muestra_kg) * 1000);
+      const key = `${idx}|${cultivo}`;
+      if (!acc.has(key)) acc.set(key, []);
+      acc.get(key)!.push(peso);
+    }
+    const out: { fecha: string; variedad: string; peso_gr: number; paquetes: number }[] = [];
+    for (const [key, pesos] of acc) {
+      const [idxStr, cultivo] = key.split('|');
+      const idx = Number(idxStr);
+      out.push({
+        fecha: b180.mesesISO[idx],
+        variedad: cultivo === 'rucula' ? 'Rúcula' : 'Lechuga',
+        peso_gr: Math.round(pesos.reduce((a, b) => a + b, 0) / pesos.length),
+        paquetes: 0,
+      });
+    }
+    return out.sort((a, b) => a.fecha.localeCompare(b.fecha));
+  })();
 
   // Productividad por mes — últimos 12 meses hasta el cierre del mes elegido. Un fetch a
   // CrossChex POR MES (~30 días cada uno) en vez de todo el rango de una sola vez — pedirle
@@ -473,7 +509,7 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
           </div>
           <div style={cardStyle}>
             <p className="card-title" style={{ margin: '0 0 2px' }}>Evolución de ciclo — últimos 180 días</p>
-            <p className="card-sub" style={{ margin: '0 0 10px' }}>Días F2 promedio, por semana</p>
+            <p className="card-sub" style={{ margin: '0 0 10px' }}>Días F2 promedio, por mes</p>
             <GraficoEvolucion series={evoCiclos180.series} labels={evoCiclos180.labels} hoyIdx={evoCiclos180.hoyIdx} />
           </div>
           <div id="productividad-paq" style={{ ...cardStyle, scrollMarginTop: '16px' }}>
@@ -485,8 +521,8 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
           </div>
           <div style={cardStyle}>
             <p className="card-title" style={{ margin: '0 0 2px' }}>Evolución de pesaje testigo — últimos 180 días</p>
-            <p className="card-sub" style={{ margin: '0 0 10px' }}>Gramos por paquete</p>
-            <GraficoPesaje puntos={puntosPesaje180} />
+            <p className="card-sub" style={{ margin: '0 0 10px' }}>Gramos por paquete, por mes</p>
+            <GraficoPesaje puntos={puntosPesaje180} labelFn={(f) => { const [y, m] = f.split('-').map(Number); return `${MESES_CORTO[m - 1]} ${String(y).slice(2)}`; }} />
           </div>
           <div style={cardStyle}>
             <p className="card-title" style={{ margin: '0 0 2px' }}>Plantas por paquete — últimos 30 días</p>

@@ -7,7 +7,8 @@ const CULTIVOS = [
   { key: 'lechuga', label: 'Lechuga', color: '#84cc16', bg: '#f0fdf4' },
 ];
 
-export default function GraficoPesaje({ puntos }: { puntos: PuntoPesaje[] }) {
+export default function GraficoPesaje({ puntos, labelFn }: { puntos: PuntoPesaje[]; labelFn?: (fecha: string) => string }) {
+  const fmtLabel = labelFn || ((f: string) => f.slice(5));
   if (!puntos.length) return (
     <div style={{ background: '#fafafa', border: '1px solid #f3f4f6', borderRadius: '8px', padding: '32px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
       No hay cosechas con pesaje testigo registradas. Se actualizará cuando se registren cosechas por paquete con peso.
@@ -63,7 +64,7 @@ export default function GraficoPesaje({ puntos }: { puntos: PuntoPesaje[] }) {
               <div>
                 <p style={{ margin: 0, fontSize: '11px', color: '#6b7280' }}>{c.label} — último</p>
                 <p style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: c.color }}>{ultimo.peso_gr} g/paq</p>
-                <p style={{ margin: 0, fontSize: '10px', color: '#9ca3af' }}>{ultimo.fecha}</p>
+                <p style={{ margin: 0, fontSize: '10px', color: '#9ca3af' }}>{fmtLabel(ultimo.fecha)}</p>
               </div>
             </div>
           );
@@ -84,7 +85,7 @@ export default function GraficoPesaje({ puntos }: { puntos: PuntoPesaje[] }) {
         {/* X axis dates */}
         {fechas.filter((_, i) => i % Math.max(1, Math.floor(fechas.length / 6)) === 0).map(f => (
           <text key={f} x={xOf(f)} y={Bot + 14} textAnchor="middle" fontSize={9} fill="#9ca3af">
-            {f.slice(5)}
+            {fmtLabel(f)}
           </text>
         ))}
         {/* Lines per cultivo */}
