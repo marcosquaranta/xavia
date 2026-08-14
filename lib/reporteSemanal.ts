@@ -2,8 +2,10 @@ import { readSheet } from './sheets';
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, PrecioVenta, ClienteVenta, VentaHistorica, StockCamara } from './types';
 import { tubosPorMesada } from './ocupacion';
 import { proyeccionCosechaSemanal, ciclosPorSemana, pesoPromedioRango, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, type PesoPromedioMes } from './estadisticas';
-import { calcularCamara, diferenciaAjustesMes } from './camara';
-import { ventasPorCultivoUltimasSemanas, resumenMesActual, ventasEnRango, type PuntoVentaCultivoSemana, type VentasRango, type ResumenMesActual } from './estadisticasVentas';
+import { calcularCamara, diferenciaAjustesRango } from './camara';
+import { ventasPorCultivoUltimasSemanas, resumenMesActual, ventasEnRango, GR_PAQ_RUCULA, GR_PAQ_LECHUGA, type PuntoVentaCultivoSemana, type VentasRango, type ResumenMesActual } from './estadisticasVentas';
+
+const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
 function lunesDe(d: Date): Date {
   const r = new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -14,15 +16,133 @@ function lunesDe(d: Date): Date {
 const fmtISO = (d: Date) => d.toISOString().slice(0, 10);
 const esRuculaV = (v: string) => { const x = String(v || '').toLowerCase(); return x.includes('rucula') || x.includes('rúcula'); };
 
+// Unidades vendidas totales de una fila de Ventas (todo lo que factura, kg convertidos a
+// paquete-equivalente con el mismo factor que el resto de la app) — para comparar
+// clientes en volumen real, no en kg crudo (que los haría ver artificialmente chicos).
+function unidadesVentaFila(v: VentaDia): number {
+  const directas = (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0) + (Number(v.lechuga_crespa) || 0) + (Number(v.hoja_roble) || 0) + (Number(v.albahaca) || 0);
+  const kgR = ((Number(v.rucula_kg) || 0) * 1000) / GR_PAQ_RUCULA;
+  const kgL = (((Number(v.lechuga_kg) || 0) + (Number(v.lechuga_kg_crespa) || 0) + (Number(v.lechuga_kg_roble) || 0)) * 1000) / GR_PAQ_LECHUGA;
+  return directas + kgR + kgL;
+}
+function sumaPorClienteEnRango(ventas: VentaDia[], desde: string, hasta: string): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const v of ventas) {
+    const f = String(v.fecha || '').split(/[T ]/)[0];
+    if (!f || f < desde || f > hasta) continue;
+    const t = unidadesVentaFila(v); if (t <= 0) continue;
+    map.set(v.id_control, (map.get(v.id_control) || 0) + t);
+  }
+  return map;
+}
+export interface ClienteVariacionSemana { nombre: string; actual: number; anterior: number; deltaUnidades: number; deltaPct: number | null }
+// Principales clientes de la semana (por volumen), con cuánto subieron/bajaron en
+// cantidad y % vs. la semana anterior — mismas ventanas de fecha que "Ventas — últimos 7 días".
+function clientesConVariacionSemana(ventas: VentaDia[], clientes: ClienteVenta[], desde: string, hasta: string, desdeAnt: string, hastaAnt: string, topN = 6): ClienteVariacionSemana[] {
+  const actual = sumaPorClienteEnRango(ventas, desde, hasta);
+  const anterior = sumaPorClienteEnRango(ventas, desdeAnt, hastaAnt);
+  const nombreMap = new Map(clientes.map(c => [c.id_control, c.nombre_display || c.nombre_xubio || c.id_control]));
+  const filas = Array.from(actual.entries()).map(([id_control, act]) => {
+    const ant = anterior.get(id_control) || 0;
+    const deltaUnidades = Math.round(act - ant);
+    const deltaPct = ant > 0 ? Math.round(((act - ant) / ant) * 100) : null;
+    return { nombre: nombreMap.get(id_control) || id_control, actual: Math.round(act), anterior: Math.round(ant), deltaUnidades, deltaPct };
+  });
+  return filas.sort((a, b) => b.actual - a.actual).slice(0, topN);
+}
+
+// Descarte (plantas, Plantín→F1 + F1→F2 + F2→Cosecha) por semana calendario, rúcula vs.
+// lechuga combinada — mismo criterio de clasificación que el resto de este reporte
+// (esRuculaV), para el gráfico de columnas agrupadas.
+function descartePorSemana(lotes: Lote[], movimientos: Movimiento[], nSemanas = 4): { label: string; rucula: number; lechuga: number }[] {
+  const hoy = new Date();
+  const lunesActual = lunesDe(hoy);
+  const lotesMap = new Map(lotes.map(l => [l.id_lote, l]));
+  const semanas = Array.from({ length: nSemanas }, (_, i) => {
+    const inicio = new Date(lunesActual); inicio.setDate(inicio.getDate() - (nSemanas - 1 - i) * 7);
+    const fin = new Date(inicio); fin.setDate(fin.getDate() + 6); fin.setHours(23, 59, 59);
+    return { inicio, fin, label: `${String(inicio.getDate()).padStart(2, '0')}/${String(inicio.getMonth() + 1).padStart(2, '0')}`, rucula: 0, lechuga: 0 };
+  });
+  for (const m of movimientos) {
+    if (!m.fecha) continue;
+    const descarte = Number(m.descarte_calculado) || 0;
+    if (descarte <= 0) continue;
+    const esTrasplante = m.tipo === 'trasplante';
+    const esCosecha = m.tipo === 'cosecha';
+    if (!esTrasplante && !esCosecha) continue;
+    const f = new Date(String(m.fecha) + 'T12:00:00');
+    if (isNaN(f.getTime())) continue;
+    const lote = lotesMap.get(String(m.id_lote || '')); if (!lote) continue;
+    const semana = semanas.find(s => f >= s.inicio && f <= s.fin); if (!semana) continue;
+    if (esRuculaV(lote.variedad)) semana.rucula += descarte; else semana.lechuga += descarte;
+  }
+  return semanas.map(({ label, rucula, lechuga }) => ({ label, rucula: Math.round(rucula), lechuga: Math.round(lechuga) }));
+}
+
+// Proyección de cosecha MENSUAL (no semanal — la semanal no se estaba cumpliendo, mucho
+// ruido de una semana a la otra). El mes en curso suma lo YA cosechado hasta hoy (real,
+// de Movimientos) + lo proyectado para lo que resta del mes (de proyeccionCosechaSemanal,
+// que solo proyecta semanas desde la actual en adelante); los meses futuros son 100%
+// proyección. Reutiliza el mismo motor semanal por lote, solo cambia el bucket de tiempo.
+function proyeccionCosechaMensual(
+  lotes: Lote[], variedades: Variedad[], movimientos: Movimiento[], nMeses = 4
+): { label: string; rucula: number; lechuga: number }[] {
+  const hoy = new Date();
+  const semanas = proyeccionCosechaSemanal(lotes, variedades, nMeses * 5); // margen: ~5 semanas/mes
+  const meses = Array.from({ length: nMeses }, (_, i) => {
+    const d = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
+    return { label: `${MESES_CORTO[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`, clave: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, rucula: 0, lechuga: 0 };
+  });
+  const idxPorMes = new Map(meses.map((m, i) => [m.clave, i]));
+  for (const s of semanas) {
+    const idx = idxPorMes.get(s.semana.slice(0, 7)); if (idx === undefined) continue;
+    meses[idx].rucula += s.rucula; meses[idx].lechuga += s.lechuga;
+  }
+  // Sumar lo ya cosechado este mes hasta hoy, para que el mes en curso muestre el total
+  // esperado del mes (no solo lo que falta de acá a fin de mes).
+  const iniMesActual = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  const lotesMap = new Map(lotes.map(l => [l.id_lote, l]));
+  const claveMesActual = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`;
+  const idxMesActual = idxPorMes.get(claveMesActual);
+  if (idxMesActual !== undefined) {
+    for (const m of movimientos) {
+      if (m.tipo !== 'cosecha' || !m.fecha) continue;
+      const f = new Date(String(m.fecha) + 'T12:00:00');
+      if (isNaN(f.getTime()) || f < iniMesActual || f > hoy) continue;
+      const lote = lotesMap.get(String(m.id_lote)); if (!lote) continue;
+      const cant = Number(m.unidades_cosechadas) || 0; if (cant <= 0) continue;
+      if (esRuculaV(lote.variedad)) meses[idxMesActual].rucula += cant; else meses[idxMesActual].lechuga += cant;
+    }
+  }
+  return meses.map(({ label, rucula, lechuga }) => ({ label, rucula: Math.round(rucula), lechuga: Math.round(lechuga) }));
+}
+
+// Cosechado REAL (Movimientos, no estimado) en un rango de fechas — para "mes pasado
+// real completo", comparable contra la proyección total del mes en curso.
+function cosechaRealEnRango(lotes: Lote[], movimientos: Movimiento[], desde: Date, hasta: Date): { rucula: number; lechuga: number } {
+  const lotesMap = new Map(lotes.map(l => [l.id_lote, l]));
+  const acc = { rucula: 0, lechuga: 0 };
+  for (const m of movimientos) {
+    if (m.tipo !== 'cosecha' || !m.fecha) continue;
+    const f = new Date(String(m.fecha) + 'T12:00:00');
+    if (isNaN(f.getTime()) || f < desde || f > hasta) continue;
+    const lote = lotesMap.get(String(m.id_lote)); if (!lote) continue;
+    const cant = Number(m.unidades_cosechadas) || 0; if (cant <= 0) continue;
+    if (esRuculaV(lote.variedad)) acc.rucula += cant; else acc.lechuga += cant;
+  }
+  return acc;
+}
+
 export interface ReporteSemanalData {
   fechaGenerado: string;
   ventasSemana: VentasRango;
   ventasSemanaAnterior: VentasRango;
   ventasMesActual: ResumenMesActual;
   ventasMesAnteriorTotal: number;
-  proyeccionProximaSemana: { rucula: number; lechuga: number };
-  proyeccionSemanas: { label: string; rucula: number; lechuga: number }[];
-  cosechaRealSemanaAnterior: { rucula: number; lechuga: number };
+  clientesVariacion: ClienteVariacionSemana[];
+  proyeccionMesActual: { rucula: number; lechuga: number };
+  cosechaRealMesAnterior: { rucula: number; lechuga: number };
+  proyeccionMeses: { label: string; rucula: number; lechuga: number }[];
   cicloSemana: { rucula: number; lechuga: number };
   cicloSemanaAnterior: { rucula: number; lechuga: number };
   cicloMesAnterior: { rucula: number; lechuga: number };
@@ -32,7 +152,9 @@ export interface ReporteSemanalData {
   mesadasBajas: { nombre: string; nave: number; pct: number }[];
   ventasSemanas: PuntoVentaCultivoSemana[];
   stock: { rucula: number; lechuga_crespa: number; lechuga_roble: number };
+  faltanteSemana: { rucula: number; lechuga_crespa: number; lechuga_roble: number; total: number };
   faltanteMes: { rucula: number; lechuga_crespa: number; lechuga_roble: number; total: number };
+  descarteSemanas: { label: string; rucula: number; lechuga: number }[];
 }
 
 export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> {
@@ -61,26 +183,19 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const diasEnMesPasado = new Date(mesPasadoRef.getFullYear(), mesPasadoRef.getMonth() + 1, 0).getDate();
   const ventasMesAnteriorTotal = resumenMesActual(ventas, precios, clientes, mesPasadoRef, diasEnMesPasado).unidadesMes;
 
-  // ── Proyección de cosecha (calendario, próximas 6 semanas) vs. lo realmente cosechado la semana pasada ──
-  const proyeccionRaw = proyeccionCosechaSemanal(lotes, variedades, 6);
-  const proyeccionSemanas = proyeccionRaw.map(p => ({ label: p.label, rucula: p.rucula, lechuga: p.lechuga }));
-  const proyeccionProximaSemana = proyeccionRaw[1] || { rucula: 0, lechuga: 0 };
-  const lunesEstaSemana = lunesDe(hoy);
-  const lunesSemanaPasada = new Date(lunesEstaSemana); lunesSemanaPasada.setDate(lunesSemanaPasada.getDate() - 7);
-  const domingoSemanaPasada = new Date(lunesEstaSemana); domingoSemanaPasada.setDate(domingoSemanaPasada.getDate() - 1);
-  domingoSemanaPasada.setHours(23, 59, 59);
-  const lotesMap = new Map(lotes.map(l => [l.id_lote, l]));
-  const cosechaRealSemanaAnterior = { rucula: 0, lechuga: 0 };
-  for (const m of movimientos) {
-    if (m.tipo !== 'cosecha' || !m.fecha) continue;
-    const f = new Date(String(m.fecha) + 'T12:00:00');
-    if (isNaN(f.getTime()) || f < lunesSemanaPasada || f > domingoSemanaPasada) continue;
-    const lote = lotesMap.get(String(m.id_lote));
-    if (!lote) continue;
-    const cant = Number(m.unidades_cosechadas) || 0;
-    if (cant <= 0) continue;
-    if (esRuculaV(lote.variedad)) cosechaRealSemanaAnterior.rucula += cant; else cosechaRealSemanaAnterior.lechuga += cant;
-  }
+  // ── Proyección de cosecha MENSUAL (no semanal — la semanal no se estaba cumpliendo) vs.
+  // lo realmente cosechado el mes pasado completo ──
+  const proyeccionMeses = proyeccionCosechaMensual(lotes, variedades, movimientos, 4);
+  const proyeccionMesActual = proyeccionMeses[0] || { rucula: 0, lechuga: 0 };
+  const inicioMesPasado = new Date(mesPasadoRef.getFullYear(), mesPasadoRef.getMonth(), 1);
+  const finMesPasado = new Date(mesPasadoRef.getFullYear(), mesPasadoRef.getMonth() + 1, 0, 23, 59, 59);
+  const cosechaRealMesAnterior = cosechaRealEnRango(lotes, movimientos, inicioMesPasado, finMesPasado);
+
+  // ── Principales clientes de la semana, con variación vs. semana anterior ──
+  const clientesVariacion = clientesConVariacionSemana(ventas, clientes, desdeSemana, hastaHoy, desdeAnt, hastaAnt, 6);
+
+  // ── Descarte por cultivo, últimas 4 semanas (columnas agrupadas) ──
+  const descarteSemanas = descartePorSemana(lotes, movimientos, 4);
 
   // ── Ciclos F2: esta semana vs. semana pasada (rolling, mismo criterio que el Panel) y vs. mes pasado ──
   const ciclosSemanas = ciclosPorSemana(lotes, movimientos);
@@ -117,22 +232,35 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     lechuga_crespa: calcularCamara('lechuga_crespa', registrosCamara, lotes, ventas).stockActual,
     lechuga_roble: calcularCamara('lechuga_roble', registrosCamara, lotes, ventas).stockActual,
   };
-  const ajusteRuc = diferenciaAjustesMes('rucula', registrosCamara, lotes, ventas, hoy);
-  const ajusteLecCrespa = diferenciaAjustesMes('lechuga_crespa', registrosCamara, lotes, ventas, hoy);
-  const ajusteLecRoble = diferenciaAjustesMes('lechuga_roble', registrosCamara, lotes, ventas, hoy);
+  const inicioMesActual = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  const finMesActual = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0, 23, 59, 59);
+  const ajusteRuc = diferenciaAjustesRango('rucula', registrosCamara, lotes, ventas, inicioMesActual, finMesActual);
+  const ajusteLecCrespa = diferenciaAjustesRango('lechuga_crespa', registrosCamara, lotes, ventas, inicioMesActual, finMesActual);
+  const ajusteLecRoble = diferenciaAjustesRango('lechuga_roble', registrosCamara, lotes, ventas, inicioMesActual, finMesActual);
   const faltanteMes = {
     rucula: ajusteRuc.acumulado, lechuga_crespa: ajusteLecCrespa.acumulado, lechuga_roble: ajusteLecRoble.acumulado,
     total: ajusteRuc.acumulado + ajusteLecCrespa.acumulado + ajusteLecRoble.acumulado,
   };
+  // Faltante de la SEMANA — mismo cálculo, acotado a los últimos 7 días (desdeSemana/hoy),
+  // no al mes calendario completo.
+  const inicioSemanaDia = new Date(desdeSemana + 'T00:00:00');
+  const finSemanaDia = new Date(hastaHoy + 'T23:59:59');
+  const ajusteSemRuc = diferenciaAjustesRango('rucula', registrosCamara, lotes, ventas, inicioSemanaDia, finSemanaDia);
+  const ajusteSemLecCrespa = diferenciaAjustesRango('lechuga_crespa', registrosCamara, lotes, ventas, inicioSemanaDia, finSemanaDia);
+  const ajusteSemLecRoble = diferenciaAjustesRango('lechuga_roble', registrosCamara, lotes, ventas, inicioSemanaDia, finSemanaDia);
+  const faltanteSemana = {
+    rucula: ajusteSemRuc.acumulado, lechuga_crespa: ajusteSemLecCrespa.acumulado, lechuga_roble: ajusteSemLecRoble.acumulado,
+    total: ajusteSemRuc.acumulado + ajusteSemLecCrespa.acumulado + ajusteSemLecRoble.acumulado,
+  };
 
   return {
     fechaGenerado: fmtISO(hoy),
-    ventasSemana, ventasSemanaAnterior, ventasMesActual, ventasMesAnteriorTotal,
-    proyeccionProximaSemana, proyeccionSemanas, cosechaRealSemanaAnterior,
+    ventasSemana, ventasSemanaAnterior, ventasMesActual, ventasMesAnteriorTotal, clientesVariacion,
+    proyeccionMesActual, cosechaRealMesAnterior, proyeccionMeses,
     cicloSemana, cicloSemanaAnterior, cicloMesAnterior,
     pesoSemana, pesoMesAnterior,
     ocupacion, mesadasBajas, ventasSemanas,
-    stock, faltanteMes,
+    stock, faltanteSemana, faltanteMes, descarteSemanas,
   };
 }
 
@@ -202,34 +330,16 @@ function graficoBarrasHtml(
     </p>`;
 }
 
-// Gráfico de líneas (SVG inline) con puntos y valores — para la evolución de venta por
-// artículo. Gmail (donde se lee este mail) soporta SVG inline en el body.
-function graficoLineasHtml(
-  puntos: { label: string; a: number; b: number }[],
-  colorA: string, colorB: string, nombreA: string, nombreB: string
-): string {
-  const max = Math.max(...puntos.flatMap(p => [p.a, p.b]), 1);
-  const n = puntos.length;
-  const W = 600, H = 190, PL = 8, PR = 8, T = 26, B = H - 24;
-  const px = (i: number) => n <= 1 ? (PL + (W - PR)) / 2 : PL + (i * (W - PR - PL)) / (n - 1);
-  const py = (v: number) => B - (v / max) * (B - T);
-  const pathDe = (key: 'a' | 'b') => puntos.map((p, i) => `${i === 0 ? 'M' : 'L'} ${px(i)} ${py(p[key])}`).join(' ');
-  const puntosDe = (key: 'a' | 'b', color: string) => puntos.map((p, i) => `
-    <circle cx="${px(i)}" cy="${py(p[key])}" r="4" fill="${color}" />
-    <text x="${px(i)}" y="${py(p[key]) - 8}" text-anchor="middle" font-size="10" fill="${color}" font-weight="700">${fmtN(p[key])}</text>
-  `).join('');
-  const labelsX = puntos.map((p, i) => `<text x="${px(i)}" y="${H - 6}" text-anchor="middle" font-size="10" fill="#9ca3af">${p.label}</text>`).join('');
-  return `
-  <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;height:auto">
-    <path d="${pathDe('a')}" fill="none" stroke="${colorA}" stroke-width="2.5" />
-    <path d="${pathDe('b')}" fill="none" stroke="${colorB}" stroke-width="2.5" />
-    ${puntosDe('a', colorA)}
-    ${puntosDe('b', colorB)}
-    ${labelsX}
-  </svg>
-  <p style="font-size:11px;color:#9ca3af;margin:4px 0 0">
-    <span style="color:${colorA}">●</span> ${nombreA} · <span style="color:${colorB}">●</span> ${nombreB}
-  </p>`;
+function filaCliente(c: ClienteVariacionSemana): string {
+  const deltaTxt = c.deltaPct !== null
+    ? flechaHtml(c.deltaPct, true)
+    : (c.deltaUnidades !== 0 ? flechaPaqHtml(c.deltaUnidades, true) : '<span style="color:#9ca3af">—</span>');
+  return `<tr>
+    <td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">${c.nombre}</td>
+    <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${fmtN(c.actual)} u</td>
+    <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${c.deltaUnidades >= 0 ? '+' : ''}${c.deltaUnidades} u</td>
+    <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${deltaTxt}</td>
+  </tr>`;
 }
 
 export function construirHtml(d: ReporteSemanalData): string {
@@ -249,10 +359,12 @@ export function construirHtml(d: ReporteSemanalData): string {
         <td style="padding:6px 10px;text-align:right">${flechaHtml(pct(totalActual.unidades, totalAnterior.unidades), true)}</td>
       </tr>`;
 
+  const clientesFilas = d.clientesVariacion.map(filaCliente).join('');
+
   const cosechaFilas = (['rucula', 'lechuga'] as const).map((c) => {
     const label = c === 'rucula' ? 'Rúcula' : 'Lechuga';
-    const proy = d.proyeccionProximaSemana[c];
-    const real = d.cosechaRealSemanaAnterior[c];
+    const proy = d.proyeccionMesActual[c];
+    const real = d.cosechaRealMesAnterior[c];
     return `<tr>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">${label}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${fmtN(proy)} paq/u</td>
@@ -275,19 +387,23 @@ export function construirHtml(d: ReporteSemanalData): string {
     </tr>`;
   }).join('');
 
+  // + verde = sobra (contado por encima de lo esperado), − rojo = falta (contado por
+  // debajo) — mismo signo que "Dif. acumulada mes" del resto de la app.
   const stockFilas = (['rucula', 'lechuga_crespa', 'lechuga_roble'] as const).map((c) => {
     const label = c === 'rucula' ? 'Rúcula' : c === 'lechuga_crespa' ? 'Lechuga Crespa' : 'Lechuga Roble';
-    const falt = d.faltanteMes[c];
+    const faltSem = d.faltanteSemana[c], faltMes = d.faltanteMes[c];
     return `<tr>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">${label}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${fmtN(d.stock[c])} paq</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${falt >= 0 ? '+' : ''}${falt} paq</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${flechaPaqHtml(faltSem, true)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${flechaPaqHtml(faltMes, true)}</td>
     </tr>`;
   }).join('');
   const stockTotalRow = `<tr style="background:#fafafa">
     <td style="padding:6px 10px;font-weight:800">Total</td>
     <td style="padding:6px 10px;text-align:right;font-weight:800">${fmtN(d.stock.rucula + d.stock.lechuga_crespa + d.stock.lechuga_roble)} paq</td>
-    <td style="padding:6px 10px;text-align:right;font-weight:800">${d.faltanteMes.total >= 0 ? '+' : ''}${d.faltanteMes.total} paq</td>
+    <td style="padding:6px 10px;text-align:right;font-weight:800">${flechaPaqHtml(d.faltanteSemana.total, true)}</td>
+    <td style="padding:6px 10px;text-align:right;font-weight:800">${flechaPaqHtml(d.faltanteMes.total, true)}</td>
   </tr>`;
 
   const ocupacionHtml = d.ocupacion.map(o =>
@@ -302,13 +418,20 @@ export function construirHtml(d: ReporteSemanalData): string {
         `<li style="margin-bottom:4px">N${m.nave} · ${m.nombre}: <strong style="color:${m.pct < 70 ? '#dc2626' : '#d97706'}">${m.pct}%</strong></li>`
       ).join('')}</ul>`;
 
-  const ventasSemanasChart = graficoLineasHtml(
+  // Gráfico de líneas SVG anterior no se veía en Gmail (quedaba como texto suelto) — se
+  // reemplaza por el mismo gráfico de barras "email-safe" (tablas) que ya funcionaba bien
+  // en Proyección de cosecha.
+  const ventasSemanasChart = graficoBarrasHtml(
     d.ventasSemanas.map(p => ({ label: p.label, a: p.rucula, b: p.lechuga })),
     '#134e4a', '#84cc16', 'Rúcula', 'Lechuga'
   );
   const proyeccionChart = graficoBarrasHtml(
-    d.proyeccionSemanas.map(p => ({ label: p.label, a: p.rucula, b: p.lechuga })),
+    d.proyeccionMeses.map(p => ({ label: p.label, a: p.rucula, b: p.lechuga })),
     '#134e4a', '#84cc16', 'Rúcula', 'Lechuga'
+  );
+  const descarteChart = graficoBarrasHtml(
+    d.descarteSemanas.map(p => ({ label: p.label, a: p.rucula, b: p.lechuga })),
+    '#dc2626', '#f97316', 'Rúcula', 'Lechuga'
   );
 
   return `
@@ -321,8 +444,14 @@ export function construirHtml(d: ReporteSemanalData): string {
       <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Unidades</th><th style="padding:6px 10px;text-align:right">Total $</th><th style="padding:6px 10px;text-align:right">vs. semana ant.</th></tr></thead>
       <tbody>${ventasFilas}</tbody>
     </table>
-    <p style="margin:0 0 8px;font-size:12px;color:#6b7280">Ventas por cultivo — últimas 4 semanas (cantidades):</p>
+    <p style="margin:0 0 8px;font-size:12px;color:#6b7280">Ventas por cultivo — últimas 4 semanas:</p>
     <div style="margin-bottom:20px">${ventasSemanasChart}</div>
+
+    <h3 style="margin:0 0 8px;font-size:14px">Principales clientes <span style="font-weight:400;color:#9ca3af">(vs. semana anterior)</span></h3>
+    <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
+      <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cliente</th><th style="padding:6px 10px;text-align:right">Esta semana</th><th style="padding:6px 10px;text-align:right">Diferencia</th><th style="padding:6px 10px;text-align:right">vs. semana ant.</th></tr></thead>
+      <tbody>${clientesFilas || '<tr><td colspan="4" style="padding:10px;color:#9ca3af;text-align:center">Sin ventas cargadas esta semana.</td></tr>'}</tbody>
+    </table>
 
     <h3 style="margin:0 0 8px;font-size:14px">Ventas — mes en curso</h3>
     <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
@@ -334,25 +463,29 @@ export function construirHtml(d: ReporteSemanalData): string {
       </tbody>
     </table>
 
-    <h3 style="margin:0 0 8px;font-size:14px">Proyección de cosecha — próxima semana <span style="font-weight:400;color:#9ca3af">(vs. real cosechado semana pasada)</span></h3>
+    <h3 style="margin:0 0 8px;font-size:14px">Proyección de cosecha — este mes <span style="font-weight:400;color:#9ca3af">(vs. real cosechado mes pasado)</span></h3>
     <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:14px">
-      <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Próx. semana (est.)</th><th style="padding:6px 10px;text-align:right">Semana pasada (real)</th><th style="padding:6px 10px;text-align:right">Var.</th></tr></thead>
+      <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Este mes (est.)</th><th style="padding:6px 10px;text-align:right">Mes pasado (real)</th><th style="padding:6px 10px;text-align:right">Var.</th></tr></thead>
       <tbody>${cosechaFilas}</tbody>
     </table>
-    <p style="margin:0 0 8px;font-size:12px;color:#6b7280">Proyección de las próximas semanas:</p>
+    <p style="margin:0 0 8px;font-size:12px;color:#6b7280">Proyección de los próximos meses:</p>
     <div style="margin-bottom:20px">${proyeccionChart}</div>
 
     <h3 style="margin:0 0 8px;font-size:14px">Ciclos y peso de esta semana</h3>
     <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
-      <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Ciclo F2</th><th style="padding:6px 10px;text-align:right">vs. sem. ant.</th><th style="padding:6px 10px;text-align:right">vs. mes ant.</th><th style="padding:6px 10px;text-align:right">Peso prom.</th><th style="padding:6px 10px;text-align:right">vs. mes ant.</th></tr></thead>
+      <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Ciclo F2</th><th style="padding:6px 10px;text-align:right">Ciclo vs. sem. ant.</th><th style="padding:6px 10px;text-align:right">Ciclo vs. mes ant.</th><th style="padding:6px 10px;text-align:right">Peso prom.</th><th style="padding:6px 10px;text-align:right">Peso vs. mes ant.</th></tr></thead>
       <tbody>${ciclosPesoFilas}</tbody>
     </table>
 
-    <h3 style="margin:0 0 8px;font-size:14px">Stock en cámara <span style="font-weight:400;color:#9ca3af">(faltante acumulado por ajustes este mes)</span></h3>
-    <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
-      <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Stock actual</th><th style="padding:6px 10px;text-align:right">Faltante mes</th></tr></thead>
+    <h3 style="margin:0 0 8px;font-size:14px">Stock en cámara</h3>
+    <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:6px">
+      <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Stock actual</th><th style="padding:6px 10px;text-align:right">Faltante semana</th><th style="padding:6px 10px;text-align:right">Faltante acum. mes</th></tr></thead>
       <tbody>${stockFilas}${stockTotalRow}</tbody>
     </table>
+    <p style="margin:0 0 20px;font-size:11px;color:#9ca3af">− (rojo) = falta, contado por debajo de lo esperado · + (verde) = sobra, contado por encima de lo esperado.</p>
+
+    <h3 style="margin:0 0 8px;font-size:14px">Descarte por cultivo <span style="font-weight:400;color:#9ca3af">(plantas, últimas 4 semanas)</span></h3>
+    <div style="margin-bottom:20px">${descarteChart}</div>
 
     <h3 style="margin:0 0 8px;font-size:14px">Ocupación por nave</h3>
     <div style="margin-bottom:6px">${ocupacionHtml}</div>
@@ -383,17 +516,24 @@ export function construirTexto(d: ReporteSemanalData): string {
   for (const s of d.ventasSemanas) L.push(`  ${s.label}: ${fmtN(s.rucula)} / ${fmtN(s.lechuga)}`);
   L.push('');
 
+  L.push(`👤 *Principales clientes* (vs. semana ant.)`);
+  if (d.clientesVariacion.length === 0) L.push('  Sin ventas cargadas esta semana.');
+  for (const c of d.clientesVariacion) {
+    L.push(`  ${c.nombre}: ${fmtN(c.actual)} u (${c.deltaUnidades >= 0 ? '+' : ''}${c.deltaUnidades} u, ${p2(c.deltaPct)})`);
+  }
+  L.push('');
+
   L.push(`📅 *Ventas — mes en curso*`);
   L.push(`Acumulado a hoy: ${fmtN(d.ventasMesActual.unidadesMes)} u`);
   L.push(`Proyectado a fin de mes: ${fmtN(d.ventasMesActual.proyeccionMes)} u (${p2(pct(d.ventasMesActual.proyeccionMes, d.ventasMesAnteriorTotal))} vs. mes ant.)`);
   L.push(`Mes pasado (total real): ${fmtN(d.ventasMesAnteriorTotal)} u`);
   L.push('');
 
-  L.push(`🌱 *Proyección de cosecha — próxima semana* (vs. real semana pasada)`);
-  L.push(`Rúcula: ${fmtN(d.proyeccionProximaSemana.rucula)} est. / ${fmtN(d.cosechaRealSemanaAnterior.rucula)} real`);
-  L.push(`Lechuga: ${fmtN(d.proyeccionProximaSemana.lechuga)} est. / ${fmtN(d.cosechaRealSemanaAnterior.lechuga)} real`);
-  L.push(`Próximas semanas (est.) — Rúcula / Lechuga:`);
-  for (const s of d.proyeccionSemanas) L.push(`  ${s.label}: ${fmtN(s.rucula)} / ${fmtN(s.lechuga)}`);
+  L.push(`🌱 *Proyección de cosecha — este mes* (vs. real mes pasado)`);
+  L.push(`Rúcula: ${fmtN(d.proyeccionMesActual.rucula)} est. / ${fmtN(d.cosechaRealMesAnterior.rucula)} real`);
+  L.push(`Lechuga: ${fmtN(d.proyeccionMesActual.lechuga)} est. / ${fmtN(d.cosechaRealMesAnterior.lechuga)} real`);
+  L.push(`Próximos meses (est.) — Rúcula / Lechuga:`);
+  for (const s of d.proyeccionMeses) L.push(`  ${s.label}: ${fmtN(s.rucula)} / ${fmtN(s.lechuga)}`);
   L.push('');
 
   L.push(`🔄 *Ciclos y peso de esta semana*`);
@@ -401,10 +541,14 @@ export function construirTexto(d: ReporteSemanalData): string {
   L.push(`Lechuga: ${d.cicloSemana.lechuga > 0 ? d.cicloSemana.lechuga + 'd' : '—'} ciclo · ${d.pesoSemana.lechuga > 0 ? d.pesoSemana.lechuga + 'g' : '—'} peso`);
   L.push('');
 
-  L.push(`❄️ *Stock en cámara* (faltante acumulado del mes)`);
-  L.push(`Rúcula: ${fmtN(d.stock.rucula)} paq · faltante ${d.faltanteMes.rucula >= 0 ? '+' : ''}${d.faltanteMes.rucula} paq`);
-  L.push(`Lechuga Crespa: ${fmtN(d.stock.lechuga_crespa)} paq · faltante ${d.faltanteMes.lechuga_crespa >= 0 ? '+' : ''}${d.faltanteMes.lechuga_crespa} paq`);
-  L.push(`Lechuga Roble: ${fmtN(d.stock.lechuga_roble)} paq · faltante ${d.faltanteMes.lechuga_roble >= 0 ? '+' : ''}${d.faltanteMes.lechuga_roble} paq`);
+  L.push(`❄️ *Stock en cámara* (− = falta, + = sobra)`);
+  L.push(`Rúcula: ${fmtN(d.stock.rucula)} paq · semana ${d.faltanteSemana.rucula >= 0 ? '+' : ''}${d.faltanteSemana.rucula} paq · mes ${d.faltanteMes.rucula >= 0 ? '+' : ''}${d.faltanteMes.rucula} paq`);
+  L.push(`Lechuga Crespa: ${fmtN(d.stock.lechuga_crespa)} paq · semana ${d.faltanteSemana.lechuga_crespa >= 0 ? '+' : ''}${d.faltanteSemana.lechuga_crespa} paq · mes ${d.faltanteMes.lechuga_crespa >= 0 ? '+' : ''}${d.faltanteMes.lechuga_crespa} paq`);
+  L.push(`Lechuga Roble: ${fmtN(d.stock.lechuga_roble)} paq · semana ${d.faltanteSemana.lechuga_roble >= 0 ? '+' : ''}${d.faltanteSemana.lechuga_roble} paq · mes ${d.faltanteMes.lechuga_roble >= 0 ? '+' : ''}${d.faltanteMes.lechuga_roble} paq`);
+  L.push('');
+
+  L.push(`🗑️ *Descarte por cultivo* (plantas, últimas 4 semanas) — Rúcula / Lechuga:`);
+  for (const s of d.descarteSemanas) L.push(`  ${s.label}: ${fmtN(s.rucula)} / ${fmtN(s.lechuga)}`);
   L.push('');
 
   L.push(`🏭 *Ocupación por nave*`);

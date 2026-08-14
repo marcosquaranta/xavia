@@ -213,18 +213,20 @@ export function diferenciaAjuste(
 
 export interface DiferenciaAjustesMes { acumulado: number; cantidadAjustes: number }
 
-// Suma las diferencias reveladas por cada ajuste cargado en el mes de `fechaRef`
-// (por defecto el mes en curso) — "cuánto se corrigió" acumulado ese mes. La secuencia
-// prev→curr y el corte de cosechado/vendido usan el momento REAL de carga de cada
-// registro (momento_carga), no solo su fecha de negocio — así un ajuste cargado a la
-// mañana (antes del mediodía) no se compara contra las ventas del día como si ya
-// hubieran salido, igual criterio que calcularCamara().
-export function diferenciaAjustesMes(
+// Suma las diferencias reveladas por cada ajuste de tipo "ajuste" cuya fecha de negocio
+// cae en [desde, hasta] (ambos inclusive) — "cuánto se corrigió" acumulado en ese rango.
+// La secuencia prev→curr y el corte de cosechado/vendido usan el momento REAL de carga
+// de cada registro (momento_carga), no solo su fecha de negocio — así un ajuste cargado
+// a la mañana (antes del mediodía) no se compara contra las ventas del día como si ya
+// hubieran salido, igual criterio que calcularCamara(). Base de diferenciaAjustesMes()
+// (rango = el mes) y de cualquier otro rango puntual (ej. la semana del reporte semanal).
+export function diferenciaAjustesRango(
   cultivo: CultivoCamara,
   registros: StockCamara[],
   lotes: Lote[],
   ventas: VentaDia[],
-  fechaRef: Date = new Date()
+  desde: Date,
+  hasta: Date
 ): DiferenciaAjustesMes {
   const ordenados = [...registros]
     .filter(r => r.cultivo === cultivo)
@@ -236,7 +238,7 @@ export function diferenciaAjustesMes(
   for (let i = 1; i < ordenados.length; i++) {
     const curr = ordenados[i];
     if (curr.tipo !== 'ajuste') continue;
-    if (curr._f.getFullYear() !== fechaRef.getFullYear() || curr._f.getMonth() !== fechaRef.getMonth()) continue;
+    if (curr._f < desde || curr._f > hasta) continue;
     const prev = ordenados[i - 1];
     const cosechado = cosechadoEntre(cultivo, lotes, prev._f, curr._m);
     const vendido = vendidoEntre(cultivo, ventas, prev._f, curr._m);
@@ -245,4 +247,17 @@ export function diferenciaAjustesMes(
     cantidadAjustes++;
   }
   return { acumulado: Math.round(acumulado), cantidadAjustes };
+}
+
+// Suma las diferencias del mes de `fechaRef` (por defecto el mes en curso).
+export function diferenciaAjustesMes(
+  cultivo: CultivoCamara,
+  registros: StockCamara[],
+  lotes: Lote[],
+  ventas: VentaDia[],
+  fechaRef: Date = new Date()
+): DiferenciaAjustesMes {
+  const desde = new Date(fechaRef.getFullYear(), fechaRef.getMonth(), 1);
+  const hasta = new Date(fechaRef.getFullYear(), fechaRef.getMonth() + 1, 0, 23, 59, 59);
+  return diferenciaAjustesRango(cultivo, registros, lotes, ventas, desde, hasta);
 }
