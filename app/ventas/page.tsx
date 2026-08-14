@@ -2,9 +2,8 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import type { ClienteVenta, PrecioVenta, VentaDia, Lote, Movimiento, VentaHistorica, PedidoFijo } from '@/lib/types';
+import type { ClienteVenta, PrecioVenta, VentaDia, VentaHistorica, PedidoFijo } from '@/lib/types';
 import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionVentaPorClienteSemanal, evolucionPrecioPromedio, resumenMesActual } from '@/lib/estadisticasVentas';
-import { estimacionCosechaHoyManana } from '@/lib/planificacionServer';
 import Header from '@/components/Header';
 import VentasManager from './VentasManager';
 import XubioResumen from './XubioResumen';
@@ -56,13 +55,12 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
   if (!user) redirect('/login');
   if (user.rol !== 'admin') redirect('/panel');
   let clientes: ClienteVenta[] = [], precios: PrecioVenta[] = [], ventas: VentaDia[] = [];
-  let lotes: Lote[] = [], movimientos: Movimiento[] = [], historicas: VentaHistorica[] = [];
+  let historicas: VentaHistorica[] = [];
   let pedidosFijos: PedidoFijo[] = [];
   let err: string | null = null;
   try {
-    [clientes, precios, ventas, lotes, movimientos, historicas, pedidosFijos] = await Promise.all([
+    [clientes, precios, ventas, historicas, pedidosFijos] = await Promise.all([
       readSheet<ClienteVenta>('Clientes'), readSheet<PrecioVenta>('Precios'), readSheet<VentaDia>('Ventas'),
-      readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<VentaHistorica>('VentasHistoricas').catch(() => []),
       readSheet<PedidoFijo>('PedidosFijos').catch(() => []),
     ]);
@@ -76,7 +74,6 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
   const evolClienteMensual = evolucionVentaPorCliente(ventas, clientes, 6, 4);
   const evolPrecio = evolucionPrecioPromedio(ventas, precios, clientes, 12);
   const resumenMes = resumenMesActual(ventas, precios, clientes);
-  const estimCosecha = estimacionCosechaHoyManana(lotes, movimientos);
 
   return (
     <>
@@ -93,7 +90,7 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
         </div>
         <VentasEvolucionCharts articulo={evolArticulo} clienteSemanal={evolClienteSemanal} clienteMensual={evolClienteMensual} precio={evolPrecio} resumenMes={resumenMes} />
         <div className="card">
-          <VentasManager clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} estimCosecha={estimCosecha} pedidosFijos={pedidosFijos.filter(p=>p.activo==='SI')} initialFecha={searchParams.fecha} />
+          <VentasManager clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} pedidosFijos={pedidosFijos.filter(p=>p.activo==='SI')} initialFecha={searchParams.fecha} />
           <XubioResumen />
         </div>
       </div>

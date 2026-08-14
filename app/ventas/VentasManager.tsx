@@ -2,7 +2,6 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import type { ClienteVenta, PrecioVenta, VentaDia, PedidoFijo } from '@/lib/types';
-import type { EstimacionCosechaCercana } from '@/lib/planificacionServer';
 import { ventasCargadasSemana } from '@/lib/estadisticasVentas';
 
 const PP = [
@@ -76,7 +75,7 @@ function mkFilas(cs: ClienteVenta[], freq: Record<string,number>): Fila[] {
   });
 }
 
-export default function VentasManager({clientes,precios,frecuencias,stats,estimCosecha,pedidosFijos,initialFecha}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;estimCosecha:EstimacionCosechaCercana;pedidosFijos:PedidoFijo[];initialFecha?:string}) {
+export default function VentasManager({clientes,precios,frecuencias,stats,pedidosFijos,initialFecha}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;pedidosFijos:PedidoFijo[];initialFecha?:string}) {
   const hoy = new Date().toISOString().split('T')[0];
   const [fecha,setFecha]=useState(initialFecha || hoy);
   const [fc,setFc]=useState<Record<string,string>>({});
@@ -98,6 +97,14 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
   const [ventas7,setVentas7]=useState<VentaDia[]>([]);
   const [facturadasHoy,setFacturadasHoy]=useState<VentaDia[]>([]);
   const [ventasSemana,setVentasSemana]=useState<VentaDia[]>([]);
+  // Ventas ya cargadas (facturadas o no) para hoy/mañana/pasado — a diferencia del resto
+  // de esta pantalla (que carga día por día), esto mira 3 días para adelante porque las
+  // ventas se cargan con un día de anticipación, para la fecha de entrega correcta.
+  const [ventasComprometidas,setVentasComprometidas]=useState<VentaDia[]>([]);
+  const [verDetalleComprometido,setVerDetalleComprometido]=useState(false);
+  // Cosecha prevista — a pedido explícito, NO se calcula sola: campo libre para cargar a
+  // mano si se la quiere contemplar en "disponible para venta" ese día en particular.
+  const [cosechaManual,setCosechaManual]=useState<Record<'rucula'|'lechuga_crespa'|'lechuga_roble',string>>({rucula:'',lechuga_crespa:'',lechuga_roble:''});
   // Celdas pre-cargadas desde un Pedido fijo (todavía no tocadas por el usuario) — se
   // marcan distinto para dejar en claro que es una sugerencia, no algo ya guardado.
   const [prefijo,setPrefijo]=useState<Set<string>>(new Set());
@@ -199,6 +206,19 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
     fetch(`/api/ventas/fecha?desde=${f(lunes)}&hasta=${f(hoy)}`).then(r=>r.json()).then(setVentasSemana).catch(()=>setVentasSemana([]));
   }
   useEffect(()=>{ cargarVentasSemana(); },[]);
+
+  // Ventas comprometidas hoy/mañana/pasado (real, no proyectado por pedido fijo) — se
+  // cargan con hasta 1 día de anticipación, así que mirando 3 días adelante ya se ve lo
+  // que efectivamente está anotado, no solo una estimación. Se toma la fecha REAL de hoy
+  // (no la `fecha` seleccionada arriba, que es para cargar un día puntual).
+  useEffect(()=>{
+    const hoyReal=new Date();
+    const f=(d:Date)=>d.toISOString().split('T')[0];
+    const hasta=new Date(hoyReal); hasta.setDate(hasta.getDate()+2);
+    fetch(`/api/ventas/fecha?desde=${f(hoyReal)}&hasta=${f(hasta)}`).then(r=>r.json())
+      .then((data:VentaDia[])=>setVentasComprometidas(data.filter(v=>!v.exportado||v.exportado==='')))
+      .catch(()=>setVentasComprometidas([]));
+  },[]);
 
   function onChange(f:Fila,k:PK,v:string){
     setCtds(p=>({...p,[`${f.id_control}__${f.sucursal}`]:{...(p[`${f.id_control}__${f.sucursal}`]||EQ),[k]:v}}));
@@ -341,40 +361,65 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
     return PK_ALL.every(k=>(Number(q(id_control,sucursal,k))||0)===fact.sum[k]);
   }
 
-  // Venta comprometida de los próximos días (pedidos fijos recurrentes que van a caer en
-  // los próximos 7 días desde hoy, sin contar hoy — eso ya se ve en la carga del día).
-  // Es lo único con lo que se puede proyectar un compromiso a futuro sin depender de que
-  // alguien haya cargado ventas con fecha futura (acá se cargan día a día, no de antemano).
-  const DIAS_COMPROMETIDO = 7;
-  function ventaComprometidaProximosDias(): SV {
-    const acc: SV = { rucula: 0, lechuga_crespa: 0, hoja_roble: 0 };
-    const base = new Date();
-    for (let i = 1; i <= DIAS_COMPROMETIDO; i++) {
-      const d = new Date(base); d.setDate(d.getDate() + i);
-      const dow = d.getDay();
-      for (const pf of pedidosFijos) {
-        if (Number(pf.dia_semana) !== dow) continue;
-        acc.rucula += Number(pf.rucula) || 0;
-        acc.lechuga_crespa += Number(pf.lechuga_crespa) || 0;
-        acc.hoja_roble += Number(pf.hoja_roble) || 0;
-      }
+  // Venta comprometida REAL hoy/mañana/pasado (no una proyección por pedido fijo) —
+  // suma lo que ya está cargado en Ventas para esos 3 días, esté facturado o no, por
+  // cultivo. hoja_roble (campo de Ventas) mapea a la clave 'lechuga_roble' del stock
+  // en cámara.
+  const DIAS_COMPROMETIDO = 3;
+  function comprometidoPorCultivo(): Record<'rucula'|'lechuga_crespa'|'lechuga_roble', number> {
+    const acc = { rucula: 0, lechuga_crespa: 0, lechuga_roble: 0 };
+    for (const v of ventasComprometidas) {
+      acc.rucula += Number(v.rucula) || 0;
+      acc.lechuga_crespa += Number(v.lechuga_crespa) || 0;
+      acc.lechuga_roble += Number(v.hoja_roble) || 0;
     }
     return acc;
   }
-  const comprometido = ventaComprometidaProximosDias();
+  const comprometido = comprometidoPorCultivo();
+
+  // Detalle por cliente (y fecha) de lo comprometido — para poder chequear a quién se le
+  // debe qué, no solo el número total.
+  interface DetalleComprometidoCliente { nombre: string; fecha: string; rucula: number; lechuga_crespa: number; lechuga_roble: number; total: number }
+  function detalleComprometidoPorCliente(): DetalleComprometidoCliente[] {
+    const map = new Map<string, DetalleComprometidoCliente>();
+    for (const v of ventasComprometidas) {
+      const rucula = Number(v.rucula) || 0, lechuga_crespa = Number(v.lechuga_crespa) || 0, lechuga_roble = Number(v.hoja_roble) || 0;
+      const total = rucula + lechuga_crespa + lechuga_roble;
+      if (total <= 0) continue;
+      const key = `${v.id_control}__${v.sucursal}__${v.fecha}`;
+      const ex = map.get(key);
+      if (ex) { ex.rucula += rucula; ex.lechuga_crespa += lechuga_crespa; ex.lechuga_roble += lechuga_roble; ex.total += total; }
+      else map.set(key, { nombre: v.sucursal && v.sucursal !== v.nombre_cliente ? `${v.nombre_cliente} · ${v.sucursal}` : v.nombre_cliente, fecha: v.fecha, rucula, lechuga_crespa, lechuga_roble, total });
+    }
+    return Array.from(map.values()).sort((a, b) => a.fecha === b.fecha ? b.total - a.total : a.fecha.localeCompare(b.fecha));
+  }
+  const detalleComprometido = detalleComprometidoPorCliente();
+  const hoyDiff0 = new Date().toISOString().split('T')[0];
+  function etiquetaDia(f: string): string {
+    if (f === hoyDiff0) return 'Hoy';
+    const d = new Date(hoyDiff0 + 'T12:00:00'); d.setDate(d.getDate() + 1);
+    if (f === d.toISOString().split('T')[0]) return 'Mañana';
+    return 'Pasado';
+  }
 
   return (
     <div>
-      {/* Stock disponible hoy (unidades) */}
+      {/* Stock disponible — cerca de donde se carga, para chequear de un vistazo antes de cargar */}
       <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'8px',padding:'8px 14px',marginBottom:'12px'}}>
-        <p style={{margin:'0 0 8px',fontSize:'12px',fontWeight:700,color:'#166534'}}>🥬 Disponible para vender hoy</p>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))',gap:'10px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'8px',flexWrap:'wrap',gap:'6px'}}>
+          <p style={{margin:0,fontSize:'12px',fontWeight:700,color:'#166534'}}>🥬 Stock actual − Ventas comprometidas (hoy/mañana/pasado), por cultivo</p>
+          {detalleComprometido.length > 0 && (
+            <button onClick={()=>setVerDetalleComprometido(v=>!v)} style={{background:'none',border:'none',color:'#166534',fontSize:'11px',fontWeight:600,cursor:'pointer',padding:0,textDecoration:'underline'}}>
+              {verDetalleComprometido ? 'Ocultar detalle por cliente' : 'Ver detalle por cliente'}
+            </button>
+          )}
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))',gap:'10px'}}>
           {(['rucula','lechuga_crespa','lechuga_roble'] as const).map(cultivo=>{
             const sc = stockCamara?.[cultivo]?.stockActual ?? 0;
-            const estCosecha = estimCosecha?.[cultivo] ?? 0;
-            const compKey = cultivo === 'lechuga_roble' ? 'hoja_roble' : cultivo;
-            const comp = comprometido[compKey as keyof SV] ?? 0;
-            const disponibleParaVenta = sc + estCosecha - comp;
+            const comp = comprometido[cultivo] ?? 0;
+            const manual = Number(cosechaManual[cultivo]) || 0;
+            const disponibleParaVenta = sc - comp + manual;
             const label  = cultivo==='rucula'?'Rúcula':cultivo==='lechuga_crespa'?'Lechuga Crespa':'Lechuga Roble';
             const color  = cultivo==='rucula'?'#b45309':cultivo==='lechuga_crespa'?'#4d7c0f':'#166534';
             const bg     = cultivo==='rucula'?'#fffbeb':cultivo==='lechuga_crespa'?'#f7fee7':'#f0fdf4';
@@ -388,14 +433,44 @@ export default function VentasManager({clientes,precios,frecuencias,stats,estimC
                   </span>
                 </div>
                 <div style={{display:'flex',gap:'12px',alignItems:'baseline',flexWrap:'wrap'}}>
-                  <span style={{fontSize:'10.5px',color:'#6b7280'}}>Stock al día: <strong style={{color:'#111827'}}>{sc}</strong></span>
-                  <span style={{fontSize:'10.5px',color:'#6b7280'}}>+ Cosecha hoy/mañana: <strong style={{color:'#111827'}}>{estCosecha}</strong></span>
+                  <span style={{fontSize:'10.5px',color:'#6b7280'}}>Stock actual: <strong style={{color:'#111827'}}>{sc}</strong></span>
                   <span style={{fontSize:'10.5px',color:'#6b7280'}}>− Comprometido {DIAS_COMPROMETIDO}d: <strong style={{color:'#111827'}}>{comp}</strong></span>
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:'6px',marginTop:'2px'}}>
+                  <span style={{fontSize:'10.5px',color:'#6b7280'}}>+ Cosecha prevista (manual):</span>
+                  <input type="number" value={cosechaManual[cultivo]} onChange={ev=>setCosechaManual(p=>({...p,[cultivo]:ev.target.value}))}
+                    placeholder="0" style={{width:'70px',fontSize:'11px',padding:'2px 5px'}} />
                 </div>
               </div>
             );
           })}
         </div>
+        {verDetalleComprometido && detalleComprometido.length > 0 && (
+          <div style={{marginTop:'10px',paddingTop:'10px',borderTop:'1px solid #bbf7d0',overflowX:'auto'}}>
+            <table style={{fontSize:'11.5px',width:'100%'}}>
+              <thead><tr>
+                <th style={{textAlign:'left'}}>Día</th>
+                <th style={{textAlign:'left'}}>Cliente</th>
+                <th style={{textAlign:'right'}}>Rúcula</th>
+                <th style={{textAlign:'right'}}>Crespa</th>
+                <th style={{textAlign:'right'}}>Roble</th>
+                <th style={{textAlign:'right'}}>Total</th>
+              </tr></thead>
+              <tbody>
+                {detalleComprometido.map((d,i)=>(
+                  <tr key={i} style={{borderTop:'1px solid #ecfdf5'}}>
+                    <td style={{color:'#6b7280'}}>{etiquetaDia(d.fecha)}</td>
+                    <td style={{fontWeight:500}}>{d.nombre}</td>
+                    <td style={{textAlign:'right'}}>{d.rucula || '—'}</td>
+                    <td style={{textAlign:'right'}}>{d.lechuga_crespa || '—'}</td>
+                    <td style={{textAlign:'right'}}>{d.lechuga_roble || '—'}</td>
+                    <td style={{textAlign:'right',fontWeight:700}}>{d.total}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Controles */}
