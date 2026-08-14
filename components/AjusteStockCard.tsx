@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import type { CultivoCamara } from '@/lib/camara';
 
 interface CultivoStock { actual: number; ajusteMes: number }
@@ -62,9 +63,12 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble }:
             <p style={{ margin: '0 0 2px', fontSize: '20px', fontWeight: 800, color: '#111827' }}>
               {c.data.actual} <span style={{ fontSize: '11px', fontWeight: 400, color: '#9ca3af' }}>paq</span>
             </p>
-            <p style={{ margin: '0 0 8px', fontSize: '11px', color: c.data.ajusteMes === 0 ? '#9ca3af' : c.data.ajusteMes > 0 ? '#059669' : '#dc2626' }}>
+            <p style={{ margin: '0 0 4px', fontSize: '11px', color: c.data.ajusteMes === 0 ? '#9ca3af' : c.data.ajusteMes > 0 ? '#059669' : '#dc2626' }}>
               Dif. acumulada mes: {c.data.ajusteMes > 0 ? '+' : ''}{c.data.ajusteMes} paq
             </p>
+            <Link href={`/stocks/${c.key}`} style={{ display: 'inline-block', margin: '0 0 8px', fontSize: '11px', color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}>
+              Ver detalle →
+            </Link>
 
             {abierto === c.key ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>

@@ -69,12 +69,13 @@ export default async function StockDetallePage({ params, searchParams }: { param
     const f = parseD(v.fecha);
     if (f && inMonth(f)) ventaDia[f.getDate()] += ventaQty(v);
   }
-  // Ajustes (controles de stock) por día del mes
-  const ajusteDia: Record<number, { cant: number; notas: string }> = {};
+  // Controles de stock (conteos físicos) por día del mes. cantidad_paq YA es el stock
+  // contado (absoluto), no un delta — de ahí sale el sobrante/faltante, no al revés.
+  const ajusteDia: Record<number, { cant: number; descarte: number; notas: string }> = {};
   for (const s of registros) {
     if (s.cultivo !== cultivo) continue;
     const f = parseD(s.fecha);
-    if (f && inMonth(f)) ajusteDia[f.getDate()] = { cant: num(s.cantidad_paq), notas: String(s.notas || '') };
+    if (f && inMonth(f)) ajusteDia[f.getDate()] = { cant: num(s.cantidad_paq), descarte: num(s.descarte_paq), notas: String(s.notas || '') };
   }
 
   // Stock inicial del mes = teórico al arranque del día 1
@@ -99,16 +100,25 @@ export default async function StockDetallePage({ params, searchParams }: { param
     inicial = bal;
   }
 
-  // Serie diaria
+  // Serie diaria. En días con control de stock, "stockActual" es lo CONTADO físicamente
+  // (dato de entrada) y "sobraFalta" sale de compararlo contra lo esperado (teórico
+  // acumulado + cosecha − ventas del día) — nunca al revés. El teórico se resetea al
+  // valor contado para seguir de ahí.
   let teorico = inicial;
-  const filas: { dia: number; cos: number; ven: number; ajuste: number | null; notas: string; teorico: number }[] = [];
+  const filas: { dia: number; cos: number; ven: number; stockActual: number | null; sobraFalta: number | null; descarte: number; notas: string; teorico: number }[] = [];
   for (let d = 1; d <= lastDay; d++) {
     const cos = cosechaDia[d], ven = ventaDia[d];
     const aj = ajusteDia[d];
-    if (aj) teorico = aj.cant;
-    else teorico = teorico + cos - ven;
-    filas.push({ dia: d, cos, ven, ajuste: aj ? aj.cant : null, notas: aj?.notas || '', teorico });
+    const esperado = teorico + cos - ven;
+    let sobraFalta: number | null = null;
+    if (aj) { sobraFalta = Math.round((aj.cant - esperado) * 100) / 100; teorico = aj.cant; }
+    else teorico = esperado;
+    filas.push({ dia: d, cos, ven, stockActual: aj ? aj.cant : null, sobraFalta, descarte: aj?.descarte || 0, notas: aj?.notas || '', teorico });
   }
+  const totales = filas.reduce((acc, f) => ({
+    cos: acc.cos + f.cos, ven: acc.ven + f.ven,
+    sobraFalta: acc.sobraFalta + (f.sobraFalta || 0), descarte: acc.descarte + f.descarte,
+  }), { cos: 0, ven: 0, sobraFalta: 0, descarte: 0 });
 
   const prevMes = `${month === 0 ? year - 1 : year}-${String(month === 0 ? 12 : month).padStart(2, '0')}`;
   const nextMes = `${month === 11 ? year + 1 : year}-${String(month === 11 ? 1 : month + 2).padStart(2, '0')}`;
@@ -127,7 +137,7 @@ export default async function StockDetallePage({ params, searchParams }: { param
             <Link href={`/stocks/${cultivo}?mes=${nextMes}`} className="btn secondary" style={{ fontSize: '12px', padding: '4px 10px' }}>→</Link>
           </div>
         </div>
-        <p className="page-subtitle">Stock teórico día a día. Las ventas se imputan por su <strong>fecha de venta</strong>. Los controles de stock (ajustes) resetean el teórico en su día (resaltados).</p>
+        <p className="page-subtitle">Stock teórico día a día. Las ventas se imputan por su <strong>fecha de venta</strong>. Los días con control de stock (resaltados) muestran lo <strong>contado físicamente</strong>; el sobrante/faltante sale de comparar ese conteo contra lo esperado.</p>
 
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
@@ -136,33 +146,54 @@ export default async function StockDetallePage({ params, searchParams }: { param
                 <th style={{ textAlign: 'left', padding: '8px 12px' }}>Día</th>
                 <th style={{ textAlign: 'right', padding: '8px 12px', color: '#059669' }}>Cosecha +</th>
                 <th style={{ textAlign: 'right', padding: '8px 12px', color: '#dc2626' }}>Ventas −</th>
-                <th style={{ textAlign: 'right', padding: '8px 12px', color: '#2563eb' }}>Ajuste</th>
+                <th style={{ textAlign: 'right', padding: '8px 12px', color: '#2563eb' }}>Stock actual (contado)</th>
+                <th style={{ textAlign: 'right', padding: '8px 12px' }}>Sobra/Falta</th>
+                <th style={{ textAlign: 'right', padding: '8px 12px', color: '#9333ea' }}>Descarte cámara</th>
                 <th style={{ textAlign: 'right', padding: '8px 14px', fontWeight: 700 }}>Stock teórico</th>
               </tr>
             </thead>
             <tbody>
               <tr style={{ background: '#f3f4f6', borderBottom: '1px solid #e5e7eb' }}>
-                <td colSpan={4} style={{ padding: '7px 12px', fontWeight: 600, color: '#6b7280' }}>Inicial del mes</td>
+                <td colSpan={6} style={{ padding: '7px 12px', fontWeight: 600, color: '#6b7280' }}>Inicial del mes</td>
                 <td style={{ padding: '7px 14px', textAlign: 'right', fontWeight: 800 }}>{fmtN(inicial)}</td>
               </tr>
               {filas.map(f => {
-                const esAjuste = f.ajuste !== null;
+                const esAjuste = f.stockActual !== null;
                 const esHoy = f.dia === hoyDia;
                 return (
                   <tr key={f.dia} style={{ borderBottom: '1px solid #f3f4f6', background: esAjuste ? '#eff6ff' : esHoy ? '#fffbeb' : 'white' }}>
                     <td style={{ padding: '6px 12px', fontWeight: esHoy ? 700 : 400 }}>{String(f.dia).padStart(2, '0')}{esHoy ? ' · hoy' : ''}</td>
                     <td style={{ padding: '6px 12px', textAlign: 'right', color: f.cos > 0 ? '#059669' : '#d1d5db' }}>{f.cos > 0 ? '+' + fmtN(f.cos) : '·'}</td>
                     <td style={{ padding: '6px 12px', textAlign: 'right', color: f.ven > 0 ? '#dc2626' : '#d1d5db' }}>{f.ven > 0 ? '−' + fmtN(f.ven) : '·'}</td>
-                    <td style={{ padding: '6px 12px', textAlign: 'right', color: '#2563eb', fontWeight: 700 }} title={f.notas}>{esAjuste ? '→ ' + fmtN(f.ajuste!) : '·'}</td>
+                    <td style={{ padding: '6px 12px', textAlign: 'right', color: '#2563eb', fontWeight: 700 }} title={f.notas}>{esAjuste ? fmtN(f.stockActual!) : '·'}</td>
+                    <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: 700, color: f.sobraFalta === null || f.sobraFalta === 0 ? '#9ca3af' : f.sobraFalta > 0 ? '#059669' : '#dc2626' }}>
+                      {f.sobraFalta === null ? '·' : `${f.sobraFalta > 0 ? '+' : ''}${fmtN(f.sobraFalta)}`}
+                    </td>
+                    <td style={{ padding: '6px 12px', textAlign: 'right', color: f.descarte > 0 ? '#9333ea' : '#d1d5db' }}>{f.descarte > 0 ? fmtN(f.descarte) : '·'}</td>
                     <td style={{ padding: '6px 14px', textAlign: 'right', fontWeight: 700, color: f.teorico < 0 ? '#dc2626' : '#111827' }}>{fmtN(f.teorico)}</td>
                   </tr>
                 );
               })}
             </tbody>
+            <tfoot>
+              <tr style={{ background: '#f9fafb', borderTop: '2px solid #e5e7eb' }}>
+                <td style={{ padding: '7px 12px', fontWeight: 800, color: '#111827' }}>Total del mes</td>
+                <td style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 800, color: '#059669' }}>+{fmtN(totales.cos)}</td>
+                <td style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 800, color: '#dc2626' }}>−{fmtN(totales.ven)}</td>
+                <td style={{ padding: '7px 12px' }} />
+                <td style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 800, color: totales.sobraFalta === 0 ? '#9ca3af' : totales.sobraFalta > 0 ? '#059669' : '#dc2626' }}>
+                  {totales.sobraFalta > 0 ? '+' : ''}{fmtN(totales.sobraFalta)}
+                </td>
+                <td style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 800, color: totales.descarte > 0 ? '#9333ea' : '#9ca3af' }}>{fmtN(totales.descarte)}</td>
+                <td style={{ padding: '7px 14px' }} />
+              </tr>
+            </tfoot>
           </table>
         </div>
         <p style={{ fontSize: '11px', color: '#9ca3af', marginTop: '10px' }}>
-          <span style={{ display: 'inline-block', width: 10, height: 10, background: '#eff6ff', border: '1px solid #2563eb', borderRadius: 2, marginRight: 4 }} /> día con control de stock (ajuste) · agrupa {isRucula ? 'rúcula + bandeja' : isCrespa ? 'solo lechuga crespa' : 'hoja de roble + otras variedades de lechuga'}
+          <span style={{ display: 'inline-block', width: 10, height: 10, background: '#eff6ff', border: '1px solid #2563eb', borderRadius: 2, marginRight: 4 }} /> día con control de stock (conteo físico) ·
+          sobra/falta = contado − esperado (verde si sobra, rojo si falta) · descarte cámara es lo que se tiró ese conteo, no se confunde con la diferencia ·
+          agrupa {isRucula ? 'rúcula + bandeja' : isCrespa ? 'solo lechuga crespa' : 'hoja de roble + otras variedades de lechuga'}
         </p>
       </div>
     </>

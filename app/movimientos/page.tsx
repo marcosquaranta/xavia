@@ -32,9 +32,18 @@ function diasAtras(s: any): string {
   } catch { return ''; }
 }
 
+// Mismo criterio de clasificación que lib/camara.ts / app/stocks/[cultivo]/page.tsx:
+// "roble" es catch-all de cualquier lechuga no-crespa, así ningún lote queda sin cultivo.
+const CULTIVO_LABEL: Record<string, string> = { rucula: 'Rúcula', lechuga_crespa: 'Lechuga Crespa', lechuga_roble: 'Lechuga Hoja de Roble' };
+function clasificarCultivo(variedad: string): 'rucula' | 'lechuga_crespa' | 'lechuga_roble' {
+  const v = String(variedad || '').toLowerCase();
+  if (v.includes('rucula') || v.includes('rúcula')) return 'rucula';
+  return v.includes('crespa') ? 'lechuga_crespa' : 'lechuga_roble';
+}
+
 export default async function MovimientosPage({
   searchParams
-}: { searchParams: { tipo?: string; dias?: string } }) {
+}: { searchParams: { tipo?: string; dias?: string; cultivo?: string } }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
 
@@ -47,7 +56,11 @@ export default async function MovimientosPage({
   } catch {}
 
   const tipoFiltro = searchParams.tipo || 'todos';
+  const cultivoFiltro = searchParams.cultivo || 'todos';
   const diasFiltro = Number(searchParams.dias || 7);
+
+  // Enriquecer con datos del lote
+  const lotesMap = new Map(lotes.map(l => [l.id_lote, l]));
 
   // Filtrar por días
   const limite = new Date();
@@ -59,12 +72,13 @@ export default async function MovimientosPage({
       if (!f) return false;
       try { if (new Date(f + 'T12:00:00') < limite) return false; } catch { return false; }
       if (tipoFiltro !== 'todos' && m.tipo !== tipoFiltro) return false;
+      if (cultivoFiltro !== 'todos') {
+        const lote = lotesMap.get(String(m.id_lote || ''));
+        if (!lote || clasificarCultivo(lote.variedad) !== cultivoFiltro) return false;
+      }
       return true;
     })
     .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
-
-  // Enriquecer con datos del lote
-  const lotesMap = new Map(lotes.map(l => [l.id_lote, l]));
 
   // Agrupar por fecha
   const porFecha = new Map<string, typeof movsFiltrados>();
@@ -92,16 +106,25 @@ export default async function MovimientosPage({
             { dias: 7, label: 'Última semana' },
             { dias: 30, label: 'Último mes' },
           ].map(({ dias, label }) => (
-            <Link key={dias} href={`/movimientos?tipo=${tipoFiltro}&dias=${dias}`} style={{ textDecoration: 'none' }}>
+            <Link key={dias} href={`/movimientos?tipo=${tipoFiltro}&cultivo=${cultivoFiltro}&dias=${dias}`} style={{ textDecoration: 'none' }}>
               <span style={{ padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: diasFiltro === dias ? 700 : 400, background: diasFiltro === dias ? '#111827' : '#f3f4f6', color: diasFiltro === dias ? 'white' : '#374151', cursor: 'pointer' }}>{label}</span>
             </Link>
           ))}
           <span style={{ width: '1px', height: '20px', background: '#e5e7eb', display: 'inline-block' }} />
           <span style={{ fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase' }}>Tipo</span>
           {['todos', 'siembra', 'trasplante', 'cosecha', 'division'].map(t => (
-            <Link key={t} href={`/movimientos?tipo=${t}&dias=${diasFiltro}`} style={{ textDecoration: 'none' }}>
+            <Link key={t} href={`/movimientos?tipo=${t}&cultivo=${cultivoFiltro}&dias=${diasFiltro}`} style={{ textDecoration: 'none' }}>
               <span style={{ padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: tipoFiltro === t ? 700 : 400, background: tipoFiltro === t ? (TIPO_LABEL[t]?.bg || '#111827') : '#f3f4f6', color: tipoFiltro === t ? (TIPO_LABEL[t]?.color || 'white') : '#374151', border: tipoFiltro === t ? `1px solid ${TIPO_LABEL[t]?.color || '#111'}` : '1px solid transparent', cursor: 'pointer' }}>
                 {t === 'todos' ? 'Todos' : TIPO_LABEL[t]?.label}
+              </span>
+            </Link>
+          ))}
+          <span style={{ width: '1px', height: '20px', background: '#e5e7eb', display: 'inline-block' }} />
+          <span style={{ fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase' }}>Cultivo</span>
+          {['todos', 'rucula', 'lechuga_crespa', 'lechuga_roble'].map(c => (
+            <Link key={c} href={`/movimientos?tipo=${tipoFiltro}&cultivo=${c}&dias=${diasFiltro}`} style={{ textDecoration: 'none' }}>
+              <span style={{ padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: cultivoFiltro === c ? 700 : 400, background: cultivoFiltro === c ? '#111827' : '#f3f4f6', color: cultivoFiltro === c ? 'white' : '#374151', cursor: 'pointer' }}>
+                {c === 'todos' ? 'Todos' : CULTIVO_LABEL[c]}
               </span>
             </Link>
           ))}
