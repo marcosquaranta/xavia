@@ -43,6 +43,44 @@ function diasAtras(s: any) {
   try { const diff = Math.round((Date.now() - new Date(String(s||'').split(/[\sT]/)[0]+'T12:00:00').getTime())/86400000); if (diff===0) return 'Hoy'; if (diff===1) return 'Ayer'; return `Hace ${diff}d`; } catch { return ''; }
 }
 
+interface ItemIndicador { label: string; valor: string; pct: number | null; mejorSiSube: boolean }
+
+// Tarjeta chica por métrica: valor grande destacado + delta color-coded (verde/rojo
+// según si subir es bueno o malo para esa métrica en particular) — reemplaza la fila
+// de lista plana anterior para que los números "salten" más a la vista.
+function TileIndicador({ label, valor, pct, mejorSiSube }: ItemIndicador) {
+  const bueno = pct === null ? null : mejorSiSube ? pct > 0 : pct < 0;
+  return (
+    <div style={{ background:'#fafafa', border:'1px solid #f1f0eb', borderRadius:'8px', padding:'9px 11px', display:'flex', flexDirection:'column', gap:'3px', minWidth:0 }}>
+      <span style={{ fontSize:'10.5px', color:'#6b7280', fontWeight:600, lineHeight:1.25 }}>{label}</span>
+      <div style={{ display:'flex', alignItems:'baseline', gap:'6px', flexWrap:'wrap' }}>
+        <strong style={{ fontSize:'18px', color:'#111827', fontWeight:800, lineHeight:1 }}>{valor}</strong>
+        {pct !== null && (
+          <span style={{ fontSize:'10.5px', fontWeight:700, color: bueno===null?'#9ca3af':bueno?'#059669':'#dc2626' }}>
+            {pct > 0 ? '↑' : pct < 0 ? '↓' : '·'} {Math.abs(pct)}%
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Grupo de indicadores relacionados (Ventas / Ciclos / Pesos / Ocupación), cada uno
+// en su propia tarjeta con header con ícono — más moderno que la lista única de antes.
+function GrupoIndicadores({ titulo, icono, color, items }: { titulo: string; icono: string; color: string; items: ItemIndicador[] }) {
+  return (
+    <div style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'12px' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'9px' }}>
+        <span style={{ fontSize:'14px' }}>{icono}</span>
+        <p style={{ margin:0, fontSize:'11px', fontWeight:800, color, textTransform:'uppercase', letterSpacing:'0.4px' }}>{titulo}</p>
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', gap:'7px' }}>
+        {items.map(it => <TileIndicador key={it.label} {...it} />)}
+      </div>
+    </div>
+  );
+}
+
 export default async function PanelPage() {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
@@ -138,11 +176,6 @@ export default async function PanelPage() {
   const ajusteMesRucula = diferenciaAjustesMes('rucula', registrosCamara, lotes, ventasPanel, ahora);
   const ajusteMesLechugaCrespa = diferenciaAjustesMes('lechuga_crespa', registrosCamara, lotes, ventasPanel, ahora);
   const ajusteMesLechugaRoble = diferenciaAjustesMes('lechuga_roble', registrosCamara, lotes, ventasPanel, ahora);
-  const ajusteMesRuculaPasado = diferenciaAjustesMes('rucula', registrosCamara, lotes, ventasPanel, mesPasadoRef);
-  const ajusteMesLechugaCrespaPasado = diferenciaAjustesMes('lechuga_crespa', registrosCamara, lotes, ventasPanel, mesPasadoRef);
-  const ajusteMesLechugaRoblePasado = diferenciaAjustesMes('lechuga_roble', registrosCamara, lotes, ventasPanel, mesPasadoRef);
-  const faltanteMesTotal = ajusteMesRucula.acumulado + ajusteMesLechugaCrespa.acumulado + ajusteMesLechugaRoble.acumulado;
-  const faltanteMesTotalPasado = ajusteMesRuculaPasado.acumulado + ajusteMesLechugaCrespaPasado.acumulado + ajusteMesLechugaRoblePasado.acumulado;
 
   const ocupNaves = tubosMesadas.map((n: any) => {
     const f2 = (n.mesadas || []).filter((m: any) => m.sector_fase !== 'fase_1');
@@ -470,54 +503,42 @@ export default async function PanelPage() {
               />
             </div>
           </div>
-          <div style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'16px' }}>
-            <p style={{ margin:'0 0 12px', fontSize:'13px', fontWeight:700, color:'#111827' }}>Indicadores</p>
-            <div style={{ display:'flex', flexDirection:'column', gap:'7px' }}>
-              {[
-                { label: 'Venta total mes al día', valor: `${resumenMesPanel.unidadesMes.toLocaleString('es-AR')} u`,
+          <div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(230px,1fr))', gap:'10px' }}>
+              <GrupoIndicadores titulo="Ventas" icono="💰" color="#059669" items={[
+                { label: 'Total mes al día', valor: `${resumenMesPanel.unidadesMes.toLocaleString('es-AR')} u`,
                   pct: pctVs(resumenMesPanel.unidadesMes, ventaEsperadaAlDia), mejorSiSube: true },
-                { label: 'Venta total mes proyectada', valor: `${resumenMesPanel.proyeccionMes.toLocaleString('es-AR')} u`,
+                { label: 'Total mes proyectada', valor: `${resumenMesPanel.proyeccionMes.toLocaleString('es-AR')} u`,
                   pct: pctVs(resumenMesPanel.proyeccionMes, resumenMesPasadoCompleto.unidadesMes), mejorSiSube: true },
-                { label: 'Ciclo actual rúcula', valor: ultSemRucula?.rucula ? `${ultSemRucula.rucula}d` : '—',
-                  pct: varPctSem(ultSemRucula?.rucula, antSemRucula?.rucula) ?? varPctSem(ultSemRucula?.rucula, cicloMesPasado.rucula), mejorSiSube: false },
-                { label: 'Ciclo actual lechuga crespa', valor: ultSemCrespa?.lechugaCrespaF2 ? `${ultSemCrespa.lechugaCrespaF2}d` : '—',
-                  pct: varPctSem(ultSemCrespa?.lechugaCrespaF2, antSemCrespa?.lechugaCrespaF2) ?? varPctSem(ultSemCrespa?.lechugaCrespaF2, cicloMesPasado.lechugaCrespa), mejorSiSube: false },
-                { label: 'Ciclo actual lechuga hoja de roble', valor: ultSemRoble?.lechugaRobleF2 ? `${ultSemRoble.lechugaRobleF2}d` : '—',
-                  pct: varPctSem(ultSemRoble?.lechugaRobleF2, antSemRoble?.lechugaRobleF2) ?? varPctSem(ultSemRoble?.lechugaRobleF2, cicloMesPasado.lechugaRoble), mejorSiSube: false },
-                { label: 'Precio promedio actual', valor: `$${Math.round(resumenMesPanel.precioPromedioMes).toLocaleString('es-AR')}`,
+                { label: 'Precio promedio', valor: `$${Math.round(resumenMesPanel.precioPromedioMes).toLocaleString('es-AR')}`,
                   pct: pctVs(resumenMesPanel.precioPromedioMes, resumenMesPasadoCompleto.precioPromedioMes), mejorSiSube: true },
-                { label: 'Peso promedio rúcula (paq)', valor: pesoMesPanel.rucula > 0 ? `${pesoMesPanel.rucula}g` : '—',
+              ]} />
+              <GrupoIndicadores titulo="Ciclos" icono="🔄" color="#2563eb" items={[
+                { label: 'Rúcula', valor: ultSemRucula?.rucula ? `${ultSemRucula.rucula}d` : '—',
+                  pct: varPctSem(ultSemRucula?.rucula, antSemRucula?.rucula) ?? varPctSem(ultSemRucula?.rucula, cicloMesPasado.rucula), mejorSiSube: false },
+                { label: 'Lechuga crespa', valor: ultSemCrespa?.lechugaCrespaF2 ? `${ultSemCrespa.lechugaCrespaF2}d` : '—',
+                  pct: varPctSem(ultSemCrespa?.lechugaCrespaF2, antSemCrespa?.lechugaCrespaF2) ?? varPctSem(ultSemCrespa?.lechugaCrespaF2, cicloMesPasado.lechugaCrespa), mejorSiSube: false },
+                { label: 'Lechuga hoja de roble', valor: ultSemRoble?.lechugaRobleF2 ? `${ultSemRoble.lechugaRobleF2}d` : '—',
+                  pct: varPctSem(ultSemRoble?.lechugaRobleF2, antSemRoble?.lechugaRobleF2) ?? varPctSem(ultSemRoble?.lechugaRobleF2, cicloMesPasado.lechugaRoble), mejorSiSube: false },
+              ]} />
+              <GrupoIndicadores titulo="Pesos" icono="⚖️" color="#d97706" items={[
+                { label: 'Rúcula (paq)', valor: pesoMesPanel.rucula > 0 ? `${pesoMesPanel.rucula}g` : '—',
                   pct: pctVs(pesoMesPanel.rucula, pesoMesPasadoPanel.rucula), mejorSiSube: true },
-                { label: 'Peso promedio lechuga crespa (paq)', valor: pesoMesPanel.lechugaCrespa > 0 ? `${pesoMesPanel.lechugaCrespa}g` : '—',
+                { label: 'Lechuga crespa (paq)', valor: pesoMesPanel.lechugaCrespa > 0 ? `${pesoMesPanel.lechugaCrespa}g` : '—',
                   pct: pctVs(pesoMesPanel.lechugaCrespa, pesoMesPasadoPanel.lechugaCrespa), mejorSiSube: true },
-                { label: 'Peso promedio lechuga hoja de roble (paq)', valor: pesoMesPanel.lechugaRoble > 0 ? `${pesoMesPanel.lechugaRoble}g` : '—',
+                { label: 'Lechuga hoja de roble (paq)', valor: pesoMesPanel.lechugaRoble > 0 ? `${pesoMesPanel.lechugaRoble}g` : '—',
                   pct: pctVs(pesoMesPanel.lechugaRoble, pesoMesPasadoPanel.lechugaRoble), mejorSiSube: true },
-                { label: 'Faltante de stock (mes)', valor: `${faltanteMesTotal>=0?'+':''}${faltanteMesTotal} paq`,
-                  pct: faltanteMesTotalPasado || faltanteMesTotal ? faltanteMesTotal - faltanteMesTotalPasado : null, mejorSiSube: true, sufijo: 'paq' as const },
-                { label: 'Ocupación N1', valor: `${ocupNaves.find((n:any)=>n.nave===1)?.pct ?? 0}%`, pct: null, mejorSiSube: true },
-                { label: 'Ocupación N2', valor: `${ocupNaves.find((n:any)=>n.nave===2)?.pct ?? 0}%`, pct: null, mejorSiSube: true },
+              ]} />
+              <GrupoIndicadores titulo="Ocupación" icono="🏠" color="#7c3aed" items={[
+                { label: 'Nave 1', valor: `${ocupNaves.find((n:any)=>n.nave===1)?.pct ?? 0}%`, pct: null, mejorSiSube: true },
+                { label: 'Nave 2', valor: `${ocupNaves.find((n:any)=>n.nave===2)?.pct ?? 0}%`, pct: null, mejorSiSube: true },
                 ...(user.rol === 'admin' && productividad.actual !== null ? [{
                   label: 'Productividad (paq/hs hombre)', valor: `${productividad.actual.toLocaleString('es-AR')} paq/h`,
                   pct: productividad.pasado !== null ? pctVs(productividad.actual, productividad.pasado) : null, mejorSiSube: true,
                 }] : []),
-              ].map((it: any) => {
-                const bueno = it.pct === null ? null : it.mejorSiSube ? it.pct > 0 : it.pct < 0;
-                return (
-                  <div key={it.label} style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', borderBottom:'1px solid #f1f0eb', paddingBottom:'6px' }}>
-                    <span style={{ fontSize:'11.5px', color:'#52514e' }}>{it.label}</span>
-                    <span style={{ display:'flex', alignItems:'baseline', gap:'6px' }}>
-                      <strong style={{ fontSize:'15px', color:'#111827' }}>{it.valor}</strong>
-                      {it.pct !== null && (
-                        <span style={{ fontSize:'10px', fontWeight:700, color: bueno===null?'#9ca3af':bueno?'#059669':'#dc2626' }}>
-                          {it.pct > 0 ? '↑' : it.pct < 0 ? '↓' : '·'} {Math.abs(it.pct)}{it.sufijo === 'paq' ? ' paq' : '%'}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                );
-              })}
+              ]} />
             </div>
-            <p style={{ margin:'10px 0 0', fontSize:'10px', color:'#9ca3af' }}>% vs. mes pasado (ocupación: sin histórico para comparar)</p>
+            <p style={{ margin:'8px 0 0', fontSize:'10px', color:'#9ca3af' }}>% vs. mes pasado (ocupación: sin histórico para comparar)</p>
           </div>
         </div>
 
