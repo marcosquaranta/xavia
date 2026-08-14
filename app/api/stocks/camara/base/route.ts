@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
 
   try {
-    const { cultivo, fecha, tipo, cantidad_paq, notas } = await req.json();
+    const { cultivo, fecha, tipo, cantidad_paq, notas, descarte_paq } = await req.json();
     if (!cultivo || !fecha || !tipo || cantidad_paq === undefined) {
       return NextResponse.json({ error: 'datos_incompletos' }, { status: 400 });
     }
@@ -23,6 +23,9 @@ export async function POST(req: NextRequest) {
     // que lib/sheets.ts redondea al día completo, perdiendo justo la hora que se
     // necesita acá. Un entero de milisegundos no tiene ese riesgo.
     await asegurarColumna('StockCamara', 'momento_carga');
+    // descarte_paq: cuánto de la diferencia de este ajuste es descarte explícito en
+    // cámara (producto que se tira) — opcional, 0 si no se cargó nada.
+    await asegurarColumna('StockCamara', 'descarte_paq');
 
     // Append por NOMBRE de columna (inmune al orden de columnas de la planilla).
     // El appendRow posicional anterior podía meter cultivo/fecha en columnas
@@ -37,6 +40,7 @@ export async function POST(req: NextRequest) {
       usuario: user.email,
       fecha_carga: new Date().toISOString().split('T')[0],
       momento_carga: Date.now(),
+      descarte_paq: Number(descarte_paq) || 0,
     });
 
     return NextResponse.json({ ok: true, id_registro: id });

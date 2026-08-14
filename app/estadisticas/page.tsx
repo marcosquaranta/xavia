@@ -15,7 +15,7 @@ import { descartePorFaseMes, resumenDescartePorCultivo, type CultivoDescarte } f
 import { ocupacionMensualPorCultivo, eficienciaSiembraCosechaPorMes } from '@/lib/kpisOperativos';
 import { productividadPlantasDeMes } from '@/lib/productividad';
 import type { OcupacionHistorialRow } from '@/lib/ocupacion';
-import type { Lote, Movimiento, Ubicacion, KilometrajeVehiculo } from '@/lib/types';
+import type { Lote, Movimiento, Ubicacion, KilometrajeVehiculo, StockCamara } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
 import GraficoCiclosMesadas from './GraficoCiclosMesadas';
@@ -37,14 +37,16 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   let configRows: { clave: string; valor: any }[] = [];
   let registrosKm: KilometrajeVehiculo[] = [];
   let ocupacionHistorial: OcupacionHistorialRow[] = [];
+  let registrosCamara: StockCamara[] = [];
   let err: string | null = null;
   try {
-    [lotes, movimientos, ubicaciones, configRows, registrosKm, ocupacionHistorial] = await Promise.all([
+    [lotes, movimientos, ubicaciones, configRows, registrosKm, ocupacionHistorial, registrosCamara] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<Ubicacion>('Ubicaciones'),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
       readSheet<KilometrajeVehiculo>('Kilometraje').catch(() => []),
       readSheet<OcupacionHistorialRow>('OcupacionHistorial').catch(() => []),
+      readSheet<StockCamara>('StockCamara').catch(() => []),
     ]);
   } catch (e: any) { err = e?.message || 'Error cargando datos'; }
 
@@ -186,17 +188,21 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
   // ── Descarte por fase (columna apilada), por mes — últimos 12 meses, indicador fijo,
   // no cambia con el filtro de arriba (igual criterio que Productividad/Clima/Km). Un
-  // gráfico por cultivo, cada columna dividida en Plantín→F1, F1→F2 y F2→Cosecha.
+  // gráfico por cultivo, cada columna dividida en Plantín→F1, F1→F2, F2→Cosecha y Cámara
+  // (descarte explícito cargado al registrar un ajuste de stock — ver AjusteStockCard).
+  // OJO: Cámara NO entra en el KPI "Eficiencia Siembra → Cosecha" de más arriba — ese
+  // queda acotado a producción (siembra→cosecha), sin cámara ni ventas, a pedido explícito.
   const NMESES_DESCARTE = 12;
-  const mesesDescarte = descartePorFaseMes(lotes, movimientos, NMESES_DESCARTE);
+  const mesesDescarte = descartePorFaseMes(lotes, movimientos, registrosCamara, NMESES_DESCARTE);
   const resumenDescarte = resumenDescartePorCultivo(mesesDescarte);
-  const COLOR_FASE = { plantinF1: '#fbbf24', f1F2: '#f97316', f2Cosecha: '#dc2626' };
+  const COLOR_FASE = { plantinF1: '#fbbf24', f1F2: '#f97316', f2Cosecha: '#dc2626', camara: '#7c3aed' };
   const labelsDescarteMeses = mesesDescarte.map(m => m.label);
   function serieDescarte(cultivo: CultivoDescarte) {
     return [
       { nombre: 'Plantín→F1', color: COLOR_FASE.plantinF1, valores: mesesDescarte.map(m => m[cultivo].plantinF1) },
       { nombre: 'F1→F2', color: COLOR_FASE.f1F2, valores: mesesDescarte.map(m => m[cultivo].f1F2) },
       { nombre: 'F2→Cosecha', color: COLOR_FASE.f2Cosecha, valores: mesesDescarte.map(m => m[cultivo].f2Cosecha) },
+      { nombre: 'Cámara', color: COLOR_FASE.camara, valores: mesesDescarte.map(m => m[cultivo].camara) },
     ];
   }
   const CULTIVO_LABEL: Record<CultivoDescarte, string> = { rucula: 'Rúcula', lechuga_crespa: 'Lechuga Crespa', lechuga_roble: 'Lechuga Hoja de Roble' };
@@ -679,12 +685,12 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
         {/* Descarte por fase — columna apilada por mes, un gráfico por cultivo + resumen en % */}
         <div id="descarte-por-fase" className="card" style={{ marginBottom:'16px', scrollMarginTop:'16px' }}>
           <p className="card-title" style={{ margin:'0 0 2px' }}>Descarte por fase</p>
-          <p className="card-sub" style={{ margin:'0 0 12px' }}>Plantines descartados por mes, divididos en Plantín→F1 / F1→F2 / F2→Cosecha · últimos 12 meses · indicador fijo, no cambia con el filtro de arriba</p>
+          <p className="card-sub" style={{ margin:'0 0 12px' }}>Plantín→F1 / F1→F2 / F2→Cosecha (plantas) + Cámara (paquetes, descarte explícito cargado al registrar un ajuste de stock) · últimos 12 meses · indicador fijo, no cambia con el filtro de arriba</p>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(320px, 1fr))', gap:'16px', marginBottom:'16px' }}>
             {(['rucula', 'lechuga_crespa', 'lechuga_roble'] as CultivoDescarte[]).map((cultivo) => (
               <div key={cultivo}>
                 <p style={{ margin:'0 0 6px', fontSize:'12px', fontWeight:700, color:'#374151' }}>{CULTIVO_LABEL[cultivo]}</p>
-                <GraficoBarrasApiladas labels={labelsDescarteMeses} series={serieDescarte(cultivo)} unidad=" pl" />
+                <GraficoBarrasApiladas labels={labelsDescarteMeses} series={serieDescarte(cultivo)} unidad="" />
               </div>
             ))}
           </div>
@@ -692,10 +698,11 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             <table style={{ fontSize:'12px', width:'100%' }}>
               <thead><tr>
                 <th style={{ textAlign:'left' }}>Cultivo</th>
-                <th style={{ textAlign:'right' }}>Plantín→F1</th>
-                <th style={{ textAlign:'right' }}>F1→F2</th>
-                <th style={{ textAlign:'right' }}>F2→Cosecha</th>
-                <th style={{ textAlign:'right' }}>Total descartado</th>
+                <th style={{ textAlign:'right' }}>Plantín→F1 (pl)</th>
+                <th style={{ textAlign:'right' }}>F1→F2 (pl)</th>
+                <th style={{ textAlign:'right' }}>F2→Cosecha (pl)</th>
+                <th style={{ textAlign:'right' }} title="Descarte explícito cargado al registrar un ajuste de stock en cámara">Cámara (paq)</th>
+                <th style={{ textAlign:'right' }}>Total</th>
               </tr></thead>
               <tbody>
                 {resumenDescarte.map((r) => (
@@ -704,11 +711,13 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                     <td style={{ textAlign:'right' }}>{r.plantinF1.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctPlantinF1}%)</span></td>
                     <td style={{ textAlign:'right' }}>{r.f1F2.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctF1F2}%)</span></td>
                     <td style={{ textAlign:'right' }}>{r.f2Cosecha.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctF2Cosecha}%)</span></td>
+                    <td style={{ textAlign:'right' }}>{r.camara.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctCamara}%)</span></td>
                     <td style={{ textAlign:'right', fontWeight:700 }}>{r.total.toLocaleString('es-AR')}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            <p style={{ margin:'8px 0 0', fontSize:'10px', color:'#9ca3af' }}>El total y el % mezclan plantas (primeras 3 etapas) con paquetes (Cámara) — sirve para ver dónde se concentra el descarte, no es una cantidad física exacta.</p>
           </div>
         </div>
 

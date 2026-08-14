@@ -253,6 +253,13 @@ export interface StockCamara {
   // el mismo día en que se registró, para las entregas (8-12hs) del día en curso. Vacío
   // en registros viejos, de antes de este campo — ver lib/camara.ts::momentoDeRegistro.
   momento_carga: number | string;
+  // Cuánto de la diferencia de este ajuste es descarte EN CÁMARA explícito (producto que
+  // se tira al hacer el conteo — podrido, pasado, etc.), en paquetes — opcional, se carga
+  // junto con el ajuste. Alimenta "Descarte por fase" en Estadísticas como una etapa más
+  // (además de Plantín→F1, F1→F2, F2→Cosecha). No se suma al indicador "Eficiencia
+  // Siembra → Cosecha" de los KPIs operativos de Marcelo — ese queda explícitamente
+  // acotado a producción (siembra→cosecha), sin cámara ni ventas.
+  descarte_paq: number | string;
 }
 
 // Configuración por empleado para Control de personal (horas/CrossChex) — workno es el

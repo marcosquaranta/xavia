@@ -28,6 +28,7 @@ function CardCamara({ datos, cultivo, cultivoKey, onSaved }: {
   const [mostrarForm, setMostrarForm] = useState(false);
   const [tipo, setTipo] = useState<'inicial' | 'ajuste'>('ajuste');
   const [cantidad, setCantidad] = useState('');
+  const [descarte, setDescarte] = useState('');
   const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0]);
   const [notas, setNotas] = useState('');
   const [loading, setLoading] = useState(false);
@@ -40,10 +41,10 @@ function CardCamara({ datos, cultivo, cultivoKey, onSaved }: {
       const res = await fetch('/api/stocks/camara/base', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cultivo: datos.cultivo, fecha, tipo, cantidad_paq: Number(cantidad), notas }),
+        body: JSON.stringify({ cultivo: datos.cultivo, fecha, tipo, cantidad_paq: Number(cantidad), descarte_paq: Number(descarte) || 0, notas }),
       });
       if (!res.ok) { const j = await res.json(); throw new Error(j.error); }
-      setMostrarForm(false); setCantidad(''); setNotas('');
+      setMostrarForm(false); setCantidad(''); setDescarte(''); setNotas('');
       onSaved();
     } catch (err: any) {
       setError(err.message);
@@ -110,6 +111,12 @@ function CardCamara({ datos, cultivo, cultivoKey, onSaved }: {
             <label style={{ fontSize: '11px' }}>Cantidad (paquetes)</label>
             <input type="number" value={cantidad} onChange={e => setCantidad(e.target.value)} required min="0" step="any" disabled={loading} />
           </div>
+          {tipo === 'ajuste' && (
+            <div>
+              <label style={{ fontSize: '11px' }} title="Cuánto de la diferencia es producto que se tira (podrido, pasado) — queda registrado como descarte en cámara">Descarte en cámara (paq, opcional)</label>
+              <input type="number" value={descarte} onChange={e => setDescarte(e.target.value)} min="0" step="any" disabled={loading} placeholder="0" />
+            </div>
+          )}
           <div>
             <label style={{ fontSize: '11px' }}>Notas</label>
             <input type="text" value={notas} onChange={e => setNotas(e.target.value)} disabled={loading} placeholder="Opcional" />
