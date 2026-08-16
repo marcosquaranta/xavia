@@ -70,8 +70,8 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
   for (const v of ventas) frecuencias[v.id_control] = (frecuencias[v.id_control]||0) + 1;
 
   const evolArticulo = evolucionVentaPorArticulo(ventas, 12, historicas);
-  const evolClienteSemanal = evolucionVentaPorClienteSemanal(ventas, clientes, 6, 4);
-  const evolClienteMensual = evolucionVentaPorCliente(ventas, clientes, 6, 4);
+  const evolClienteSemanal = evolucionVentaPorClienteSemanal(ventas, clientes, 6, 5);
+  const evolClienteMensual = evolucionVentaPorCliente(ventas, clientes, 6, 5);
   const evolPrecio = evolucionPrecioPromedio(ventas, precios, clientes, 12);
   const resumenMes = resumenMesActual(ventas, precios, clientes);
 
