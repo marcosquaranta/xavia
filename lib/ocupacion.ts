@@ -147,6 +147,7 @@ export interface TubosMesada {
   tubos_totales: number;      // perfiles_por_modulo = total de tubos
   tubos_ocupados: number;     // suma tubos_ocupados_actual de lotes activos
   tubos_libres: number;
+  posiciones_totales: number; // tubos_totales × orificios_por_perfil = plantas que entran en total
   ocupacion_pct: number;
   lotes_count: number;
 }
@@ -197,6 +198,7 @@ export function tubosPorMesada(ubicaciones: Ubicacion[], lotes: Lote[]): Resumen
       });
       const tubosOcup = lotesAqui.reduce((acc, l) => acc + (Number(l.tubos_ocupados_actual) || 0), 0);
       const pct = tubosTotal > 0 ? Math.round((tubosOcup / tubosTotal) * 100) : 0;
+      const orificiosPorPerfil = Number(u.orificios_por_perfil) || 0;
       return {
         id_ubicacion: u.id_ubicacion,
         nombre: u.nombre,
@@ -206,6 +208,7 @@ export function tubosPorMesada(ubicaciones: Ubicacion[], lotes: Lote[]): Resumen
         tubos_totales: tubosTotal,
         tubos_ocupados: tubosOcup,
         tubos_libres: Math.max(0, tubosTotal - tubosOcup),
+        posiciones_totales: tubosTotal * orificiosPorPerfil,
         ocupacion_pct: pct,
         lotes_count: lotesAqui.length,
       };

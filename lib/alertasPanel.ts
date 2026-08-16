@@ -85,20 +85,23 @@ export function generarAlertas(lotes: Lote[], tubosMesadas: any[], ciclosRealesM
     alertas.push({ tipo: 'warn', msg: `Ocupación global al ${ocGlobal}% — sin espacio para nuevos trasplantes`, categoria: 'general' });
   }
 
-  // 🔵 Mesadas F2 con capacidad > 50% libre (oportunidad)
+  // 🔵 Mesadas F2 con capacidad > 50% libre (oportunidad) — con cantidad de tubos y
+  // posiciones (tubos × orificios/tubo = plantas que entran) para que se note el peso
+  // real de la oportunidad, no solo el %.
   for (const nave of tubosMesadas) {
     for (const m of nave.mesadas || []) {
       if (m.sector_fase === 'fase_2' && m.tubos_totales > 10 && m.tubos_libres > m.tubos_totales * 0.5) {
-        alertas.push({ tipo: 'info', msg: `${m.nombre.replace(/^Nave \d+ - /, '')} F2 al ${m.ocupacion_pct}% — espacio disponible`, categoria: 'general' });
+        alertas.push({ tipo: 'info', msg: `${m.nombre.replace(/^Nave \d+ - /, '')} F2 al ${m.ocupacion_pct}% — espacio disponible (${m.tubos_libres} de ${m.tubos_totales} tubos libres${m.posiciones_totales > 0 ? `, ${m.posiciones_totales.toLocaleString('es-AR')} posiciones en total` : ''})`, categoria: 'general' });
       }
     }
   }
 
-  // 🔵 Mesadas vacías (prioridad 0 — van primero)
+  // 🔵 Mesadas vacías (prioridad 0 — van primero) — mismo criterio, para darle más peso
+  // a una mesada grande vacía que a una chica.
   for (const nave of tubosMesadas) {
     for (const m of nave.mesadas || []) {
       if (m.tubos_totales > 10 && m.tubos_ocupados === 0) {
-        alertas.push({ tipo: 'info', msg: `${m.nombre.replace(/^Nave \d+ - /, '')} — vacía`, prioridad: 0, categoria: 'general' });
+        alertas.push({ tipo: 'info', msg: `${m.nombre.replace(/^Nave \d+ - /, '')} — vacía (${m.tubos_totales} tubos${m.posiciones_totales > 0 ? `, ${m.posiciones_totales.toLocaleString('es-AR')} posiciones en total` : ''})`, prioridad: 0, categoria: 'general' });
       }
     }
   }

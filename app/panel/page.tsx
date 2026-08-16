@@ -266,19 +266,18 @@ export default async function PanelPage() {
     } catch {}
   }
 
-  // Productividad = paquetes cosechados ÷ horas-hombre reales (CrossChex) — mes en curso
-  // (hasta hoy) vs. mes pasado hasta el mismo día del mes, mismo criterio de corte que ya
-  // usa "Venta total mes al día". Solo admin; si CrossChex falla, el indicador queda en null
-  // y esa fila no se muestra en vez de romper el resto del Panel.
-  // Mismo bloque calcula Descartes y Plantas cosechadas/km (reutiliza el rango de fechas
-  // ya resuelto acá) — los 3 arman el bloque "Producción" de Indicadores.
+  // Productividad, Descarte del mes y Plantas/km — arman el bloque "Producción" de
+  // Indicadores (home, solo admin). Van en tries SEPARADOS a propósito: Productividad
+  // depende de CrossChex (puede tirar error — token vencido, API caída, etc.), mientras
+  // que Descarte y Plantas/km salen de datos que ya están cargados (Sheets) y no deberían
+  // quedar en blanco solo porque CrossChex falló ese momento — antes compartían un mismo
+  // try y un error de CrossChex tiraba abajo los 3 indicadores de golpe.
+  const cosechaMes = cosechadoEsteMes(lotes);
+  const mesAnteriorRef = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+
   let productividad: { actual: number | null; pasado: number | null } = { actual: null, pasado: null };
-  let descarteMes: { actual: number | null; pasado: number | null } = { actual: null, pasado: null };
-  let plantasPorKm: { actual: number | null; pasado: number | null } = { actual: null, pasado: null };
   if (user.rol === 'admin') {
     try {
-      const cosechaMes = cosechadoEsteMes(lotes);
-      const mesAnteriorRef = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
       const rangoActualMes = rangoMes(hoy.getFullYear(), hoy.getMonth() + 1, cosechaMes.diaCorte);
       const rangoPasadoMes = rangoMes(mesAnteriorRef.getFullYear(), mesAnteriorRef.getMonth() + 1, cosechaMes.diaCorte);
       const [regActual, regPasado] = await Promise.all([
@@ -291,19 +290,31 @@ export default async function PanelPage() {
         actual: horasActual > 0 ? Math.round((cosechaMes.actual / horasActual) * 100) / 100 : null,
         pasado: horasPasado > 0 ? Math.round((cosechaMes.pasado / horasPasado) * 100) / 100 : null,
       };
+    } catch {}
+  }
 
-      // Descarte del mes (plantas, 3 etapas Plantín→F1 / F1→F2 / F2→Cosecha, sin cámara —
-      // mismo criterio que "Eficiencia Siembra → Cosecha", cámara queda afuera por acuerdo
-      // con Marcelo). Acá sí van meses calendario completos (no hay corte por hoy que valga
-      // la pena separar) — actual = mes en curso hasta ahora, pasado = mes calendario anterior completo.
+  // Descarte del mes (plantas, 3 etapas Plantín→F1 / F1→F2 / F2→Cosecha, sin cámara —
+  // mismo criterio que "Eficiencia Siembra → Cosecha", cámara queda afuera por acuerdo con
+  // Marcelo). Meses calendario completos — actual = mes en curso hasta ahora, pasado = mes
+  // calendario anterior completo.
+  let descarteMes: { actual: number | null; pasado: number | null } = { actual: null, pasado: null };
+  if (user.rol === 'admin') {
+    try {
       const [mesPasadoDF, mesActualDF] = descartePorFaseMes(lotes, movimientos, registrosCamara, 2);
       const sumaFases = (m: typeof mesActualDF) => (['rucula', 'lechuga_crespa', 'lechuga_roble'] as const)
         .reduce((a, c) => a + m[c].plantinF1 + m[c].f1F2 + m[c].f2Cosecha, 0);
       descarteMes = { actual: Math.round(sumaFases(mesActualDF)), pasado: Math.round(sumaFases(mesPasadoDF)) };
+    } catch {}
+  }
 
-      // Plantas cosechadas ÷ km recorridos por el vehículo de reparto — mismo rango
-      // "hasta hoy vs. hasta el mismo día del mes pasado" que productividad, para que sea
-      // comparable.
+  // Plantas cosechadas ÷ km recorridos por el vehículo de reparto — mismo rango "hasta
+  // hoy vs. hasta el mismo día del mes pasado" que productividad, para que sea comparable.
+  // Si todavía no hay 2 cargas de kilometraje, kmEnRango da 0 y el indicador queda en null
+  // (no hay con qué calcular la diferencia de odómetro) — no es un error, es esperable
+  // hasta que haya más de una lectura cargada.
+  let plantasPorKm: { actual: number | null; pasado: number | null } = { actual: null, pasado: null };
+  if (user.rol === 'admin') {
+    try {
       const desdeActualStr = fmtISODate(new Date(hoy.getFullYear(), hoy.getMonth(), 1));
       const hastaActualStr = fmtISODate(hoy);
       const desdePasadoStr = fmtISODate(new Date(mesAnteriorRef.getFullYear(), mesAnteriorRef.getMonth(), 1));
