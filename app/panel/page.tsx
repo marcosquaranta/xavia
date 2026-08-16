@@ -51,6 +51,23 @@ function diasAtras(s: any) {
 function fmtISODate(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
+const MESES_CORTO_PANEL = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+// Suma la proyección semanal (paquetes esperados por semana) en totales por mes calendario
+// — cada semana se atribuye al mes de su lunes (mismo criterio que el resto de la app para
+// "semana → mes"). Para el panel de datos al lado del gráfico de Proyección de cosecha.
+function proyeccionPorMes(datos: { semana: string; rucula: number; lechuga: number }[]) {
+  const map = new Map<string, { label: string; rucula: number; lechuga: number }>();
+  for (const d of datos) {
+    const mk = d.semana.slice(0, 7); // YYYY-MM
+    if (!map.has(mk)) {
+      const [y, m] = mk.split('-').map(Number);
+      map.set(mk, { label: `${MESES_CORTO_PANEL[m - 1]} ${String(y).slice(2)}`, rucula: 0, lechuga: 0 });
+    }
+    const e = map.get(mk)!;
+    e.rucula += d.rucula; e.lechuga += d.lechuga;
+  }
+  return [...map.keys()].sort().map((k) => map.get(k)!);
+}
 // Plantas cosechadas (reconvertidas — rúcula en paquetes × plantas_por_unidad_real, resto
 // ya en plantas) en un rango de fechas puntual — mismo criterio que productividadPlantasDeMes
 // (lib/productividad.ts) pero por rango en vez de mes calendario completo, para poder
@@ -701,20 +718,60 @@ export default async function PanelPage() {
           </div>
         </div>
 
-        {/* ══ FILA 3: PROYECCIÓN DE COSECHA SEMANAL ══ */}
+        {/* ══ FILA 3: PROYECCIÓN DE COSECHA SEMANAL — gráfico angosto + datos al lado
+            (antes ocupaba todo el ancho, quedaba enorme) ══ */}
         <div style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'14px', marginBottom:'14px' }}>
           <p style={{ margin:'0 0 3px', fontSize:'11px', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.3px' }}>Proyección de cosecha semanal</p>
           <p style={{ margin:'0 0 10px', fontSize:'10px', color:'#9ca3af' }}>Paquetes esperados por semana · rúcula vs. lechuga</p>
-          <GraficoDistribucionMesadas datos={proyeccionCosecha} />
+          <div style={{ display:'grid', gridTemplateColumns:'minmax(280px,420px) 1fr', gap:'20px', alignItems:'start' }}>
+            <GraficoDistribucionMesadas datos={proyeccionCosecha} />
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:'16px' }}>
+              <div>
+                <p style={{ margin:'0 0 6px', fontSize:'10px', color:'#9ca3af', fontWeight:700, textTransform:'uppercase' }}>Por semana</p>
+                <table style={{ fontSize:'11px', width:'100%', borderCollapse:'collapse' }}>
+                  <thead><tr style={{ color:'#9ca3af' }}>
+                    <th style={{ textAlign:'left', padding:'2px 4px', fontWeight:600 }}>Sem.</th>
+                    <th style={{ textAlign:'right', padding:'2px 4px', fontWeight:600, color:'#134e4a' }}>Rúc.</th>
+                    <th style={{ textAlign:'right', padding:'2px 4px', fontWeight:600, color:'#84cc16' }}>Lech.</th>
+                  </tr></thead>
+                  <tbody>
+                    {proyeccionCosecha.map((d: any, i: number) => (
+                      <tr key={d.semana} style={{ borderTop:'1px solid #f3f4f6', fontWeight:i===0?700:400, color:i===0?'#111827':'#374151' }}>
+                        <td style={{ padding:'3px 4px' }}>{d.label}</td>
+                        <td style={{ textAlign:'right', padding:'3px 4px' }}>{d.rucula > 0 ? d.rucula.toLocaleString('es-AR') : '—'}</td>
+                        <td style={{ textAlign:'right', padding:'3px 4px' }}>{d.lechuga > 0 ? d.lechuga.toLocaleString('es-AR') : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div>
+                <p style={{ margin:'0 0 6px', fontSize:'10px', color:'#9ca3af', fontWeight:700, textTransform:'uppercase' }}>Total acumulado por mes</p>
+                <table style={{ fontSize:'11px', width:'100%', borderCollapse:'collapse' }}>
+                  <thead><tr style={{ color:'#9ca3af' }}>
+                    <th style={{ textAlign:'left', padding:'2px 4px', fontWeight:600 }}>Mes</th>
+                    <th style={{ textAlign:'right', padding:'2px 4px', fontWeight:600, color:'#134e4a' }}>Rúc.</th>
+                    <th style={{ textAlign:'right', padding:'2px 4px', fontWeight:600, color:'#84cc16' }}>Lech.</th>
+                  </tr></thead>
+                  <tbody>
+                    {proyeccionPorMes(proyeccionCosecha).map((m) => (
+                      <tr key={m.label} style={{ borderTop:'1px solid #f3f4f6' }}>
+                        <td style={{ padding:'3px 4px', fontWeight:600 }}>{m.label}</td>
+                        <td style={{ textAlign:'right', padding:'3px 4px' }}>{Math.round(m.rucula).toLocaleString('es-AR')}</td>
+                        <td style={{ textAlign:'right', padding:'3px 4px' }}>{Math.round(m.lechuga).toLocaleString('es-AR')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* ══ ACCIONES RÁPIDAS ══ — Ocupación y Actividad ya tienen su propio "Ver
-            detalle →"/"Ver todos →" en las tarjetas de arriba, no hace falta repetirlos acá. */}
+        {/* ══ NUEVO LOTE ══ — Ocupación, Actividad y Estadísticas ya tienen su propio
+            "Ver detalle →"/"Ver todos →" en las tarjetas de arriba. */}
         <div className="card" style={{ marginBottom:'14px' }}>
-          <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', alignItems:'center' }}>
-            <Link href="/cultivos/nuevo" className="btn">+ Nuevo lote</Link>
-            {user.rol === 'admin' && <Link href="/estadisticas" className="btn secondary">Estadísticas</Link>}
-          </div>
+          <Link href="/cultivos/nuevo" className="btn">+ Nuevo lote</Link>
         </div>
 
       </div>
