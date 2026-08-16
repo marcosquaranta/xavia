@@ -6,7 +6,7 @@ import { calcularDiasPorFase } from '@/lib/lotes';
 import { calcularCapacidad, diasCicloDefault } from '@/lib/planificacionServer';
 import { calcularPlan, repartoHelpers, parseReparto, REPARTO_DEFAULT, DIA_SIEMBRA, CUB, planchas } from '@/lib/planificacion';
 import { calcularCapacidadProductiva } from '@/lib/capacidadProductiva';
-import { productividadDeMes, productividadPlantasDeMes, horasHombreDesdeCache } from '@/lib/productividad';
+import { productividadDeMes, productividadPlantasDeMes } from '@/lib/productividad';
 import { obtenerTemperaturasRosario, temperaturaPromedioPorMes } from '@/lib/clima';
 import { kmPorSemana, VEHICULO_PARTNER } from '@/lib/kilometraje';
 import { descartePorFaseMes, resumenDescartePorCultivo, type CultivoDescarte } from '@/lib/descarte';
@@ -72,14 +72,8 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     const esMesActual = d.getFullYear() === hoy.getFullYear() && d.getMonth() === hoy.getMonth();
     mesesProd.push({ anio: d.getFullYear(), mes: d.getMonth() + 1, diaHasta: esMesActual ? hoy.getDate() : undefined });
   }
-  const pad2 = (n: number) => String(n).padStart(2, '0');
-  const horasDelMes = ({ anio, mes, diaHasta }: { anio: number; mes: number; diaHasta?: number }) => {
-    const ultimoDia = new Date(anio, mes, 0).getDate();
-    const hasta = diaHasta ? Math.min(diaHasta, ultimoDia) : ultimoDia;
-    return horasHombreDesdeCache(productividadCache, `${anio}-${pad2(mes)}-01`, `${anio}-${pad2(mes)}-${pad2(hasta)}`);
-  };
-  const productividadMensual = mesesProd.map(({ anio, mes, diaHasta }) => productividadDeMes(lotes, horasDelMes({ anio, mes, diaHasta }), anio, mes, diaHasta));
-  const productividadPlantasMensual = mesesProd.map(({ anio, mes, diaHasta }) => productividadPlantasDeMes(lotes, horasDelMes({ anio, mes, diaHasta }), anio, mes, diaHasta));
+  const productividadMensual = mesesProd.map(({ anio, mes, diaHasta }) => productividadDeMes(lotes, productividadCache, anio, mes, diaHasta));
+  const productividadPlantasMensual = mesesProd.map(({ anio, mes, diaHasta }) => productividadPlantasDeMes(lotes, productividadCache, anio, mes, diaHasta));
   const evoProductividadMensual = {
     series: [{ nombre: 'Paquetes/hora-hombre', color: '#2563eb', puntos: productividadMensual.map((p, i) => [i, p.productividad ?? 0] as [number, number]).filter(p => p[1] > 0) }],
     labels: productividadMensual.map(p => p.label), hoyIdx: productividadMensual.length - 1,

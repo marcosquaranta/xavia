@@ -7,7 +7,7 @@ import { calcularCapacidadProductiva, resumenCiclosPorCultivoYNave } from '@/lib
 import { calcularCamara, diferenciaAjustesMes } from '@/lib/camara';
 import { calcularDriversMes, calcularUsoTeorico } from '@/lib/usoTeorico';
 import { ocupacionPromedioPorNave, type OcupacionHistorialRow } from '@/lib/ocupacion';
-import { productividadDeMes, productividadPlantasDeMes, horasHombreDesdeCache } from '@/lib/productividad';
+import { productividadDeMes, productividadPlantasDeMes } from '@/lib/productividad';
 import { ocupacionMensualPorCultivo, eficienciaSiembraCosechaPorMes } from '@/lib/kpisOperativos';
 import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionPrecioPromedio } from '@/lib/estadisticasVentas';
 import type { Lote, Movimiento, Ubicacion, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, Articulo, StockMes, StockCamara, ProductividadDiaria } from '@/lib/types';
@@ -272,14 +272,8 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
     const esUltimoMes = d.getFullYear() === refDate.getFullYear() && d.getMonth() === refDate.getMonth();
     mesesProd.push({ anio: d.getFullYear(), mes: d.getMonth() + 1, diaHasta: esUltimoMes ? refDate.getDate() : undefined });
   }
-  const pad2 = (n: number) => String(n).padStart(2, '0');
-  const horasDelMesRep = ({ anio, mes, diaHasta }: { anio: number; mes: number; diaHasta?: number }) => {
-    const ultimoDia = new Date(anio, mes, 0).getDate();
-    const hasta = diaHasta ? Math.min(diaHasta, ultimoDia) : ultimoDia;
-    return horasHombreDesdeCache(productividadCache, `${anio}-${pad2(mes)}-01`, `${anio}-${pad2(mes)}-${pad2(hasta)}`);
-  };
-  const productividadMensualRep = mesesProd.map(({ anio, mes, diaHasta }) => productividadDeMes(lotesRep, horasDelMesRep({ anio, mes, diaHasta }), anio, mes, diaHasta));
-  const productividadPlantasMensualRep = mesesProd.map(({ anio, mes, diaHasta }) => productividadPlantasDeMes(lotesRep, horasDelMesRep({ anio, mes, diaHasta }), anio, mes, diaHasta));
+  const productividadMensualRep = mesesProd.map(({ anio, mes, diaHasta }) => productividadDeMes(lotesRep, productividadCache, anio, mes, diaHasta));
+  const productividadPlantasMensualRep = mesesProd.map(({ anio, mes, diaHasta }) => productividadPlantasDeMes(lotesRep, productividadCache, anio, mes, diaHasta));
   const evoProductividad = {
     series: [{ nombre: 'Paquetes/hora-hombre', color: '#2563eb', puntos: productividadMensualRep.map((p, i) => [i, p.productividad ?? 0] as [number, number]).filter(p => p[1] > 0) }],
     labels: productividadMensualRep.map(p => p.label), hoyIdx: productividadMensualRep.length - 1,

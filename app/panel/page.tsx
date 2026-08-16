@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
-import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, cosechadoEsteMes } from '@/lib/estadisticas';
+import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio } from '@/lib/estadisticas';
 import { codigoCultivo } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, Empleado, PersonalQuincena, CajonMovimiento, KilometrajeVehiculo, ProductividadDiaria } from '@/lib/types';
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
@@ -15,7 +15,7 @@ import { saldoPorCliente, alertasCajones } from '@/lib/cajones';
 import { descartePorFaseMes } from '@/lib/descarte';
 import { faltaCargarEstaSemana, ultimaLectura, kmEnRango, VEHICULO_PARTNER } from '@/lib/kilometraje';
 import { getRegistrosCrossChex } from '@/lib/crosschex';
-import { horasHombreDesdeCache } from '@/lib/productividad';
+import { productividadDeMes } from '@/lib/productividad';
 import { calcularResumenQuincena, rangoQuincena, tardanzasDeHoy } from '@/lib/personal';
 import Header from '@/components/Header';
 import GraficoCiclosSemanas from '@/components/GraficoCiclosSemanas';
@@ -274,29 +274,30 @@ export default async function PanelPage() {
   }
 
   // Productividad, Descarte del mes y Plantas/km — arman el bloque "Producción" de
-  // Indicadores (home, solo admin). Mismo rango "mes en curso hasta hoy vs. mes pasado
-  // hasta el mismo día" para los 3, así que se calcula una sola vez acá arriba.
-  const cosechaMes = cosechadoEsteMes(lotes);
+  // Indicadores (home, solo admin).
   const mesAnteriorRef = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
   const desdeActualStr = fmtISODate(new Date(hoy.getFullYear(), hoy.getMonth(), 1));
   const hastaActualStr = fmtISODate(hoy);
   const desdePasadoStr = fmtISODate(new Date(mesAnteriorRef.getFullYear(), mesAnteriorRef.getMonth(), 1));
-  const hastaPasadoStr = fmtISODate(new Date(mesAnteriorRef.getFullYear(), mesAnteriorRef.getMonth(), cosechaMes.diaCorte));
+  // Solo para Plantas/km más abajo (comparación día a día tiene sentido ahí, no es un
+  // análisis de horas de personal) — Productividad usa el mes pasado COMPLETO, ver abajo.
+  const hastaPasadoStr = fmtISODate(new Date(mesAnteriorRef.getFullYear(), mesAnteriorRef.getMonth(), hoy.getDate()));
 
-  // Productividad = paquetes cosechados ÷ horas-hombre reales, sumadas desde la caché
-  // diaria ProductividadDiaria (ver lib/types.ts) en vez de pedirle a CrossChex en vivo —
-  // CrossChex limita a 1 pedido cada 15 segundos, así que ya no se le pregunta acá; la
-  // caché la carga /api/cron/productividad-diaria una vez por día. Sin try/catch porque
-  // ya no depende de una API externa que pueda fallar — a lo sumo readSheet devuelve [].
+  // Productividad = paquetes cosechados ÷ horas-hombre reales, SIEMPRE acumulado del mes
+  // (nunca un día suelto) — sumadas desde la caché diaria ProductividadDiaria (ver
+  // lib/types.ts) en vez de pedirle a CrossChex en vivo. "Mes en curso" = acumulado hasta
+  // hoy (parcial, crece día a día a medida que el cron suma jornadas); "mes pasado" = el
+  // mes calendario ANTERIOR COMPLETO (no truncado al mismo día — es un análisis mensual de
+  // personal, no un comparativo día a día). productividadDeMes ya restringe la cosecha a
+  // los mismos días que la caché de horas cubre, así que el número no se dispara mientras
+  // la caché todavía esté incompleta (ver lib/productividad.ts). Sin try/catch porque ya
+  // no depende de una API externa que pueda fallar — a lo sumo readSheet devuelve [].
   let productividad: { actual: number | null; pasado: number | null } = { actual: null, pasado: null };
   if (user.rol === 'admin') {
     const productividadCache = await readSheet<ProductividadDiaria>('ProductividadDiaria').catch(() => []);
-    const horasActual = horasHombreDesdeCache(productividadCache, desdeActualStr, hastaActualStr);
-    const horasPasado = horasHombreDesdeCache(productividadCache, desdePasadoStr, hastaPasadoStr);
-    productividad = {
-      actual: horasActual > 0 ? Math.round((cosechaMes.actual / horasActual) * 100) / 100 : null,
-      pasado: horasPasado > 0 ? Math.round((cosechaMes.pasado / horasPasado) * 100) / 100 : null,
-    };
+    const puntoActual = productividadDeMes(lotes, productividadCache, hoy.getFullYear(), hoy.getMonth() + 1, hoy.getDate());
+    const puntoPasado = productividadDeMes(lotes, productividadCache, mesAnteriorRef.getFullYear(), mesAnteriorRef.getMonth() + 1);
+    productividad = { actual: puntoActual.productividad, pasado: puntoPasado.productividad };
   }
 
   // Descarte del mes (plantas, 3 etapas Plantín→F1 / F1→F2 / F2→Cosecha, sin cámara —
@@ -626,7 +627,9 @@ export default async function PanelPage() {
           </div>
         </div>
 
-        {/* ══ FILA 2: CICLOS + ÚLTIMOS MOVIMIENTOS ══ */}
+        {/* ══ FILA 2: CICLOS + ACTIVIDAD + OCUPACIÓN (antes 2 filas separadas — se
+            fusionaron Actividad y Ocupación por mesada en una sola fila para no acumular
+            tantas secciones distintas en el home) ══ */}
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))', gap:'12px', marginBottom:'14px', alignItems:'start' }}>
             <div className="card" style={{ margin:0 }}>
               <p className="card-title">Ciclos en mesadas — 8 semanas</p>
@@ -692,6 +695,50 @@ export default async function PanelPage() {
               </div>
             )}
           </div>
+
+          {/* Ocupación por mesada — antes su propia fila aparte, fusionada acá con
+              Actividad para no acumular tantas secciones sueltas en el home. */}
+          <div className="card" style={{ margin:0 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
+              <p className="card-title" style={{ margin:0 }}>Ocupación por mesada</p>
+              <Link href="/ocupacion" style={{ fontSize:'11px', color:'#6b7280', textDecoration:'none' }}>Ver detalle →</Link>
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
+              {tubosMesadas.map((nave: any) => (
+                <div key={nave.nave}>
+                  {(() => { const f2=(nave.mesadas||[]).filter((m:any)=>m.sector_fase!=='fase_1'); const tot=f2.reduce((s:number,m:any)=>s+m.tubos_totales,0); const ocu=f2.reduce((s:number,m:any)=>s+m.tubos_ocupados,0); const pct=tot>0?Math.round(ocu/tot*100):0; return (<>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
+                    <span style={{ background:nave.nave===1?'#881337':'#7c3aed', color:'white', padding:'2px 10px', borderRadius:'5px', fontSize:'12px', fontWeight:700 }}>NAVE {nave.nave}</span>
+                    <span style={{ fontSize:'11px', color:'#6b7280' }}>{ocu}/{tot} · <strong>{pct}%</strong></span>
+                  </div>
+                  <div style={{ height:'4px', background:'#f3f4f6', borderRadius:'2px', overflow:'hidden', marginBottom:'8px' }}>
+                    <div style={{ width:Math.min(100,pct)+'%', height:'100%', background:nave.nave===1?'#881337':'#7c3aed' }} />
+                  </div>
+                  </>); })()}
+                  <table style={{ fontSize:'11px', width:'100%' }}>
+                    <thead><tr>
+                      <th style={{ textAlign:'left', padding:'3px 6px' }}>Mesada</th>
+                      <th style={{ textAlign:'right' }}>Tot.</th>
+                      <th style={{ textAlign:'right' }}>Ocup.</th>
+                      <th style={{ textAlign:'right' }}>Lib.</th>
+                      <th style={{ textAlign:'right' }}>%</th>
+                    </tr></thead>
+                    <tbody>
+                      {(nave.mesadas||[]).filter((m:any)=>m.sector_fase!=='fase_1').map((m: any) => (
+                        <tr key={m.id_ubicacion}>
+                          <td style={{ padding:'3px 6px', fontWeight:500 }}>{m.nombre.replace(/^Nave \d+ - /,'').replace(' (F2)','')}</td>
+                          <td style={{ textAlign:'right', color:'#6b7280' }}>{m.tubos_totales}</td>
+                          <td style={{ textAlign:'right', fontWeight:600 }}>{m.tubos_ocupados}</td>
+                          <td style={{ textAlign:'right', color:m.tubos_libres>0?'#059669':'#9ca3af' }}>{m.tubos_libres}</td>
+                          <td style={{ textAlign:'right', fontWeight:600, color:m.ocupacion_pct>=80?'#059669':m.ocupacion_pct>=40?'#d97706':'#9ca3af' }}>{m.ocupacion_pct}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* ══ FILA 3: PROYECCIÓN DE COSECHA SEMANAL ══ */}
@@ -699,43 +746,6 @@ export default async function PanelPage() {
           <p style={{ margin:'0 0 3px', fontSize:'11px', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.3px' }}>Proyección de cosecha semanal</p>
           <p style={{ margin:'0 0 10px', fontSize:'10px', color:'#9ca3af' }}>Paquetes esperados por semana · rúcula vs. lechuga</p>
           <GraficoDistribucionMesadas datos={proyeccionCosecha} />
-        </div>
-
-        {/* ══ FILA 4: OCUPACIÓN POR MESADA ══ */}
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))', gap:'12px', marginBottom:'14px' }}>
-          {tubosMesadas.map((nave: any) => (
-            <div key={nave.nave} style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'12px' }}>
-              {(() => { const f2=(nave.mesadas||[]).filter((m:any)=>m.sector_fase!=='fase_1'); const tot=f2.reduce((s:number,m:any)=>s+m.tubos_totales,0); const ocu=f2.reduce((s:number,m:any)=>s+m.tubos_ocupados,0); const pct=tot>0?Math.round(ocu/tot*100):0; return (<>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
-                <span style={{ background:nave.nave===1?'#881337':'#7c3aed', color:'white', padding:'2px 10px', borderRadius:'5px', fontSize:'12px', fontWeight:700 }}>NAVE {nave.nave}</span>
-                <span style={{ fontSize:'11px', color:'#6b7280' }}>{ocu}/{tot} · <strong>{pct}%</strong></span>
-              </div>
-              <div style={{ height:'4px', background:'#f3f4f6', borderRadius:'2px', overflow:'hidden', marginBottom:'8px' }}>
-                <div style={{ width:Math.min(100,pct)+'%', height:'100%', background:nave.nave===1?'#881337':'#7c3aed' }} />
-              </div>
-              </>); })()}
-              <table style={{ fontSize:'11px' }}>
-                <thead><tr>
-                  <th style={{ textAlign:'left', padding:'3px 6px' }}>Mesada</th>
-                  <th style={{ textAlign:'right' }}>Tot.</th>
-                  <th style={{ textAlign:'right' }}>Ocup.</th>
-                  <th style={{ textAlign:'right' }}>Lib.</th>
-                  <th style={{ textAlign:'right' }}>%</th>
-                </tr></thead>
-                <tbody>
-                  {(nave.mesadas||[]).filter((m:any)=>m.sector_fase!=='fase_1').map((m: any) => (
-                    <tr key={m.id_ubicacion}>
-                      <td style={{ padding:'3px 6px', fontWeight:500 }}>{m.nombre.replace(/^Nave \d+ - /,'').replace(' (F2)','')}</td>
-                      <td style={{ textAlign:'right', color:'#6b7280' }}>{m.tubos_totales}</td>
-                      <td style={{ textAlign:'right', fontWeight:600 }}>{m.tubos_ocupados}</td>
-                      <td style={{ textAlign:'right', color:m.tubos_libres>0?'#059669':'#9ca3af' }}>{m.tubos_libres}</td>
-                      <td style={{ textAlign:'right', fontWeight:600, color:m.ocupacion_pct>=80?'#059669':m.ocupacion_pct>=40?'#d97706':'#9ca3af' }}>{m.ocupacion_pct}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ))}
         </div>
 
         {/* ══ ACCIONES RÁPIDAS ══ */}
