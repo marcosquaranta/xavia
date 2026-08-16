@@ -145,7 +145,12 @@ export function GraficoPrecioPromedio({ datos }: { datos: PuntoPrecio[] }) {
         <LineChart data={datos} margin={{ top: 16, right: 40, left: 0, bottom: 0 }}>
           <CartesianGrid stroke={GRID} vertical={false} />
           <XAxis dataKey="label" tick={{ fontSize: 11, fill: INK_MUTED }} axisLine={{ stroke: '#c3c2b7' }} tickLine={false} />
-          <YAxis tick={{ fontSize: 11, fill: INK_MUTED }} axisLine={false} tickLine={false} tickFormatter={fmtMoneda} width={56} domain={[1400, 'dataMax + 50']} />
+          {/* allowDataOverflow: SIN esto, Recharts ignora el domain fijo apenas algún punto
+              queda afuera del rango — lo re-escala solo para que entre igual. Con esto el
+              eje queda fijo de verdad en [1500, 2000], recorta lo que se pase (no hay
+              puntos fuera de ese rango en la práctica, pero si algún día lo hay, mejor que
+              se vea "pegado al techo/piso" a que el eje entero se descuadre). */}
+          <YAxis tick={{ fontSize: 11, fill: INK_MUTED }} axisLine={false} tickLine={false} tickFormatter={fmtMoneda} width={56} domain={[1500, 2000]} allowDataOverflow />
           <Tooltip content={<TooltipCard formatter={fmtMoneda} />} />
           <Legend wrapperStyle={{ fontSize: '12px', color: INK_SECUNDARIA }} iconType="circle" iconSize={8} />
           <Line type="monotone" dataKey="precioRucula" name="Rúcula" stroke={CATEGORICOS[0]} strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }}>
