@@ -93,19 +93,35 @@ function agruparPorEmpleadoYDia(registros: RegistroCrossChex[]): Map<string, Map
   return out;
 }
 
+// Suma las horas trabajadas de un día emparejando los fichajes de a pares consecutivos
+// (1º-2º = una entrada/salida, 3º-4º = otra, etc.) en vez de tomar solo el primer y el
+// último fichaje del día — así un empleado que entra y sale dos veces en el mismo día
+// (ej. corte de almuerzo, salida y vuelta) no queda contado como si hubiera trabajado
+// de punta a punta, incluyendo el hueco de en medio como si fuera trabajo. Si sobra un
+// fichaje sin pareja (se olvidó marcar la vuelta), se cuentan igual los pares completos
+// y el día queda marcado incompleto (no se puede saber cuánto duró esa última vuelta).
+function sumarHorasPares(checksMin: number[]): { horas: number; entrada: number; salidaFinal: number | null; incompleto: boolean } {
+  const entrada = checksMin[0];
+  if (checksMin.length < 2) return { horas: 0, entrada, salidaFinal: null, incompleto: true };
+  let horas = 0;
+  const pares = Math.floor(checksMin.length / 2);
+  for (let i = 0; i < pares; i++) horas += Math.max(0, (checksMin[i * 2 + 1] - checksMin[i * 2]) / 60);
+  const impar = checksMin.length % 2 === 1;
+  return { horas, entrada, salidaFinal: impar ? null : checksMin[checksMin.length - 1], incompleto: impar };
+}
+
 // Total de horas-hombre reales trabajadas (todos los empleados, todos los días) en un
 // conjunto de fichajes ya traído de CrossChex para el rango que corresponda — para el
-// indicador de productividad (paquetes cosechados ÷ horas-hombre). Mismo criterio que el
-// resto de Control de Personal: primer fichaje del día = entrada, último = salida; un
-// solo fichaje ese día queda "incompleto" y no aporta horas (no se puede calcular).
+// indicador de productividad (paquetes cosechados ÷ horas-hombre). Mismo criterio de
+// emparejamiento que calcularResumenQuincena (ver sumarHorasPares); un solo fichaje ese
+// día queda "incompleto" y no aporta horas (no se puede calcular).
 export function horasHombreEnRango(registros: RegistroCrossChex[]): number {
   const porEmpleadoDia = agruparPorEmpleadoYDia(registros);
   let total = 0;
   for (const porDia of porEmpleadoDia.values()) {
     for (const isos of porDia.values()) {
       const checks = isos.map((iso) => partesArg(iso).horaMin).sort((a, b) => a - b);
-      if (checks.length < 2) continue;
-      total += Math.max(0, (checks[checks.length - 1] - checks[0]) / 60);
+      total += sumarHorasPares(checks).horas;
     }
   }
   return Math.round(total * 100) / 100;
@@ -209,10 +225,7 @@ export function calcularResumenQuincena(
         if (diaProgramado) faltas++;
         continue;
       }
-      const entradaMin = checks[0];
-      const salidaMin = checks.length > 1 ? checks[checks.length - 1] : null;
-      const incompleto = salidaMin === null;
-      const horas = incompleto ? 0 : Math.max(0, (salidaMin - entradaMin) / 60);
+      const { horas, entrada: entradaMin, salidaFinal: salidaMin, incompleto } = sumarHorasPares(checks);
       const esperadaMin = emp?.hora_entrada_esperada ? minDeHora(emp.hora_entrada_esperada) : null;
       const tardanzaMin = esperadaMin !== null && entradaMin <= LIMITE_ENTRADA_RARA_MIN ? Math.max(0, entradaMin - esperadaMin) : 0;
       // De más/de menos: contra lo esperado ese día (o contra un turno de 8hs si no hay

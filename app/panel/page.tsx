@@ -12,7 +12,8 @@ import { evolucionVentaPorArticulo, resumenMesActual } from '@/lib/estadisticasV
 import { generarAlertas, motivoAlertaCosecha, type MotivoAlertaCosecha } from '@/lib/alertasPanel';
 import { calcularCamara, diferenciaAjustesMes } from '@/lib/camara';
 import { saldoPorCliente, alertasCajones } from '@/lib/cajones';
-import { faltaCargarEstaSemana, ultimaLectura, VEHICULO_PARTNER } from '@/lib/kilometraje';
+import { descartePorFaseMes } from '@/lib/descarte';
+import { faltaCargarEstaSemana, ultimaLectura, kmEnRango, VEHICULO_PARTNER } from '@/lib/kilometraje';
 import { getRegistrosCrossChex } from '@/lib/crosschex';
 import { calcularResumenQuincena, rangoQuincena, rangoMes, tardanzasDeHoy, horasHombreEnRango } from '@/lib/personal';
 import Header from '@/components/Header';
@@ -41,6 +42,25 @@ function fmtFecha(s: any) {
 }
 function diasAtras(s: any) {
   try { const diff = Math.round((Date.now() - new Date(String(s||'').split(/[\sT]/)[0]+'T12:00:00').getTime())/86400000); if (diff===0) return 'Hoy'; if (diff===1) return 'Ayer'; return `Hace ${diff}d`; } catch { return ''; }
+}
+function fmtISODate(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+// Plantas cosechadas (reconvertidas — rúcula en paquetes × plantas_por_unidad_real, resto
+// ya en plantas) en un rango de fechas puntual — mismo criterio que productividadPlantasDeMes
+// (lib/productividad.ts) pero por rango en vez de mes calendario completo, para poder
+// comparar "mes en curso hasta hoy" contra "mes pasado hasta el mismo día".
+function plantasCosechadasEnRango(lotes: Lote[], desde: string, hasta: string): number {
+  let plantas = 0;
+  for (const l of lotes) {
+    if (l.estado !== 'cosechado') continue;
+    const f = String(l.fecha_cosecha || l.fecha_ult_movimiento || '').split(/[T ]/)[0];
+    if (!f || f < desde || f > hasta) continue;
+    const v = String(l.variedad || '').toLowerCase();
+    const esRucula = v.includes('rucula') || v.includes('rúcula');
+    plantas += esRucula ? (Number(l.unidades_cosechadas) || 0) * (Number(l.plantas_por_unidad_real) || 3) : (Number(l.unidades_cosechadas) || 0);
+  }
+  return plantas;
 }
 
 interface ItemIndicador { label: string; valor: string; pct: number | null; mejorSiSube: boolean }
@@ -250,7 +270,11 @@ export default async function PanelPage() {
   // (hasta hoy) vs. mes pasado hasta el mismo día del mes, mismo criterio de corte que ya
   // usa "Venta total mes al día". Solo admin; si CrossChex falla, el indicador queda en null
   // y esa fila no se muestra en vez de romper el resto del Panel.
+  // Mismo bloque calcula Descartes y Plantas cosechadas/km (reutiliza el rango de fechas
+  // ya resuelto acá) — los 3 arman el bloque "Producción" de Indicadores.
   let productividad: { actual: number | null; pasado: number | null } = { actual: null, pasado: null };
+  let descarteMes: { actual: number | null; pasado: number | null } = { actual: null, pasado: null };
+  let plantasPorKm: { actual: number | null; pasado: number | null } = { actual: null, pasado: null };
   if (user.rol === 'admin') {
     try {
       const cosechaMes = cosechadoEsteMes(lotes);
@@ -266,6 +290,31 @@ export default async function PanelPage() {
       productividad = {
         actual: horasActual > 0 ? Math.round((cosechaMes.actual / horasActual) * 100) / 100 : null,
         pasado: horasPasado > 0 ? Math.round((cosechaMes.pasado / horasPasado) * 100) / 100 : null,
+      };
+
+      // Descarte del mes (plantas, 3 etapas Plantín→F1 / F1→F2 / F2→Cosecha, sin cámara —
+      // mismo criterio que "Eficiencia Siembra → Cosecha", cámara queda afuera por acuerdo
+      // con Marcelo). Acá sí van meses calendario completos (no hay corte por hoy que valga
+      // la pena separar) — actual = mes en curso hasta ahora, pasado = mes calendario anterior completo.
+      const [mesPasadoDF, mesActualDF] = descartePorFaseMes(lotes, movimientos, registrosCamara, 2);
+      const sumaFases = (m: typeof mesActualDF) => (['rucula', 'lechuga_crespa', 'lechuga_roble'] as const)
+        .reduce((a, c) => a + m[c].plantinF1 + m[c].f1F2 + m[c].f2Cosecha, 0);
+      descarteMes = { actual: Math.round(sumaFases(mesActualDF)), pasado: Math.round(sumaFases(mesPasadoDF)) };
+
+      // Plantas cosechadas ÷ km recorridos por el vehículo de reparto — mismo rango
+      // "hasta hoy vs. hasta el mismo día del mes pasado" que productividad, para que sea
+      // comparable.
+      const desdeActualStr = fmtISODate(new Date(hoy.getFullYear(), hoy.getMonth(), 1));
+      const hastaActualStr = fmtISODate(hoy);
+      const desdePasadoStr = fmtISODate(new Date(mesAnteriorRef.getFullYear(), mesAnteriorRef.getMonth(), 1));
+      const hastaPasadoStr = fmtISODate(new Date(mesAnteriorRef.getFullYear(), mesAnteriorRef.getMonth(), cosechaMes.diaCorte));
+      const plantasActual = plantasCosechadasEnRango(lotes, desdeActualStr, hastaActualStr);
+      const plantasPasado = plantasCosechadasEnRango(lotes, desdePasadoStr, hastaPasadoStr);
+      const kmActual = kmEnRango(registrosKm, VEHICULO_PARTNER, desdeActualStr, hastaActualStr);
+      const kmPasado = kmEnRango(registrosKm, VEHICULO_PARTNER, desdePasadoStr, hastaPasadoStr);
+      plantasPorKm = {
+        actual: kmActual > 0 ? Math.round((plantasActual / kmActual) * 10) / 10 : null,
+        pasado: kmPasado > 0 ? Math.round((plantasPasado / kmPasado) * 10) / 10 : null,
       };
     } catch {}
   }
@@ -532,13 +581,25 @@ export default async function PanelPage() {
               <GrupoIndicadores titulo="Ocupación" icono="🏠" color="#7c3aed" items={[
                 { label: 'Nave 1', valor: `${ocupNaves.find((n:any)=>n.nave===1)?.pct ?? 0}%`, pct: null, mejorSiSube: true },
                 { label: 'Nave 2', valor: `${ocupNaves.find((n:any)=>n.nave===2)?.pct ?? 0}%`, pct: null, mejorSiSube: true },
-                ...(user.rol === 'admin' && productividad.actual !== null ? [{
-                  label: 'Productividad (paq/hs hombre)', valor: `${productividad.actual.toLocaleString('es-AR')} paq/h`,
-                  pct: productividad.pasado !== null ? pctVs(productividad.actual, productividad.pasado) : null, mejorSiSube: true,
-                }] : []),
               ]} />
+              {user.rol === 'admin' && (
+                <GrupoIndicadores titulo="Producción" icono="📊" color="#0f766e" items={[
+                  ...(productividad.actual !== null ? [{
+                    label: 'Productividad (paq/hs hombre)', valor: `${productividad.actual.toLocaleString('es-AR')} paq/h`,
+                    pct: productividad.pasado !== null ? pctVs(productividad.actual, productividad.pasado) : null, mejorSiSube: true,
+                  }] : []),
+                  ...(descarteMes.actual !== null ? [{
+                    label: 'Descartes (mes)', valor: `${descarteMes.actual.toLocaleString('es-AR')} pl`,
+                    pct: descarteMes.pasado !== null ? pctVs(descarteMes.actual, descarteMes.pasado) : null, mejorSiSube: false,
+                  }] : []),
+                  ...(plantasPorKm.actual !== null ? [{
+                    label: 'Plantas cosechadas / km', valor: `${plantasPorKm.actual.toLocaleString('es-AR')} pl/km`,
+                    pct: plantasPorKm.pasado !== null ? pctVs(plantasPorKm.actual, plantasPorKm.pasado) : null, mejorSiSube: true,
+                  }] : []),
+                ]} />
+              )}
             </div>
-            <p style={{ margin:'8px 0 0', fontSize:'10px', color:'#9ca3af' }}>% vs. mes pasado (ocupación: sin histórico para comparar)</p>
+            <p style={{ margin:'8px 0 0', fontSize:'10px', color:'#9ca3af' }}>% vs. mes pasado (ocupación: sin histórico para comparar · descartes y producción: hasta hoy vs. hasta el mismo día del mes pasado)</p>
           </div>
         </div>
 

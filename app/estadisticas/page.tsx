@@ -583,7 +583,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                 </p>
               )}
               {evoOcupacionCultivo.series.some((s) => s.puntos.length > 0) ? (
-                <GraficoEvolucion series={evoOcupacionCultivo.series} labels={evoOcupacionCultivo.labels} hoyIdx={evoOcupacionCultivo.hoyIdx} unidad="%" yMin={0} yMax={100} />
+                <GraficoEvolucion series={evoOcupacionCultivo.series} labels={evoOcupacionCultivo.labels} hoyIdx={evoOcupacionCultivo.hoyIdx} unidad="%" yMax={100} />
               ) : (
                 <p style={{ color:'#9ca3af', fontSize:'12px', textAlign:'center', padding:'16px' }}>Sin histórico de ocupación todavía.</p>
               )}
@@ -606,7 +606,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                 </p>
               )}
               {evoEficienciaCultivo.series.some((s) => s.puntos.length > 0) ? (
-                <GraficoEvolucion series={evoEficienciaCultivo.series} labels={evoEficienciaCultivo.labels} hoyIdx={evoEficienciaCultivo.hoyIdx} unidad="%" yMin={0} yMax={100} />
+                <GraficoEvolucion series={evoEficienciaCultivo.series} labels={evoEficienciaCultivo.labels} hoyIdx={evoEficienciaCultivo.hoyIdx} unidad="%" yMax={100} />
               ) : (
                 <p style={{ color:'#9ca3af', fontSize:'12px', textAlign:'center', padding:'16px' }}>Sin lotes cosechados en el período.</p>
               )}

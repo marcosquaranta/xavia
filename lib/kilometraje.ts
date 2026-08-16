@@ -37,6 +37,25 @@ export function ultimaLectura(registros: KilometrajeVehiculo[], vehiculo: string
   return [...propias].sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)))[propias.length - 1];
 }
 
+// Km recorridos en un rango de fechas puntual [desde, hasta] (ambos inclusive, YYYY-MM-DD)
+// = última lectura de odómetro dentro del rango, menos la última lectura ANTERIOR a
+// `desde` (o, si no hay ninguna lectura previa al rango, la primera lectura dentro del
+// rango — no se puede saber cuánto se recorrió antes de esa primera carga). Para el
+// indicador "plantas cosechadas por km" del Panel.
+export function kmEnRango(registros: KilometrajeVehiculo[], vehiculo: string, desde: string, hasta: string): number {
+  const propias = registros
+    .filter((r) => r.vehiculo === vehiculo)
+    .map((r) => ({ fecha: String(r.fecha || '').slice(0, 10), km: num(r.km_acumulado) }))
+    .filter((r) => r.fecha)
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const enRango = propias.filter((r) => r.fecha >= desde && r.fecha <= hasta);
+  if (!enRango.length) return 0;
+  const antes = [...propias].filter((r) => r.fecha < desde).pop();
+  const base = antes ? antes.km : enRango[0].km;
+  const ultimo = enRango[enRango.length - 1].km;
+  return Math.max(0, ultimo - base);
+}
+
 export interface PuntoKmSemana {
   fecha: string;   // YYYY-MM-DD de la lectura
   label: string;   // dd/mm para el eje del gráfico
