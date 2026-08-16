@@ -14,7 +14,7 @@ import { calcularCamara, diferenciaAjustesMes } from '@/lib/camara';
 import { saldoPorCliente, alertasCajones } from '@/lib/cajones';
 import { descartePorFaseMes } from '@/lib/descarte';
 import { faltaCargarEstaSemana, ultimaLectura, kmEnRango, VEHICULO_PARTNER } from '@/lib/kilometraje';
-import { getRegistrosCrossChex } from '@/lib/crosschex';
+import { getRegistrosCrossChex, getRegistrosCrossChexSecuencial } from '@/lib/crosschex';
 import { calcularResumenQuincena, rangoQuincena, rangoMes, tardanzasDeHoy, horasHombreEnRango } from '@/lib/personal';
 import Header from '@/components/Header';
 import GraficoCiclosSemanas from '@/components/GraficoCiclosSemanas';
@@ -282,10 +282,9 @@ export default async function PanelPage() {
     try {
       const rangoActualMes = rangoMes(hoy.getFullYear(), hoy.getMonth() + 1, cosechaMes.diaCorte);
       const rangoPasadoMes = rangoMes(mesAnteriorRef.getFullYear(), mesAnteriorRef.getMonth() + 1, cosechaMes.diaCorte);
-      const [regActual, regPasado] = await Promise.all([
-        getRegistrosCrossChex(rangoActualMes.desde, rangoActualMes.hasta),
-        getRegistrosCrossChex(rangoPasadoMes.desde, rangoPasadoMes.hasta),
-      ]);
+      // Secuencial, no Promise.all — pedirle 2 rangos a CrossChex al mismo tiempo puede
+      // hacer que alguno de los dos vuelva vacío (ver getRegistrosCrossChexSecuencial).
+      const [regActual, regPasado] = await getRegistrosCrossChexSecuencial([rangoActualMes, rangoPasadoMes]);
       const horasActual = horasHombreEnRango(regActual);
       const horasPasado = horasHombreEnRango(regPasado);
       productividad = {

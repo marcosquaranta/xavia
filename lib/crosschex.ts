@@ -6,6 +6,8 @@ import { randomUUID } from 'crypto';
 const API_URL = process.env.CROSSCHEX_API_URL || 'https://api.us.crosschexcloud.com/';
 
 let cachedToken: { token: string; exp: number } | null = null;
+// Pedido de token en curso (si hay uno) — ver comentario en getToken().
+let tokenEnCurso: Promise<string> | null = null;
 
 function ts(): string {
   return new Date().toISOString().replace('Z', '+00:00');
@@ -30,15 +32,29 @@ async function crosschexPost(nameSpace: string, nameAction: string, payload: Rec
 
 async function getToken(): Promise<string> {
   if (cachedToken && cachedToken.exp > Date.now() + 60_000) return cachedToken.token;
-  const apiKey = process.env.CROSSCHEX_API_KEY;
-  const apiSecret = process.env.CROSSCHEX_API_SECRET;
-  if (!apiKey || !apiSecret) throw new Error('Faltan CROSSCHEX_API_KEY / CROSSCHEX_API_SECRET en el entorno');
-  const json = await crosschexPost('authorize.token', 'token', { api_key: apiKey, api_secret: apiSecret });
-  const token = json?.payload?.token;
-  const expires = json?.payload?.expires;
-  if (!token) throw new Error(json?.payload?.message || 'No se pudo obtener token de CrossChex — revisá API_KEY/API_SECRET');
-  cachedToken = { token, exp: expires ? new Date(expires).getTime() : Date.now() + 3600_000 };
-  return token;
+  // Si ya hay un pedido de token en vuelo (varias llamadas a getRegistrosCrossChex
+  // concurrentes dentro del mismo request, ej. Productividad pidiendo mes actual y mes
+  // pasado a la vez), esperar ESE en vez de disparar uno nuevo por cada una — pedir
+  // varios tokens al mismo tiempo puede hacer que CrossChex responda distinto en cada
+  // uno (o rechace alguno), y eso es justamente lo que dejaba el indicador en blanco sin
+  // ningún error visible (el try/catch de quien llama se lo comía silenciosamente).
+  if (tokenEnCurso) return tokenEnCurso;
+  tokenEnCurso = (async () => {
+    try {
+      const apiKey = process.env.CROSSCHEX_API_KEY;
+      const apiSecret = process.env.CROSSCHEX_API_SECRET;
+      if (!apiKey || !apiSecret) throw new Error('Faltan CROSSCHEX_API_KEY / CROSSCHEX_API_SECRET en el entorno');
+      const json = await crosschexPost('authorize.token', 'token', { api_key: apiKey, api_secret: apiSecret });
+      const token = json?.payload?.token;
+      const expires = json?.payload?.expires;
+      if (!token) throw new Error(json?.payload?.message || 'No se pudo obtener token de CrossChex — revisá API_KEY/API_SECRET');
+      cachedToken = { token, exp: expires ? new Date(expires).getTime() : Date.now() + 3600_000 };
+      return token;
+    } finally {
+      tokenEnCurso = null;
+    }
+  })();
+  return tokenEnCurso;
 }
 
 export interface RegistroCrossChex {
@@ -82,5 +98,18 @@ export async function getRegistrosCrossChex(desde: string, hasta: string): Promi
     if (list.length < 100 || page >= pageCount) break;
     page++;
   }
+  return out;
+}
+
+// Trae fichajes de varios rangos SEGUIDOS, uno por vez (nunca en paralelo). Pedirle a
+// CrossChex varios rangos al mismo tiempo (ej. Productividad pidiendo 12 meses de una
+// sola vez con Promise.all) puede saturar la API y dejar algunos —o todos— los pedidos
+// vacíos o con error, absorbido en silencio por el try/catch de quien llama: así quedaba
+// el indicador de Productividad en blanco sin ningún aviso. Usar esto en vez de
+// `Promise.all(rangos.map(getRegistrosCrossChex))` en cualquier lugar que pida más de un
+// rango de una.
+export async function getRegistrosCrossChexSecuencial(rangos: { desde: string; hasta: string }[]): Promise<RegistroCrossChex[][]> {
+  const out: RegistroCrossChex[][] = [];
+  for (const r of rangos) out.push(await getRegistrosCrossChex(r.desde, r.hasta));
   return out;
 }

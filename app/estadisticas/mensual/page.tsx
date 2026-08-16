@@ -10,7 +10,7 @@ import { ocupacionPromedioPorNave, type OcupacionHistorialRow } from '@/lib/ocup
 import { productividadDeMes, productividadPlantasDeMes } from '@/lib/productividad';
 import { ocupacionMensualPorCultivo, eficienciaSiembraCosechaPorMes } from '@/lib/kpisOperativos';
 import { rangoMes } from '@/lib/personal';
-import { getRegistrosCrossChex } from '@/lib/crosschex';
+import { getRegistrosCrossChexSecuencial } from '@/lib/crosschex';
 import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionPrecioPromedio } from '@/lib/estadisticasVentas';
 import type { Lote, Movimiento, Ubicacion, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, Articulo, StockMes, StockCamara } from '@/lib/types';
 import Header from '@/components/Header';
@@ -275,10 +275,9 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
       mesesProd.push({ anio: d.getFullYear(), mes: d.getMonth() + 1, diaHasta: esUltimoMes ? refDate.getDate() : undefined });
     }
     // Un solo fetch a CrossChex por mes, reutilizado para las 2 variantes (paquetes y plantas).
-    const registrosPorMes = await Promise.all(mesesProd.map(({ anio, mes, diaHasta }) => {
-      const r = rangoMes(anio, mes, diaHasta);
-      return getRegistrosCrossChex(r.desde, r.hasta);
-    }));
+    // Secuencial (no Promise.all): pedirle 12 meses a CrossChex al mismo tiempo puede
+    // saturar la API y dejar el indicador entero en blanco (ver getRegistrosCrossChexSecuencial).
+    const registrosPorMes = await getRegistrosCrossChexSecuencial(mesesProd.map(({ anio, mes, diaHasta }) => rangoMes(anio, mes, diaHasta)));
     productividadMensualRep = mesesProd.map(({ anio, mes, diaHasta }, i) => productividadDeMes(lotesRep, registrosPorMes[i], anio, mes, diaHasta));
     productividadPlantasMensualRep = mesesProd.map(({ anio, mes, diaHasta }, i) => productividadPlantasDeMes(lotesRep, registrosPorMes[i], anio, mes, diaHasta));
   } catch {}
