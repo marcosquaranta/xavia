@@ -7,12 +7,10 @@ import { calcularCapacidadProductiva, resumenCiclosPorCultivoYNave } from '@/lib
 import { calcularCamara, diferenciaAjustesMes } from '@/lib/camara';
 import { calcularDriversMes, calcularUsoTeorico } from '@/lib/usoTeorico';
 import { ocupacionPromedioPorNave, type OcupacionHistorialRow } from '@/lib/ocupacion';
-import { productividadDeMes, productividadPlantasDeMes } from '@/lib/productividad';
+import { productividadDeMes, productividadPlantasDeMes, horasHombreDesdeCache } from '@/lib/productividad';
 import { ocupacionMensualPorCultivo, eficienciaSiembraCosechaPorMes } from '@/lib/kpisOperativos';
-import { rangoMes } from '@/lib/personal';
-import { getRegistrosCrossChexSecuencial } from '@/lib/crosschex';
 import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionPrecioPromedio } from '@/lib/estadisticasVentas';
-import type { Lote, Movimiento, Ubicacion, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, Articulo, StockMes, StockCamara } from '@/lib/types';
+import type { Lote, Movimiento, Ubicacion, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, Articulo, StockMes, StockCamara, ProductividadDiaria } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from '../GraficoEvolucion';
 import GraficoPesaje from '../GraficoPesaje';
@@ -163,14 +161,16 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
   let ventas: VentaDia[] = [], clientes: ClienteVenta[] = [], precios: PrecioVenta[] = [], historicas: VentaHistorica[] = [];
   let articulos: Articulo[] = [], stocks: StockMes[] = [], registrosCamara: StockCamara[] = [];
   let ocupHistRows: OcupacionHistorialRow[] = [];
+  let productividadCache: ProductividadDiaria[] = [];
   let err: string | null = null;
   try {
-    [lotes, movimientos, ubicaciones, ventas, clientes, precios, historicas, articulos, stocks, registrosCamara] = await Promise.all([
+    [lotes, movimientos, ubicaciones, ventas, clientes, precios, historicas, articulos, stocks, registrosCamara, productividadCache] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'), readSheet<Ubicacion>('Ubicaciones'),
       readSheet<VentaDia>('Ventas'), readSheet<ClienteVenta>('Clientes').catch(() => []),
       readSheet<PrecioVenta>('Precios').catch(() => []), readSheet<VentaHistorica>('VentasHistoricas').catch(() => []),
       readSheet<Articulo>('Articulos'), readSheet<StockMes>('Stocks'),
       readSheet<StockCamara>('StockCamara').catch(() => []),
+      readSheet<ProductividadDiaria>('ProductividadDiaria').catch(() => []),
     ]);
     ocupHistRows = await readSheet<OcupacionHistorialRow>('OcupacionHistorial').catch(() => []);
   } catch (e: any) { err = e?.message || 'Error cargando datos'; }
@@ -261,26 +261,25 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
     return out.sort((a, b) => a.fecha.localeCompare(b.fecha));
   })();
 
-  // Productividad por mes — últimos 12 meses hasta el cierre del mes elegido. Un fetch a
-  // CrossChex POR MES (~30 días cada uno) en vez de todo el rango de una sola vez — pedirle
-  // a CrossChex varias semanas/meses juntos no devolvía los datos completos.
-  let productividadMensualRep: ReturnType<typeof productividadDeMes>[] = [];
-  let productividadPlantasMensualRep: ReturnType<typeof productividadPlantasDeMes>[] = [];
-  try {
-    const NMESES = 12;
-    const mesesProd: { anio: number; mes: number; diaHasta?: number }[] = [];
-    for (let i = NMESES - 1; i >= 0; i--) {
-      const d = new Date(refDate.getFullYear(), refDate.getMonth() - i, 1);
-      const esUltimoMes = d.getFullYear() === refDate.getFullYear() && d.getMonth() === refDate.getMonth();
-      mesesProd.push({ anio: d.getFullYear(), mes: d.getMonth() + 1, diaHasta: esUltimoMes ? refDate.getDate() : undefined });
-    }
-    // Un solo fetch a CrossChex por mes, reutilizado para las 2 variantes (paquetes y plantas).
-    // Secuencial (no Promise.all): pedirle 12 meses a CrossChex al mismo tiempo puede
-    // saturar la API y dejar el indicador entero en blanco (ver getRegistrosCrossChexSecuencial).
-    const registrosPorMes = await getRegistrosCrossChexSecuencial(mesesProd.map(({ anio, mes, diaHasta }) => rangoMes(anio, mes, diaHasta)));
-    productividadMensualRep = mesesProd.map(({ anio, mes, diaHasta }, i) => productividadDeMes(lotesRep, registrosPorMes[i], anio, mes, diaHasta));
-    productividadPlantasMensualRep = mesesProd.map(({ anio, mes, diaHasta }, i) => productividadPlantasDeMes(lotesRep, registrosPorMes[i], anio, mes, diaHasta));
-  } catch {}
+  // Productividad por mes — últimos 12 meses hasta el cierre del mes elegido, sumada desde
+  // la caché diaria ProductividadDiaria (ver lib/types.ts) en vez de pedirle a CrossChex en
+  // vivo acá — CrossChex limita a 1 pedido cada 15 segundos, no da para pedirle 12 meses en
+  // cada carga de esta página. La caché la carga /api/cron/productividad-diaria por día.
+  const NMESES = 12;
+  const mesesProd: { anio: number; mes: number; diaHasta?: number }[] = [];
+  for (let i = NMESES - 1; i >= 0; i--) {
+    const d = new Date(refDate.getFullYear(), refDate.getMonth() - i, 1);
+    const esUltimoMes = d.getFullYear() === refDate.getFullYear() && d.getMonth() === refDate.getMonth();
+    mesesProd.push({ anio: d.getFullYear(), mes: d.getMonth() + 1, diaHasta: esUltimoMes ? refDate.getDate() : undefined });
+  }
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const horasDelMesRep = ({ anio, mes, diaHasta }: { anio: number; mes: number; diaHasta?: number }) => {
+    const ultimoDia = new Date(anio, mes, 0).getDate();
+    const hasta = diaHasta ? Math.min(diaHasta, ultimoDia) : ultimoDia;
+    return horasHombreDesdeCache(productividadCache, `${anio}-${pad2(mes)}-01`, `${anio}-${pad2(mes)}-${pad2(hasta)}`);
+  };
+  const productividadMensualRep = mesesProd.map(({ anio, mes, diaHasta }) => productividadDeMes(lotesRep, horasDelMesRep({ anio, mes, diaHasta }), anio, mes, diaHasta));
+  const productividadPlantasMensualRep = mesesProd.map(({ anio, mes, diaHasta }) => productividadPlantasDeMes(lotesRep, horasDelMesRep({ anio, mes, diaHasta }), anio, mes, diaHasta));
   const evoProductividad = {
     series: [{ nombre: 'Paquetes/hora-hombre', color: '#2563eb', puntos: productividadMensualRep.map((p, i) => [i, p.productividad ?? 0] as [number, number]).filter(p => p[1] > 0) }],
     labels: productividadMensualRep.map(p => p.label), hoyIdx: productividadMensualRep.length - 1,

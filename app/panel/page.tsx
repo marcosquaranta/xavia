@@ -5,7 +5,7 @@ import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
 import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, cosechadoEsteMes } from '@/lib/estadisticas';
 import { codigoCultivo } from '@/lib/lotes';
-import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, Empleado, PersonalQuincena, CajonMovimiento, KilometrajeVehiculo } from '@/lib/types';
+import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, Empleado, PersonalQuincena, CajonMovimiento, KilometrajeVehiculo, ProductividadDiaria } from '@/lib/types';
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
 import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
 import { evolucionVentaPorArticulo, resumenMesActual } from '@/lib/estadisticasVentas';
@@ -14,8 +14,9 @@ import { calcularCamara, diferenciaAjustesMes } from '@/lib/camara';
 import { saldoPorCliente, alertasCajones } from '@/lib/cajones';
 import { descartePorFaseMes } from '@/lib/descarte';
 import { faltaCargarEstaSemana, ultimaLectura, kmEnRango, VEHICULO_PARTNER } from '@/lib/kilometraje';
-import { getRegistrosCrossChex, getRegistrosCrossChexSecuencial } from '@/lib/crosschex';
-import { calcularResumenQuincena, rangoQuincena, rangoMes, tardanzasDeHoy, horasHombreEnRango } from '@/lib/personal';
+import { getRegistrosCrossChex } from '@/lib/crosschex';
+import { horasHombreDesdeCache } from '@/lib/productividad';
+import { calcularResumenQuincena, rangoQuincena, tardanzasDeHoy } from '@/lib/personal';
 import Header from '@/components/Header';
 import GraficoCiclosSemanas from '@/components/GraficoCiclosSemanas';
 import GraficoDistribucionMesadas from '@/components/GraficoDistribucionMesadas';
@@ -26,6 +27,10 @@ import KilometrajeReminder from '@/components/KilometrajeReminder';
 import { GraficoVentaPorArticulo } from '@/app/ventas/VentasEvolucionCharts';
 
 export const dynamic = 'force-dynamic';
+// Tardanzas de hoy sigue pidiéndole a CrossChex en vivo (necesita el fichaje del día, no
+// se puede cachear) — con el límite real de CrossChex (1 pedido/15s, ver lib/crosschex.ts)
+// un token+datos "en frío" puede tardar ~15-20s, más que el timeout por defecto.
+export const maxDuration = 60;
 
 const TIPO_LABEL: Record<string, { label: string; color: string; bg: string }> = {
   siembra:    { label: 'Siembra',    color: '#92400e', bg: '#fef9c3' },
@@ -269,29 +274,29 @@ export default async function PanelPage() {
   }
 
   // Productividad, Descarte del mes y Plantas/km — arman el bloque "Producción" de
-  // Indicadores (home, solo admin). Van en tries SEPARADOS a propósito: Productividad
-  // depende de CrossChex (puede tirar error — token vencido, API caída, etc.), mientras
-  // que Descarte y Plantas/km salen de datos que ya están cargados (Sheets) y no deberían
-  // quedar en blanco solo porque CrossChex falló ese momento — antes compartían un mismo
-  // try y un error de CrossChex tiraba abajo los 3 indicadores de golpe.
+  // Indicadores (home, solo admin). Mismo rango "mes en curso hasta hoy vs. mes pasado
+  // hasta el mismo día" para los 3, así que se calcula una sola vez acá arriba.
   const cosechaMes = cosechadoEsteMes(lotes);
   const mesAnteriorRef = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+  const desdeActualStr = fmtISODate(new Date(hoy.getFullYear(), hoy.getMonth(), 1));
+  const hastaActualStr = fmtISODate(hoy);
+  const desdePasadoStr = fmtISODate(new Date(mesAnteriorRef.getFullYear(), mesAnteriorRef.getMonth(), 1));
+  const hastaPasadoStr = fmtISODate(new Date(mesAnteriorRef.getFullYear(), mesAnteriorRef.getMonth(), cosechaMes.diaCorte));
 
+  // Productividad = paquetes cosechados ÷ horas-hombre reales, sumadas desde la caché
+  // diaria ProductividadDiaria (ver lib/types.ts) en vez de pedirle a CrossChex en vivo —
+  // CrossChex limita a 1 pedido cada 15 segundos, así que ya no se le pregunta acá; la
+  // caché la carga /api/cron/productividad-diaria una vez por día. Sin try/catch porque
+  // ya no depende de una API externa que pueda fallar — a lo sumo readSheet devuelve [].
   let productividad: { actual: number | null; pasado: number | null } = { actual: null, pasado: null };
   if (user.rol === 'admin') {
-    try {
-      const rangoActualMes = rangoMes(hoy.getFullYear(), hoy.getMonth() + 1, cosechaMes.diaCorte);
-      const rangoPasadoMes = rangoMes(mesAnteriorRef.getFullYear(), mesAnteriorRef.getMonth() + 1, cosechaMes.diaCorte);
-      // Secuencial, no Promise.all — pedirle 2 rangos a CrossChex al mismo tiempo puede
-      // hacer que alguno de los dos vuelva vacío (ver getRegistrosCrossChexSecuencial).
-      const [regActual, regPasado] = await getRegistrosCrossChexSecuencial([rangoActualMes, rangoPasadoMes]);
-      const horasActual = horasHombreEnRango(regActual);
-      const horasPasado = horasHombreEnRango(regPasado);
-      productividad = {
-        actual: horasActual > 0 ? Math.round((cosechaMes.actual / horasActual) * 100) / 100 : null,
-        pasado: horasPasado > 0 ? Math.round((cosechaMes.pasado / horasPasado) * 100) / 100 : null,
-      };
-    } catch {}
+    const productividadCache = await readSheet<ProductividadDiaria>('ProductividadDiaria').catch(() => []);
+    const horasActual = horasHombreDesdeCache(productividadCache, desdeActualStr, hastaActualStr);
+    const horasPasado = horasHombreDesdeCache(productividadCache, desdePasadoStr, hastaPasadoStr);
+    productividad = {
+      actual: horasActual > 0 ? Math.round((cosechaMes.actual / horasActual) * 100) / 100 : null,
+      pasado: horasPasado > 0 ? Math.round((cosechaMes.pasado / horasPasado) * 100) / 100 : null,
+    };
   }
 
   // Descarte del mes (plantas, 3 etapas Plantín→F1 / F1→F2 / F2→Cosecha, sin cámara —
@@ -323,10 +328,6 @@ export default async function PanelPage() {
   let plantasPorKm: { actual: number | null; pasado: number | null } = { actual: null, pasado: null };
   if (user.rol === 'admin') {
     try {
-      const desdeActualStr = fmtISODate(new Date(hoy.getFullYear(), hoy.getMonth(), 1));
-      const hastaActualStr = fmtISODate(hoy);
-      const desdePasadoStr = fmtISODate(new Date(mesAnteriorRef.getFullYear(), mesAnteriorRef.getMonth(), 1));
-      const hastaPasadoStr = fmtISODate(new Date(mesAnteriorRef.getFullYear(), mesAnteriorRef.getMonth(), cosechaMes.diaCorte));
       const plantasActual = plantasCosechadasEnRango(lotes, desdeActualStr, hastaActualStr);
       const plantasPasado = plantasCosechadasEnRango(lotes, desdePasadoStr, hastaPasadoStr);
       const kmActual = kmEnRango(registrosKm, VEHICULO_PARTNER, desdeActualStr, hastaActualStr);

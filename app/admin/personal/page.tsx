@@ -9,6 +9,9 @@ import Header from '@/components/Header';
 import PersonalManager from './PersonalManager';
 
 export const dynamic = 'force-dynamic';
+// Pide fichajes de la quincena a CrossChex en vivo — con el límite real de CrossChex
+// (1 pedido/15s, ver lib/crosschex.ts) un token+datos "en frío" puede tardar ~15-20s.
+export const maxDuration = 60;
 
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 

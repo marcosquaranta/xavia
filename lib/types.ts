@@ -237,6 +237,18 @@ export interface KilometrajeVehiculo {
   usuario: string;
 }
 
+// Caché diaria de horas-hombre reales (CrossChex), cargada por el cron
+// /api/cron/productividad-diaria — CrossChex limita a 1 pedido cada 15 segundos, así que
+// pedirle en vivo varios meses de fichajes en cada carga del Panel/Estadísticas (como se
+// hacía antes) satura la API y deja el indicador de Productividad vacío. El cron trae solo
+// "ayer" una vez por día (2-3 pedidos, entra cómodo en el límite) y lo deja acá; Panel y
+// Estadísticas suman estas filas en vez de llamar a CrossChex directo.
+export interface ProductividadDiaria {
+  fecha: string; // YYYY-MM-DD
+  horas_hombre: number | string;
+  actualizado: string; // ISO — cuándo se cargó/actualizó esta fila
+}
+
 export interface StockCamara {
   id_registro: string;
   // 'lechuga' queda solo por compatibilidad con registros viejos (antes del split

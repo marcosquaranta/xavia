@@ -13,21 +13,43 @@ function ts(): string {
   return new Date().toISOString().replace('Z', '+00:00');
 }
 
+// CrossChex Cloud limita a 1 pedido cada 15 segundos (dato confirmado, no está documentado
+// en la API) — y ese límite aplica a CUALQUIER pedido (token, datos, cada página de una
+// paginación), no solo a pedidos del mismo tipo. Esta cola global asegura que TODOS los
+// pedidos de este módulo —vengan de donde vengan, en el mismo request o no— salgan
+// separados por al menos ese intervalo, encadenándolos en el orden en que se piden (nunca
+// en paralelo). Es lo que de fondo explica dos síntomas que parecían distintos: un rango
+// ancho que necesita varias páginas fallaba (páginas pedidas una atrás de otra sin pausa),
+// y pedir varios rangos a la vez (ej. Productividad con Promise.all) también fallaba.
+const INTERVALO_MIN_MS = 15_000;
+let colaCrossChex: Promise<void> = Promise.resolve();
+
+function encolar<T>(fn: () => Promise<T>): Promise<T> {
+  const miTurno = colaCrossChex.then(fn);
+  colaCrossChex = miTurno.then(
+    () => new Promise((resolve) => setTimeout(resolve, INTERVALO_MIN_MS)),
+    () => new Promise((resolve) => setTimeout(resolve, INTERVALO_MIN_MS)), // si falló, igual esperar antes del próximo
+  );
+  return miTurno;
+}
+
 async function crosschexPost(nameSpace: string, nameAction: string, payload: Record<string, any>, token?: string): Promise<any> {
-  const body: Record<string, any> = {
-    header: { nameSpace, nameAction, version: '1.0', requestId: randomUUID(), timestamp: ts() },
-    payload,
-  };
-  if (token) body.authorize = { type: 'token', token };
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    cache: 'no-store',
+  return encolar(async () => {
+    const body: Record<string, any> = {
+      header: { nameSpace, nameAction, version: '1.0', requestId: randomUUID(), timestamp: ts() },
+      payload,
+    };
+    if (token) body.authorize = { type: 'token', token };
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`CrossChex ${nameSpace}.${nameAction}: HTTP ${res.status}`);
+    return json;
   });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`CrossChex ${nameSpace}.${nameAction}: HTTP ${res.status}`);
-  return json;
 }
 
 async function getToken(): Promise<string> {
@@ -101,15 +123,3 @@ export async function getRegistrosCrossChex(desde: string, hasta: string): Promi
   return out;
 }
 
-// Trae fichajes de varios rangos SEGUIDOS, uno por vez (nunca en paralelo). Pedirle a
-// CrossChex varios rangos al mismo tiempo (ej. Productividad pidiendo 12 meses de una
-// sola vez con Promise.all) puede saturar la API y dejar algunos —o todos— los pedidos
-// vacíos o con error, absorbido en silencio por el try/catch de quien llama: así quedaba
-// el indicador de Productividad en blanco sin ningún aviso. Usar esto en vez de
-// `Promise.all(rangos.map(getRegistrosCrossChex))` en cualquier lugar que pida más de un
-// rango de una.
-export async function getRegistrosCrossChexSecuencial(rangos: { desde: string; hasta: string }[]): Promise<RegistroCrossChex[][]> {
-  const out: RegistroCrossChex[][] = [];
-  for (const r of rangos) out.push(await getRegistrosCrossChex(r.desde, r.hasta));
-  return out;
-}
