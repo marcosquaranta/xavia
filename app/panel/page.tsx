@@ -63,12 +63,13 @@ function plantasCosechadasEnRango(lotes: Lote[], desde: string, hasta: string): 
   return plantas;
 }
 
-interface ItemIndicador { label: string; valor: string; pct: number | null; mejorSiSube: boolean }
+interface ItemIndicador { label: string; valor: string; pct: number | null; mejorSiSube: boolean; detalle?: string }
 
 // Tarjeta chica por métrica: valor grande destacado + delta color-coded (verde/rojo
 // según si subir es bueno o malo para esa métrica en particular) — reemplaza la fila
-// de lista plana anterior para que los números "salten" más a la vista.
-function TileIndicador({ label, valor, pct, mejorSiSube }: ItemIndicador) {
+// de lista plana anterior para que los números "salten" más a la vista. `detalle`
+// opcional agrega una línea chica debajo (ej. desglose por fase de Descartes).
+function TileIndicador({ label, valor, pct, mejorSiSube, detalle }: ItemIndicador) {
   const bueno = pct === null ? null : mejorSiSube ? pct > 0 : pct < 0;
   return (
     <div style={{ background:'#fafafa', border:'1px solid #f1f0eb', borderRadius:'8px', padding:'9px 11px', display:'flex', flexDirection:'column', gap:'3px', minWidth:0 }}>
@@ -81,6 +82,7 @@ function TileIndicador({ label, valor, pct, mejorSiSube }: ItemIndicador) {
           </span>
         )}
       </div>
+      {detalle && <span style={{ fontSize:'9.5px', color:'#9ca3af', lineHeight:1.3 }}>{detalle}</span>}
     </div>
   );
 }
@@ -296,14 +298,21 @@ export default async function PanelPage() {
   // Descarte del mes (plantas, 3 etapas Plantín→F1 / F1→F2 / F2→Cosecha, sin cámara —
   // mismo criterio que "Eficiencia Siembra → Cosecha", cámara queda afuera por acuerdo con
   // Marcelo). Meses calendario completos — actual = mes en curso hasta ahora, pasado = mes
-  // calendario anterior completo.
-  let descarteMes: { actual: number | null; pasado: number | null } = { actual: null, pasado: null };
+  // calendario anterior completo. Guarda también el desglose por fase (sumado entre
+  // cultivos) para mostrarlo en letra chica debajo del número total.
+  let descarteMes: { actual: number | null; pasado: number | null; porFase: { plantinF1: number; f1F2: number; f2Cosecha: number } | null } = { actual: null, pasado: null, porFase: null };
   if (user.rol === 'admin') {
     try {
       const [mesPasadoDF, mesActualDF] = descartePorFaseMes(lotes, movimientos, registrosCamara, 2);
       const sumaFases = (m: typeof mesActualDF) => (['rucula', 'lechuga_crespa', 'lechuga_roble'] as const)
         .reduce((a, c) => a + m[c].plantinF1 + m[c].f1F2 + m[c].f2Cosecha, 0);
-      descarteMes = { actual: Math.round(sumaFases(mesActualDF)), pasado: Math.round(sumaFases(mesPasadoDF)) };
+      const cultivosDF = ['rucula', 'lechuga_crespa', 'lechuga_roble'] as const;
+      const porFase = {
+        plantinF1: Math.round(cultivosDF.reduce((a, c) => a + mesActualDF[c].plantinF1, 0)),
+        f1F2: Math.round(cultivosDF.reduce((a, c) => a + mesActualDF[c].f1F2, 0)),
+        f2Cosecha: Math.round(cultivosDF.reduce((a, c) => a + mesActualDF[c].f2Cosecha, 0)),
+      };
+      descarteMes = { actual: Math.round(sumaFases(mesActualDF)), pasado: Math.round(sumaFases(mesPasadoDF)), porFase };
     } catch {}
   }
 
@@ -602,6 +611,9 @@ export default async function PanelPage() {
                   ...(descarteMes.actual !== null ? [{
                     label: 'Descartes (mes)', valor: `${descarteMes.actual.toLocaleString('es-AR')} pl`,
                     pct: descarteMes.pasado !== null ? pctVs(descarteMes.actual, descarteMes.pasado) : null, mejorSiSube: false,
+                    detalle: descarteMes.porFase
+                      ? `Plantín→F1 ${descarteMes.porFase.plantinF1.toLocaleString('es-AR')} · F1→F2 ${descarteMes.porFase.f1F2.toLocaleString('es-AR')} · F2→Cosecha ${descarteMes.porFase.f2Cosecha.toLocaleString('es-AR')}`
+                      : undefined,
                   }] : []),
                   ...(plantasPorKm.actual !== null ? [{
                     label: 'Plantas cosechadas / km', valor: `${plantasPorKm.actual.toLocaleString('es-AR')} pl/km`,
