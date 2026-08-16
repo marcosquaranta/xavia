@@ -94,12 +94,18 @@ function TileIndicador({ label, valor, pct, mejorSiSube, detalle }: ItemIndicado
 
 // Grupo de indicadores relacionados (Ventas / Ciclos / Pesos / Ocupación), cada uno
 // en su propia tarjeta con header con ícono — más moderno que la lista única de antes.
-function GrupoIndicadores({ titulo, icono, color, items }: { titulo: string; icono: string; color: string; items: ItemIndicador[] }) {
+// `link` opcional agrega un "Ver detalle →" en el header, para grupos que tienen su
+// propia página con más profundidad (ej. Ocupación → /ocupacion) sin duplicar esa
+// información en una tarjeta aparte en el home.
+function GrupoIndicadores({ titulo, icono, color, items, link }: { titulo: string; icono: string; color: string; items: ItemIndicador[]; link?: { href: string; texto: string } }) {
   return (
     <div style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'12px' }}>
-      <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'9px' }}>
-        <span style={{ fontSize:'14px' }}>{icono}</span>
-        <p style={{ margin:0, fontSize:'11px', fontWeight:800, color, textTransform:'uppercase', letterSpacing:'0.4px' }}>{titulo}</p>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'6px', marginBottom:'9px' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+          <span style={{ fontSize:'14px' }}>{icono}</span>
+          <p style={{ margin:0, fontSize:'11px', fontWeight:800, color, textTransform:'uppercase', letterSpacing:'0.4px' }}>{titulo}</p>
+        </div>
+        {link && <Link href={link.href} style={{ fontSize:'10.5px', color:'#9ca3af', textDecoration:'none', fontWeight:600 }}>{link.texto}</Link>}
       </div>
       <div style={{ display:'flex', flexDirection:'column', gap:'7px' }}>
         {items.map(it => <TileIndicador key={it.label} {...it} />)}
@@ -599,7 +605,7 @@ export default async function PanelPage() {
                 { label: 'Lechuga hoja de roble (paq)', valor: pesoMesPanel.lechugaRoble > 0 ? `${pesoMesPanel.lechugaRoble}g` : '—',
                   pct: pctVs(pesoMesPanel.lechugaRoble, pesoMesPasadoPanel.lechugaRoble), mejorSiSube: true },
               ]} />
-              <GrupoIndicadores titulo="Ocupación" icono="🏠" color="#7c3aed" items={[
+              <GrupoIndicadores titulo="Ocupación" icono="🏠" color="#7c3aed" link={{ href: '/ocupacion', texto: 'Ver por mesada →' }} items={[
                 { label: 'Nave 1', valor: `${ocupNaves.find((n:any)=>n.nave===1)?.pct ?? 0}%`, pct: null, mejorSiSube: true },
                 { label: 'Nave 2', valor: `${ocupNaves.find((n:any)=>n.nave===2)?.pct ?? 0}%`, pct: null, mejorSiSube: true },
               ]} />
@@ -627,9 +633,7 @@ export default async function PanelPage() {
           </div>
         </div>
 
-        {/* ══ FILA 2: CICLOS + ACTIVIDAD + OCUPACIÓN (antes 2 filas separadas — se
-            fusionaron Actividad y Ocupación por mesada en una sola fila para no acumular
-            tantas secciones distintas en el home) ══ */}
+        {/* ══ FILA 2: CICLOS + ACTIVIDAD ══ */}
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))', gap:'12px', marginBottom:'14px', alignItems:'start' }}>
             <div className="card" style={{ margin:0 }}>
               <p className="card-title">Ciclos en mesadas — 8 semanas</p>
@@ -695,50 +699,6 @@ export default async function PanelPage() {
               </div>
             )}
           </div>
-
-          {/* Ocupación por mesada — antes su propia fila aparte, fusionada acá con
-              Actividad para no acumular tantas secciones sueltas en el home. */}
-          <div className="card" style={{ margin:0 }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
-              <p className="card-title" style={{ margin:0 }}>Ocupación por mesada</p>
-              <Link href="/ocupacion" style={{ fontSize:'11px', color:'#6b7280', textDecoration:'none' }}>Ver detalle →</Link>
-            </div>
-            <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
-              {tubosMesadas.map((nave: any) => (
-                <div key={nave.nave}>
-                  {(() => { const f2=(nave.mesadas||[]).filter((m:any)=>m.sector_fase!=='fase_1'); const tot=f2.reduce((s:number,m:any)=>s+m.tubos_totales,0); const ocu=f2.reduce((s:number,m:any)=>s+m.tubos_ocupados,0); const pct=tot>0?Math.round(ocu/tot*100):0; return (<>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
-                    <span style={{ background:nave.nave===1?'#881337':'#7c3aed', color:'white', padding:'2px 10px', borderRadius:'5px', fontSize:'12px', fontWeight:700 }}>NAVE {nave.nave}</span>
-                    <span style={{ fontSize:'11px', color:'#6b7280' }}>{ocu}/{tot} · <strong>{pct}%</strong></span>
-                  </div>
-                  <div style={{ height:'4px', background:'#f3f4f6', borderRadius:'2px', overflow:'hidden', marginBottom:'8px' }}>
-                    <div style={{ width:Math.min(100,pct)+'%', height:'100%', background:nave.nave===1?'#881337':'#7c3aed' }} />
-                  </div>
-                  </>); })()}
-                  <table style={{ fontSize:'11px', width:'100%' }}>
-                    <thead><tr>
-                      <th style={{ textAlign:'left', padding:'3px 6px' }}>Mesada</th>
-                      <th style={{ textAlign:'right' }}>Tot.</th>
-                      <th style={{ textAlign:'right' }}>Ocup.</th>
-                      <th style={{ textAlign:'right' }}>Lib.</th>
-                      <th style={{ textAlign:'right' }}>%</th>
-                    </tr></thead>
-                    <tbody>
-                      {(nave.mesadas||[]).filter((m:any)=>m.sector_fase!=='fase_1').map((m: any) => (
-                        <tr key={m.id_ubicacion}>
-                          <td style={{ padding:'3px 6px', fontWeight:500 }}>{m.nombre.replace(/^Nave \d+ - /,'').replace(' (F2)','')}</td>
-                          <td style={{ textAlign:'right', color:'#6b7280' }}>{m.tubos_totales}</td>
-                          <td style={{ textAlign:'right', fontWeight:600 }}>{m.tubos_ocupados}</td>
-                          <td style={{ textAlign:'right', color:m.tubos_libres>0?'#059669':'#9ca3af' }}>{m.tubos_libres}</td>
-                          <td style={{ textAlign:'right', fontWeight:600, color:m.ocupacion_pct>=80?'#059669':m.ocupacion_pct>=40?'#d97706':'#9ca3af' }}>{m.ocupacion_pct}%</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* ══ FILA 3: PROYECCIÓN DE COSECHA SEMANAL ══ */}
@@ -748,13 +708,12 @@ export default async function PanelPage() {
           <GraficoDistribucionMesadas datos={proyeccionCosecha} />
         </div>
 
-        {/* ══ ACCIONES RÁPIDAS ══ */}
+        {/* ══ ACCIONES RÁPIDAS ══ — Ocupación y Actividad ya tienen su propio "Ver
+            detalle →"/"Ver todos →" en las tarjetas de arriba, no hace falta repetirlos acá. */}
         <div className="card" style={{ marginBottom:'14px' }}>
           <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', alignItems:'center' }}>
             <Link href="/cultivos/nuevo" className="btn">+ Nuevo lote</Link>
-            <Link href="/ocupacion" className="btn secondary">Ocupación</Link>
             {user.rol === 'admin' && <Link href="/estadisticas" className="btn secondary">Estadísticas</Link>}
-            <Link href="/movimientos" className="btn secondary">Actividad</Link>
           </div>
         </div>
 
