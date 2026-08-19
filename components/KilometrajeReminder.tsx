@@ -1,12 +1,15 @@
 'use client';
 import { useState } from 'react';
 
-export default function KilometrajeReminder({ ultimoKm, ultimaFecha }: { ultimoKm: number | null; ultimaFecha: string | null }) {
+export default function KilometrajeReminder({ ultimoKm, ultimaFecha, ultimoIdKm, faltaCargar }: {
+  ultimoKm: number | null; ultimaFecha: string | null; ultimoIdKm: string | null; faltaCargar: boolean;
+}) {
   const [abierto, setAbierto] = useState(false);
   const [km, setKm] = useState('');
   const [notas, setNotas] = useState('');
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; s: string } | null>(null);
+  const [corrigiendo, setCorrigiendo] = useState(false);
 
   async function registrar() {
     if (!(Number(km) > 0)) { setMsg({ t: 'err', s: 'Ingresá el kilometraje.' }); return; }
@@ -24,6 +27,54 @@ export default function KilometrajeReminder({ ultimoKm, ultimaFecha }: { ultimoK
       setMsg({ t: 'err', s: e.message || 'Error al guardar' });
       setLoading(false);
     }
+  }
+
+  // Si te equivocaste al cargar (ej. faltó un dígito), la única forma de cargar un número
+  // MENOR es borrar esa última carga primero — el odómetro no puede "retroceder" para
+  // cualquier otro caso, a propósito (para agarrar errores de tipeo).
+  async function borrarUltima() {
+    if (!ultimoIdKm) return;
+    setLoading(true); setMsg(null);
+    try {
+      const res = await fetch('/api/kilometraje', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_km: ultimoIdKm }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || 'Error al borrar');
+      setMsg({ t: 'ok', s: '✓ Carga borrada. Recargando para volver a cargar…' });
+      setTimeout(() => window.location.reload(), 1200);
+    } catch (e: any) {
+      setMsg({ t: 'err', s: e.message || 'Error al borrar' });
+      setLoading(false);
+    }
+  }
+
+  // Ya se cargó algo esta semana (no falta) — solo mostrar una línea chica con la opción
+  // de corregir por si el número cargado estuvo mal, sin el banner grande de recordatorio.
+  if (!faltaCargar) {
+    if (ultimoKm === null) return null;
+    return (
+      <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 14px', marginBottom: '14px', fontSize: '12px', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+        <span>🚗 Última carga de km del Partner: <strong>{ultimoKm.toLocaleString('es-AR')} km</strong>{ultimaFecha ? ` (${ultimaFecha})` : ''}.</span>
+        {!corrigiendo ? (
+          <button onClick={() => setCorrigiendo(true)} style={{ background: 'none', border: 'none', color: '#2563eb', fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: 0 }}>
+            ¿Cargaste mal? Corregir
+          </button>
+        ) : (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>Borrar esta carga y volver a cargar el número correcto:</span>
+            <button onClick={borrarUltima} disabled={loading} className="btn secondary" style={{ fontSize: '11px', padding: '3px 10px', color: '#dc2626', borderColor: '#fecaca' }}>
+              {loading ? 'Borrando…' : 'Borrar última carga'}
+            </button>
+            <button onClick={() => setCorrigiendo(false)} disabled={loading} style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: '12px', cursor: 'pointer', padding: 0 }}>
+              Cancelar
+            </button>
+          </span>
+        )}
+        {msg && <span style={{ fontWeight: 600, color: msg.t === 'ok' ? '#059669' : '#dc2626' }}>{msg.s}</span>}
+      </div>
+    );
   }
 
   return (

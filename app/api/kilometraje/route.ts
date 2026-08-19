@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { appendRowObj, asegurarHoja, readSheet } from '@/lib/sheets';
+import { appendRowObj, asegurarHoja, deleteRow, readSheet } from '@/lib/sheets';
 import { VEHICULO_PARTNER, ultimaLectura } from '@/lib/kilometraje';
 import type { KilometrajeVehiculo } from '@/lib/types';
 
@@ -31,6 +31,31 @@ export async function POST(req: NextRequest) {
       notas: notas || '', usuario: user.email,
     });
     return NextResponse.json({ ok: true, id_km: idNuevo });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'server_error' }, { status: 500 });
+  }
+}
+
+// Corrige un error de tipeo en la ÚLTIMA carga (ej. faltó un dígito) — borra esa lectura
+// para poder volver a cargar el número correcto sin chocar con la validación de "el
+// odómetro no retrocede" de arriba. Por seguridad solo deja borrar la lectura MÁS
+// RECIENTE del vehículo (no cualquier registro histórico): evita que se pueda voltear
+// datos viejos desde acá, y de paso es justo el caso de uso real (recién cargaste mal).
+export async function DELETE(req: NextRequest) {
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
+  try {
+    const { id_km } = await req.json();
+    if (!id_km) return NextResponse.json({ error: 'datos_incompletos' }, { status: 400 });
+
+    const registros = await readSheet<KilometrajeVehiculo>('Kilometraje');
+    const ultima = ultimaLectura(registros, VEHICULO_PARTNER);
+    if (!ultima || String(ultima.id_km) !== String(id_km)) {
+      return NextResponse.json({ error: 'Solo se puede borrar la última carga registrada.' }, { status: 400 });
+    }
+
+    await deleteRow('Kilometraje', 'id_km', String(id_km));
+    return NextResponse.json({ ok: true });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'server_error' }, { status: 500 });
   }

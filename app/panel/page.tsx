@@ -483,12 +483,12 @@ export default async function PanelPage() {
           </div>
         )}
 
-        {faltaKm && (
-          <KilometrajeReminder
-            ultimoKm={ultimaLecturaKm ? Number(ultimaLecturaKm.km_acumulado) : null}
-            ultimaFecha={ultimaLecturaKm ? ultimaLecturaKm.fecha : null}
-          />
-        )}
+        <KilometrajeReminder
+          ultimoKm={ultimaLecturaKm ? Number(ultimaLecturaKm.km_acumulado) : null}
+          ultimaFecha={ultimaLecturaKm ? ultimaLecturaKm.fecha : null}
+          ultimoIdKm={ultimaLecturaKm ? String(ultimaLecturaKm.id_km) : null}
+          faltaCargar={faltaKm}
+        />
 
         {/* ══ TAREAS DE HOY ══ */}
         <div style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)', border:'1px solid #bfdbfe', borderRadius:'10px', padding:'14px', marginBottom:'14px' }}>
