@@ -51,32 +51,38 @@ function clientesConVariacionSemana(ventas: VentaDia[], clientes: ClienteVenta[]
   return filas.sort((a, b) => b.actual - a.actual).slice(0, topN);
 }
 
-// Descarte (plantas, Plantín→F1 + F1→F2 + F2→Cosecha) por semana calendario, rúcula vs.
-// lechuga combinada — mismo criterio de clasificación que el resto de este reporte
-// (esRuculaV), para el gráfico de columnas agrupadas.
-function descartePorSemana(lotes: Lote[], movimientos: Movimiento[], nSemanas = 4): { label: string; rucula: number; lechuga: number }[] {
+export interface DescarteFaseReporte { cultivo: string; plantinF1: number; f1F2: number; f2Cosecha: number; total: number }
+// Descarte (plantas) de las últimas N semanas, por cultivo (rúcula vs. lechuga
+// combinada, mismo criterio esRuculaV que el resto de este reporte) Y por la etapa donde
+// se pierde — Plantín→F1, F1→F2 (Movimientos tipo "trasplante") y F2→Cosecha (Movimientos
+// tipo "cosecha") — para poder ver DÓNDE se concentra la pérdida, no solo cuánta hay.
+function descartePorFaseUltimasSemanas(lotes: Lote[], movimientos: Movimiento[], nSemanas = 4): DescarteFaseReporte[] {
   const hoy = new Date();
   const lunesActual = lunesDe(hoy);
+  const inicio = new Date(lunesActual); inicio.setDate(inicio.getDate() - (nSemanas - 1) * 7);
+  const fin = new Date(hoy); fin.setHours(23, 59, 59);
   const lotesMap = new Map(lotes.map(l => [l.id_lote, l]));
-  const semanas = Array.from({ length: nSemanas }, (_, i) => {
-    const inicio = new Date(lunesActual); inicio.setDate(inicio.getDate() - (nSemanas - 1 - i) * 7);
-    const fin = new Date(inicio); fin.setDate(fin.getDate() + 6); fin.setHours(23, 59, 59);
-    return { inicio, fin, label: `${String(inicio.getDate()).padStart(2, '0')}/${String(inicio.getMonth() + 1).padStart(2, '0')}`, rucula: 0, lechuga: 0 };
-  });
+  const acc = { rucula: { plantinF1: 0, f1F2: 0, f2Cosecha: 0 }, lechuga: { plantinF1: 0, f1F2: 0, f2Cosecha: 0 } };
   for (const m of movimientos) {
     if (!m.fecha) continue;
     const descarte = Number(m.descarte_calculado) || 0;
     if (descarte <= 0) continue;
-    const esTrasplante = m.tipo === 'trasplante';
-    const esCosecha = m.tipo === 'cosecha';
-    if (!esTrasplante && !esCosecha) continue;
     const f = new Date(String(m.fecha) + 'T12:00:00');
-    if (isNaN(f.getTime())) continue;
+    if (isNaN(f.getTime()) || f < inicio || f > fin) continue;
     const lote = lotesMap.get(String(m.id_lote || '')); if (!lote) continue;
-    const semana = semanas.find(s => f >= s.inicio && f <= s.fin); if (!semana) continue;
-    if (esRuculaV(lote.variedad)) semana.rucula += descarte; else semana.lechuga += descarte;
+    const key = esRuculaV(lote.variedad) ? 'rucula' : 'lechuga';
+    if (m.tipo === 'trasplante') {
+      if (m.fase_origen === 'plantin' && m.fase_destino === 'fase_1') acc[key].plantinF1 += descarte;
+      else if (m.fase_origen === 'fase_1' && m.fase_destino === 'fase_2') acc[key].f1F2 += descarte;
+    } else if (m.tipo === 'cosecha') {
+      acc[key].f2Cosecha += descarte;
+    }
   }
-  return semanas.map(({ label, rucula, lechuga }) => ({ label, rucula: Math.round(rucula), lechuga: Math.round(lechuga) }));
+  return (['rucula', 'lechuga'] as const).map((k) => ({
+    cultivo: k === 'rucula' ? 'Rúcula' : 'Lechuga',
+    plantinF1: Math.round(acc[k].plantinF1), f1F2: Math.round(acc[k].f1F2), f2Cosecha: Math.round(acc[k].f2Cosecha),
+    total: Math.round(acc[k].plantinF1 + acc[k].f1F2 + acc[k].f2Cosecha),
+  }));
 }
 
 // Proyección de cosecha MENSUAL (no semanal — la semanal no se estaba cumpliendo, mucho
@@ -142,7 +148,6 @@ export interface ReporteSemanalData {
   clientesVariacion: ClienteVariacionSemana[];
   proyeccionMesActual: { rucula: number; lechuga: number };
   cosechaRealMesAnterior: { rucula: number; lechuga: number };
-  proyeccionMeses: { label: string; rucula: number; lechuga: number }[];
   cicloSemana: { rucula: number; lechuga: number };
   cicloSemanaAnterior: { rucula: number; lechuga: number };
   cicloMesAnterior: { rucula: number; lechuga: number };
@@ -154,7 +159,7 @@ export interface ReporteSemanalData {
   stock: { rucula: number; lechuga_crespa: number; lechuga_roble: number };
   faltanteSemana: { rucula: number; lechuga_crespa: number; lechuga_roble: number; total: number };
   faltanteMes: { rucula: number; lechuga_crespa: number; lechuga_roble: number; total: number };
-  descarteSemanas: { label: string; rucula: number; lechuga: number }[];
+  descartePorFase: DescarteFaseReporte[];
 }
 
 export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> {
@@ -183,10 +188,10 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const diasEnMesPasado = new Date(mesPasadoRef.getFullYear(), mesPasadoRef.getMonth() + 1, 0).getDate();
   const ventasMesAnteriorTotal = resumenMesActual(ventas, precios, clientes, mesPasadoRef, diasEnMesPasado).unidadesMes;
 
-  // ── Proyección de cosecha MENSUAL (no semanal — la semanal no se estaba cumpliendo) vs.
-  // lo realmente cosechado el mes pasado completo ──
-  const proyeccionMeses = proyeccionCosechaMensual(lotes, variedades, movimientos, 4);
-  const proyeccionMesActual = proyeccionMeses[0] || { rucula: 0, lechuga: 0 };
+  // ── Proyección de cosecha MENSUAL (no semanal — la semanal no se estaba cumpliendo),
+  // SOLO el mes en curso (a pedido: nada de proyección de meses futuros, muy poco
+  // confiable a esa distancia) vs. lo realmente cosechado el mes pasado completo ──
+  const [proyeccionMesActual] = proyeccionCosechaMensual(lotes, variedades, movimientos, 1);
   const inicioMesPasado = new Date(mesPasadoRef.getFullYear(), mesPasadoRef.getMonth(), 1);
   const finMesPasado = new Date(mesPasadoRef.getFullYear(), mesPasadoRef.getMonth() + 1, 0, 23, 59, 59);
   const cosechaRealMesAnterior = cosechaRealEnRango(lotes, movimientos, inicioMesPasado, finMesPasado);
@@ -194,8 +199,8 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   // ── Principales clientes de la semana, con variación vs. semana anterior ──
   const clientesVariacion = clientesConVariacionSemana(ventas, clientes, desdeSemana, hastaHoy, desdeAnt, hastaAnt, 6);
 
-  // ── Descarte por cultivo, últimas 4 semanas (columnas agrupadas) ──
-  const descarteSemanas = descartePorSemana(lotes, movimientos, 4);
+  // ── Descarte por cultivo Y por fase (dónde se pierde), últimas 4 semanas ──
+  const descartePorFase = descartePorFaseUltimasSemanas(lotes, movimientos, 4);
 
   // ── Ciclos F2: esta semana vs. semana pasada (rolling, mismo criterio que el Panel) y vs. mes pasado ──
   const ciclosSemanas = ciclosPorSemana(lotes, movimientos);
@@ -256,11 +261,11 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   return {
     fechaGenerado: fmtISO(hoy),
     ventasSemana, ventasSemanaAnterior, ventasMesActual, ventasMesAnteriorTotal, clientesVariacion,
-    proyeccionMesActual, cosechaRealMesAnterior, proyeccionMeses,
+    proyeccionMesActual, cosechaRealMesAnterior,
     cicloSemana, cicloSemanaAnterior, cicloMesAnterior,
     pesoSemana, pesoMesAnterior,
     ocupacion, mesadasBajas, ventasSemanas,
-    stock, faltanteSemana, faltanteMes, descarteSemanas,
+    stock, faltanteSemana, faltanteMes, descartePorFase,
   };
 }
 
@@ -373,6 +378,11 @@ export function construirHtml(d: ReporteSemanalData): string {
     </tr>`;
   }).join('');
 
+  // Vs. sem./mes ant.: además de la flecha con el %, muestra el valor anterior (de dónde
+  // viene) — "↓ 6%" solo no dice si venía de 30d o de 300d.
+  const cicloVsHtml = (actual: number, ref: number) => ref > 0
+    ? `${ref}d <span style="color:#d1d5db">·</span> ${flechaHtml(pct(actual, ref), false)}`
+    : '<span style="color:#9ca3af">—</span>';
   const ciclosPesoFilas = (['rucula', 'lechuga'] as const).map((c) => {
     const label = c === 'rucula' ? 'Rúcula' : 'Lechuga';
     const ciclo = d.cicloSemana[c], cicloAntSem = d.cicloSemanaAnterior[c], cicloAntMes = d.cicloMesAnterior[c];
@@ -380,8 +390,8 @@ export function construirHtml(d: ReporteSemanalData): string {
     return `<tr>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">${label}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${ciclo > 0 ? ciclo + 'd' : '—'}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${flechaHtml(pct(ciclo, cicloAntSem), false)}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${flechaHtml(pct(ciclo, cicloAntMes), false)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${cicloVsHtml(ciclo, cicloAntSem)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${cicloVsHtml(ciclo, cicloAntMes)}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${peso > 0 ? peso + 'g' : '—'}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${flechaHtml(pct(peso, pesoAnt), true)}</td>
     </tr>`;
@@ -425,14 +435,15 @@ export function construirHtml(d: ReporteSemanalData): string {
     d.ventasSemanas.map(p => ({ label: p.label, a: p.rucula, b: p.lechuga })),
     '#134e4a', '#84cc16', 'Rúcula', 'Lechuga'
   );
-  const proyeccionChart = graficoBarrasHtml(
-    d.proyeccionMeses.map(p => ({ label: p.label, a: p.rucula, b: p.lechuga })),
-    '#134e4a', '#84cc16', 'Rúcula', 'Lechuga'
-  );
-  const descarteChart = graficoBarrasHtml(
-    d.descarteSemanas.map(p => ({ label: p.label, a: p.rucula, b: p.lechuga })),
-    '#dc2626', '#f97316', 'Rúcula', 'Lechuga'
-  );
+  // Descarte por cultivo Y por fase — tabla en vez de gráfico de barras, para poder abrir
+  // las 3 etapas (Plantín→F1, F1→F2, F2→Cosecha) y ver DÓNDE se pierde, no solo cuánto.
+  const descarteFaseFilas = d.descartePorFase.map((f) => `<tr>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">${f.cultivo}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${fmtN(f.plantinF1)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${fmtN(f.f1F2)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${fmtN(f.f2Cosecha)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:800">${fmtN(f.total)}</td>
+    </tr>`).join('');
 
   return `
   <div style="font-family:system-ui,Arial,sans-serif;color:#111;max-width:640px">
@@ -464,12 +475,10 @@ export function construirHtml(d: ReporteSemanalData): string {
     </table>
 
     <h3 style="margin:0 0 8px;font-size:14px">Proyección de cosecha — este mes <span style="font-weight:400;color:#9ca3af">(vs. real cosechado mes pasado)</span></h3>
-    <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:14px">
+    <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
       <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Este mes (est.)</th><th style="padding:6px 10px;text-align:right">Mes pasado (real)</th><th style="padding:6px 10px;text-align:right">Var.</th></tr></thead>
       <tbody>${cosechaFilas}</tbody>
     </table>
-    <p style="margin:0 0 8px;font-size:12px;color:#6b7280">Proyección de los próximos meses:</p>
-    <div style="margin-bottom:20px">${proyeccionChart}</div>
 
     <h3 style="margin:0 0 8px;font-size:14px">Ciclos y peso de esta semana</h3>
     <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
@@ -484,8 +493,11 @@ export function construirHtml(d: ReporteSemanalData): string {
     </table>
     <p style="margin:0 0 20px;font-size:11px;color:#9ca3af">− (rojo) = falta, contado por debajo de lo esperado · + (verde) = sobra, contado por encima de lo esperado.</p>
 
-    <h3 style="margin:0 0 8px;font-size:14px">Descarte por cultivo <span style="font-weight:400;color:#9ca3af">(plantas, últimas 4 semanas)</span></h3>
-    <div style="margin-bottom:20px">${descarteChart}</div>
+    <h3 style="margin:0 0 8px;font-size:14px">Descarte por cultivo y por fase <span style="font-weight:400;color:#9ca3af">(plantas, últimas 4 semanas — dónde se pierde)</span></h3>
+    <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
+      <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Plantín→F1</th><th style="padding:6px 10px;text-align:right">F1→F2</th><th style="padding:6px 10px;text-align:right">F2→Cosecha</th><th style="padding:6px 10px;text-align:right">Total</th></tr></thead>
+      <tbody>${descarteFaseFilas}</tbody>
+    </table>
 
     <h3 style="margin:0 0 8px;font-size:14px">Ocupación por nave</h3>
     <div style="margin-bottom:6px">${ocupacionHtml}</div>
@@ -532,13 +544,14 @@ export function construirTexto(d: ReporteSemanalData): string {
   L.push(`🌱 *Proyección de cosecha — este mes* (vs. real mes pasado)`);
   L.push(`Rúcula: ${fmtN(d.proyeccionMesActual.rucula)} est. / ${fmtN(d.cosechaRealMesAnterior.rucula)} real`);
   L.push(`Lechuga: ${fmtN(d.proyeccionMesActual.lechuga)} est. / ${fmtN(d.cosechaRealMesAnterior.lechuga)} real`);
-  L.push(`Próximos meses (est.) — Rúcula / Lechuga:`);
-  for (const s of d.proyeccionMeses) L.push(`  ${s.label}: ${fmtN(s.rucula)} / ${fmtN(s.lechuga)}`);
   L.push('');
 
+  // Ciclo: al lado del valor de esta semana, de dónde viene (valor de la semana/mes
+  // anterior) además de la variación — un "↓6%" solo no dice si venía de 30d o de 300d.
+  const cicloVsTxt = (actual: number, ref: number) => ref > 0 ? `${ref}d (${p2(pct(actual, ref))})` : '—';
   L.push(`🔄 *Ciclos y peso de esta semana*`);
-  L.push(`Rúcula: ${d.cicloSemana.rucula > 0 ? d.cicloSemana.rucula + 'd' : '—'} ciclo · ${d.pesoSemana.rucula > 0 ? d.pesoSemana.rucula + 'g' : '—'} peso`);
-  L.push(`Lechuga: ${d.cicloSemana.lechuga > 0 ? d.cicloSemana.lechuga + 'd' : '—'} ciclo · ${d.pesoSemana.lechuga > 0 ? d.pesoSemana.lechuga + 'g' : '—'} peso`);
+  L.push(`Rúcula: ${d.cicloSemana.rucula > 0 ? d.cicloSemana.rucula + 'd' : '—'} ciclo · sem. ant. ${cicloVsTxt(d.cicloSemana.rucula, d.cicloSemanaAnterior.rucula)} · mes ant. ${cicloVsTxt(d.cicloSemana.rucula, d.cicloMesAnterior.rucula)} · ${d.pesoSemana.rucula > 0 ? d.pesoSemana.rucula + 'g' : '—'} peso`);
+  L.push(`Lechuga: ${d.cicloSemana.lechuga > 0 ? d.cicloSemana.lechuga + 'd' : '—'} ciclo · sem. ant. ${cicloVsTxt(d.cicloSemana.lechuga, d.cicloSemanaAnterior.lechuga)} · mes ant. ${cicloVsTxt(d.cicloSemana.lechuga, d.cicloMesAnterior.lechuga)} · ${d.pesoSemana.lechuga > 0 ? d.pesoSemana.lechuga + 'g' : '—'} peso`);
   L.push('');
 
   L.push(`❄️ *Stock en cámara* (− = falta, + = sobra)`);
@@ -547,8 +560,10 @@ export function construirTexto(d: ReporteSemanalData): string {
   L.push(`Lechuga Roble: ${fmtN(d.stock.lechuga_roble)} paq · semana ${d.faltanteSemana.lechuga_roble >= 0 ? '+' : ''}${d.faltanteSemana.lechuga_roble} paq · mes ${d.faltanteMes.lechuga_roble >= 0 ? '+' : ''}${d.faltanteMes.lechuga_roble} paq`);
   L.push('');
 
-  L.push(`🗑️ *Descarte por cultivo* (plantas, últimas 4 semanas) — Rúcula / Lechuga:`);
-  for (const s of d.descarteSemanas) L.push(`  ${s.label}: ${fmtN(s.rucula)} / ${fmtN(s.lechuga)}`);
+  L.push(`🗑️ *Descarte por cultivo y por fase* (plantas, últimas 4 semanas — dónde se pierde):`);
+  for (const f of d.descartePorFase) {
+    L.push(`  ${f.cultivo}: Plantín→F1 ${fmtN(f.plantinF1)} · F1→F2 ${fmtN(f.f1F2)} · F2→Cosecha ${fmtN(f.f2Cosecha)} · Total ${fmtN(f.total)}`);
+  }
   L.push('');
 
   L.push(`🏭 *Ocupación por nave*`);
