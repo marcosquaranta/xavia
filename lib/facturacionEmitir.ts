@@ -157,18 +157,31 @@ export async function emitirPendientes(idControls?: string[] | null): Promise<Re
   if (!pendientes.length) return { emitidas: [], errores: [] };
 
   const clientesXubio = await getClientesXubio();
+  const clientesMap = new Map(clientes.map(c => [c.id_control, c]));
 
-  const porControl = new Map<string, VentaDia[]>();
+  // Agrupa por cliente para armar UNA factura combinada — salvo que el cliente tenga
+  // facturar_por_sucursal='SI' (misma razón social, pero pide un comprobante A XUBIO
+  // SEPARADO por cada sucursal, ej. "La Esperanza"): ahí la clave de agrupación suma la
+  // sucursal, así cada una sale como su propia factura en vez de mezclarse en una sola.
+  interface Grupo { idControl: string; sucursal: string | null; lineas: VentaDia[] }
+  const grupos = new Map<string, Grupo>();
   for (const v of pendientes) {
-    const arr = porControl.get(v.id_control) || []; arr.push(v); porControl.set(v.id_control, arr);
+    const cliente = clientesMap.get(v.id_control);
+    const porSucursal = cliente?.facturar_por_sucursal === 'SI';
+    const sucursal = porSucursal ? (v.sucursal || '(sin sucursal)') : null;
+    const key = porSucursal ? `${v.id_control}||${sucursal}` : v.id_control;
+    if (!grupos.has(key)) grupos.set(key, { idControl: v.id_control, sucursal, lineas: [] });
+    grupos.get(key)!.lineas.push(v);
   }
 
   const emitidas: ResultadoEmision['emitidas'] = [];
   const errores: { cliente: string; error: string }[] = [];
 
-  for (const [idControl, lineas] of porControl) {
-    const cliente = clientes.find(c => c.id_control === idControl);
-    const nombre = cliente?.nombre_xubio || idControl;
+  for (const { idControl, sucursal, lineas } of grupos.values()) {
+    const cliente = clientesMap.get(idControl);
+    // Nombre que se muestra en emitidas/errores — con la sucursal entre paréntesis
+    // cuando la factura salió separada, para poder distinguir cuál es cuál de un vistazo.
+    const nombre = (cliente?.nombre_xubio || idControl) + (sucursal ? ` (${sucursal})` : '');
     if (!cliente) { errores.push({ cliente: nombre, error: 'cliente no encontrado en la base local' }); continue; }
 
     const clienteId = matchClienteXubio(cliente.nombre_xubio, clientesXubio);
@@ -181,8 +194,15 @@ export async function emitirPendientes(idControls?: string[] | null): Promise<Re
         const qty = Number((l as any)[key]) || 0;
         if (qty <= 0) continue;
         const precio = getPrecio(precios, idControl, l.sucursal, key, cliente.sucursales);
-        items.push({ codigo: PRODUCTO_CODIGO[key], cantidad: qty, precio, descripcion: l.sucursal || cliente.nombre_xubio });
-        detalle.push({ nombre: NOMBRE_PROD[key] || key, cantidad: qty, precio, importe: qty * precio });
+        // Si la venta tiene sucursal real cargada, va SIEMPRE al frente de la descripción
+        // de cada renglón — para que quede clarísimo a qué sucursal corresponde el
+        // pedido, esté la factura separada por sucursal o combinada con otras. Clientes
+        // sin sucursales (l.sucursal vacío) mantienen la descripción simple de siempre —
+        // no tiene sentido inventarles una "sucursal" con su propio nombre.
+        const nombreProd = NOMBRE_PROD[key] || key;
+        const descripcion = l.sucursal ? `Sucursal ${l.sucursal} — ${nombreProd}` : nombreProd;
+        items.push({ codigo: PRODUCTO_CODIGO[key], cantidad: qty, precio, descripcion });
+        detalle.push({ nombre: l.sucursal ? `${nombreProd} (${l.sucursal})` : nombreProd, cantidad: qty, precio, importe: qty * precio });
       }
     }
     if (!items.length) {

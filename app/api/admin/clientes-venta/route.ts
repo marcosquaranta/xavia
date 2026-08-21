@@ -8,9 +8,10 @@ export async function PATCH(req: NextRequest) {
   try {
     const { id_control, ...fields } = await req.json();
     if (!id_control) return NextResponse.json({ error: 'id_control requerido' }, { status: 400 });
-    // "orden" es un campo nuevo — se agrega solo a la hoja si todavía no existe, para
-    // no romper el guardado la primera vez que se usa.
+    // Campos nuevos — se agregan solo a la hoja si todavía no existen, para no romper el
+    // guardado la primera vez que se usan.
     if ('orden' in fields) await asegurarColumna('Clientes', 'orden');
+    if ('facturar_por_sucursal' in fields) await asegurarColumna('Clientes', 'facturar_por_sucursal');
     const updated = await updateRow('Clientes', 'id_control', String(id_control), fields);
     if (!updated) return NextResponse.json({ error: 'cliente_no_encontrado' }, { status: 404 });
     return NextResponse.json({ ok: true });

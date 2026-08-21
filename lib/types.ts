@@ -137,6 +137,12 @@ export interface ClienteVenta {
   // fijado, el cliente cae al final ordenado por frecuencia de compra (comportamiento
   // de siempre). Ver mkFilas() en app/ventas/VentasManager.tsx.
   orden: number | string;
+  // 'SI' = emitir una factura A XUBIO SEPARADA por cada sucursal (misma razón social,
+  // comprobantes distintos) en vez de una sola factura combinada con todas las
+  // sucursales adentro — para clientes tipo "La Esperanza" que piden un comprobante por
+  // sucursal aunque compartan CUIT. '' o 'NO' = comportamiento de siempre (combinado).
+  // Ver emitirPendientes() en lib/facturacionEmitir.ts.
+  facturar_por_sucursal: 'SI' | 'NO' | '';
 }
 
 // Pedido recurrente de un cliente para un día fijo de la semana (0=domingo..6=sábado,

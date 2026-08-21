@@ -29,14 +29,27 @@ export async function enviarResumenPendientes(): Promise<{ ok: boolean; facturas
   const pendientes = ventas.filter(v => v.exportado === 'PENDIENTE');
   if (!pendientes.length) return { ok: true, facturas: 0, msg: 'Sin ventas pendientes' };
 
-  const porControl = new Map<string, VentaDia[]>();
-  for (const v of pendientes) { const a = porControl.get(v.id_control) || []; a.push(v); porControl.set(v.id_control, a); }
+  // Mismo criterio de agrupación que emitirPendientes() en lib/facturacionEmitir.ts: los
+  // clientes con facturar_por_sucursal='SI' se desglosan por sucursal acá también, para
+  // que este resumen anticipe exactamente cuántas facturas van a salir (no menos de las
+  // que realmente se van a emitir).
+  const clientesMap = new Map(clientes.map(c => [c.id_control, c]));
+  interface Grupo { idControl: string; sucursal: string | null; lineas: VentaDia[] }
+  const grupos = new Map<string, Grupo>();
+  for (const v of pendientes) {
+    const cliente = clientesMap.get(v.id_control);
+    const porSucursal = cliente?.facturar_por_sucursal === 'SI';
+    const sucursal = porSucursal ? (v.sucursal || '(sin sucursal)') : null;
+    const key = porSucursal ? `${v.id_control}||${sucursal}` : v.id_control;
+    if (!grupos.has(key)) grupos.set(key, { idControl: v.id_control, sucursal, lineas: [] });
+    grupos.get(key)!.lineas.push(v);
+  }
 
   const fmtFecha = (s: string) => { const [y, m, d] = String(s || '').split(/[T ]/)[0].split('-'); return d && m ? `${d}/${m}` : String(s || ''); };
 
   const filas: { cliente: string; letra: string; unidades: number; total: number; fechas: string }[] = [];
-  for (const [idControl, lineasV] of porControl) {
-    const cliente = clientes.find(c => c.id_control === idControl);
+  for (const { idControl, sucursal, lineas: lineasV } of grupos.values()) {
+    const cliente = clientesMap.get(idControl);
     let total = 0, unidades = 0;
     for (const l of lineasV) {
       for (const key of PRODS) {
@@ -48,7 +61,8 @@ export async function enviarResumenPendientes(): Promise<{ ok: boolean; facturas
     }
     if (unidades <= 0) continue;
     const fechas = Array.from(new Set(lineasV.map(l => String(l.fecha || '').split(/[T ]/)[0]).filter(Boolean))).sort().map(fmtFecha).join(', ');
-    filas.push({ cliente: cliente?.nombre_display || cliente?.nombre_xubio || idControl, letra: cliente?.tipo_factura || '?', unidades, total, fechas });
+    const nombreBase = cliente?.nombre_display || cliente?.nombre_xubio || idControl;
+    filas.push({ cliente: sucursal ? `${nombreBase} (${sucursal})` : nombreBase, letra: cliente?.tipo_factura || '?', unidades, total, fechas });
   }
   if (!filas.length) return { ok: true, facturas: 0, msg: 'Sin unidades' };
   filas.sort((a, b) => b.total - a.total);

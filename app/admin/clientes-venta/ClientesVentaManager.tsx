@@ -86,6 +86,7 @@ function ClienteRow({ c, precios, onSaved }: { c: ClienteVenta; precios: PrecioV
     sucursales: c.sucursales || '',
     unidad: String(c.unidad || 'paq'),
     orden: String(c.orden || ''),
+    facturar_por_sucursal: c.facturar_por_sucursal === 'SI' ? 'SI' : 'NO',
   });
 
   const sucursalesArr = fields.sucursales ? fields.sucursales.split('|').map(s => s.trim()).filter(Boolean) : [];
@@ -172,6 +173,17 @@ function ClienteRow({ c, precios, onSaved }: { c: ClienteVenta; precios: PrecioV
                   <label style={{ fontSize: '11px' }}>Sucursales (separadas por |)</label>
                   <input type="text" value={fields.sucursales} onChange={e => setFields(f => ({ ...f, sucursales: e.target.value }))} disabled={saving} placeholder="Ej: Norte|Sur|Centro" />
                 </div>
+                {sucursalesArr.length > 0 && (
+                  <div>
+                    <label style={{ fontSize: '11px' }} title="Emite una factura A Xubio separada por cada sucursal en vez de una sola combinada — misma razón social, comprobantes distintos. Cada renglón de la factura también aclara la sucursal.">
+                      Facturación por sucursal
+                    </label>
+                    <select value={fields.facturar_por_sucursal} onChange={e => setFields(f => ({ ...f, facturar_por_sucursal: e.target.value }))} disabled={saving}>
+                      <option value="NO">Una factura combinada (todas las sucursales)</option>
+                      <option value="SI">Una factura separada por sucursal</option>
+                    </select>
+                  </div>
+                )}
                 <div>
                   <label style={{ fontSize: '11px' }}>Unidad de venta</label>
                   <select value={fields.unidad} onChange={e => setFields(f => ({ ...f, unidad: e.target.value }))} disabled={saving}>
