@@ -84,6 +84,55 @@ export function ocupacionMensualPorCultivo(historial: OcupacionHistorialRow[], u
   return meses;
 }
 
+export interface PlantasPerdidasSubocupacion { rucula: number; lechuga: number; total: number }
+
+// Traduce los días con subocupación (mesadas F2 con tubos vacíos) a PLANTAS PERDIDAS,
+// usando el ciclo ACTUAL de cada cultivo como referencia (lo pasa quien llama — nunca un
+// número fijo hardcodeado acá) — pedido explícito para darle dimensión real a lo que se
+// deja de producir por tener capacidad ociosa, no solo un % de ocupación abstracto.
+//
+// La cuenta: para cada mesada y día del rango, tubos vacíos × posiciones por tubo
+// (orificios_por_perfil de esa mesada puntual, no un promedio) = "plantas-día" de
+// capacidad ociosa ese día. Sumado en todo el rango y dividido por la duración del ciclo
+// da cuántos ciclos completos (cosechas) de esas plantas se perdieron — un tubo vacío
+// durante exactamente un ciclo es UNA cosecha completa de ese tubo que no se hizo.
+export function plantasPerdidasPorSubocupacion(
+  historial: OcupacionHistorialRow[], ubicaciones: Ubicacion[],
+  desde: string, hasta: string, // YYYY-MM-DD, ambos inclusive
+  cicloRuculaDias: number, cicloLechugaDias: number
+): PlantasPerdidasSubocupacion {
+  const mesadas = ubicaciones.filter((u) => u.tipo === 'mesada');
+  const infoMesada = new Map<string, { cultivo: CultivoOcupacion; orificios: number }>();
+  for (const u of mesadas) {
+    const va = String(u.variedad_asignada || '').toLowerCase();
+    const cultivo: CultivoOcupacion = va === 'rucula' || va === 'rúcula' ? 'rucula' : va === 'mixta' ? 'mixta' : 'lechuga';
+    const orificios = Number(u.orificios_por_perfil) || 0;
+    infoMesada.set(`${normMesada(u.nombre)}||${u.nave}`, { cultivo, orificios });
+    infoMesada.set(`${normBaseMesada(u.nombre)}||${u.nave}`, { cultivo, orificios });
+  }
+  function infoDe(mesadaNombre: string, nave: string | number) {
+    return infoMesada.get(`${normMesada(mesadaNombre)}||${nave}`) ?? infoMesada.get(`${normBaseMesada(mesadaNombre)}||${nave}`) ?? null;
+  }
+
+  let plantasDiaRucula = 0, plantasDiaLechuga = 0; // "mixta" se suma junto a lechuga, mismo criterio catch-all que el resto de la app
+  for (const r of historial) {
+    const f = String(r.fecha || '').slice(0, 10);
+    if (!f || f < desde || f > hasta) continue;
+    const info = infoDe(String(r.mesada || ''), r.nave);
+    if (!info || info.orificios <= 0) continue;
+    const tot = Number(r.tubos_totales) || 0, ocu = Number(r.tubos_ocupados) || 0;
+    const vacios = Math.max(0, tot - ocu);
+    if (vacios <= 0) continue;
+    const plantasVacias = vacios * info.orificios;
+    if (info.cultivo === 'rucula') plantasDiaRucula += plantasVacias;
+    else plantasDiaLechuga += plantasVacias;
+  }
+
+  const rucula = cicloRuculaDias > 0 ? Math.round(plantasDiaRucula / cicloRuculaDias) : 0;
+  const lechuga = cicloLechugaDias > 0 ? Math.round(plantasDiaLechuga / cicloLechugaDias) : 0;
+  return { rucula, lechuga, total: rucula + lechuga };
+}
+
 // ══════════════════════════════════════════════════════════════════════════════════════
 // KPI 2 — Eficiencia Siembra → Cosecha (versión final acordada: NO es "unidades vendidas
 // / sembradas" — Marcelo pidió sacar la venta/cámara de la cuenta porque no depende de

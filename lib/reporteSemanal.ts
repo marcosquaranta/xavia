@@ -1,9 +1,10 @@
 import { readSheet } from './sheets';
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, PrecioVenta, ClienteVenta, VentaHistorica, StockCamara } from './types';
-import { tubosPorMesada } from './ocupacion';
+import { tubosPorMesada, type OcupacionHistorialRow } from './ocupacion';
 import { proyeccionCosechaSemanal, ciclosPorSemana, pesoPromedioRango, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, type PesoPromedioMes } from './estadisticas';
 import { calcularCamara, diferenciaAjustesRango } from './camara';
 import { ventasPorCultivoUltimasSemanas, resumenMesActual, ventasEnRango, GR_PAQ_RUCULA, GR_PAQ_LECHUGA, type PuntoVentaCultivoSemana, type VentasRango, type ResumenMesActual } from './estadisticasVentas';
+import { plantasPerdidasPorSubocupacion, type PlantasPerdidasSubocupacion } from './kpisOperativos';
 
 const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
@@ -155,6 +156,7 @@ export interface ReporteSemanalData {
   pesoMesAnterior: PesoPromedioMes;
   ocupacion: { nave: number; pct: number }[];
   mesadasBajas: { nombre: string; nave: number; pct: number }[];
+  plantasPerdidasSubocupacion: PlantasPerdidasSubocupacion;
   ventasSemanas: PuntoVentaCultivoSemana[];
   stock: { rucula: number; lechuga_crespa: number; lechuga_roble: number };
   faltanteSemana: { rucula: number; lechuga_crespa: number; lechuga_roble: number; total: number };
@@ -163,12 +165,13 @@ export interface ReporteSemanalData {
 }
 
 export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> {
-  const [lotes, movimientos, ubicaciones, variedades, ventas, precios, clientes, historicas, registrosCamara] = await Promise.all([
+  const [lotes, movimientos, ubicaciones, variedades, ventas, precios, clientes, historicas, registrosCamara, ocupacionHistorial] = await Promise.all([
     readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'), readSheet<Ubicacion>('Ubicaciones'),
     readSheet<Variedad>('Variedades'), readSheet<VentaDia>('Ventas'), readSheet<PrecioVenta>('Precios'),
     readSheet<ClienteVenta>('Clientes'),
     readSheet<VentaHistorica>('VentasHistoricas').catch(() => []),
     readSheet<StockCamara>('StockCamara').catch(() => []),
+    readSheet<OcupacionHistorialRow>('OcupacionHistorial').catch(() => []),
   ]);
   void historicas; // no se usa en la evolución semanal (los históricos son totales mensuales)
 
@@ -209,6 +212,16 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const cicloSemana = { rucula: ultSem.rucula || 0, lechuga: ultSem.lechugaF2 || 0 };
   const cicloSemanaAnterior = { rucula: antSem.rucula || 0, lechuga: antSem.lechugaF2 || 0 };
   const cicloMesAnterior = cicloMesPromedio(lotes, movimientos, mesPasadoRef);
+
+  // ── Plantas perdidas por subocupación esta semana — traduce los tubos vacíos F2 a
+  // plantas usando el ciclo ACTUAL de la semana (cicloSemana, recién calculado arriba)
+  // como referencia, para darle dimensión real a lo que se dejó de producir. Si esta
+  // semana no tuvo ninguna cosecha (sin ciclo real), cae a un ciclo de referencia
+  // razonable (35d rúcula / 40d lechuga) para no dejar el cálculo en cero solo por eso. ──
+  const plantasPerdidasSubocupacion = plantasPerdidasPorSubocupacion(
+    ocupacionHistorial, ubicaciones, desdeSemana, hastaHoy,
+    cicloSemana.rucula || 35, cicloSemana.lechuga || 40,
+  );
 
   // ── Peso promedio de esta semana vs. promedio del mes pasado completo ──
   const desde7 = new Date(hoy); desde7.setDate(desde7.getDate() - 7);
@@ -264,7 +277,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     proyeccionMesActual, cosechaRealMesAnterior,
     cicloSemana, cicloSemanaAnterior, cicloMesAnterior,
     pesoSemana, pesoMesAnterior,
-    ocupacion, mesadasBajas, ventasSemanas,
+    ocupacion, mesadasBajas, plantasPerdidasSubocupacion, ventasSemanas,
     stock, faltanteSemana, faltanteMes, descartePorFase,
   };
 }
@@ -503,6 +516,11 @@ export function construirHtml(d: ReporteSemanalData): string {
     <div style="margin-bottom:6px">${ocupacionHtml}</div>
     <p style="margin:10px 0 0;font-size:12px;color:#6b7280">Mesadas F2 por debajo del 90%:</p>
     <div style="margin-bottom:10px">${mesadasBajasHtml}</div>
+    ${d.plantasPerdidasSubocupacion.total > 0 ? `<p style="margin:10px 0 0;font-size:12px;color:#b45309">
+      🌱 ~<strong>${fmtN(d.plantasPerdidasSubocupacion.total)}</strong> plantas perdidas por subocupación esta semana
+      (Rúcula ${fmtN(d.plantasPerdidasSubocupacion.rucula)} · Lechuga ${fmtN(d.plantasPerdidasSubocupacion.lechuga)})
+      <span style="color:#9ca3af">— tubos vacíos convertidos a plantas, usando el ciclo F2 actual como referencia</span>
+    </p>` : ''}
   </div>`;
 }
 
@@ -573,6 +591,9 @@ export function construirTexto(d: ReporteSemanalData): string {
     for (const m of d.mesadasBajas) L.push(`  N${m.nave} · ${m.nombre}: ${m.pct}%`);
   } else {
     L.push(`✓ Ninguna mesada F2 por debajo del 90%.`);
+  }
+  if (d.plantasPerdidasSubocupacion.total > 0) {
+    L.push(`🌱 ~${fmtN(d.plantasPerdidasSubocupacion.total)} plantas perdidas por subocupación esta semana (Rúcula ${fmtN(d.plantasPerdidasSubocupacion.rucula)} / Lechuga ${fmtN(d.plantasPerdidasSubocupacion.lechuga)}) — ref. ciclo F2 actual`);
   }
 
   return L.join('\n');

@@ -8,7 +8,8 @@ import { calcularCamara, diferenciaAjustesMes } from '@/lib/camara';
 import { calcularDriversMes, calcularUsoTeorico } from '@/lib/usoTeorico';
 import { ocupacionPromedioPorNave, type OcupacionHistorialRow } from '@/lib/ocupacion';
 import { productividadDeMes, productividadPlantasDeMes } from '@/lib/productividad';
-import { ocupacionMensualPorCultivo, eficienciaSiembraCosechaPorMes } from '@/lib/kpisOperativos';
+import { ocupacionMensualPorCultivo, eficienciaSiembraCosechaPorMes, plantasPerdidasPorSubocupacion } from '@/lib/kpisOperativos';
+import { cicloMesPromedio } from '@/lib/estadisticas';
 import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionPrecioPromedio } from '@/lib/estadisticasVentas';
 import type { Lote, Movimiento, Ubicacion, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, Articulo, StockMes, StockCamara, ProductividadDiaria } from '@/lib/types';
 import Header from '@/components/Header';
@@ -286,6 +287,20 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
 
   // ── KPI 1: Ocupación de posiciones — promedio mensual por cultivo, hasta el cierre del mes elegido ──
   const ocupacionMensualRep = ocupacionMensualPorCultivo(ocupHistRows, ubicaciones, 6, refDate);
+  // Plantas perdidas por subocupación este mes — traduce tubos vacíos-día a plantas
+  // usando el ciclo F2 ACTUAL del mes elegido como referencia (no un promedio fijo ni
+  // un default): un tubo vacío durante todo un ciclo es una cosecha completa perdida.
+  // Si el mes no tuvo ninguna cosecha de un cultivo (no hay ciclo real para ese mes),
+  // cae a un ciclo de referencia razonable (35d rúcula / 40d lechuga) para no dejar el
+  // cálculo en cero solo por falta de dato del ciclo.
+  const cicloActualMesRep = cicloMesPromedio(lotesRep, movimientos, refDate);
+  const finMesSelStr = new Date(anioSel, mesSel, 0);
+  const plantasPerdidasSubocupacionMes = plantasPerdidasPorSubocupacion(
+    ocupHistRows, ubicaciones,
+    `${anioSel}-${String(mesSel).padStart(2, '0')}-01`,
+    `${anioSel}-${String(mesSel).padStart(2, '0')}-${String(finMesSelStr.getDate()).padStart(2, '0')}`,
+    cicloActualMesRep.rucula || 35, cicloActualMesRep.lechuga || 40,
+  );
   const ocupacionUltimoMesRep = [...ocupacionMensualRep].reverse().find((m) => m.total.pct !== null) ?? null;
   const evoOcupacionCultivoRep = {
     series: [
@@ -414,8 +429,13 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
                 <span style={{ fontSize: '11px', color: '#9ca3af' }}>{ocupacionUltimoMesRep?.label ?? 'sin datos'}</span>
               </div>
               {ocupacionUltimoMesRep && (
-                <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#6b7280' }}>
+                <p style={{ margin: '0 0 6px', fontSize: '11px', color: '#6b7280' }}>
                   Rúcula {ocupacionUltimoMesRep.rucula.pct ?? '—'}% · Lechuga {ocupacionUltimoMesRep.lechuga.pct ?? '—'}%
+                </p>
+              )}
+              {plantasPerdidasSubocupacionMes.total > 0 && (
+                <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#b45309' }} title="Tubos vacíos del mes convertidos a plantas, usando el ciclo F2 actual de este mes como referencia — un tubo vacío durante todo un ciclo es una cosecha completa que no se hizo">
+                  🌱 ~<strong>{plantasPerdidasSubocupacionMes.total.toLocaleString('es-AR')}</strong> plantas perdidas por subocupación este mes (Rúcula {plantasPerdidasSubocupacionMes.rucula.toLocaleString('es-AR')} · Lechuga {plantasPerdidasSubocupacionMes.lechuga.toLocaleString('es-AR')})
                 </p>
               )}
               {evoOcupacionCultivoRep.series.some((s) => s.puntos.length > 0)
