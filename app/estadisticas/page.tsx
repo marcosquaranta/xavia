@@ -11,8 +11,9 @@ import { obtenerTemperaturasRosario, temperaturaPromedioPorMes } from '@/lib/cli
 import { kmPorSemana, VEHICULO_PARTNER } from '@/lib/kilometraje';
 import { descartePorFaseMes, resumenDescartePorCultivo, type CultivoDescarte } from '@/lib/descarte';
 import { ocupacionMensualPorCultivo, eficienciaSiembraCosechaPorMes } from '@/lib/kpisOperativos';
+import { perdidasPorMes } from '@/lib/perdidas';
 import type { OcupacionHistorialRow } from '@/lib/ocupacion';
-import type { Lote, Movimiento, Ubicacion, KilometrajeVehiculo, StockCamara, ProductividadDiaria } from '@/lib/types';
+import type { Lote, Movimiento, Ubicacion, KilometrajeVehiculo, StockCamara, ProductividadDiaria, VentaDia } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
 import GraficoCiclosMesadas from './GraficoCiclosMesadas';
@@ -36,9 +37,10 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   let ocupacionHistorial: OcupacionHistorialRow[] = [];
   let registrosCamara: StockCamara[] = [];
   let productividadCache: ProductividadDiaria[] = [];
+  let ventas: VentaDia[] = [];
   let err: string | null = null;
   try {
-    [lotes, movimientos, ubicaciones, configRows, registrosKm, ocupacionHistorial, registrosCamara, productividadCache] = await Promise.all([
+    [lotes, movimientos, ubicaciones, configRows, registrosKm, ocupacionHistorial, registrosCamara, productividadCache, ventas] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<Ubicacion>('Ubicaciones'),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
@@ -46,6 +48,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
       readSheet<OcupacionHistorialRow>('OcupacionHistorial').catch(() => []),
       readSheet<StockCamara>('StockCamara').catch(() => []),
       readSheet<ProductividadDiaria>('ProductividadDiaria').catch(() => []),
+      readSheet<VentaDia>('Ventas').catch(() => []),
     ]);
   } catch (e: any) { err = e?.message || 'Error cargando datos'; }
 
@@ -196,6 +199,19 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     ];
   }
   const CULTIVO_LABEL: Record<CultivoDescarte, string> = { rucula: 'Rúcula', lechuga_crespa: 'Lechuga Crespa', lechuga_roble: 'Lechuga Hoja de Roble' };
+
+  // ── Pérdidas totales por mes — junta Descarte + Faltante de stock + Subocupación (las
+  // 3 pérdidas que hoy se ven cada una en su propia sección) en una sola cuenta, todas
+  // reconvertidas a plantas para poder sumarlas y compararlas entre sí. Mismo período que
+  // Descarte por fase (12 meses, indicador fijo).
+  const mesesPerdidas = perdidasPorMes(lotes, movimientos, registrosCamara, ventas, ubicaciones, ocupacionHistorial, NMESES_DESCARTE);
+  const COLOR_PERDIDA = { descarte: '#dc2626', faltanteStock: '#2563eb', subocupacion: '#d97706' };
+  const seriePerdidas = [
+    { nombre: 'Descarte', color: COLOR_PERDIDA.descarte, valores: mesesPerdidas.map(m => m.descarte) },
+    { nombre: 'Faltante de stock', color: COLOR_PERDIDA.faltanteStock, valores: mesesPerdidas.map(m => m.faltanteStock) },
+    { nombre: 'Subocupación', color: COLOR_PERDIDA.subocupacion, valores: mesesPerdidas.map(m => m.subocupacion) },
+  ];
+  const perdidasUltimoMes = [...mesesPerdidas].reverse().find(m => m.total > 0) ?? null;
 
   // Fecha desde la que arranca el filtro global elegido — null = histórico, sin límite.
   function desdeDePeriodo(p: PeriodoGlobal): Date | null {
@@ -709,6 +725,24 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             </table>
             <p style={{ margin:'8px 0 0', fontSize:'10px', color:'#9ca3af' }}>El total y el % mezclan plantas (primeras 3 etapas) con paquetes (Cámara) — sirve para ver dónde se concentra el descarte, no es una cantidad física exacta.</p>
           </div>
+        </div>
+
+        {/* Pérdidas totales — Descarte + Faltante de stock + Subocupación, sumadas */}
+        <div id="perdidas-totales" className="card" style={{ marginBottom:'16px', scrollMarginTop:'16px' }}>
+          <p className="card-title" style={{ margin:'0 0 2px' }}>Pérdidas totales</p>
+          <p className="card-sub" style={{ margin:'0 0 4px' }}>Descarte + Faltante de stock (solo lo que faltó) + Subocupación, todo reconvertido a plantas · últimos 12 meses · indicador fijo</p>
+          {perdidasUltimoMes && (
+            <p style={{ margin:'0 0 12px', fontSize:'12px', color:'#6b7280' }}>
+              {perdidasUltimoMes.label}: <strong style={{ color:'#111827' }}>{perdidasUltimoMes.total.toLocaleString('es-AR')} pl</strong> perdidas
+              — Descarte {perdidasUltimoMes.descarte.toLocaleString('es-AR')} · Faltante {perdidasUltimoMes.faltanteStock.toLocaleString('es-AR')} · Subocupación {perdidasUltimoMes.subocupacion.toLocaleString('es-AR')}
+            </p>
+          )}
+          <GraficoBarrasApiladas labels={mesesPerdidas.map(m => m.label)} series={seriePerdidas} unidad=" pl" />
+          <p style={{ margin:'8px 0 0', fontSize:'10px', color:'#9ca3af' }}>
+            Faltante de stock y Subocupación reconvierten paquetes/tubos vacíos a plantas con el mismo factor que el resto de la app
+            (rúcula ≈3 plantas/paq, lechuga 1:1) — son aproximaciones para poder compararlas entre sí, no cantidades físicas exactas.
+            Subocupación usa el ciclo F2 real de cada mes como referencia (ver sección Ocupación).
+          </p>
         </div>
 
         {/* Ciclos por mesada */}
