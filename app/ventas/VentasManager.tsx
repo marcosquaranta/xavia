@@ -364,32 +364,74 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   // Venta comprometida REAL hoy/mañana/pasado (no una proyección por pedido fijo) —
   // suma lo que ya está cargado en Ventas para esos 3 días, esté facturado o no, por
   // cultivo. hoja_roble (campo de Ventas) mapea a la clave 'lechuga_roble' del stock
-  // en cámara.
+  // en cámara. `ventasComprometidas` es un snapshot que se trae del server una sola vez
+  // al entrar a la pantalla — para el día que se está cargando AHORA (el de `fecha`, si
+  // cae dentro de la ventana de 3 días) se descarta ese snapshot y se suma en vivo desde
+  // `ctds` en su lugar: así "Disp. para venta" se actualiza al toque con cada celda que
+  // se toca (y también contempla lo pre-cargado de un Pedido fijo, que ya vive en `ctds`
+  // desde que se hidrata más arriba), en vez de quedar pegado al valor de cuando se
+  // entró a la pantalla hasta recargar la página.
   const DIAS_COMPROMETIDO = 3;
   function comprometidoPorCultivo(): Record<'rucula'|'lechuga_crespa'|'lechuga_roble', number> {
     const acc = { rucula: 0, lechuga_crespa: 0, lechuga_roble: 0 };
+    const hoyReal = new Date();
+    const f = (d: Date) => d.toISOString().split('T')[0];
+    const desdeVentana = f(hoyReal);
+    const hastaD = new Date(hoyReal); hastaD.setDate(hastaD.getDate() + 2);
+    const hastaVentana = f(hastaD);
+    const fechaEnVentana = fecha >= desdeVentana && fecha <= hastaVentana;
+
     for (const v of ventasComprometidas) {
+      const vFecha = String(v.fecha || '').split(/[T ]/)[0];
+      if (fechaEnVentana && vFecha === fecha) continue; // ese día se reemplaza por el vivo de abajo
       acc.rucula += Number(v.rucula) || 0;
       acc.lechuga_crespa += Number(v.lechuga_crespa) || 0;
       acc.lechuga_roble += Number(v.hoja_roble) || 0;
+    }
+    if (fechaEnVentana) {
+      for (const fl of filas) {
+        const vals = ctds[`${fl.id_control}__${fl.sucursal}`]; if (!vals) continue;
+        acc.rucula += Number(vals.rucula) || 0;
+        acc.lechuga_crespa += Number(vals.lechuga_crespa) || 0;
+        acc.lechuga_roble += Number(vals.hoja_roble) || 0;
+      }
     }
     return acc;
   }
   const comprometido = comprometidoPorCultivo();
 
   // Detalle por cliente (y fecha) de lo comprometido — para poder chequear a quién se le
-  // debe qué, no solo el número total.
+  // debe qué, no solo el número total. Mismo criterio que comprometidoPorCultivo(): el
+  // día que se está cargando ahora (si cae en la ventana) sale de `ctds` en vivo, no del
+  // snapshot del server, para que el detalle nunca desentone con el total de arriba.
   interface DetalleComprometidoCliente { nombre: string; fecha: string; rucula: number; lechuga_crespa: number; lechuga_roble: number; total: number }
   function detalleComprometidoPorCliente(): DetalleComprometidoCliente[] {
+    const hoyReal = new Date();
+    const f = (d: Date) => d.toISOString().split('T')[0];
+    const desdeVentana = f(hoyReal);
+    const hastaD = new Date(hoyReal); hastaD.setDate(hastaD.getDate() + 2);
+    const hastaVentana = f(hastaD);
+    const fechaEnVentana = fecha >= desdeVentana && fecha <= hastaVentana;
+
     const map = new Map<string, DetalleComprometidoCliente>();
-    for (const v of ventasComprometidas) {
-      const rucula = Number(v.rucula) || 0, lechuga_crespa = Number(v.lechuga_crespa) || 0, lechuga_roble = Number(v.hoja_roble) || 0;
+    function acumular(id_control: string, nombre_cliente: string, sucursal: string, fechaLinea: string, rucula: number, lechuga_crespa: number, lechuga_roble: number) {
       const total = rucula + lechuga_crespa + lechuga_roble;
-      if (total <= 0) continue;
-      const key = `${v.id_control}__${v.sucursal}__${v.fecha}`;
+      if (total <= 0) return;
+      const key = `${id_control}__${sucursal}__${fechaLinea}`;
       const ex = map.get(key);
       if (ex) { ex.rucula += rucula; ex.lechuga_crespa += lechuga_crespa; ex.lechuga_roble += lechuga_roble; ex.total += total; }
-      else map.set(key, { nombre: v.sucursal && v.sucursal !== v.nombre_cliente ? `${v.nombre_cliente} · ${v.sucursal}` : v.nombre_cliente, fecha: v.fecha, rucula, lechuga_crespa, lechuga_roble, total });
+      else map.set(key, { nombre: sucursal && sucursal !== nombre_cliente ? `${nombre_cliente} · ${sucursal}` : nombre_cliente, fecha: fechaLinea, rucula, lechuga_crespa, lechuga_roble, total });
+    }
+    for (const v of ventasComprometidas) {
+      const vFecha = String(v.fecha || '').split(/[T ]/)[0];
+      if (fechaEnVentana && vFecha === fecha) continue;
+      acumular(v.id_control, v.nombre_cliente, v.sucursal, v.fecha, Number(v.rucula) || 0, Number(v.lechuga_crespa) || 0, Number(v.hoja_roble) || 0);
+    }
+    if (fechaEnVentana) {
+      for (const fl of filas) {
+        const vals = ctds[`${fl.id_control}__${fl.sucursal}`]; if (!vals) continue;
+        acumular(fl.id_control, fl.nombre_cliente, fl.sucursal, fecha, Number(vals.rucula) || 0, Number(vals.lechuga_crespa) || 0, Number(vals.hoja_roble) || 0);
+      }
     }
     return Array.from(map.values()).sort((a, b) => a.fecha === b.fecha ? b.total - a.total : a.fecha.localeCompare(b.fecha));
   }

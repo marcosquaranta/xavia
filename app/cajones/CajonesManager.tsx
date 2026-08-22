@@ -90,15 +90,23 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
     } catch {}
   }
 
+  // Las dos tarjetas de arriba llevan al detalle por cliente de más abajo (mismo dato,
+  // desglosado) — antes eran solo decorativas, sin ningún lugar adonde ir al tocarlas.
+  function irADetalle() {
+    document.getElementById('detalle-saldo-cliente')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   return (
     <div>
       {/* Totales */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: '12px', marginBottom: '16px' }}>
-        <div style={{ background: '#111827', borderRadius: '10px', padding: '16px' }}>
+        <div onClick={irADetalle} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && irADetalle()}
+          style={{ background: '#111827', borderRadius: '10px', padding: '16px', cursor: 'pointer' }} title="Ver detalle por cliente">
           <p style={{ margin: '0 0 6px', fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase', fontWeight: 700 }}>Cajones en la calle</p>
           <p style={{ margin: 0, fontSize: '32px', fontWeight: 800, color: 'white' }}>{fmt(totalEnLaCalle)}</p>
         </div>
-        <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px' }}>
+        <div onClick={irADetalle} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && irADetalle()}
+          style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px', cursor: 'pointer' }} title="Ver detalle por cliente">
           <p style={{ margin: '0 0 6px', fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', fontWeight: 700 }}>Clientes con saldo</p>
           <p style={{ margin: 0, fontSize: '32px', fontWeight: 800, color: '#111827' }}>{clientesConSaldo}</p>
         </div>
@@ -210,7 +218,7 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
       </div>
 
       {/* Resumen por cliente */}
-      <div className="card" style={{ marginBottom: '16px' }}>
+      <div id="detalle-saldo-cliente" className="card" style={{ marginBottom: '16px', scrollMarginTop: '16px' }}>
         <p className="card-title">Saldo por cliente</p>
         {saldos.length === 0 ? (
           <p style={{ color: '#9ca3af', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Todavía no hay movimientos de cajones registrados.</p>
