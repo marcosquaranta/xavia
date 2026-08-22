@@ -123,7 +123,7 @@ export default async function DetalleLotePage({ params }: { params: { id: string
             <p className="card-title" style={{ color: '#991b1b' }}>⚠️ Revisar alerta de cosecha</p>
             {alertasCosechaLote.map(({ mov: m, motivo }) => {
               const descartePct = Number(m.plantas_estimadas) > 0 ? Math.round((Number(m.descarte_calculado) / Number(m.plantas_estimadas)) * 100) : 0;
-              const motivoTxt = motivo === 'descarte' ? `Descarte del ${descartePct}% de la cosecha (más de 5%)`
+              const motivoTxt = motivo === 'descarte' ? `Descarte del ${descartePct}% de la cosecha (más de 10%)`
                 : motivo === 'densidad' ? `Rúcula armada a ${m.plantas_por_unidad_real} plantas/paquete (más de 3)`
                 : `Desvío del ${m.desvio_porcentaje}% en la cantidad cosechada (nivel ${m.nivel_alerta})`;
               return (

@@ -39,8 +39,13 @@ export function saldoPorCliente(movimientos: CajonMovimiento[], clientes: Client
   const hoyStr = hoy.toISOString().slice(0, 10);
   return Array.from(acc.entries()).map(([id_control, r]) => {
     const diasSinMovimiento = r.ultimo ? Math.max(0, Math.round((new Date(hoyStr + 'T12:00:00').getTime() - new Date(r.ultimo + 'T12:00:00').getTime()) / 86400000)) : null;
+    // Si ni el cliente actual ni el propio movimiento tienen un nombre guardado (cliente
+    // borrado, o un registro viejo de antes de que se guardara nombre_cliente), nunca
+    // mostrar el id_control pelado — se confunde con cualquier otro número en pantalla.
+    // Queda explícito que hace falta revisar ese dato.
+    const nombre = nombreMap.get(id_control) || m_nombreFallback(movimientos, id_control) || `Cliente #${id_control} (revisar)`;
     return {
-      id_control, nombre: nombreMap.get(id_control) || m_nombreFallback(movimientos, id_control) || id_control,
+      id_control, nombre,
       entregados: r.entregados, devueltos: r.devueltos, saldo: r.entregados - r.devueltos,
       ultimoMovimiento: r.ultimo, diasSinMovimiento,
     };

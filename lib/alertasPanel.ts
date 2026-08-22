@@ -13,7 +13,7 @@ function safeDate(s: any): Date | null {
 // ── Motivo de alerta de calidad de una cosecha puntual — compartido entre el Panel
 // ("Desvíos y calidad de cosecha") y la ficha del lote, para no duplicar los umbrales. ──
 export type MotivoAlertaCosecha = 'desvio' | 'descarte' | 'densidad';
-export const UMBRAL_DESCARTE_PCT = 0.05;
+export const UMBRAL_DESCARTE_PCT = 0.10;
 export function motivoAlertaCosecha(mov: Movimiento, esRucula: boolean): MotivoAlertaCosecha | null {
   if (mov.tipo !== 'cosecha') return null;
   if (mov.nivel_alerta === 'amarillo' || mov.nivel_alerta === 'rojo') return 'desvio';

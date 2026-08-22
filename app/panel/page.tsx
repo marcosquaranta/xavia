@@ -5,7 +5,7 @@ import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
 import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio } from '@/lib/estadisticas';
 import { codigoCultivo } from '@/lib/lotes';
-import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, Empleado, PersonalQuincena, CajonMovimiento, KilometrajeVehiculo, ProductividadDiaria } from '@/lib/types';
+import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, CajonMovimiento, KilometrajeVehiculo, ProductividadDiaria } from '@/lib/types';
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
 import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
 import { evolucionVentaPorArticulo, resumenMesActual } from '@/lib/estadisticasVentas';
@@ -13,10 +13,9 @@ import { generarAlertas, motivoAlertaCosecha, type MotivoAlertaCosecha } from '@
 import { calcularCamara, diferenciaAjustesMes } from '@/lib/camara';
 import { saldoPorCliente, alertasCajones } from '@/lib/cajones';
 import { descartePorFaseMes } from '@/lib/descarte';
+import { germinacionYSupervivenciaMes } from '@/lib/germinacion';
 import { faltaCargarEstaSemana, ultimaLectura, kmEnRango, VEHICULO_PARTNER } from '@/lib/kilometraje';
-import { getRegistrosCrossChex } from '@/lib/crosschex';
 import { productividadDeMes } from '@/lib/productividad';
-import { calcularResumenQuincena, rangoQuincena, tardanzasDeHoy } from '@/lib/personal';
 import Header from '@/components/Header';
 import GraficoCiclosSemanas from '@/components/GraficoCiclosSemanas';
 import GraficoDistribucionMesadas from '@/components/GraficoDistribucionMesadas';
@@ -24,12 +23,12 @@ import BuscadorLote from '@/components/BuscadorLote';
 import GruposLotes from '@/components/GruposLotes';
 import AjusteStockCard from '@/components/AjusteStockCard';
 import KilometrajeReminder from '@/components/KilometrajeReminder';
+import TardanzasHoyBanner from '@/components/TardanzasHoyBanner';
 import { GraficoVentaPorArticulo } from '@/app/ventas/VentasEvolucionCharts';
 
 export const dynamic = 'force-dynamic';
-// Tardanzas de hoy sigue pidiéndole a CrossChex en vivo (necesita el fichaje del día, no
-// se puede cachear) — con el límite real de CrossChex (1 pedido/15s, ver lib/crosschex.ts)
-// un token+datos "en frío" puede tardar ~15-20s, más que el timeout por defecto.
+// Ya no le pide nada a CrossChex acá adentro (ver TardanzasHoyBanner.tsx) — se deja el
+// timeout generoso igual, de margen, por si alguna de las hojas de Sheets tarda.
 export const maxDuration = 60;
 
 const TIPO_LABEL: Record<string, { label: string; color: string; bg: string }> = {
@@ -272,29 +271,11 @@ export default async function PanelPage() {
     ];
   } catch {}
 
-  // Tardanzas DE HOY (no de toda la quincena) (CrossChex) — solo admin, banner grande en
-  // el home. Envuelto en try/catch: si CrossChex está caído o faltan credenciales, no debe
-  // romper el resto del Panel.
-  let tardanzasHoy: { nombre: string; hora: string }[] = [];
-  if (user.rol === 'admin') {
-    try {
-      const quincenaActual = (hoy.getDate() <= 15 ? 1 : 2) as 1 | 2;
-      const { desde, hasta } = rangoQuincena(hoy.getFullYear(), hoy.getMonth() + 1, quincenaActual);
-      const [empleadosPanel, registrosPanel, ajustesPanel] = await Promise.all([
-        readSheet<Empleado>('Empleados').catch(() => []),
-        getRegistrosCrossChex(desde, hasta),
-        readSheet<PersonalQuincena>('PersonalQuincena').catch(() => []),
-      ]);
-      const ajustesMap: Record<string, { presentismoManual?: 'SI' | 'NO' | '' }> = {};
-      for (const a of ajustesPanel) {
-        if (String(a.anio) === String(hoy.getFullYear()) && String(a.mes) === String(hoy.getMonth() + 1) && String(a.quincena) === String(quincenaActual)) {
-          ajustesMap[String(a.workno)] = { presentismoManual: a.presentismo_manual };
-        }
-      }
-      const resumenPersonal = calcularResumenQuincena(registrosPanel, empleadosPanel, hoy.getFullYear(), hoy.getMonth() + 1, quincenaActual, ajustesMap);
-      tardanzasHoy = tardanzasDeHoy(resumenPersonal);
-    } catch {}
-  }
+  // Tardanzas de hoy: se movió a TardanzasHoyBanner (cliente, fetch a
+  // /api/panel/tardanzas-hoy) — depende de CrossChex, que ahora respeta su límite real de
+  // 1 pedido/15s (ver lib/crosschex.ts), y calcularlo acá adentro bloqueaba la carga de
+  // TODA la página ~15-20s. Con esto el Panel renderiza al toque y el banner aparece
+  // aparte unos segundos después si hubo alguna tardanza.
 
   // Productividad, Descarte del mes y Plantas/km — arman el bloque "Producción" de
   // Indicadores (home, solo admin).
@@ -363,6 +344,22 @@ export default async function PanelPage() {
     } catch {}
   }
 
+  // Germinación (proxy: % que llega vivo al primer trasplante Plantín→F1 — no es
+  // germinación pura, mezcla semillas que no germinaron con plantines perdidos en
+  // plantinera antes del trasplante, pero es el dato más cercano sin sumar un paso de
+  // carga nuevo) y Supervivencia post-trasplante (esto sí preciso: % que entra a F1 y
+  // llega vivo a cosecha, sumando F1→F2 + F2→Cosecha) — mes en curso vs. mes pasado.
+  let germinacionMes: { actual: number | null; pasado: number | null } = { actual: null, pasado: null };
+  let supervivenciaMes: { actual: number | null; pasado: number | null } = { actual: null, pasado: null };
+  if (user.rol === 'admin') {
+    try {
+      const gActual = germinacionYSupervivenciaMes(lotes, movimientos, hoy);
+      const gPasado = germinacionYSupervivenciaMes(lotes, movimientos, mesAnteriorRef);
+      germinacionMes = { actual: gActual.pctGerminacion, pasado: gPasado.pctGerminacion };
+      supervivenciaMes = { actual: gActual.pctSupervivenciaPostTrasplante, pasado: gPasado.pctSupervivenciaPostTrasplante };
+    } catch {}
+  }
+
   // ── ÚLTIMOS MOVIMIENTOS, separados por tipo (definido acá arriba porque también
   // hace falta para clasificar cultivo en "Desvíos de cosecha", justo abajo) ──
   const lotesMap = new Map(lotes.map(l => [l.id_lote, l]));
@@ -370,7 +367,7 @@ export default async function PanelPage() {
   // Desvíos de cosecha (antes en la sección "Alertas" propia, ahora solo en el home) —
   // solo admin, últimos 30 días, sin revisar primero. Además del desvío de cantidad
   // (nivel_alerta ya calculado en /api/lotes/cosecha), suma dos alertas de calidad
-  // puntuales pedidas explícitamente: descarte de lechuga > 5% de la cosecha del lote
+  // puntuales pedidas explícitamente: descarte de lechuga > 10% de la cosecha del lote
   // (descarte_calculado / plantas_estimadas, mismo % que se usa en el formulario de
   // cosecha), y rúcula armada con más de 3 plantas por paquete (paquetes más chicos).
   // Ventana de 3 días y orden estrictamente por fecha (más reciente primero) — antes eran
@@ -457,18 +454,7 @@ export default async function PanelPage() {
 
         <BuscadorLote baseUrl="/cultivos" />
 
-        {tardanzasHoy.length > 0 && (
-          <div style={{ background:'#fef2f2', border:'2px solid #dc2626', borderRadius:'10px', padding:'16px 18px', marginBottom:'14px', display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }}>
-            <span style={{ fontSize:'28px', lineHeight:1 }}>⏰</span>
-            <div style={{ flex:1, minWidth:'260px' }}>
-              <p style={{ margin:'0 0 4px', fontSize:'15px', fontWeight:800, color:'#991b1b' }}>Hoy hubo tardanzas</p>
-              <p style={{ margin:0, fontSize:'12.5px', color:'#7f1d1d' }}>
-                {tardanzasHoy.map((t, i) => (<span key={t.nombre}>{i > 0 && ' · '}<strong>{t.nombre}</strong> llegó a las {t.hora}</span>))}
-              </p>
-            </div>
-            <Link href="/admin/personal" className="btn secondary" style={{ fontSize:'12px', whiteSpace:'nowrap' }}>Ver Control de personal →</Link>
-          </div>
-        )}
+        {user.rol === 'admin' && <TardanzasHoyBanner />}
 
         {esDiaStockCamara && (
           <div style={{ background:'#fef3c7', border:'2px solid #f59e0b', borderRadius:'10px', padding:'16px 18px', marginBottom:'14px', display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }}>
@@ -557,7 +543,7 @@ export default async function PanelPage() {
                         const badgeTxt = motivo === 'descarte' ? `${descartePct}% desc.`
                           : motivo === 'densidad' ? `${Number(m.plantas_por_unidad_real)||0} pl/paq`
                           : `+${Math.round(Number(m.desvio_porcentaje) || 0)}%`;
-                        const detalleTxt = motivo === 'descarte' ? `descarte del ${descartePct}% (>5%)`
+                        const detalleTxt = motivo === 'descarte' ? `descarte del ${descartePct}% (>10%)`
                           : motivo === 'densidad' ? `rúcula con más de 3 plantas/paquete`
                           : `${Number(m.descarte_calculado)||0} s/id`;
                         return (
@@ -642,6 +628,16 @@ export default async function PanelPage() {
                   ...(plantasPorKm.actual !== null ? [{
                     label: 'Plantas cosechadas / km', valor: `${plantasPorKm.actual.toLocaleString('es-AR')} pl/km`,
                     pct: plantasPorKm.pasado !== null ? pctVs(plantasPorKm.actual, plantasPorKm.pasado) : null, mejorSiSube: true,
+                  }] : []),
+                  ...(germinacionMes.actual !== null ? [{
+                    label: 'Germinación (proxy)', valor: `${germinacionMes.actual}%`,
+                    pct: germinacionMes.pasado !== null ? pctVs(germinacionMes.actual, germinacionMes.pasado) : null, mejorSiSube: true,
+                    detalle: '% que llega vivo al primer trasplante — mezcla no-germinó + pérdida temprana en plantinera',
+                  }] : []),
+                  ...(supervivenciaMes.actual !== null ? [{
+                    label: 'Supervivencia post-trasplante', valor: `${supervivenciaMes.actual}%`,
+                    pct: supervivenciaMes.pasado !== null ? pctVs(supervivenciaMes.actual, supervivenciaMes.pasado) : null, mejorSiSube: true,
+                    detalle: '% que entra a F1 y llega vivo a cosecha (F1→F2 + F2→Cosecha)',
                   }] : []),
                 ]} />
               )}
