@@ -32,7 +32,11 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
   const totalEnLaCalle = saldos.reduce((a, s) => a + Math.max(0, s.saldo), 0);
   const clientesConSaldo = saldos.filter(s => s.saldo > 0).length;
 
-  const nombreCliente = (id: string) => clientes.find(c => c.id_control === id)?.nombre_display || clientes.find(c => c.id_control === id)?.nombre_xubio || id;
+  // String(...) obligatorio: si id_control viene como número nativo desde Sheets (celda
+  // cargada como número, no como texto), esta comparación nunca hacía match contra el id
+  // (siempre string, viene de un <select>) — cualquier registro nuevo guardaba
+  // nombre_cliente vacío/con el id pelado, en vez del nombre real del cliente.
+  const nombreCliente = (id: string) => clientes.find(c => String(c.id_control) === id)?.nombre_display || clientes.find(c => String(c.id_control) === id)?.nombre_xubio || id;
 
   // Info del cliente elegido en el formulario — aparece apenas se selecciona, para que
   // quien carga la entrega/devolución pueda chequear contra el teórico al toque, sin

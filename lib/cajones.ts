@@ -24,7 +24,12 @@ export interface SaldoCajonCliente {
 // historial de movimientos — un simple acumulado entrega(+)/devolución(-), sin ventana de
 // tiempo: los cajones no "vencen", quedan pendientes hasta que se devuelven.
 export function saldoPorCliente(movimientos: CajonMovimiento[], clientes: ClienteVenta[], hoy: Date = new Date()): SaldoCajonCliente[] {
-  const nombreMap = new Map(clientes.map(c => [c.id_control, c.nombre_display || c.nombre_xubio || c.id_control]));
+  // String(...) en la key es obligatorio acá: si la columna id_control de la hoja tiene
+  // celdas cargadas como número (no como texto), Sheets las devuelve como number nativo
+  // — sin este cast, esta Map nunca hacía match contra el id_control (siempre string) del
+  // resto de la función, y CUALQUIER cliente caía siempre al fallback (mostraba el
+  // id_control pelado, para TODOS, no solo el que no se encontraba de verdad).
+  const nombreMap = new Map(clientes.map(c => [String(c.id_control), c.nombre_display || c.nombre_xubio || String(c.id_control)]));
   const acc = new Map<string, { entregados: number; devueltos: number; ultimo: string | null }>();
   for (const m of movimientos) {
     const id = String(m.id_control || '');
@@ -52,7 +57,7 @@ export function saldoPorCliente(movimientos: CajonMovimiento[], clientes: Client
   }).sort((a, b) => b.saldo - a.saldo);
 }
 function m_nombreFallback(movimientos: CajonMovimiento[], id_control: string): string | null {
-  return movimientos.find(m => m.id_control === id_control)?.nombre_cliente || null;
+  return movimientos.find(m => String(m.id_control) === id_control)?.nombre_cliente || null;
 }
 
 // Unidades vendidas a un cliente, separadas por rúcula y lechuga (paquetes/plantas +
