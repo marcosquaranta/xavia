@@ -92,7 +92,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   const [correlaB,setCorrelaB]=useState<string>('');
   const [enviarEmail,setEnviarEmail]=useState(true);
   const [limpiando,setLimpiando]=useState(false);
-  const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number;diasPromedio:number};lechuga_crespa:{stockActual:number;diasPromedio:number};lechuga_roble:{stockActual:number;diasPromedio:number};factorGrPaq:{rucula:number;lechuga_crespa:number;lechuga_roble:number}}|null>(null);
+  const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number;diasPromedio:number};lechuga_crespa:{stockActual:number;diasPromedio:number};lechuga_roble:{stockActual:number;diasPromedio:number};factorGrPaq:{rucula:number;lechuga_crespa:number;lechuga_roble:number};ventasHoyYaDescontadas:boolean}|null>(null);
   const [ctdsKg,setCtdsKg]=useState<CKG>({});
   const [ventas7,setVentas7]=useState<VentaDia[]>([]);
   const [facturadasHoy,setFacturadasHoy]=useState<VentaDia[]>([]);
@@ -371,34 +371,43 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   // se toca (y también contempla lo pre-cargado de un Pedido fijo, que ya vive en `ctds`
   // desde que se hidrata más arriba), en vez de quedar pegado al valor de cuando se
   // entró a la pantalla hasta recargar la página.
+  // Desglosado por día (no un solo "comprometido 3d") — a pedido explícito: una factura
+  // cargada con FECHA de hoy pero pensada para mañana antes se mezclaba sin distinguir en
+  // el total de 3 días, y el stock disponible cambiaba de una forma que no se entendía de
+  // dónde salía. Separado así se puede ver de un vistazo si lo que aparece en "Ventas de
+  // hoy" tiene sentido, sin que quede tapado por mañana/pasado.
   const DIAS_COMPROMETIDO = 3;
-  function comprometidoPorCultivo(): Record<'rucula'|'lechuga_crespa'|'lechuga_roble', number> {
-    const acc = { rucula: 0, lechuga_crespa: 0, lechuga_roble: 0 };
+  type CultivoStock = 'rucula' | 'lechuga_crespa' | 'lechuga_roble';
+  interface ComprometidoDia { hoy: number; siguientes2: number }
+  function comprometidoPorCultivoYDia(): Record<CultivoStock, ComprometidoDia> {
+    const acc: Record<CultivoStock, ComprometidoDia> = { rucula: { hoy: 0, siguientes2: 0 }, lechuga_crespa: { hoy: 0, siguientes2: 0 }, lechuga_roble: { hoy: 0, siguientes2: 0 } };
     const hoyReal = new Date();
     const f = (d: Date) => d.toISOString().split('T')[0];
-    const desdeVentana = f(hoyReal);
+    const hoyRealStr = f(hoyReal);
+    const desdeVentana = hoyRealStr;
     const hastaD = new Date(hoyReal); hastaD.setDate(hastaD.getDate() + 2);
     const hastaVentana = f(hastaD);
     const fechaEnVentana = fecha >= desdeVentana && fecha <= hastaVentana;
 
+    function sumar(bucket: 'hoy' | 'siguientes2', rucula: number, lechuga_crespa: number, lechuga_roble: number) {
+      acc.rucula[bucket] += rucula; acc.lechuga_crespa[bucket] += lechuga_crespa; acc.lechuga_roble[bucket] += lechuga_roble;
+    }
     for (const v of ventasComprometidas) {
       const vFecha = String(v.fecha || '').split(/[T ]/)[0];
       if (fechaEnVentana && vFecha === fecha) continue; // ese día se reemplaza por el vivo de abajo
-      acc.rucula += Number(v.rucula) || 0;
-      acc.lechuga_crespa += Number(v.lechuga_crespa) || 0;
-      acc.lechuga_roble += Number(v.hoja_roble) || 0;
+      const bucket = vFecha === hoyRealStr ? 'hoy' : 'siguientes2';
+      sumar(bucket, Number(v.rucula) || 0, Number(v.lechuga_crespa) || 0, Number(v.hoja_roble) || 0);
     }
     if (fechaEnVentana) {
+      const bucket = fecha === hoyRealStr ? 'hoy' : 'siguientes2';
       for (const fl of filas) {
         const vals = ctds[`${fl.id_control}__${fl.sucursal}`]; if (!vals) continue;
-        acc.rucula += Number(vals.rucula) || 0;
-        acc.lechuga_crespa += Number(vals.lechuga_crespa) || 0;
-        acc.lechuga_roble += Number(vals.hoja_roble) || 0;
+        sumar(bucket, Number(vals.rucula) || 0, Number(vals.lechuga_crespa) || 0, Number(vals.hoja_roble) || 0);
       }
     }
     return acc;
   }
-  const comprometido = comprometidoPorCultivo();
+  const comprometidoDia = comprometidoPorCultivoYDia();
 
   // Detalle por cliente (y fecha) de lo comprometido — para poder chequear a quién se le
   // debe qué, no solo el número total. Mismo criterio que comprometidoPorCultivo(): el
@@ -449,7 +458,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       {/* Stock disponible — cerca de donde se carga, para chequear de un vistazo antes de cargar */}
       <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'8px',padding:'8px 14px',marginBottom:'12px'}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'8px',flexWrap:'wrap',gap:'6px'}}>
-          <p style={{margin:0,fontSize:'12px',fontWeight:700,color:'#166534'}}>🥬 Stock actual − Ventas comprometidas (hoy/mañana/pasado), por cultivo</p>
+          <p style={{margin:0,fontSize:'12px',fontWeight:700,color:'#166534'}}>🥬 Stock inicial de hoy − Ventas comprometidas, por cultivo</p>
           {detalleComprometido.length > 0 && (
             <button onClick={()=>setVerDetalleComprometido(v=>!v)} style={{background:'none',border:'none',color:'#166534',fontSize:'11px',fontWeight:600,cursor:'pointer',padding:0,textDecoration:'underline'}}>
               {verDetalleComprometido ? 'Ocultar detalle por cliente' : 'Ver detalle por cliente'}
@@ -459,9 +468,14 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))',gap:'10px'}}>
           {(['rucula','lechuga_crespa','lechuga_roble'] as const).map(cultivo=>{
             const sc = stockCamara?.[cultivo]?.stockActual ?? 0;
-            const comp = comprometido[cultivo] ?? 0;
+            const { hoy: compHoy, siguientes2: compSig2 } = comprometidoDia[cultivo];
             const manual = Number(cosechaManual[cultivo]) || 0;
-            const disponibleParaVenta = sc - comp + manual;
+            // Si ya pasó el mediodía, "Stock inicial de hoy" (stockActual) ya viene con las
+            // ventas de hoy descontadas (regla del mediodía, ver lib/camara.ts) — restarlas
+            // de nuevo acá las contaría dos veces. Antes del mediodía todavía no están
+            // descontadas, así que sí hay que restarlas.
+            const yaDescontadas = stockCamara?.ventasHoyYaDescontadas ?? false;
+            const disponibleParaVenta = yaDescontadas ? (sc - compSig2 + manual) : (sc - compHoy - compSig2 + manual);
             const label  = cultivo==='rucula'?'Rúcula':cultivo==='lechuga_crespa'?'Lechuga Crespa':'Lechuga Roble';
             const color  = cultivo==='rucula'?'#b45309':cultivo==='lechuga_crespa'?'#4d7c0f':'#166534';
             const bg     = cultivo==='rucula'?'#fffbeb':cultivo==='lechuga_crespa'?'#f7fee7':'#f0fdf4';
@@ -475,8 +489,11 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
                   </span>
                 </div>
                 <div style={{display:'flex',gap:'12px',alignItems:'baseline',flexWrap:'wrap'}}>
-                  <span style={{fontSize:'10.5px',color:'#6b7280'}}>Stock actual: <strong style={{color:'#111827'}}>{sc}</strong></span>
-                  <span style={{fontSize:'10.5px',color:'#6b7280'}}>− Comprometido {DIAS_COMPROMETIDO}d: <strong style={{color:'#111827'}}>{comp}</strong></span>
+                  <span style={{fontSize:'10.5px',color:'#6b7280'}}>
+                    Stock inicial de hoy <span style={{color: yaDescontadas ? '#166534' : '#b45309', fontWeight:600}}>({yaDescontadas ? 'ya cuenta las ventas de hoy' : 'no cuenta las ventas de hoy todavía'})</span>: <strong style={{color:'#111827'}}>{sc}</strong>
+                  </span>
+                  <span style={{fontSize:'10.5px',color:'#6b7280'}}>− Ventas de hoy: <strong style={{color:'#111827'}}>{compHoy}</strong>{yaDescontadas && <span style={{color:'#9ca3af'}}> (informativo, ya está en el stock)</span>}</span>
+                  <span style={{fontSize:'10.5px',color:'#6b7280'}}>− Comprometidas {DIAS_COMPROMETIDO-1}d más: <strong style={{color:'#111827'}}>{compSig2}</strong></span>
                 </div>
                 <div style={{display:'flex',alignItems:'center',gap:'6px',marginTop:'2px'}}>
                   <span style={{fontSize:'10.5px',color:'#6b7280'}}>+ Cosecha prevista (manual):</span>

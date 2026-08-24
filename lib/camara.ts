@@ -22,6 +22,13 @@ const HORA_CORTE_MEDIODIA = 12;
 function horaArgentina(momento: Date): number {
   return Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Argentina/Buenos_Aires', hour: 'numeric', hour12: false }).format(momento));
 }
+// Expuesto para quien consuma calcularCamara() y necesite saber, sin adivinar, si el
+// "stockActual" que devuelve ya tiene descontadas las ventas de HOY o todavía no (regla
+// del mediodía de arriba) — ej. el cuadro de "Disp. para venta" en Ventas, para no
+// restar de nuevo lo que ya está restado (y para poder avisarlo en pantalla).
+export function ventasDeHoyYaDescontadas(momentoRef: Date = new Date()): boolean {
+  return horaArgentina(momentoRef) >= HORA_CORTE_MEDIODIA;
+}
 function fechaArgentina(momento: Date): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric', month: '2-digit', day: '2-digit' }).format(momento);
 }

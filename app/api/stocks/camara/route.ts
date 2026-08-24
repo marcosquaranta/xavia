@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import type { Lote, VentaDia, StockCamara } from '@/lib/types';
-import { calcularCamara, type CultivoCamara } from '@/lib/camara';
+import { calcularCamara, ventasDeHoyYaDescontadas, type CultivoCamara } from '@/lib/camara';
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -43,5 +43,9 @@ export async function GET() {
   return NextResponse.json({
     rucula, lechuga_crespa: lechugaCrespa, lechuga_roble: lechugaRoble,
     factorGrPaq: { rucula: factorGr('rucula'), lechuga_crespa: factorGr('lechuga_crespa'), lechuga_roble: factorGr('lechuga_roble') },
+    // Si ya pasó el mediodía (regla del mediodía, ver lib/camara.ts), el "stockActual" de
+    // cada cultivo YA tiene descontadas las ventas de hoy — quien consuma esto no debe
+    // restarlas de nuevo (ver app/ventas/VentasManager.tsx).
+    ventasHoyYaDescontadas: ventasDeHoyYaDescontadas(),
   });
 }
