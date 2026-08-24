@@ -2,19 +2,25 @@
 import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import type { CajonMovimiento, ClienteVenta } from '@/lib/types';
-import type { SaldoCajonCliente, AlertaCajon, TeoricoCajonCliente } from '@/lib/cajones';
+import type { SaldoCajonCliente, AlertaCajon } from '@/lib/cajones';
 import NumberInput from '@/components/NumberInput';
 
 const HOY = new Date().toISOString().split('T')[0];
 const fmt = (n: number) => Math.round(n).toLocaleString('es-AR');
 
-export default function CajonesManager({ saldos, teorico, alertas, clientes, movimientos, unidadesPorCajonRucula, unidadesPorCajonLechuga, esAdmin }: {
-  saldos: SaldoCajonCliente[]; teorico: Record<string, TeoricoCajonCliente>; alertas: AlertaCajon[];
+const TIPO_LABEL: Record<CajonMovimiento['tipo'], { label: string; icon: string; color: string }> = {
+  entrega: { label: 'Entrega', icon: '📤', color: '#d97706' },
+  devolucion: { label: 'Devolución', icon: '📥', color: '#059669' },
+  ajuste: { label: 'Ajuste (conteo)', icon: '🔧', color: '#7c3aed' },
+};
+
+export default function CajonesManager({ saldos, alertas, clientes, movimientos, unidadesPorCajonRucula, unidadesPorCajonLechuga, esAdmin }: {
+  saldos: SaldoCajonCliente[]; alertas: AlertaCajon[];
   clientes: ClienteVenta[]; movimientos: CajonMovimiento[]; unidadesPorCajonRucula: number; unidadesPorCajonLechuga: number; esAdmin: boolean;
 }) {
   const router = useRouter();
   const [idControl, setIdControl] = useState('');
-  const [tipo, setTipo] = useState<'entrega' | 'devolucion'>('entrega');
+  const [tipo, setTipo] = useState<CajonMovimiento['tipo']>('entrega');
   const [cantidad, setCantidad] = useState(0);
   const [fecha, setFecha] = useState(HOY);
   const [notas, setNotas] = useState('');
@@ -31,6 +37,10 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
 
   const totalEnLaCalle = saldos.reduce((a, s) => a + Math.max(0, s.saldo), 0);
   const clientesConSaldo = saldos.filter(s => s.saldo > 0).length;
+  // Suma de todo lo que se perdió (diferencias negativas de los ajustes), de todos los
+  // clientes — indicador nuevo a pedido explícito, para dimensionar cuánto se está
+  // perdiendo en cajones en total, no solo por cliente.
+  const perdidaTotal = saldos.reduce((a, s) => a + s.perdidaAcumulada, 0);
 
   // String(...) obligatorio: si id_control viene como número nativo desde Sheets (celda
   // cargada como número, no como texto), esta comparación nunca hacía match contra el id
@@ -38,19 +48,19 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
   // nombre_cliente vacío/con el id pelado, en vez del nombre real del cliente.
   const nombreCliente = (id: string) => clientes.find(c => String(c.id_control) === id)?.nombre_display || clientes.find(c => String(c.id_control) === id)?.nombre_xubio || id;
 
-  // Info del cliente elegido en el formulario — aparece apenas se selecciona, para que
-  // quien carga la entrega/devolución pueda chequear contra el teórico al toque, sin
-  // tener que ir a buscarlo en el cuadro de abajo.
+  // Info del cliente elegido en el formulario — aparece apenas se selecciona, para poder
+  // chequear el saldo actual antes de confirmar (y, en un ajuste, ver la diferencia al toque).
   const infoCliente = useMemo(() => {
     if (!idControl) return null;
-    const s = saldos.find(x => x.id_control === idControl) || null;
-    const t = teorico[idControl] || null;
-    return { saldo: s, teorico: t };
-  }, [idControl, saldos, teorico]);
+    return saldos.find(x => x.id_control === idControl) || null;
+  }, [idControl, saldos]);
+
+  const saldoAntesDeAjuste = infoCliente?.saldo ?? 0;
+  const diffAjuste = tipo === 'ajuste' && idControl ? Math.round(cantidad - saldoAntesDeAjuste) : null;
 
   async function registrar() {
     if (!idControl) { setError('Elegí un cliente.'); return; }
-    if (!(cantidad > 0)) { setError('Ingresá una cantidad válida.'); return; }
+    if (tipo === 'ajuste' ? cantidad < 0 : !(cantidad > 0)) { setError('Ingresá una cantidad válida.'); return; }
     setGuardando(true); setError(null); setMsgOk(null);
     try {
       const res = await fetch('/api/cajones/movimiento', {
@@ -59,7 +69,13 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || 'Error al guardar');
-      setMsgOk(`${tipo === 'entrega' ? 'Entrega' : 'Devolución'} registrada: ${cantidad} cajones — ${nombreCliente(idControl)}`);
+      if (tipo === 'ajuste') {
+        const dif = Number(j.diferencia_paq) || 0;
+        const difTxt = dif === 0 ? 'sin diferencia vs. lo esperado' : dif < 0 ? `se perdieron ${Math.abs(dif)} cajones` : `aparecieron ${dif} cajones de más`;
+        setMsgOk(`Ajuste registrado: ${cantidad} cajones en la calle — ${nombreCliente(idControl)} (${difTxt})`);
+      } else {
+        setMsgOk(`${TIPO_LABEL[tipo].label} registrada: ${cantidad} cajones — ${nombreCliente(idControl)}`);
+      }
       setCantidad(0); setNotas('');
       router.refresh();
     } catch (err: any) {
@@ -94,7 +110,7 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
     } catch {}
   }
 
-  // Las dos tarjetas de arriba llevan al detalle por cliente de más abajo (mismo dato,
+  // Las tarjetas de arriba llevan al detalle por cliente de más abajo (mismo dato,
   // desglosado) — antes eran solo decorativas, sin ningún lugar adonde ir al tocarlas.
   function irADetalle() {
     document.getElementById('detalle-saldo-cliente')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -113,6 +129,12 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
           style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px', cursor: 'pointer' }} title="Ver detalle por cliente">
           <p style={{ margin: '0 0 6px', fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', fontWeight: 700 }}>Clientes con saldo</p>
           <p style={{ margin: 0, fontSize: '32px', fontWeight: 800, color: '#111827' }}>{clientesConSaldo}</p>
+        </div>
+        <div onClick={irADetalle} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && irADetalle()}
+          style={{ background: perdidaTotal > 0 ? '#fef2f2' : 'white', border: `1px solid ${perdidaTotal > 0 ? '#fecaca' : '#e5e7eb'}`, borderRadius: '10px', padding: '16px', cursor: 'pointer' }}
+          title="Suma de las diferencias negativas de todos los ajustes — cajones que se contaron de menos">
+          <p style={{ margin: '0 0 6px', fontSize: '11px', color: perdidaTotal > 0 ? '#991b1b' : '#6b7280', textTransform: 'uppercase', fontWeight: 700 }}>Pérdida de cajones</p>
+          <p style={{ margin: 0, fontSize: '32px', fontWeight: 800, color: perdidaTotal > 0 ? '#dc2626' : '#111827' }}>{fmt(perdidaTotal)}</p>
         </div>
         <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px' }}>
           <p style={{ margin: '0 0 6px', fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', fontWeight: 700 }}>Unidades por cajón</p>
@@ -139,7 +161,6 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
               {esAdmin && <button onClick={() => setEditandoConfig(true)} style={{ fontSize: '11px', color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 400, padding: 0 }}>editar</button>}
             </div>
           )}
-          <p style={{ margin: '4px 0 0', fontSize: '10px', color: '#9ca3af' }}>usadas para el cálculo teórico</p>
         </div>
       </div>
 
@@ -171,7 +192,7 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
             </select>
           </div>
           <div>
-            <label style={{ fontSize: '11px', color: '#6b7280' }}>Cantidad</label>
+            <label style={{ fontSize: '11px', color: '#6b7280' }}>{tipo === 'ajuste' ? 'Cantidad real contada' : 'Cantidad'}</label>
             <NumberInput value={cantidad} onChange={setCantidad} min={0} disabled={guardando} />
           </div>
           <div>
@@ -184,22 +205,26 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
           </div>
         </div>
 
-        {/* Info instantánea del cliente elegido — para chequear contra el teórico antes de confirmar */}
+        {/* Info instantánea del cliente elegido — saldo actual, y en un ajuste la
+            diferencia al toque contra ese saldo, antes de confirmar. */}
         {infoCliente && (
           <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '10px 14px', marginBottom: '12px', display: 'flex', gap: '20px', flexWrap: 'wrap', fontSize: '12.5px' }}>
             <span>
-              <strong style={{ color: '#1e40af' }}>{infoCliente.saldo ? fmt(infoCliente.saldo.saldo) : 0}</strong>
+              <strong style={{ color: '#1e40af' }}>{fmt(infoCliente.saldo)}</strong>
               <span style={{ color: '#6b7280' }}> en la calle ahora</span>
             </span>
-            <span>
-              <strong style={{ color: '#1e40af' }}>{infoCliente.teorico ? fmt(infoCliente.teorico.teorico) : '—'}</strong>
-              <span style={{ color: '#6b7280' }}> teóricos</span>
-              {infoCliente.teorico && (
-                <span style={{ color: '#9ca3af' }}> ({fmt(infoCliente.teorico.teoricoRucula)} rúc. + {fmt(infoCliente.teorico.teoricoLechuga)} lech.)</span>
-              )}
-            </span>
+            {tipo === 'ajuste' && diffAjuste !== null && (
+              <span style={{ fontWeight: 700, color: diffAjuste === 0 ? '#6b7280' : diffAjuste > 0 ? '#059669' : '#dc2626' }}>
+                {diffAjuste === 0 ? 'Sin diferencia vs. lo esperado' : diffAjuste > 0 ? `+${diffAjuste} aparecieron de más` : `${diffAjuste} se perdieron`}
+              </span>
+            )}
+            {infoCliente.perdidaAcumulada > 0 && (
+              <span style={{ color: '#dc2626' }}>
+                <strong>{fmt(infoCliente.perdidaAcumulada)}</strong> perdidos históricamente
+              </span>
+            )}
             <span style={{ color: '#6b7280' }}>
-              Último movimiento: {infoCliente.saldo?.ultimoMovimiento ? `${infoCliente.saldo.ultimoMovimiento} (hace ${infoCliente.saldo.diasSinMovimiento}d)` : 'nunca'}
+              Último movimiento: {infoCliente.ultimoMovimiento ? `${infoCliente.ultimoMovimiento} (hace ${infoCliente.diasSinMovimiento}d)` : 'nunca'}
             </span>
           </div>
         )}
@@ -213,6 +238,11 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
             <button onClick={() => setTipo('devolucion')} disabled={guardando}
               style={{ padding: '10px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: 700, border: 'none', cursor: 'pointer', background: tipo === 'devolucion' ? '#059669' : '#f3f4f6', color: tipo === 'devolucion' ? 'white' : '#374151' }}>
               📥 Recibir devolución
+            </button>
+            <button onClick={() => setTipo('ajuste')} disabled={guardando}
+              title="Corrige el saldo en la calle de este cliente a partir de un conteo físico real"
+              style={{ padding: '10px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: 700, border: 'none', cursor: 'pointer', background: tipo === 'ajuste' ? '#7c3aed' : '#f3f4f6', color: tipo === 'ajuste' ? 'white' : '#374151' }}>
+              🔧 Ajustar (conteo)
             </button>
           </div>
           <button onClick={registrar} className="btn" disabled={guardando} style={{ marginLeft: 'auto' }}>
@@ -234,14 +264,11 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
                 <th style={{ textAlign: 'right' }}>Entregados</th>
                 <th style={{ textAlign: 'right' }}>Devueltos</th>
                 <th style={{ textAlign: 'right' }}>En la calle</th>
-                <th style={{ textAlign: 'right' }} title="Estimado según lo vendido ÷ unidades por cajón, por cultivo">Teórico</th>
-                <th style={{ textAlign: 'right' }} title="Entregados reales − teórico">Diferencia</th>
+                <th style={{ textAlign: 'right' }} title="Suma de las diferencias negativas de los ajustes de este cliente">Perdidos</th>
                 <th style={{ textAlign: 'right' }}>Último mov.</th>
               </tr></thead>
               <tbody>
                 {saldos.map(s => {
-                  const t = teorico[s.id_control];
-                  const diff = t ? s.entregados - t.teorico : null;
                   const alerta = s.saldo > 0 && s.diasSinMovimiento !== null && s.diasSinMovimiento > 7;
                   return (
                     <tr key={s.id_control} style={{ borderBottom: '1px solid #f3f4f6', background: alerta ? '#fef2f2' : 'transparent' }}>
@@ -249,9 +276,8 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
                       <td style={{ textAlign: 'right' }}>{fmt(s.entregados)}</td>
                       <td style={{ textAlign: 'right' }}>{fmt(s.devueltos)}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: s.saldo > 0 ? '#d97706' : '#9ca3af' }}>{fmt(s.saldo)}</td>
-                      <td style={{ textAlign: 'right', color: '#6b7280' }} title={t ? `${fmt(t.teoricoRucula)} rúcula + ${fmt(t.teoricoLechuga)} lechuga` : ''}>{t ? fmt(t.teorico) : '—'}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: diff === null ? '#9ca3af' : diff > 0 ? '#059669' : diff < 0 ? '#dc2626' : '#9ca3af' }}>
-                        {diff !== null ? `${diff > 0 ? '+' : ''}${fmt(diff)}` : '—'}
+                      <td style={{ textAlign: 'right', fontWeight: s.perdidaAcumulada > 0 ? 700 : 400, color: s.perdidaAcumulada > 0 ? '#dc2626' : '#9ca3af' }}>
+                        {s.perdidaAcumulada > 0 ? fmt(s.perdidaAcumulada) : '—'}
                       </td>
                       <td style={{ textAlign: 'right', color: alerta ? '#dc2626' : '#9ca3af', fontWeight: alerta ? 700 : 400 }}>
                         {s.ultimoMovimiento ? `${s.diasSinMovimiento}d` : 'nunca'}
@@ -263,7 +289,6 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
             </table>
           </div>
         )}
-        <p style={{ margin: '10px 0 0', fontSize: '10px', color: '#9ca3af' }}>Teórico = unidades vendidas históricas al cliente ÷ unidades por cajón de cada cultivo — una estimación para comparar, no un conteo exacto.</p>
       </div>
 
       {/* Historial */}
@@ -279,22 +304,30 @@ export default function CajonesManager({ saldos, teorico, alertas, clientes, mov
                 <th style={{ textAlign: 'left' }}>Cliente</th>
                 <th style={{ textAlign: 'left' }}>Tipo</th>
                 <th style={{ textAlign: 'right' }}>Cantidad</th>
+                <th style={{ textAlign: 'right' }}>Diferencia</th>
                 <th style={{ textAlign: 'left' }}>Notas</th>
                 {esAdmin && <th></th>}
               </tr></thead>
               <tbody>
-                {[...movimientos].sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || ''))).map(m => (
-                  <tr key={m.id_movimiento} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td>{m.fecha}</td>
-                    <td>{m.nombre_cliente}</td>
-                    <td style={{ color: m.tipo === 'entrega' ? '#d97706' : '#059669', fontWeight: 600 }}>{m.tipo === 'entrega' ? '📤 Entrega' : '📥 Devolución'}</td>
-                    <td style={{ textAlign: 'right' }}>{fmt(Number(m.cantidad) || 0)}</td>
-                    <td style={{ color: '#9ca3af', fontSize: '11px' }}>{m.notas}</td>
-                    {esAdmin && (
-                      <td><button onClick={() => borrarMovimiento(m.id_movimiento)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '11px' }}>Borrar</button></td>
-                    )}
-                  </tr>
-                ))}
+                {[...movimientos].sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || ''))).map(m => {
+                  const t = TIPO_LABEL[m.tipo] || TIPO_LABEL.entrega;
+                  const dif = m.tipo === 'ajuste' ? Number(m.diferencia_paq) || 0 : null;
+                  return (
+                    <tr key={m.id_movimiento} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                      <td>{m.fecha}</td>
+                      <td>{m.nombre_cliente}</td>
+                      <td style={{ color: t.color, fontWeight: 600 }}>{t.icon} {t.label}</td>
+                      <td style={{ textAlign: 'right' }}>{fmt(Number(m.cantidad) || 0)}</td>
+                      <td style={{ textAlign: 'right', fontWeight: dif ? 700 : 400, color: dif === null ? '#d1d5db' : dif === 0 ? '#9ca3af' : dif > 0 ? '#059669' : '#dc2626' }}>
+                        {dif === null ? '·' : `${dif > 0 ? '+' : ''}${fmt(dif)}`}
+                      </td>
+                      <td style={{ color: '#9ca3af', fontSize: '11px' }}>{m.notas}</td>
+                      {esAdmin && (
+                        <td><button onClick={() => borrarMovimiento(m.id_movimiento)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '11px' }}>Borrar</button></td>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

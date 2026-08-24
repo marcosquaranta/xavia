@@ -225,10 +225,16 @@ export interface CajonMovimiento {
   fecha: string;
   id_control: string;
   nombre_cliente: string;
-  tipo: 'entrega' | 'devolucion';
+  // 'ajuste' = corrección manual del saldo en la calle a partir de un conteo físico —
+  // a diferencia de 'entrega'/'devolucion' (que suman/restan), acá `cantidad` es el
+  // saldo TOTAL contado (absoluto, mismo criterio que StockCamara.cantidad_paq), no un
+  // delta. La diferencia contra el saldo teórico de ese momento queda registrada en
+  // diferencia_paq — negativa = cajones perdidos, positiva = aparecieron de más.
+  tipo: 'entrega' | 'devolucion' | 'ajuste';
   cantidad: number | string;
   usuario: string;
   notas: string;
+  diferencia_paq: number | string;
 }
 
 // Lectura puntual del odómetro de un vehículo (km TOTALES acumulados, no el recorrido de

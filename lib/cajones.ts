@@ -15,14 +15,27 @@ export interface SaldoCajonCliente {
   nombre: string;
   entregados: number;
   devueltos: number;
-  saldo: number; // en la calle = entregados - devueltos
+  saldo: number; // en la calle AHORA — entregados − devueltos, reseteado por cada ajuste
+  perdidaAcumulada: number; // suma de las diferencias NEGATIVAS de los ajustes de este cliente (positivo = cuánto se perdió en total)
   ultimoMovimiento: string | null; // fecha YYYY-MM-DD
   diasSinMovimiento: number | null;
 }
 
-// Saldo por cliente (cuántos cajones tiene cada uno "en la calle") a partir de todo el
-// historial de movimientos — un simple acumulado entrega(+)/devolución(-), sin ventana de
-// tiempo: los cajones no "vencen", quedan pendientes hasta que se devuelven.
+// Orden cronológico estable para procesar los movimientos de un cliente: por fecha, y
+// dentro del mismo día por el correlativo de id_movimiento (CJ-0001, CJ-0002, ...) —
+// necesario para que un 'ajuste' resetee el saldo justo donde corresponde en la
+// secuencia, no en un orden arbitrario.
+function ordenMovimiento(m: CajonMovimiento): [string, number] {
+  const num = parseInt(String(m.id_movimiento).replace(/\D/g, ''), 10) || 0;
+  return [String(m.fecha || ''), num];
+}
+
+// Saldo por cliente (cuántos cajones tiene cada uno "en la calle") — replay cronológico
+// de todo el historial: 'entrega' suma, 'devolucion' resta, y 'ajuste' (conteo físico
+// manual) RESETEA el saldo al valor contado, registrando la diferencia contra el saldo
+// teórico de ese momento — si es negativa (contó menos de lo que "debería" haber), se
+// acumula como cajones perdidos. `entregados`/`devueltos` son totales históricos de toda
+// la vida (no se resetean con un ajuste), solo informativos.
 export function saldoPorCliente(movimientos: CajonMovimiento[], clientes: ClienteVenta[], hoy: Date = new Date()): SaldoCajonCliente[] {
   // String(...) en la key es obligatorio acá: si la columna id_control de la hoja tiene
   // celdas cargadas como número (no como texto), Sheets las devuelve como number nativo
@@ -30,31 +43,43 @@ export function saldoPorCliente(movimientos: CajonMovimiento[], clientes: Client
   // resto de la función, y CUALQUIER cliente caía siempre al fallback (mostraba el
   // id_control pelado, para TODOS, no solo el que no se encontraba de verdad).
   const nombreMap = new Map(clientes.map(c => [String(c.id_control), c.nombre_display || c.nombre_xubio || String(c.id_control)]));
-  const acc = new Map<string, { entregados: number; devueltos: number; ultimo: string | null }>();
+  const porCliente = new Map<string, CajonMovimiento[]>();
   for (const m of movimientos) {
     const id = String(m.id_control || '');
     if (!id) continue;
-    const cant = Number(m.cantidad) || 0;
-    if (!acc.has(id)) acc.set(id, { entregados: 0, devueltos: 0, ultimo: null });
-    const r = acc.get(id)!;
-    if (m.tipo === 'entrega') r.entregados += cant; else r.devueltos += cant;
-    const f = String(m.fecha || '');
-    if (f && (!r.ultimo || f > r.ultimo)) r.ultimo = f;
+    if (!porCliente.has(id)) porCliente.set(id, []);
+    porCliente.get(id)!.push(m);
   }
+
   const hoyStr = hoy.toISOString().slice(0, 10);
-  return Array.from(acc.entries()).map(([id_control, r]) => {
-    const diasSinMovimiento = r.ultimo ? Math.max(0, Math.round((new Date(hoyStr + 'T12:00:00').getTime() - new Date(r.ultimo + 'T12:00:00').getTime()) / 86400000)) : null;
+  const out: SaldoCajonCliente[] = [];
+  for (const [id_control, movs] of porCliente) {
+    const ordenados = [...movs].sort((a, b) => {
+      const [fa, na] = ordenMovimiento(a), [fb, nb] = ordenMovimiento(b);
+      return fa === fb ? na - nb : fa.localeCompare(fb);
+    });
+    let saldo = 0, entregados = 0, devueltos = 0, perdidaAcumulada = 0, ultimo: string | null = null;
+    for (const m of ordenados) {
+      const cant = Number(m.cantidad) || 0;
+      if (m.tipo === 'entrega') { saldo += cant; entregados += cant; }
+      else if (m.tipo === 'devolucion') { saldo -= cant; devueltos += cant; }
+      else if (m.tipo === 'ajuste') {
+        const diferencia = cant - saldo; // contado − teórico antes del ajuste
+        if (diferencia < 0) perdidaAcumulada += -diferencia;
+        saldo = cant;
+      }
+      const f = String(m.fecha || '');
+      if (f && (!ultimo || f > ultimo)) ultimo = f;
+    }
+    const diasSinMovimiento = ultimo ? Math.max(0, Math.round((new Date(hoyStr + 'T12:00:00').getTime() - new Date(ultimo + 'T12:00:00').getTime()) / 86400000)) : null;
     // Si ni el cliente actual ni el propio movimiento tienen un nombre guardado (cliente
     // borrado, o un registro viejo de antes de que se guardara nombre_cliente), nunca
     // mostrar el id_control pelado — se confunde con cualquier otro número en pantalla.
     // Queda explícito que hace falta revisar ese dato.
     const nombre = nombreMap.get(id_control) || m_nombreFallback(movimientos, id_control) || `Cliente #${id_control} (revisar)`;
-    return {
-      id_control, nombre,
-      entregados: r.entregados, devueltos: r.devueltos, saldo: r.entregados - r.devueltos,
-      ultimoMovimiento: r.ultimo, diasSinMovimiento,
-    };
-  }).sort((a, b) => b.saldo - a.saldo);
+    out.push({ id_control, nombre, entregados, devueltos, saldo, perdidaAcumulada, ultimoMovimiento: ultimo, diasSinMovimiento });
+  }
+  return out.sort((a, b) => b.saldo - a.saldo);
 }
 function m_nombreFallback(movimientos: CajonMovimiento[], id_control: string): string | null {
   return movimientos.find(m => String(m.id_control) === id_control)?.nombre_cliente || null;
