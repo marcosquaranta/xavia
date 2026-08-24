@@ -1,4 +1,6 @@
 import type { Lote, VentaDia, StockCamara } from './types';
+import { pesoPromedioRango } from './estadisticas';
+import { GR_PAQ_RUCULA, GR_PAQ_LECHUGA } from './estadisticasVentas';
 
 export type CultivoCamara = 'rucula' | 'lechuga_crespa' | 'lechuga_roble';
 
@@ -85,13 +87,34 @@ function cosechadoEntre(cultivo: CultivoCamara, lotes: Lote[], desde: Date, mome
     .reduce((a, l) => a + (Number(l.unidades_cosechadas) || 0), 0);
 }
 
+// Gramos por paquete a usar para convertir ventas en KG a paquetes-equivalente, para
+// clientes que compran por kg (ej. Select Food) — usa el peso REAL promedio de lo
+// cosechado de este cultivo en la ÚLTIMA SEMANA respecto a `momentoRef` (pesoPromedioRango,
+// misma fuente que ya usan el Panel/reporte semanal para "Peso promedio"), así el
+// descuento de stock se ajusta solo si las plantas están saliendo más chicas o más
+// grandes que el histórico — a pedido explícito, en vez de un gramaje fijo. Si esa semana
+// no hubo ninguna cosecha de este cultivo para sacar un promedio, cae al valor fijo de
+// siempre (mismo fallback que el resto de la app: GR_PAQ_RUCULA/GR_PAQ_LECHUGA).
+function gramosPorPaqueteUltimaSemana(cultivo: CultivoCamara, lotes: Lote[], momentoRef: Date): number {
+  const desde = new Date(momentoRef);
+  desde.setDate(desde.getDate() - 7);
+  const prom = pesoPromedioRango(lotes, desde, momentoRef);
+  const gr = cultivo === 'rucula' ? prom.rucula : cultivo === 'lechuga_crespa' ? prom.lechugaCrespa : prom.lechugaRoble;
+  return gr > 0 ? gr : (cultivo === 'rucula' ? GR_PAQ_RUCULA : GR_PAQ_LECHUGA);
+}
+
 // Paquetes vendidos (exportados a Xubio) de `cultivo` con fecha posterior a `desde` y ya
 // concretados (regla del mediodía) respecto a `momentoRef`. El export marca `exportado`
 // con el id de exportación (ej. "EXP-20260619-1430"), NO con el literal 'SI'. Por eso se
 // descuenta cualquier venta con exportado no vacío. lechuga_crespa/hoja_roble ya son
 // campos separados en Ventas — no hace falta clasificar por texto de variedad como con
-// las cosechas.
-function vendidoEntre(cultivo: CultivoCamara, ventas: VentaDia[], desde: Date, momentoRef: Date): number {
+// las cosechas. Ventas en KG (rucula_kg/lechuga_kg_crespa/lechuga_kg_roble, + el legado
+// lechuga_kg sin split que cae en "roble" como catch-all, mismo criterio que
+// matchCultivo) se reconvierten a paquetes-equivalente con el peso promedio de la
+// semana — antes NO se descontaban del stock de cámara en absoluto (un cliente por kg
+// podía vaciar la cámara entera sin que el stock se moviera un solo paquete).
+function vendidoEntre(cultivo: CultivoCamara, ventas: VentaDia[], lotes: Lote[], desde: Date, momentoRef: Date): number {
+  const gramosPorPaquete = gramosPorPaqueteUltimaSemana(cultivo, lotes, momentoRef);
   return ventas
     .filter(v => {
       if (!v.exportado || String(v.exportado).trim() === '') return false;
@@ -100,9 +123,19 @@ function vendidoEntre(cultivo: CultivoCamara, ventas: VentaDia[], desde: Date, m
       return yaConcretado(v.fecha, momentoRef);
     })
     .reduce((acc, v) => {
-      if (cultivo === 'rucula') return acc + (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0);
-      if (cultivo === 'lechuga_crespa') return acc + (Number(v.lechuga_crespa) || 0);
-      return acc + (Number(v.hoja_roble) || 0);
+      if (cultivo === 'rucula') {
+        const directo = (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0);
+        const kg = ((Number(v.rucula_kg) || 0) * 1000) / gramosPorPaquete;
+        return acc + directo + kg;
+      }
+      if (cultivo === 'lechuga_crespa') {
+        const directo = Number(v.lechuga_crespa) || 0;
+        const kg = ((Number(v.lechuga_kg_crespa) || 0) * 1000) / gramosPorPaquete;
+        return acc + directo + kg;
+      }
+      const directo = Number(v.hoja_roble) || 0;
+      const kg = ((Number(v.lechuga_kg_roble) || 0) + (Number(v.lechuga_kg) || 0)) * 1000 / gramosPorPaquete;
+      return acc + directo + kg;
     }, 0);
 }
 
@@ -160,7 +193,7 @@ export function calcularCamara(
     .map(l => ({ fecha: parseDate(l.fecha_cosecha || l.fecha_ult_movimiento)!, cantidad: Number(l.unidades_cosechadas) || 0 }))
     .filter(e => e.cantidad > 0);
 
-  const totalVendido = vendidoEntre(cultivo, ventas, fechaBase, hoy);
+  const totalVendido = vendidoEntre(cultivo, ventas, lotes, fechaBase, hoy);
   const totalCosechado = cosechas.reduce((a, c) => a + c.cantidad, 0);
   const stockActual = Math.max(0, cantidadBase + totalCosechado - totalVendido);
 
@@ -213,7 +246,7 @@ export function diferenciaAjuste(
   if (!prev) return 0; // sin base previa, no hay con qué comparar
 
   const cosechado = cosechadoEntre(cultivo, lotes, prev._f, fecha);
-  const vendido = vendidoEntre(cultivo, ventas, prev._f, fecha);
+  const vendido = vendidoEntre(cultivo, ventas, lotes, prev._f, fecha);
   const teorico = Math.max(0, (Number(prev.cantidad_paq) || 0) + cosechado - vendido);
   return Math.round(cantidadNueva - teorico);
 }
@@ -248,7 +281,7 @@ export function diferenciaAjustesRango(
     if (curr._f < desde || curr._f > hasta) continue;
     const prev = ordenados[i - 1];
     const cosechado = cosechadoEntre(cultivo, lotes, prev._f, curr._m);
-    const vendido = vendidoEntre(cultivo, ventas, prev._f, curr._m);
+    const vendido = vendidoEntre(cultivo, ventas, lotes, prev._f, curr._m);
     const teorico = Math.max(0, (Number(prev.cantidad_paq) || 0) + cosechado - vendido);
     acumulado += Number(curr.cantidad_paq) - teorico;
     cantidadAjustes++;
