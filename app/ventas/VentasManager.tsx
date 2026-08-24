@@ -102,6 +102,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   // ventas se cargan con un día de anticipación, para la fecha de entrega correcta.
   const [ventasComprometidas,setVentasComprometidas]=useState<VentaDia[]>([]);
   const [verDetalleComprometido,setVerDetalleComprometido]=useState(false);
+  // Detalle por cliente de "Ventas de hoy"/"Comprometidas Xd más" en las tarjetas de
+  // stock por cultivo — key: `${cultivo}__${bucket}` del que está expandido, o null.
+  const [detalleAbierto,setDetalleAbierto]=useState<string|null>(null);
   // Cosecha prevista — a pedido explícito, NO se calcula sola: campo libre para cargar a
   // mano si se la quiere contemplar en "disponible para venta" ese día en particular.
   const [cosechaManual,setCosechaManual]=useState<Record<'rucula'|'lechuga_crespa'|'lechuga_roble',string>>({rucula:'',lechuga_crespa:'',lechuga_roble:''});
@@ -378,9 +381,18 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   // hoy" tiene sentido, sin que quede tapado por mañana/pasado.
   const DIAS_COMPROMETIDO = 3;
   type CultivoStock = 'rucula' | 'lechuga_crespa' | 'lechuga_roble';
-  interface ComprometidoDia { hoy: number; siguientes2: number }
+  interface DetalleLinea { nombre: string; cantidad: number }
+  interface ComprometidoDia { hoy: number; siguientes2: number; detalleHoy: DetalleLinea[]; detalleSiguientes2: DetalleLinea[] }
+  // Junta el total Y el detalle por cliente (qué cantidad de cada uno la compone) en una
+  // sola pasada — a pedido explícito: "Ventas de hoy" y "Comprometidas Xd más" antes solo
+  // mostraban el número, sin decir a quién corresponde.
   function comprometidoPorCultivoYDia(): Record<CultivoStock, ComprometidoDia> {
-    const acc: Record<CultivoStock, ComprometidoDia> = { rucula: { hoy: 0, siguientes2: 0 }, lechuga_crespa: { hoy: 0, siguientes2: 0 }, lechuga_roble: { hoy: 0, siguientes2: 0 } };
+    const cultivosList: CultivoStock[] = ['rucula', 'lechuga_crespa', 'lechuga_roble'];
+    const acc: Record<CultivoStock, { hoy: number; siguientes2: number; mapaHoy: Map<string, number>; mapaSiguientes2: Map<string, number> }> = {
+      rucula: { hoy: 0, siguientes2: 0, mapaHoy: new Map(), mapaSiguientes2: new Map() },
+      lechuga_crespa: { hoy: 0, siguientes2: 0, mapaHoy: new Map(), mapaSiguientes2: new Map() },
+      lechuga_roble: { hoy: 0, siguientes2: 0, mapaHoy: new Map(), mapaSiguientes2: new Map() },
+    };
     const hoyReal = new Date();
     const f = (d: Date) => d.toISOString().split('T')[0];
     const hoyRealStr = f(hoyReal);
@@ -389,23 +401,38 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
     const hastaVentana = f(hastaD);
     const fechaEnVentana = fecha >= desdeVentana && fecha <= hastaVentana;
 
-    function sumar(bucket: 'hoy' | 'siguientes2', rucula: number, lechuga_crespa: number, lechuga_roble: number) {
-      acc.rucula[bucket] += rucula; acc.lechuga_crespa[bucket] += lechuga_crespa; acc.lechuga_roble[bucket] += lechuga_roble;
+    function sumar(bucket: 'hoy' | 'siguientes2', nombre: string, valores: Record<CultivoStock, number>) {
+      for (const c of cultivosList) {
+        const qty = valores[c]; if (qty <= 0) continue;
+        const a = acc[c];
+        a[bucket] += qty;
+        const mapa = bucket === 'hoy' ? a.mapaHoy : a.mapaSiguientes2;
+        mapa.set(nombre, (mapa.get(nombre) || 0) + qty);
+      }
     }
     for (const v of ventasComprometidas) {
       const vFecha = String(v.fecha || '').split(/[T ]/)[0];
       if (fechaEnVentana && vFecha === fecha) continue; // ese día se reemplaza por el vivo de abajo
       const bucket = vFecha === hoyRealStr ? 'hoy' : 'siguientes2';
-      sumar(bucket, Number(v.rucula) || 0, Number(v.lechuga_crespa) || 0, Number(v.hoja_roble) || 0);
+      const nombre = v.sucursal && v.sucursal !== v.nombre_cliente ? `${v.nombre_cliente} · ${v.sucursal}` : v.nombre_cliente;
+      sumar(bucket, nombre, { rucula: Number(v.rucula) || 0, lechuga_crespa: Number(v.lechuga_crespa) || 0, lechuga_roble: Number(v.hoja_roble) || 0 });
     }
     if (fechaEnVentana) {
       const bucket = fecha === hoyRealStr ? 'hoy' : 'siguientes2';
       for (const fl of filas) {
         const vals = ctds[`${fl.id_control}__${fl.sucursal}`]; if (!vals) continue;
-        sumar(bucket, Number(vals.rucula) || 0, Number(vals.lechuga_crespa) || 0, Number(vals.hoja_roble) || 0);
+        const nombre = fl.sucursal && fl.sucursal !== fl.nombre_cliente ? `${fl.nombre_cliente} · ${fl.sucursal}` : fl.nombre_cliente;
+        sumar(bucket, nombre, { rucula: Number(vals.rucula) || 0, lechuga_crespa: Number(vals.lechuga_crespa) || 0, lechuga_roble: Number(vals.hoja_roble) || 0 });
       }
     }
-    return acc;
+
+    const ordenar = (m: Map<string, number>) => Array.from(m.entries()).map(([nombre, cantidad]) => ({ nombre, cantidad })).sort((a, b) => b.cantidad - a.cantidad);
+    const out = {} as Record<CultivoStock, ComprometidoDia>;
+    for (const c of cultivosList) {
+      const a = acc[c];
+      out[c] = { hoy: a.hoy, siguientes2: a.siguientes2, detalleHoy: ordenar(a.mapaHoy), detalleSiguientes2: ordenar(a.mapaSiguientes2) };
+    }
+    return out;
   }
   const comprometidoDia = comprometidoPorCultivoYDia();
 
@@ -492,8 +519,33 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
                   <span style={{fontSize:'10.5px',color:'#6b7280'}}>
                     Stock inicial de hoy <span style={{color: yaDescontadas ? '#166534' : '#b45309', fontWeight:600}}>({yaDescontadas ? 'ya cuenta las ventas de hoy' : 'no cuenta las ventas de hoy todavía'})</span>: <strong style={{color:'#111827'}}>{sc}</strong>
                   </span>
-                  <span style={{fontSize:'10.5px',color:'#6b7280'}}>− Ventas de hoy: <strong style={{color:'#111827'}}>{compHoy}</strong>{yaDescontadas && <span style={{color:'#9ca3af'}}> (informativo, ya está en el stock)</span>}</span>
-                  <span style={{fontSize:'10.5px',color:'#6b7280'}}>− Comprometidas {DIAS_COMPROMETIDO-1}d más: <strong style={{color:'#111827'}}>{compSig2}</strong></span>
+                </div>
+                <div style={{display:'flex',flexDirection:'column',gap:'2px'}}>
+                  {([
+                    { bucket:'hoy' as const, texto:'Ventas de hoy', valor:compHoy, detalle:comprometidoDia[cultivo].detalleHoy, extra: yaDescontadas ? ' (informativo, ya está en el stock)' : '' },
+                    { bucket:'siguientes2' as const, texto:`Comprometidas ${DIAS_COMPROMETIDO-1}d más`, valor:compSig2, detalle:comprometidoDia[cultivo].detalleSiguientes2, extra:'' },
+                  ]).map(({bucket, texto, valor, detalle, extra}) => {
+                    const key = `${cultivo}__${bucket}`;
+                    const abierto = detalleAbierto === key;
+                    return (
+                      <div key={key}>
+                        <span
+                          onClick={() => valor > 0 && setDetalleAbierto(abierto ? null : key)}
+                          style={{fontSize:'10.5px', color:'#6b7280', cursor: valor > 0 ? 'pointer' : 'default', userSelect:'none'}}>
+                          {valor > 0 && (abierto ? '▾ ' : '▸ ')}− {texto}: <strong style={{color:'#111827'}}>{valor}</strong>{extra && <span style={{color:'#9ca3af'}}>{extra}</span>}
+                        </span>
+                        {abierto && (
+                          <div style={{marginTop:'3px', marginLeft:'12px', paddingLeft:'6px', borderLeft:'2px solid #e5e7eb', display:'flex', flexDirection:'column', gap:'1px'}}>
+                            {detalle.length === 0
+                              ? <span style={{fontSize:'10px', color:'#9ca3af'}}>Sin clientes cargados todavía.</span>
+                              : detalle.map(d => (
+                                  <span key={d.nombre} style={{fontSize:'10px', color:'#6b7280'}}>{d.nombre}: <strong style={{color:'#374151'}}>{d.cantidad}</strong></span>
+                                ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
                 <div style={{display:'flex',alignItems:'center',gap:'6px',marginTop:'2px'}}>
                   <span style={{fontSize:'10.5px',color:'#6b7280'}}>+ Cosecha prevista (manual):</span>
