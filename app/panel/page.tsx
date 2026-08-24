@@ -10,7 +10,7 @@ import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAUL
 import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
 import { evolucionVentaPorArticulo, resumenMesActual } from '@/lib/estadisticasVentas';
 import { generarAlertas, motivoAlertaCosecha, type MotivoAlertaCosecha } from '@/lib/alertasPanel';
-import { calcularCamara, diferenciaAjustesMes } from '@/lib/camara';
+import { calcularCamara, diferenciaAjustesMes, ventasDeHoyYaDescontadas } from '@/lib/camara';
 import { saldoPorCliente, alertasCajones } from '@/lib/cajones';
 import { descartePorFaseMes } from '@/lib/descarte';
 import { germinacionYSupervivenciaMes } from '@/lib/germinacion';
@@ -579,6 +579,7 @@ export default async function PanelPage() {
                 rucula={{ actual: camaraRucula.stockActual, ajusteMes: ajusteMesRucula.acumulado }}
                 lechugaCrespa={{ actual: camaraLechugaCrespa.stockActual, ajusteMes: ajusteMesLechugaCrespa.acumulado }}
                 lechugaRoble={{ actual: camaraLechugaRoble.stockActual, ajusteMes: ajusteMesLechugaRoble.acumulado }}
+                ventasHoyYaDescontadas={ventasDeHoyYaDescontadas()}
               />
             </div>
           </div>

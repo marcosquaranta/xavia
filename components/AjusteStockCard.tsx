@@ -5,8 +5,8 @@ import type { CultivoCamara } from '@/lib/camara';
 
 interface CultivoStock { actual: number; ajusteMes: number }
 
-export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble }: {
-  rucula: CultivoStock; lechugaCrespa: CultivoStock; lechugaRoble: CultivoStock;
+export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, ventasHoyYaDescontadas }: {
+  rucula: CultivoStock; lechugaCrespa: CultivoStock; lechugaRoble: CultivoStock; ventasHoyYaDescontadas: boolean;
 }) {
   const [abierto, setAbierto] = useState<CultivoCamara | null>(null);
   const [cantidad, setCantidad] = useState('');
@@ -54,19 +54,31 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble }:
   }
 
   return (
-    <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '14px' }}>
-      <p style={{ margin: '0 0 10px', fontSize: '13px', fontWeight: 700, color: '#111827' }}>Stock en cámara</p>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
+    <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '12px' }}>
+      {/* Header con ícono + título en mayúsculas — mismo lenguaje visual que el resto de
+          las tarjetas de Indicadores (Ventas, Ciclos, Pesos, Producción, Ocupación). */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+        <span style={{ fontSize: '14px' }}>🧊</span>
+        <p style={{ margin: 0, fontSize: '11px', fontWeight: 800, color: '#0e7490', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Stock en cámara</p>
+      </div>
+      {/* Misma aclaración que "Disp. para venta" en Ventas — el stock ya sale de
+          calcularCamara() con la misma regla del mediodía, así que la ambigüedad de si
+          cuenta o no las ventas de hoy es exactamente la misma acá. */}
+      <p style={{ margin: '0 0 9px', fontSize: '10px', color: ventasHoyYaDescontadas ? '#166534' : '#b45309', fontWeight: 600 }}>
+        {ventasHoyYaDescontadas ? 'Ya cuenta las ventas de hoy' : 'No cuenta las ventas de hoy todavía'} <span style={{ color: '#9ca3af', fontWeight: 400 }}>(regla del mediodía)</span>
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
         {cultivos.map(c => (
-          <div key={c.key} style={{ background: '#fafafa', border: '1px solid #f1f0eb', borderRadius: '8px', padding: '10px 12px' }}>
-            <p style={{ margin: '0 0 6px', fontSize: '11px', fontWeight: 700, color: c.color, textTransform: 'uppercase' }}>{c.label}</p>
-            <p style={{ margin: '0 0 2px', fontSize: '20px', fontWeight: 800, color: '#111827' }}>
-              {c.data.actual} <span style={{ fontSize: '11px', fontWeight: 400, color: '#9ca3af' }}>paq</span>
-            </p>
-            <p style={{ margin: '0 0 4px', fontSize: '11px', color: c.data.ajusteMes === 0 ? '#9ca3af' : c.data.ajusteMes > 0 ? '#059669' : '#dc2626' }}>
-              Dif. acumulada mes: {c.data.ajusteMes > 0 ? '+' : ''}{c.data.ajusteMes} paq
-            </p>
-            <Link href={`/stocks/${c.key}`} style={{ display: 'inline-block', margin: '0 0 8px', fontSize: '11px', color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}>
+          <div key={c.key} style={{ background: '#fafafa', border: '1px solid #f1f0eb', borderRadius: '8px', padding: '9px 11px' }}>
+            <span style={{ fontSize: '10.5px', color: c.color, fontWeight: 700, textTransform: 'uppercase' }}>{c.label}</span>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap', margin: '2px 0 6px' }}>
+              <strong style={{ fontSize: '18px', color: '#111827', fontWeight: 800, lineHeight: 1 }}>{c.data.actual}</strong>
+              <span style={{ fontSize: '10.5px', color: '#9ca3af' }}>paq</span>
+              <span style={{ fontSize: '10.5px', fontWeight: 700, color: c.data.ajusteMes === 0 ? '#9ca3af' : c.data.ajusteMes > 0 ? '#059669' : '#dc2626' }}>
+                {c.data.ajusteMes > 0 ? '↑' : c.data.ajusteMes < 0 ? '↓' : '·'} {Math.abs(c.data.ajusteMes)} paq <span style={{ fontWeight: 400, color: '#9ca3af' }}>dif. acum. mes</span>
+              </span>
+            </div>
+            <Link href={`/stocks/${c.key}`} style={{ display: 'inline-block', marginBottom: '8px', fontSize: '11px', color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}>
               Ver detalle →
             </Link>
 
