@@ -183,7 +183,26 @@ export default function CajonesManager({ saldos, alertas, clientes, movimientos,
         <p className="card-title">Registrar movimiento</p>
         {error && <div className="alert-box error" style={{ marginBottom: '10px' }}>{error}</div>}
         {msgOk && <div className="alert-box" style={{ marginBottom: '10px', background: '#f0fdf4', border: '1px solid #86efac', color: '#166534' }}>{msgOk}</div>}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: '12px', marginBottom: '12px' }}>
+
+        {/* Tipo primero — para que los campos de abajo ya se muestren acordes a lo que se
+            va a registrar, en vez de cambiar de golpe después de haber llenado todo. */}
+        <div style={{ display: 'flex', gap: '6px', marginBottom: '14px' }}>
+          <button onClick={() => setTipo('entrega')} disabled={guardando}
+            style={{ padding: '10px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: 700, border: 'none', cursor: 'pointer', background: tipo === 'entrega' ? '#d97706' : '#f3f4f6', color: tipo === 'entrega' ? 'white' : '#374151' }}>
+            📤 Entregar
+          </button>
+          <button onClick={() => setTipo('devolucion')} disabled={guardando}
+            style={{ padding: '10px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: 700, border: 'none', cursor: 'pointer', background: tipo === 'devolucion' ? '#059669' : '#f3f4f6', color: tipo === 'devolucion' ? 'white' : '#374151' }}>
+            📥 Recibir devolución
+          </button>
+          <button onClick={() => setTipo('ajuste')} disabled={guardando}
+            title="Corrige el saldo en la calle de este cliente a partir de un conteo físico real"
+            style={{ padding: '10px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: 700, border: 'none', cursor: 'pointer', background: tipo === 'ajuste' ? '#7c3aed' : '#f3f4f6', color: tipo === 'ajuste' ? 'white' : '#374151' }}>
+            🔧 Ajustar (conteo)
+          </button>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: '12px', marginBottom: tipo === 'ajuste' ? '10px' : '12px' }}>
           <div>
             <label style={{ fontSize: '11px', color: '#6b7280' }}>Cliente</label>
             <select value={idControl} onChange={e => setIdControl(e.target.value)} disabled={guardando}>
@@ -191,10 +210,12 @@ export default function CajonesManager({ saldos, alertas, clientes, movimientos,
               {clientes.map(c => <option key={c.id_control} value={c.id_control}>{c.nombre_display || c.nombre_xubio}</option>)}
             </select>
           </div>
-          <div>
-            <label style={{ fontSize: '11px', color: '#6b7280' }}>{tipo === 'ajuste' ? 'Cantidad real contada' : 'Cantidad'}</label>
-            <NumberInput value={cantidad} onChange={setCantidad} min={0} disabled={guardando} />
-          </div>
+          {tipo !== 'ajuste' && (
+            <div>
+              <label style={{ fontSize: '11px', color: '#6b7280' }}>Cantidad</label>
+              <NumberInput value={cantidad} onChange={setCantidad} min={0} disabled={guardando} />
+            </div>
+          )}
           <div>
             <label style={{ fontSize: '11px', color: '#6b7280' }}>Fecha</label>
             <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} disabled={guardando} />
@@ -205,19 +226,45 @@ export default function CajonesManager({ saldos, alertas, clientes, movimientos,
           </div>
         </div>
 
-        {/* Info instantánea del cliente elegido — saldo actual, y en un ajuste la
-            diferencia al toque contra ese saldo, antes de confirmar. */}
-        {infoCliente && (
+        {tipo === 'ajuste' ? (
+          // Cuadro dedicado al ajuste — separado del resto, para que sea imposible
+          // confundir "cantidad" con un delta (entrega/devolución) en vez de un conteo
+          // absoluto: acá se ven los dos números uno al lado del otro (teórica vs. real) y
+          // la diferencia que se va a registrar, ANTES de confirmar.
+          <div style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '8px', padding: '12px 14px', marginBottom: '12px' }}>
+            <p style={{ margin: '0 0 10px', fontSize: '11px', fontWeight: 700, color: '#6b21a8', textTransform: 'uppercase' }}>Ajuste de stock — conteo físico</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: '12px', alignItems: 'end', marginBottom: '10px' }}>
+              <div>
+                <label style={{ fontSize: '11px', color: '#6b7280' }}>Cantidad teórica en la calle</label>
+                <p style={{ margin: '4px 0 0', fontSize: '22px', fontWeight: 800, color: '#374151' }}>{idControl ? fmt(saldoAntesDeAjuste) : '—'}</p>
+              </div>
+              <div>
+                <label style={{ fontSize: '11px', color: '#6b7280' }}>Cantidad real en la calle</label>
+                <NumberInput value={cantidad} onChange={setCantidad} min={0} disabled={guardando || !idControl} />
+              </div>
+              <div>
+                <label style={{ fontSize: '11px', color: '#6b7280' }}>Diferencia que se va a registrar</label>
+                <p style={{ margin: '4px 0 0', fontSize: '22px', fontWeight: 800, color: diffAjuste === null || diffAjuste === 0 ? '#6b7280' : diffAjuste > 0 ? '#059669' : '#dc2626' }}>
+                  {diffAjuste === null ? '—' : `${diffAjuste > 0 ? '+' : ''}${diffAjuste}`}
+                </p>
+              </div>
+            </div>
+            <p style={{ margin: 0, fontSize: '11px', color: diffAjuste === null || diffAjuste === 0 ? '#9ca3af' : diffAjuste > 0 ? '#059669' : '#dc2626', fontWeight: 600 }}>
+              {!idControl ? 'Elegí un cliente para ver la cantidad teórica.'
+                : diffAjuste === null ? ''
+                : diffAjuste === 0 ? '✓ Sin diferencia — el conteo coincide con lo esperado.'
+                : diffAjuste > 0 ? `⚠️ Van a aparecer ${diffAjuste} cajones de más (sobrante, no se cuenta como pérdida).`
+                : `⚠️ Se van a registrar ${Math.abs(diffAjuste)} cajones perdidos para este cliente.`}
+            </p>
+          </div>
+        ) : infoCliente && (
+          // Info instantánea del cliente para entrega/devolución — solo el saldo actual y
+          // el último movimiento, sin mezclar con la lógica de ajuste.
           <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '10px 14px', marginBottom: '12px', display: 'flex', gap: '20px', flexWrap: 'wrap', fontSize: '12.5px' }}>
             <span>
               <strong style={{ color: '#1e40af' }}>{fmt(infoCliente.saldo)}</strong>
               <span style={{ color: '#6b7280' }}> en la calle ahora</span>
             </span>
-            {tipo === 'ajuste' && diffAjuste !== null && (
-              <span style={{ fontWeight: 700, color: diffAjuste === 0 ? '#6b7280' : diffAjuste > 0 ? '#059669' : '#dc2626' }}>
-                {diffAjuste === 0 ? 'Sin diferencia vs. lo esperado' : diffAjuste > 0 ? `+${diffAjuste} aparecieron de más` : `${diffAjuste} se perdieron`}
-              </span>
-            )}
             {infoCliente.perdidaAcumulada > 0 && (
               <span style={{ color: '#dc2626' }}>
                 <strong>{fmt(infoCliente.perdidaAcumulada)}</strong> perdidos históricamente
@@ -229,23 +276,8 @@ export default function CajonesManager({ saldos, alertas, clientes, movimientos,
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', gap: '6px' }}>
-            <button onClick={() => setTipo('entrega')} disabled={guardando}
-              style={{ padding: '10px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: 700, border: 'none', cursor: 'pointer', background: tipo === 'entrega' ? '#d97706' : '#f3f4f6', color: tipo === 'entrega' ? 'white' : '#374151' }}>
-              📤 Entregar
-            </button>
-            <button onClick={() => setTipo('devolucion')} disabled={guardando}
-              style={{ padding: '10px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: 700, border: 'none', cursor: 'pointer', background: tipo === 'devolucion' ? '#059669' : '#f3f4f6', color: tipo === 'devolucion' ? 'white' : '#374151' }}>
-              📥 Recibir devolución
-            </button>
-            <button onClick={() => setTipo('ajuste')} disabled={guardando}
-              title="Corrige el saldo en la calle de este cliente a partir de un conteo físico real"
-              style={{ padding: '10px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: 700, border: 'none', cursor: 'pointer', background: tipo === 'ajuste' ? '#7c3aed' : '#f3f4f6', color: tipo === 'ajuste' ? 'white' : '#374151' }}>
-              🔧 Ajustar (conteo)
-            </button>
-          </div>
-          <button onClick={registrar} className="btn" disabled={guardando} style={{ marginLeft: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button onClick={registrar} className="btn" disabled={guardando}>
             {guardando ? 'Guardando…' : 'Registrar'}
           </button>
         </div>
