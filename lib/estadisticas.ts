@@ -213,18 +213,31 @@ function f2RealPorVariedad(lotes: Lote[], ultimos: number = 5): Map<string, numb
 }
 
 /**
- * Para cada lote activo, estima la fecha de cosecha y suma los paquetes esperados en la
- * semana calendario correspondiente. Si el lote YA está en Fase 2 (con fecha_f2
- * registrada), ancla la estimación ahí: fecha_f2 + días reales promedio en F2 — mucho
- * más preciso que recalcular desde la siembra, porque no depende de cuánto varió el
- * tiempo en F1 para este lote en particular (un lote con F1 más corto/largo que el
- * promedio quedaba mal ubicado si se estimaba solo desde la siembra). Si no está en F2
- * (o no tiene fecha_f2), usa siembra + ciclo total real/estimado como antes. Los lotes
- * vencidos (fecha estimada ya pasada) se cuentan en la semana actual. Devuelve `semanas`
- * puntos, desde la semana actual en adelante, con fecha real de cada semana.
+ * Para cada lote activo, estima la fecha de cosecha y suma los paquetes esperados en el
+ * período correspondiente (7 días = semana calendario por defecto; `diasPorPeriodo`
+ * distinto arma bloques rodantes desde hoy, sin alinear a ningún día fijo). Si el lote YA
+ * está en Fase 2 (con fecha_f2 registrada), ancla la estimación ahí: fecha_f2 + días
+ * reales promedio en F2 — mucho más preciso que recalcular desde la siembra, porque no
+ * depende de cuánto varió el tiempo en F1 para este lote en particular (un lote con F1
+ * más corto/largo que el promedio quedaba mal ubicado si se estimaba solo desde la
+ * siembra). Si no está en F2 (o no tiene fecha_f2), usa siembra + ciclo total real/estimado
+ * como antes. Los lotes vencidos (fecha estimada ya pasada) se cuentan en el período
+ * actual. Devuelve `periodos` puntos, desde el período actual en adelante, con fecha real
+ * de cada uno.
+ *
+ * OJO variación semana a semana: como la siembra se hace en tandas (mismo día de la
+ * semana, ver DIA_SIEMBRA), los lotes de una misma tanda tienden a estar listos también
+ * en la misma semana — un desvío chico en el ciclo estimado alcanza para correr TODA la
+ * tanda de una semana a la siguiente, lo que da columnas muy dispares en vez de una curva
+ * suave. No es un error de cálculo; es propio de cómo se siembra. El mismo ruido ya se
+ * había detectado antes para el informe semanal por mail, que por eso pasó a agrupar por
+ * MES en vez de por semana (ver proyeccionCosechaMensual en lib/reporteSemanal.ts) — acá
+ * en el Panel, `diasPorPeriodo=10` (en vez de 7) es un punto intermedio: agrupa lo
+ * suficiente como para amortiguar ese corrimiento de tanda sin perder toda la resolución
+ * semanal.
  */
 export function proyeccionCosechaSemanal(
-  lotes: Lote[], variedades: import('./types').Variedad[], semanas = 8
+  lotes: Lote[], variedades: import('./types').Variedad[], semanas = 8, diasPorPeriodo = 7
 ): PuntoProyeccionCosecha[] {
   const lunesActual = lunesDe(new Date());
   const ciclosMap = cicloRealPorVariedad(lotes, [], 5);
@@ -256,15 +269,38 @@ export function proyeccionCosechaSemanal(
     return f > 0 ? f : (rucula ? 3 : 1);
   }
 
-  const semanasArr = Array.from({ length: semanas }, (_, i) => {
-    const d = new Date(lunesActual); d.setDate(d.getDate() + i * 7);
+  // Con el bucket clásico de 7 días, el punto de partida es el LUNES de esta semana (ver
+  // lunesDe). Con cualquier otro tamaño de bucket, arranca directo desde hoy — no hay un
+  // "lunes" natural para bloques de 10 días, y forzar alineación a semana calendario ahí
+  // solo complicaría sin aportar nada.
+  const esSemanaCalendario = diasPorPeriodo === 7;
+  const inicio0 = esSemanaCalendario ? lunesActual : new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+  const periodosArr = Array.from({ length: semanas }, (_, i) => {
+    const d = new Date(inicio0); d.setDate(d.getDate() + i * diasPorPeriodo);
     return d;
   });
   const claveDe = (d: Date) => d.toISOString().slice(0, 10);
-  const labelDe = (d: Date) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const labelDe = (d: Date) => {
+    if (diasPorPeriodo === 7) return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}`;
+    const fin = new Date(d); fin.setDate(fin.getDate() + diasPorPeriodo - 1);
+    return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}-${pad2(fin.getDate())}/${pad2(fin.getMonth() + 1)}`;
+  };
+  // Período (inicio del bucket) al que corresponde una fecha estimada — alineado a lunes
+  // en el caso semanal (compatibilidad con el uso mensual de reporteSemanal.ts), o al
+  // bloque rodante de `diasPorPeriodo` días desde `inicio0` en cualquier otro caso.
+  function inicioDePeriodo(fechaEst: Date): Date {
+    if (esSemanaCalendario) {
+      const lunes = lunesDe(fechaEst);
+      return lunes < inicio0 ? inicio0 : lunes;
+    }
+    const idx = Math.max(0, Math.floor((fechaEst.getTime() - inicio0.getTime()) / (diasPorPeriodo * 86400000)));
+    const d = new Date(inicio0); d.setDate(d.getDate() + idx * diasPorPeriodo);
+    return d;
+  }
 
   const mapa = new Map<string, { rucula: number; lechuga: number }>();
-  for (const d of semanasArr) mapa.set(claveDe(d), { rucula: 0, lechuga: 0 });
+  for (const d of periodosArr) mapa.set(claveDe(d), { rucula: 0, lechuga: 0 });
 
   for (const l of lotes.filter((l) => l.estado === 'activo')) {
     const cultivo = cultivoDe(l.variedad);
@@ -286,9 +322,8 @@ export function proyeccionCosechaSemanal(
       fechaEst = new Date(siembra); fechaEst.setDate(fechaEst.getDate() + ciclo);
     }
 
-    let lunesEst = lunesDe(fechaEst);
-    if (lunesEst < lunesActual) lunesEst = lunesActual; // vencido → cuenta en la semana actual
-    const key = claveDe(lunesEst);
+    const periodoEst = inicioDePeriodo(fechaEst);
+    const key = claveDe(periodoEst);
     if (!mapa.has(key)) continue; // más allá de la ventana visible
 
     const plantas = Number(l.plantas_estimadas_actual) || Number(l.plantines_iniciales) || 0;
@@ -297,7 +332,7 @@ export function proyeccionCosechaSemanal(
     mapa.get(key)![cultivo] += paquetes;
   }
 
-  return semanasArr.map((d) => {
+  return periodosArr.map((d) => {
     const v = mapa.get(claveDe(d))!;
     return { semana: claveDe(d), label: labelDe(d), rucula: Math.round(v.rucula), lechuga: Math.round(v.lechuga) };
   });

@@ -18,7 +18,7 @@ function factorPlantaPorPaq(cultivo: CultivoCamara): number {
 
 export interface PerdidasMes {
   mes: string; label: string;
-  descarte: number;       // plantas — 3 etapas de producción + cámara (reconvertida)
+  descarte: number;       // plantas — SOLO F2→Cosecha (a pedido explícito, ver nota abajo)
   faltanteStock: number;  // plantas — solo lo que FALTÓ (contado por debajo de lo esperado), reconvertido
   subocupacion: number;   // plantas — tubos F2 vacíos, ver plantasPerdidasPorSubocupacion
   total: number;
@@ -31,6 +31,9 @@ export interface PerdidasMes {
 //
 // "Faltante de stock" solo cuenta la parte NEGATIVA (lo que faltó) — un sobrante no es una
 // pérdida física de producto, es la señal contraria (se contó de más de lo esperado).
+//
+// "Descarte" acá es SOLO F2→Cosecha (a pedido explícito) — Plantín→F1, F1→F2 y Cámara NO
+// entran en esta cuenta puntual (siguen viéndose desglosados en "Descarte por fase").
 export function perdidasPorMes(
   lotes: Lote[], movimientos: Movimiento[], registrosCamara: StockCamara[], ventas: VentaDia[],
   ubicaciones: Ubicacion[], ocupacionHistorial: OcupacionHistorialRow[], nMeses = 12
@@ -47,11 +50,14 @@ export function perdidasPorMes(
     const mesKey = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
     const mesData = mapaDescarte.get(mesKey);
 
-    // Descarte: 3 etapas de producción (ya en plantas) + cámara (en paquetes, reconvertida)
+    // Descarte: SOLO F2→Cosecha (a pedido explícito) — Plantín→F1, F1→F2 y Cámara quedan
+    // afuera de esta cuenta puntual (siguen desglosados en la sección "Descarte por fase"
+    // de arriba); acá interesa específicamente lo que se pierde en la última etapa
+    // productiva, ya está en plantas, sin reconversión.
     let descarte = 0;
     if (mesData) {
       for (const c of cultivos) {
-        descarte += mesData[c].plantinF1 + mesData[c].f1F2 + mesData[c].f2Cosecha + mesData[c].camara * factorPlantaPorPaq(c);
+        descarte += mesData[c].f2Cosecha;
       }
     }
 

@@ -10,23 +10,25 @@ const fmtISO = (d: Date) => {
   return `${y}-${m}-${day}`;
 };
 
-// Sábado más reciente (hoy incluido si hoy es sábado) — punto de referencia de "esta
-// semana" para el recordatorio: se pide el kilometraje los sábados, y como no hay que
-// sacarlo hasta que se cargue, sigue apuntando al mismo sábado (o al que venga después,
-// si pasan varias semanas sin cargarlo) hasta que haya una lectura posterior.
-function sabadoDeReferencia(hoy: Date): Date {
+// Viernes más reciente (hoy incluido si hoy es viernes) — punto de referencia de "esta
+// semana" para el recordatorio: se pide el kilometraje los viernes (antes era sábados —
+// cambiado a pedido explícito), y como no hay que sacarlo hasta que se cargue, sigue
+// apuntando al mismo viernes (o al que venga después, si pasan varias semanas sin
+// cargarlo) hasta que haya una lectura posterior.
+function viernesDeReferencia(hoy: Date): Date {
   const d = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
   const dow = d.getDay(); // 0=domingo..6=sábado
-  const diff = (dow - 6 + 7) % 7; // días desde el último sábado (0 si hoy es sábado)
+  const diff = (dow - 5 + 7) % 7; // días desde el último viernes (0 si hoy es viernes)
   d.setDate(d.getDate() - diff);
   return d;
 }
 
-// True si todavía no se cargó ninguna lectura desde el último sábado — el recordatorio en
-// el Panel se muestra mientras esto sea true, cualquier día de la semana, no solo sábados.
+// True si todavía no se cargó ninguna lectura desde el último viernes — el recordatorio en
+// el Panel se muestra mientras esto sea true, cualquier día de la semana, no solo viernes,
+// y deja de mostrarse apenas se carga una lectura (activo solo si falta cargar).
 export function faltaCargarEstaSemana(registros: KilometrajeVehiculo[], vehiculo: string, hoy: Date = new Date()): boolean {
-  const sabStr = fmtISO(sabadoDeReferencia(hoy));
-  return !registros.some((r) => r.vehiculo === vehiculo && String(r.fecha || '').slice(0, 10) >= sabStr);
+  const vieStr = fmtISO(viernesDeReferencia(hoy));
+  return !registros.some((r) => r.vehiculo === vehiculo && String(r.fecha || '').slice(0, 10) >= vieStr);
 }
 
 // Última lectura conocida (para mostrar de referencia en el formulario y validar que la

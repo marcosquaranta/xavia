@@ -10,8 +10,9 @@ import { productividadDeMes, productividadPlantasDeMes } from '@/lib/productivid
 import { obtenerTemperaturasRosario, temperaturaPromedioPorMes } from '@/lib/clima';
 import { kmPorSemana, VEHICULO_PARTNER } from '@/lib/kilometraje';
 import { descartePorFaseMes, resumenDescartePorCultivo, type CultivoDescarte } from '@/lib/descarte';
-import { ocupacionMensualPorCultivo, eficienciaSiembraCosechaPorMes } from '@/lib/kpisOperativos';
+import { ocupacionMensualPorCultivo, eficienciaSiembraCosechaPorMes, type EficienciaMesCultivo } from '@/lib/kpisOperativos';
 import { perdidasPorMes } from '@/lib/perdidas';
+import { cicloMesPromedio } from '@/lib/estadisticas';
 import type { OcupacionHistorialRow } from '@/lib/ocupacion';
 import type { Lote, Movimiento, Ubicacion, KilometrajeVehiculo, StockCamara, ProductividadDiaria, VentaDia } from '@/lib/types';
 import Header from '@/components/Header';
@@ -23,13 +24,19 @@ export const dynamic = 'force-dynamic';
 
 type PeriodoGlobal = 'd30' | 'd180' | 'anio' | 'historico';
 
-export default async function EstadisticasPage({ searchParams }: { searchParams: { nave?: string; periodo?: string } }) {
+export default async function EstadisticasPage({ searchParams }: { searchParams: { nave?: string; periodo?: string; perdidas?: string } }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
   if (user.rol !== 'admin') redirect('/panel');
 
   const naveFilter = searchParams.nave || 'todas';
   const periodo = (['d30', 'd180', 'anio', 'historico'].includes(searchParams.periodo || '') ? searchParams.periodo : 'anio') as PeriodoGlobal;
+  // Ventana de "Pérdidas totales" — propia, independiente del filtro global de arriba (que
+  // no aplica a los indicadores fijos por mes) y de los 12 meses fijos de "Descarte por
+  // fase". Por defecto 3 meses (a pedido explícito), con opción de ampliar a 6 o 12 ahí
+  // mismo, sin tocar nada más de la página.
+  const perdidasMesesRaw = Number(searchParams.perdidas);
+  const perdidasMeses = ([3, 6, 12].includes(perdidasMesesRaw) ? perdidasMesesRaw : 3) as 3 | 6 | 12;
 
   let lotes: Lote[] = [], movimientos: Movimiento[] = [], ubicaciones: Ubicacion[] = [];
   let configRows: { clave: string; valor: any }[] = [];
@@ -93,16 +100,29 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
   // ── KPI 2: Eficiencia Siembra → Cosecha — promedio mensual, por cultivo (últimos 6 meses) ──
   const eficienciaMensual = eficienciaSiembraCosechaPorMes(lotes, 6);
+  function eficienciaGlobalDeMes(m: EficienciaMesCultivo): number | null {
+    const vivaTot = m.rucula.viva + m.lechuga_crespa.viva + m.lechuga_roble.viva;
+    const descarteTot = m.rucula.descarte + m.lechuga_crespa.descarte + m.lechuga_roble.descarte;
+    const base = vivaTot + descarteTot;
+    return base > 0 ? Math.round((vivaTot / base) * 1000) / 10 : null;
+  }
+  const eficienciaGlobalMensual = eficienciaMensual.map(eficienciaGlobalDeMes);
   const eficienciaUltimoMes = (() => {
     for (let i = eficienciaMensual.length - 1; i >= 0; i--) {
-      const m = eficienciaMensual[i];
-      const vivaTot = m.rucula.viva + m.lechuga_crespa.viva + m.lechuga_roble.viva;
-      const descarteTot = m.rucula.descarte + m.lechuga_crespa.descarte + m.lechuga_roble.descarte;
-      const base = vivaTot + descarteTot;
-      if (base > 0) return { mes: m, pctGlobal: Math.round((vivaTot / base) * 1000) / 10 };
+      const pctGlobal = eficienciaGlobalMensual[i];
+      if (pctGlobal !== null) return { mes: eficienciaMensual[i], pctGlobal };
     }
     return null;
   })();
+  // Promedio / mejor / peor mes del período mostrado — el detalle que se agrega debajo de
+  // cada gráfico de Indicadores Marce, a pedido explícito (antes solo se veía la curva).
+  function detalleMinMaxProm(valores: (number | null)[], unidad: string): string {
+    const vals = valores.filter((v): v is number => v !== null);
+    if (!vals.length) return 'Sin datos en el período.';
+    const prom = Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
+    const max = Math.max(...vals), min = Math.min(...vals);
+    return `Promedio del período: ${prom}${unidad} · mejor: ${max}${unidad} · peor: ${min}${unidad}`;
+  }
 
   // Gráficos "mes a mes" de los 3 KPIs operativos, para la sección destacada de más abajo.
   const puntosPct = (arr: (number | null)[]) => arr.map((v, i) => [i, v] as [number, number | null]).filter((p): p is [number, number] => p[1] !== null);
@@ -172,7 +192,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   };
 
   // ── Kilometraje semanal del Partner — diferencia entre lecturas de odómetro
-  // consecutivas (se cargan los sábados desde el Panel), no semanas calendario forzadas.
+  // consecutivas (se cargan los viernes desde el Panel), no semanas calendario forzadas.
   const puntosKm = kmPorSemana(registrosKm, VEHICULO_PARTNER, 12).filter(p => p.kmSemana !== null);
   const evoKmSemana = {
     series: [{ nombre: 'Km recorridos', color: '#0891b2', puntos: puntosKm.map((p, i) => [i, p.kmSemana as number] as [number, number]) }],
@@ -200,18 +220,22 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   }
   const CULTIVO_LABEL: Record<CultivoDescarte, string> = { rucula: 'Rúcula', lechuga_crespa: 'Lechuga Crespa', lechuga_roble: 'Lechuga Hoja de Roble' };
 
-  // ── Pérdidas totales por mes — junta Descarte + Faltante de stock + Subocupación (las
-  // 3 pérdidas que hoy se ven cada una en su propia sección) en una sola cuenta, todas
-  // reconvertidas a plantas para poder sumarlas y compararlas entre sí. Mismo período que
-  // Descarte por fase (12 meses, indicador fijo).
-  const mesesPerdidas = perdidasPorMes(lotes, movimientos, registrosCamara, ventas, ubicaciones, ocupacionHistorial, NMESES_DESCARTE);
+  // ── Pérdidas totales por mes — junta Descarte (solo F2→Cosecha) + Faltante de stock +
+  // Subocupación en una sola cuenta, todas reconvertidas a plantas para poder sumarlas y
+  // compararlas entre sí. Ventana propia (perdidasMeses, selector arriba del gráfico) — no
+  // depende del filtro global ni de los 12 meses fijos de "Descarte por fase".
+  const mesesPerdidas = perdidasPorMes(lotes, movimientos, registrosCamara, ventas, ubicaciones, ocupacionHistorial, perdidasMeses);
   const COLOR_PERDIDA = { descarte: '#dc2626', faltanteStock: '#2563eb', subocupacion: '#d97706' };
   const seriePerdidas = [
-    { nombre: 'Descarte', color: COLOR_PERDIDA.descarte, valores: mesesPerdidas.map(m => m.descarte) },
+    { nombre: 'Descarte (F2→Cosecha)', color: COLOR_PERDIDA.descarte, valores: mesesPerdidas.map(m => m.descarte) },
     { nombre: 'Faltante de stock', color: COLOR_PERDIDA.faltanteStock, valores: mesesPerdidas.map(m => m.faltanteStock) },
     { nombre: 'Subocupación', color: COLOR_PERDIDA.subocupacion, valores: mesesPerdidas.map(m => m.subocupacion) },
   ];
   const perdidasUltimoMes = [...mesesPerdidas].reverse().find(m => m.total > 0) ?? null;
+  // Último mes con datos de cada componente por separado, para el cuadro de detalle de
+  // cálculo (subocupación en particular casi siempre tiene datos aunque los otros dos den 0).
+  const perdidasDetalleMes = [...mesesPerdidas].reverse()[0] ?? null;
+  const cicloDetalleMes = cicloMesPromedio(lotes, movimientos, hoy);
 
   // Fecha desde la que arranca el filtro global elegido — null = histórico, sin límite.
   function desdeDePeriodo(p: PeriodoGlobal): Date | null {
@@ -522,14 +546,16 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
   const nombre = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
 
-  // Construye URLs preservando los filtros activos (nave, periodo)
+  // Construye URLs preservando los filtros activos (nave, periodo, ventana de Pérdidas)
   const buildUrl = (overrides: Record<string, string>) => {
     const p: Record<string, string> = {};
     if (naveFilter !== 'todas') p.nave = naveFilter;
     if (periodo !== 'anio') p.periodo = periodo;
+    if (perdidasMeses !== 3) p.perdidas = String(perdidasMeses);
     Object.assign(p, overrides);
     if (p.nave === 'todas') delete p.nave;
     if (p.periodo === 'anio') delete p.periodo;
+    if (p.perdidas === '3') delete p.perdidas;
     const qs = new URLSearchParams(p).toString();
     return `/estadisticas${qs ? '?' + qs : ''}`;
   };
@@ -572,11 +598,14 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             </Link>
           </div>
 
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(300px, 1fr))', gap:'16px' }}>
+          {/* Uno abajo del otro (antes 3 en fila, quedaban muy apretados) — con el ancho
+              completo cada gráfico se lee mejor, y de paso entra la fila de "más detalle"
+              (promedio/mejor/peor del período) sin amontonar nada. */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:'16px' }}>
             {/* KPI 1 — Ocupación de posiciones */}
             <div className="card" style={{ margin:0 }}>
               <p style={{ margin:'0 0 2px', fontSize:'12.5px', fontWeight:700 }}>1. Ocupación de posiciones</p>
-              <p style={{ margin:'0 0 10px', fontSize:'11px', color:'#9ca3af' }}>Objetivo: 95% promedio mensual, por cultivo — promedio del mes, no foto puntual</p>
+              <p style={{ margin:'0 0 10px', fontSize:'11px', color:'#9ca3af' }}>Objetivo: 95% promedio mensual, por cultivo — promedio del mes, no foto puntual · últimos {ocupacionMensual.length} meses</p>
               <div style={{ display:'flex', alignItems:'baseline', gap:'8px', marginBottom:'6px' }}>
                 <strong style={{ fontSize:'30px', color: ocupacionUltimoMes?.total.pct !== null && ocupacionUltimoMes?.total.pct !== undefined ? (ocupacionUltimoMes.total.pct >= 95 ? '#059669' : '#d97706') : '#9ca3af' }}>
                   {ocupacionUltimoMes?.total.pct !== null && ocupacionUltimoMes?.total.pct !== undefined ? `${ocupacionUltimoMes.total.pct}%` : '—'}
@@ -589,7 +618,10 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                 </p>
               )}
               {evoOcupacionCultivo.series.some((s) => s.puntos.length > 0) ? (
-                <GraficoEvolucion series={evoOcupacionCultivo.series} labels={evoOcupacionCultivo.labels} hoyIdx={evoOcupacionCultivo.hoyIdx} unidad="%" yMax={100} />
+                <>
+                  <GraficoEvolucion series={evoOcupacionCultivo.series} labels={evoOcupacionCultivo.labels} hoyIdx={evoOcupacionCultivo.hoyIdx} unidad="%" yMax={Math.min(100, Math.ceil((Math.max(...evoOcupacionCultivo.series.flatMap(s => s.puntos.map(p => p[1]))) + 3) / 5) * 5)} />
+                  <p style={{ margin:'6px 0 0', fontSize:'11px', color:'#6b7280' }}>{detalleMinMaxProm(ocupacionMensual.map(m => m.total.pct), '%')}</p>
+                </>
               ) : (
                 <p style={{ color:'#9ca3af', fontSize:'12px', textAlign:'center', padding:'16px' }}>Sin histórico de ocupación todavía.</p>
               )}
@@ -599,7 +631,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             {/* KPI 2 — Eficiencia Siembra → Cosecha */}
             <div className="card" style={{ margin:0 }}>
               <p style={{ margin:'0 0 2px', fontSize:'12.5px', fontWeight:700 }}>2. Eficiencia Siembra → Cosecha</p>
-              <p style={{ margin:'0 0 10px', fontSize:'11px', color:'#9ca3af' }}>% de plantines que llega vivo a cosecha, según el descarte de las 3 etapas — sin ventas ni cámara. Sin objetivo numérico fijado aún</p>
+              <p style={{ margin:'0 0 10px', fontSize:'11px', color:'#9ca3af' }}>% de plantines que llega vivo a cosecha, según el descarte de las 3 etapas — sin ventas ni cámara. Sin objetivo numérico fijado aún · últimos {eficienciaMensual.length} meses</p>
               <div style={{ display:'flex', alignItems:'baseline', gap:'8px', marginBottom:'6px' }}>
                 <strong style={{ fontSize:'30px', color:'#111827' }}>
                   {eficienciaUltimoMes ? `${eficienciaUltimoMes.pctGlobal}%` : '—'}
@@ -612,7 +644,10 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                 </p>
               )}
               {evoEficienciaCultivo.series.some((s) => s.puntos.length > 0) ? (
-                <GraficoEvolucion series={evoEficienciaCultivo.series} labels={evoEficienciaCultivo.labels} hoyIdx={evoEficienciaCultivo.hoyIdx} unidad="%" yMax={100} />
+                <>
+                  <GraficoEvolucion series={evoEficienciaCultivo.series} labels={evoEficienciaCultivo.labels} hoyIdx={evoEficienciaCultivo.hoyIdx} unidad="%" />
+                  <p style={{ margin:'6px 0 0', fontSize:'11px', color:'#6b7280' }}>{detalleMinMaxProm(eficienciaGlobalMensual, '%')}</p>
+                </>
               ) : (
                 <p style={{ color:'#9ca3af', fontSize:'12px', textAlign:'center', padding:'16px' }}>Sin lotes cosechados en el período.</p>
               )}
@@ -622,7 +657,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             {/* KPI 3 — Productividad (plantas cosechadas / hora-persona) */}
             <div className="card" style={{ margin:0 }}>
               <p style={{ margin:'0 0 2px', fontSize:'12.5px', fontWeight:700 }}>3. Productividad de empleados</p>
-              <p style={{ margin:'0 0 10px', fontSize:'11px', color:'#9ca3af' }}>Plantas cosechadas al mes por hora-persona total. En medición — objetivo a fijar con 6-8 mediciones contra el propio baseline</p>
+              <p style={{ margin:'0 0 10px', fontSize:'11px', color:'#9ca3af' }}>Plantas cosechadas al mes por hora-persona total. En medición — objetivo a fijar con 6-8 mediciones contra el propio baseline · últimos {productividadPlantasMensual.length} meses</p>
               <div style={{ display:'flex', alignItems:'baseline', gap:'8px', marginBottom:'10px' }}>
                 <strong style={{ fontSize:'30px', color:'#111827' }}>
                   {productividadPlantasUltimoMes ? productividadPlantasUltimoMes.productividad!.toLocaleString('es-AR') : '—'}
@@ -630,13 +665,129 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                 <span style={{ fontSize:'11px', color:'#9ca3af' }}>pl/h · {productividadPlantasUltimoMes?.label ?? 'sin datos aún'}</span>
               </div>
               {evoProductividadPlantas.series[0].puntos.length > 0 ? (
-                <GraficoEvolucion series={evoProductividadPlantas.series} labels={evoProductividadPlantas.labels} hoyIdx={evoProductividadPlantas.hoyIdx} unidad=" pl/h" />
+                <>
+                  <GraficoEvolucion series={evoProductividadPlantas.series} labels={evoProductividadPlantas.labels} hoyIdx={evoProductividadPlantas.hoyIdx} unidad=" pl/h" />
+                  <p style={{ margin:'6px 0 0', fontSize:'11px', color:'#6b7280' }}>{detalleMinMaxProm(productividadPlantasMensual.map(m => m.productividad), ' pl/h')}</p>
+                </>
               ) : (
                 <p style={{ color:'#9ca3af', fontSize:'12px', textAlign:'center', padding:'16px' }}>Sin datos de CrossChex disponibles.</p>
               )}
               <a href="#productividad" style={{ fontSize:'11px', color:'#2563eb', textDecoration:'none', fontWeight:600, display:'inline-block', marginTop:'8px' }}>Ver evolución en paquetes/hora →</a>
             </div>
           </div>
+        </div>
+
+        {/* Descarte por fase — columna apilada por mes, un gráfico por cultivo + resumen en %.
+            A pedido explícito, va justo debajo de Indicadores Marce (antes quedaba más abajo,
+            después de toda la fila de Evolución) y con un gráfico por fila, más grande — antes
+            los 3 lado a lado quedaban ilegibles. */}
+        <div id="descarte-por-fase" className="card" style={{ marginBottom:'16px', scrollMarginTop:'16px' }}>
+          <p className="card-title" style={{ margin:'0 0 2px' }}>Descarte por fase</p>
+          <p className="card-sub" style={{ margin:'0 0 12px' }}>Plantín→F1 / F1→F2 / F2→Cosecha (plantas) + Cámara (paquetes, descarte explícito cargado al registrar un ajuste de stock) · últimos 12 meses · indicador fijo, no cambia con el filtro de arriba</p>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:'22px', marginBottom:'16px' }}>
+            {(['rucula', 'lechuga_crespa', 'lechuga_roble'] as CultivoDescarte[]).map((cultivo) => (
+              <div key={cultivo}>
+                <p style={{ margin:'0 0 6px', fontSize:'13px', fontWeight:700, color:'#374151' }}>{CULTIVO_LABEL[cultivo]}</p>
+                <GraficoBarrasApiladas labels={labelsDescarteMeses} series={serieDescarte(cultivo)} unidad="" />
+              </div>
+            ))}
+          </div>
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ fontSize:'12px', width:'100%' }}>
+              <thead><tr>
+                <th style={{ textAlign:'left' }}>Cultivo</th>
+                <th style={{ textAlign:'right' }}>Plantín→F1 (pl)</th>
+                <th style={{ textAlign:'right' }}>F1→F2 (pl)</th>
+                <th style={{ textAlign:'right' }}>F2→Cosecha (pl)</th>
+                <th style={{ textAlign:'right' }} title="Descarte explícito cargado al registrar un ajuste de stock en cámara">Cámara (paq)</th>
+                <th style={{ textAlign:'right' }}>Total</th>
+              </tr></thead>
+              <tbody>
+                {resumenDescarte.map((r) => (
+                  <tr key={r.cultivo} style={{ borderTop:'1px solid #f3f4f6' }}>
+                    <td style={{ fontWeight:600, padding:'4px 0' }}>{CULTIVO_LABEL[r.cultivo]}</td>
+                    <td style={{ textAlign:'right' }}>{r.plantinF1.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctPlantinF1}%)</span></td>
+                    <td style={{ textAlign:'right' }}>{r.f1F2.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctF1F2}%)</span></td>
+                    <td style={{ textAlign:'right' }}>{r.f2Cosecha.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctF2Cosecha}%)</span></td>
+                    <td style={{ textAlign:'right' }}>{r.camara.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctCamara}%)</span></td>
+                    <td style={{ textAlign:'right', fontWeight:700 }}>{r.total.toLocaleString('es-AR')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p style={{ margin:'8px 0 0', fontSize:'10px', color:'#9ca3af' }}>El total y el % mezclan plantas (primeras 3 etapas) con paquetes (Cámara) — sirve para ver dónde se concentra el descarte, no es una cantidad física exacta.</p>
+            {resumenDescarte.find(r => r.cultivo === 'rucula' && r.plantinF1 === 0) && (
+              <p style={{ margin:'8px 0 0', fontSize:'11px', color:'#92400e', background:'#fffbeb', border:'1px solid #fde68a', borderRadius:'6px', padding:'6px 10px' }}>
+                ℹ️ Rúcula sin descarte en Plantín→F1: sí se pide y se calcula igual que en lechuga (mismo formulario de trasplante, misma fórmula, con cartel de confirmación si se deja en 0) — si acá da 0 en todos los meses, es porque los trasplantes cargados vinieron con descarte=0 real, no porque falte medirlo. Vale la pena confirmar con el equipo que estén revisando bien esa etapa en rúcula antes de confirmar "0 pérdida", en vez de tildarlo de memoria.
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Pérdidas totales — Descarte (SOLO F2→Cosecha) + Faltante de stock + Subocupación */}
+        <div id="perdidas-totales" className="card" style={{ marginBottom:'16px', scrollMarginTop:'16px' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:'8px', marginBottom:'2px' }}>
+            <p className="card-title" style={{ margin:0 }}>Pérdidas totales</p>
+            <div style={{ display:'flex', gap:'4px' }}>
+              {([[3,'3 meses'],[6,'6 meses'],[12,'12 meses']] as const).map(([v,l]) => (
+                <a key={v} href={buildUrl({ perdidas:String(v) })}
+                  style={{ padding:'3px 8px', borderRadius:'5px', fontSize:'11px', fontWeight:perdidasMeses===v?700:400, background:perdidasMeses===v?'#111827':'#f3f4f6', color:perdidasMeses===v?'white':'#374151', textDecoration:'none' }}>
+                  {l}
+                </a>
+              ))}
+            </div>
+          </div>
+          <p className="card-sub" style={{ margin:'0 0 4px' }}>Descarte (solo F2→Cosecha) + Faltante de stock (solo lo que faltó) + Subocupación, todo reconvertido a plantas · últimos {perdidasMeses} meses</p>
+          {perdidasUltimoMes && (
+            <p style={{ margin:'0 0 12px', fontSize:'12px', color:'#6b7280' }}>
+              {perdidasUltimoMes.label}: <strong style={{ color:'#111827' }}>{perdidasUltimoMes.total.toLocaleString('es-AR')} pl</strong> perdidas
+              — Descarte {perdidasUltimoMes.descarte.toLocaleString('es-AR')} · Faltante {perdidasUltimoMes.faltanteStock.toLocaleString('es-AR')} · Subocupación {perdidasUltimoMes.subocupacion.toLocaleString('es-AR')}
+            </p>
+          )}
+          <GraficoBarrasApiladas labels={mesesPerdidas.map(m => m.label)} series={seriePerdidas} unidad=" pl" />
+          <p style={{ margin:'8px 0 0', fontSize:'10px', color:'#9ca3af' }}>
+            Faltante de stock y Subocupación reconvierten paquetes/tubos vacíos a plantas con el mismo factor que el resto de la app
+            (rúcula ≈3 plantas/paq, lechuga 1:1) — son aproximaciones para poder compararlas entre sí, no cantidades físicas exactas.
+          </p>
+
+          {/* Detalle de cómo se calcula cada componente — a pedido explícito, especialmente
+              para dejar clara la cuenta de Subocupación, que es la menos obvia de las 3. */}
+          {perdidasDetalleMes && (
+            <div style={{ marginTop:'14px', paddingTop:'12px', borderTop:'1px solid #f3f4f6', overflowX:'auto' }}>
+              <p style={{ margin:'0 0 8px', fontSize:'11px', fontWeight:700, color:'#6b7280', textTransform:'uppercase' }}>Cómo se calcula cada componente — ejemplo con {perdidasDetalleMes.label}</p>
+              <table style={{ fontSize:'12px', width:'100%', minWidth:'640px' }}>
+                <thead><tr>
+                  <th style={{ textAlign:'left' }}>Componente</th>
+                  <th style={{ textAlign:'left' }}>Qué mide</th>
+                  <th style={{ textAlign:'left' }}>Cómo se calcula</th>
+                  <th style={{ textAlign:'right' }}>{perdidasDetalleMes.label}</th>
+                </tr></thead>
+                <tbody>
+                  <tr style={{ borderTop:'1px solid #f3f4f6' }}>
+                    <td style={{ fontWeight:600, padding:'6px 8px 6px 0', color:COLOR_PERDIDA.descarte }}>Descarte</td>
+                    <td style={{ padding:'6px 8px', color:'#6b7280' }}>Plantas perdidas SOLO entre pasar a Fase 2 y la cosecha (última etapa productiva)</td>
+                    <td style={{ padding:'6px 8px', color:'#6b7280' }}>Suma de descarte_calculado de los movimientos de cosecha del mes, ya en plantas</td>
+                    <td style={{ textAlign:'right', fontWeight:700, padding:'6px 0' }}>{perdidasDetalleMes.descarte.toLocaleString('es-AR')} pl</td>
+                  </tr>
+                  <tr style={{ borderTop:'1px solid #f3f4f6' }}>
+                    <td style={{ fontWeight:600, padding:'6px 8px 6px 0', color:COLOR_PERDIDA.faltanteStock }}>Faltante de stock</td>
+                    <td style={{ padding:'6px 8px', color:'#6b7280' }}>Solo la parte que FALTÓ al contar físicamente la cámara (un sobrante no cuenta, es la señal contraria)</td>
+                    <td style={{ padding:'6px 8px', color:'#6b7280' }}>máx(0, −(stock contado − stock teórico esperado)) en cada ajuste del mes, × ~3 pl/paq en rúcula, 1:1 en lechuga</td>
+                    <td style={{ textAlign:'right', fontWeight:700, padding:'6px 0' }}>{perdidasDetalleMes.faltanteStock.toLocaleString('es-AR')} pl</td>
+                  </tr>
+                  <tr style={{ borderTop:'1px solid #f3f4f6' }}>
+                    <td style={{ fontWeight:600, padding:'6px 8px 6px 0', color:COLOR_PERDIDA.subocupacion }}>Subocupación</td>
+                    <td style={{ padding:'6px 8px', color:'#6b7280' }}>Capacidad ociosa: tubos F2 vacíos que podrían haber estado produciendo</td>
+                    <td style={{ padding:'6px 8px', color:'#6b7280' }}>
+                      Σ (tubos vacíos × posiciones por tubo) cada día del mes, ÷ ciclo F2 real de ese mes — un tubo vacío durante un ciclo completo = una cosecha entera que no se hizo.
+                      Ciclo usado en {perdidasDetalleMes.label}: rúcula {cicloDetalleMes.rucula || '—'}d · lechuga {cicloDetalleMes.lechuga || '—'}d.
+                    </td>
+                    <td style={{ textAlign:'right', fontWeight:700, padding:'6px 0' }}>{perdidasDetalleMes.subocupacion.toLocaleString('es-AR')} pl</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Evolución de ciclos / pesaje / plantas por paquete — 2 por fila */}
@@ -681,68 +832,11 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
           <div className="card" style={{ margin:0 }}>
             <p className="card-title" style={{ margin:'0 0 2px' }}>Kilometraje — Vehículo Partner</p>
-            <p className="card-sub" style={{ margin:'0 0 10px' }}>Km recorridos entre lecturas del odómetro (se cargan los sábados) · indicador fijo, no cambia con el filtro de arriba</p>
+            <p className="card-sub" style={{ margin:'0 0 10px' }}>Km recorridos entre lecturas del odómetro (se cargan los viernes) · indicador fijo, no cambia con el filtro de arriba</p>
             {evoKmSemana.series[0].puntos.length > 0
               ? <GraficoEvolucion series={evoKmSemana.series} labels={evoKmSemana.labels} hoyIdx={evoKmSemana.hoyIdx} unidad=" km" />
               : <p style={{ color:'#9ca3af', fontSize:'13px', textAlign:'center', padding:'20px' }}>Todavía no hay dos lecturas de kilometraje cargadas para calcular la diferencia semanal.</p>}
           </div>
-        </div>
-
-        {/* Descarte por fase — columna apilada por mes, un gráfico por cultivo + resumen en % */}
-        <div id="descarte-por-fase" className="card" style={{ marginBottom:'16px', scrollMarginTop:'16px' }}>
-          <p className="card-title" style={{ margin:'0 0 2px' }}>Descarte por fase</p>
-          <p className="card-sub" style={{ margin:'0 0 12px' }}>Plantín→F1 / F1→F2 / F2→Cosecha (plantas) + Cámara (paquetes, descarte explícito cargado al registrar un ajuste de stock) · últimos 12 meses · indicador fijo, no cambia con el filtro de arriba</p>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(320px, 1fr))', gap:'16px', marginBottom:'16px' }}>
-            {(['rucula', 'lechuga_crespa', 'lechuga_roble'] as CultivoDescarte[]).map((cultivo) => (
-              <div key={cultivo}>
-                <p style={{ margin:'0 0 6px', fontSize:'12px', fontWeight:700, color:'#374151' }}>{CULTIVO_LABEL[cultivo]}</p>
-                <GraficoBarrasApiladas labels={labelsDescarteMeses} series={serieDescarte(cultivo)} unidad="" />
-              </div>
-            ))}
-          </div>
-          <div style={{ overflowX:'auto' }}>
-            <table style={{ fontSize:'12px', width:'100%' }}>
-              <thead><tr>
-                <th style={{ textAlign:'left' }}>Cultivo</th>
-                <th style={{ textAlign:'right' }}>Plantín→F1 (pl)</th>
-                <th style={{ textAlign:'right' }}>F1→F2 (pl)</th>
-                <th style={{ textAlign:'right' }}>F2→Cosecha (pl)</th>
-                <th style={{ textAlign:'right' }} title="Descarte explícito cargado al registrar un ajuste de stock en cámara">Cámara (paq)</th>
-                <th style={{ textAlign:'right' }}>Total</th>
-              </tr></thead>
-              <tbody>
-                {resumenDescarte.map((r) => (
-                  <tr key={r.cultivo} style={{ borderTop:'1px solid #f3f4f6' }}>
-                    <td style={{ fontWeight:600, padding:'4px 0' }}>{CULTIVO_LABEL[r.cultivo]}</td>
-                    <td style={{ textAlign:'right' }}>{r.plantinF1.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctPlantinF1}%)</span></td>
-                    <td style={{ textAlign:'right' }}>{r.f1F2.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctF1F2}%)</span></td>
-                    <td style={{ textAlign:'right' }}>{r.f2Cosecha.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctF2Cosecha}%)</span></td>
-                    <td style={{ textAlign:'right' }}>{r.camara.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctCamara}%)</span></td>
-                    <td style={{ textAlign:'right', fontWeight:700 }}>{r.total.toLocaleString('es-AR')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p style={{ margin:'8px 0 0', fontSize:'10px', color:'#9ca3af' }}>El total y el % mezclan plantas (primeras 3 etapas) con paquetes (Cámara) — sirve para ver dónde se concentra el descarte, no es una cantidad física exacta.</p>
-          </div>
-        </div>
-
-        {/* Pérdidas totales — Descarte + Faltante de stock + Subocupación, sumadas */}
-        <div id="perdidas-totales" className="card" style={{ marginBottom:'16px', scrollMarginTop:'16px' }}>
-          <p className="card-title" style={{ margin:'0 0 2px' }}>Pérdidas totales</p>
-          <p className="card-sub" style={{ margin:'0 0 4px' }}>Descarte + Faltante de stock (solo lo que faltó) + Subocupación, todo reconvertido a plantas · últimos 12 meses · indicador fijo</p>
-          {perdidasUltimoMes && (
-            <p style={{ margin:'0 0 12px', fontSize:'12px', color:'#6b7280' }}>
-              {perdidasUltimoMes.label}: <strong style={{ color:'#111827' }}>{perdidasUltimoMes.total.toLocaleString('es-AR')} pl</strong> perdidas
-              — Descarte {perdidasUltimoMes.descarte.toLocaleString('es-AR')} · Faltante {perdidasUltimoMes.faltanteStock.toLocaleString('es-AR')} · Subocupación {perdidasUltimoMes.subocupacion.toLocaleString('es-AR')}
-            </p>
-          )}
-          <GraficoBarrasApiladas labels={mesesPerdidas.map(m => m.label)} series={seriePerdidas} unidad=" pl" />
-          <p style={{ margin:'8px 0 0', fontSize:'10px', color:'#9ca3af' }}>
-            Faltante de stock y Subocupación reconvierten paquetes/tubos vacíos a plantas con el mismo factor que el resto de la app
-            (rúcula ≈3 plantas/paq, lechuga 1:1) — son aproximaciones para poder compararlas entre sí, no cantidades físicas exactas.
-            Subocupación usa el ciclo F2 real de cada mes como referencia (ver sección Ocupación).
-          </p>
         </div>
 
         {/* Ciclos por mesada */}

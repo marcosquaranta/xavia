@@ -4,7 +4,7 @@ import { calcularUsoTeorico, type DriversMes } from './usoTeorico';
 // categoria 'lote_atraso' = atraso puntual de trasplante/cosecha de un lote — ese detalle
 // ya se ve en las secciones "Cosechar"/"Trasplantar" del home (con su propio color por
 // tiempo transcurrido), así que el Panel las excluye de "Alertas" para no duplicar.
-export interface Alerta { tipo: 'error' | 'warn' | 'info'; msg: string; lote?: string; prioridad?: number; categoria?: 'lote_atraso' | 'general' }
+export interface Alerta { tipo: 'error' | 'warn' | 'info'; msg: string; lote?: string; href?: string; prioridad?: number; categoria?: 'lote_atraso' | 'general' }
 
 function safeDate(s: any): Date | null {
   try { const str = String(s || '').split(/[\sT]/)[0]; return str ? new Date(str + 'T12:00:00') : null; } catch { return null; }

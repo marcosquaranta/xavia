@@ -52,7 +52,10 @@ export default function GruposLotes({ grupos, icono, etiqueta }: { grupos: Grupo
   return (
     <div>
       <p style={{ margin: '0 0 10px', fontSize: '13px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>{icono} {etiqueta}</p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      {/* Grid en vez de columna única — con pocos lotes listos, una sola columna angosta
+          dejaba mucho espacio vacío a la derecha en pantallas anchas; así las secciones
+          (y las mesadas dentro de cada una) se acomodan una al lado de la otra cuando entran. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', alignItems: 'start' }}>
         {titulos.map(titulo => {
           const st = estiloTitulo(titulo);
           const gs = porTitulo.get(titulo)!;
@@ -64,7 +67,7 @@ export default function GruposLotes({ grupos, icono, etiqueta }: { grupos: Grupo
               <p style={{ margin: '0 0 7px', display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', fontWeight: 800, color: st.color, background: st.bg, borderRadius: '5px', padding: '3px 10px' }}>
                 {st.icon} {titulo}
               </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingLeft: '2px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px', paddingLeft: '2px' }}>
                 {gs.map((g, i) => {
                   const c = estiloCultivo(g.cultivo);
                   const mesadaEsRedundante = g.mesada.trim().toLowerCase() === deLabel;

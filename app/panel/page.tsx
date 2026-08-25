@@ -5,11 +5,12 @@ import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
 import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio } from '@/lib/estadisticas';
 import { codigoCultivo } from '@/lib/lotes';
-import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, CajonMovimiento, KilometrajeVehiculo, ProductividadDiaria } from '@/lib/types';
+import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, CajonMovimiento, KilometrajeVehiculo, ProductividadDiaria, Articulo, StockMes } from '@/lib/types';
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
 import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
 import { evolucionVentaPorArticulo, resumenMesActual } from '@/lib/estadisticasVentas';
-import { generarAlertas, motivoAlertaCosecha, type MotivoAlertaCosecha } from '@/lib/alertasPanel';
+import { generarAlertas, motivoAlertaCosecha, alertasStockBajo, type MotivoAlertaCosecha } from '@/lib/alertasPanel';
+import { calcularDriversMes } from '@/lib/usoTeorico';
 import { calcularCamara, diferenciaAjustesMes, ventasDeHoyYaDescontadas } from '@/lib/camara';
 import { saldoPorCliente, alertasCajones } from '@/lib/cajones';
 import { descartePorFaseMes } from '@/lib/descarte';
@@ -140,8 +141,9 @@ export default async function PanelPage() {
   let registrosCamara: StockCamara[] = [];
   let movimientosCajones: CajonMovimiento[] = [];
   let registrosKm: KilometrajeVehiculo[] = [];
+  let articulosPanel: Articulo[] = [], stocksPanel: StockMes[] = [];
   try {
-    [lotes, movimientos, ubicaciones, variedades, ventasPanel, clientesPanel, preciosPanel, historicasPanel, configRows, registrosCamara, movimientosCajones, registrosKm] = await Promise.all([
+    [lotes, movimientos, ubicaciones, variedades, ventasPanel, clientesPanel, preciosPanel, historicasPanel, configRows, registrosCamara, movimientosCajones, registrosKm, articulosPanel, stocksPanel] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<Ubicacion>('Ubicaciones'), readSheet<Variedad>('Variedades'),
       readSheet<VentaDia>('Ventas'),
@@ -152,6 +154,8 @@ export default async function PanelPage() {
       readSheet<StockCamara>('StockCamara').catch(() => []),
       readSheet<CajonMovimiento>('CajonesMovimientos').catch(() => []),
       readSheet<KilometrajeVehiculo>('Kilometraje').catch(() => []),
+      readSheet<Articulo>('Articulos').catch(() => []),
+      readSheet<StockMes>('Stocks').catch(() => []),
     ]);
   } catch {}
 
@@ -192,7 +196,12 @@ export default async function PanelPage() {
     navesOcup     = ocupacionPorNave(ubicaciones, lotes);
     tubosMesadas  = tubosPorMesada(ubicaciones, lotes);
     resumen       = plantasPorCultivo(lotes);
-    proyeccionCosecha = proyeccionCosechaSemanal(lotes, variedades, 8);
+    // Bloques de 10 días (en vez de 7) — a pedido explícito: la proyección semana a
+    // semana variaba mucho de una columna a la otra (las siembras van en tandas, así que
+    // un desvío chico en el ciclo corre TODA una tanda de semana), agrupar de a 10 días
+    // amortigua ese ruido sin perder toda la resolución. 6 períodos ≈ mismo horizonte de
+    // ~2 meses que antes (8 semanas).
+    proyeccionCosecha = proyeccionCosechaSemanal(lotes, variedades, 6, 10);
     ciclosSemanas  = ciclosPorSemana(lotes, movimientos);
     ciclosRealesMap = cicloRealPorVariedad(lotes, [], 5);
   } catch {}
@@ -247,10 +256,6 @@ export default async function PanelPage() {
 
   // ── ALERTAS ──
   const hoy = new Date();
-  // Las alertas de stock de insumos (alertasStockBajo) se movieron a la sección Stocks
-  // — se apoyan en datos de Uso Teórico que todavía dan cifras raras para algunos
-  // artículos (stock_inicial arrastrado en 0 en filas creadas desde Gastos), así que por
-  // ahora quedan afuera de las Alertas del Panel hasta confirmar que están bien.
   // En el home se excluyen las alertas de atraso puntual de trasplante/cosecha — ese
   // detalle ya se ve más abajo en "Cosechar"/"Trasplantar", con su propio color por
   // tiempo transcurrido. El resto (mesadas vacías, sin siembras recientes, ocupación, etc.)
@@ -268,6 +273,21 @@ export default async function PanelPage() {
         msg: `${a.nombre} debe ${a.saldo} cajones — sin movimiento hace ${a.diasSinMovimiento}d`,
         categoria: 'general' as const,
       })),
+    ];
+  } catch {}
+  // Insumos con stock estimado por debajo del umbral de pedido (15 días de uso) — mismo
+  // motor que ya se usa en Stocks (alertasStockBajo), a pedido explícito para que también
+  // salten acá y no solo entrando a Stocks a revisar. Con link directo a Stocks (href).
+  try {
+    let mesPrevStock = hoy.getMonth(), anioPrevStock = hoy.getFullYear();
+    if (mesPrevStock === 0) { mesPrevStock = 12; anioPrevStock--; }
+    const diasEnMesPrevStock = new Date(anioPrevStock, mesPrevStock, 0).getDate();
+    const driversStockActualPanel = calcularDriversMes(lotes, ventasPanel, preciosPanel, clientesPanel, hoy.getFullYear(), hoy.getMonth() + 1);
+    const driversStockPasadoPanel = calcularDriversMes(lotes, ventasPanel, preciosPanel, clientesPanel, anioPrevStock, mesPrevStock);
+    const alertasStockPanel = alertasStockBajo(articulosPanel, stocksPanel, driversStockActualPanel, driversStockPasadoPanel, hoy.getFullYear(), hoy.getMonth() + 1, diasEnMesPrevStock, 15);
+    alertas = [
+      ...alertas,
+      ...alertasStockPanel.map(a => ({ ...a, href: '/stocks' })),
     ];
   } catch {}
 
@@ -440,7 +460,7 @@ export default async function PanelPage() {
   const horaArg = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Argentina/Buenos_Aires', hour: 'numeric', hour12: false }).format(new Date()));
   const esDiaStockCamara = horaArg >= 12;
 
-  // Recordatorio de kilometraje del Partner — se pide los sábados, y queda pendiente
+  // Recordatorio de kilometraje del Partner — se pide los viernes, y queda pendiente
   // (se sigue mostrando) todos los días de la semana hasta que se cargue una lectura.
   const faltaKm = faltaCargarEstaSemana(registrosKm, VEHICULO_PARTNER, hoy);
   const ultimaLecturaKm = ultimaLectura(registrosKm, VEHICULO_PARTNER);
@@ -449,8 +469,15 @@ export default async function PanelPage() {
     <>
       <Header user={user} current="panel" />
       <div className="container">
-        <h1 className="page-title">Panel de control</h1>
-        <p className="page-subtitle">{hoyStr.charAt(0).toUpperCase()+hoyStr.slice(1)} · Bienvenido, {user.nombre}</p>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:'10px' }}>
+          <div>
+            <h1 className="page-title">Panel de control</h1>
+            <p className="page-subtitle">{hoyStr.charAt(0).toUpperCase()+hoyStr.slice(1)} · Bienvenido, {user.nombre}</p>
+          </div>
+          {/* Antes al pie de la página — a pedido explícito, arriba de todo para no tener
+              que bajar todo el Panel cada vez que hay que cargar un lote nuevo. */}
+          <Link href="/cultivos/nuevo" className="btn" style={{ whiteSpace:'nowrap' }}>+ Nuevo lote</Link>
+        </div>
 
         <BuscadorLote baseUrl="/cultivos" />
 
@@ -493,6 +520,8 @@ export default async function PanelPage() {
                         {a.tipo==='error'?'🔴':a.tipo==='warn'?'🟡':'🔵'}
                         {a.lote ? (
                           <Link href={`/cultivos/${encodeURIComponent(a.lote)}`} style={{ textDecoration:'none', color:'inherit', fontWeight:600 }}>{a.msg}</Link>
+                        ) : a.href ? (
+                          <Link href={a.href} style={{ textDecoration:'none', color:'inherit', fontWeight:600 }}>{a.msg}</Link>
                         ) : a.msg}
                       </div>
                     ))}
@@ -715,19 +744,19 @@ export default async function PanelPage() {
           </div>
         </div>
 
-        {/* ══ FILA 3: PROYECCIÓN DE COSECHA SEMANAL — gráfico angosto + datos al lado
+        {/* ══ FILA 3: PROYECCIÓN DE COSECHA — gráfico angosto + datos al lado
             (antes ocupaba todo el ancho, quedaba enorme) ══ */}
         <div style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'14px', marginBottom:'14px' }}>
-          <p style={{ margin:'0 0 3px', fontSize:'11px', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.3px' }}>Proyección de cosecha semanal</p>
-          <p style={{ margin:'0 0 10px', fontSize:'10px', color:'#9ca3af' }}>Paquetes esperados por semana · rúcula vs. lechuga</p>
+          <p style={{ margin:'0 0 3px', fontSize:'11px', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.3px' }}>Proyección de cosecha — cada 10 días</p>
+          <p style={{ margin:'0 0 10px', fontSize:'10px', color:'#9ca3af' }}>Paquetes esperados por período de 10 días · rúcula vs. lechuga — agrupado así (no semana a semana) porque las siembras van en tandas y una semana sola puede variar mucho de la siguiente</p>
           <div style={{ display:'grid', gridTemplateColumns:'minmax(280px,420px) 1fr', gap:'20px', alignItems:'start' }}>
             <GraficoDistribucionMesadas datos={proyeccionCosecha} />
             <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:'16px' }}>
               <div>
-                <p style={{ margin:'0 0 6px', fontSize:'10px', color:'#9ca3af', fontWeight:700, textTransform:'uppercase' }}>Por semana</p>
+                <p style={{ margin:'0 0 6px', fontSize:'10px', color:'#9ca3af', fontWeight:700, textTransform:'uppercase' }}>Por período (10 días)</p>
                 <table style={{ fontSize:'11px', width:'100%', borderCollapse:'collapse' }}>
                   <thead><tr style={{ color:'#9ca3af' }}>
-                    <th style={{ textAlign:'left', padding:'2px 4px', fontWeight:600 }}>Sem.</th>
+                    <th style={{ textAlign:'left', padding:'2px 4px', fontWeight:600 }}>Período</th>
                     <th style={{ textAlign:'right', padding:'2px 4px', fontWeight:600, color:'#134e4a' }}>Rúc.</th>
                     <th style={{ textAlign:'right', padding:'2px 4px', fontWeight:600, color:'#84cc16' }}>Lech.</th>
                   </tr></thead>
@@ -763,12 +792,6 @@ export default async function PanelPage() {
               </div>
             </div>
           </div>
-        </div>
-
-        {/* ══ NUEVO LOTE ══ — Ocupación, Actividad y Estadísticas ya tienen su propio
-            "Ver detalle →"/"Ver todos →" en las tarjetas de arriba. */}
-        <div className="card" style={{ marginBottom:'14px' }}>
-          <Link href="/cultivos/nuevo" className="btn">+ Nuevo lote</Link>
         </div>
 
       </div>

@@ -84,7 +84,7 @@ export default function KilometrajeReminder({ ultimoKm, ultimaFecha, ultimoIdKm,
         <div style={{ flex: 1, minWidth: '260px' }}>
           <p style={{ margin: '0 0 4px', fontSize: '15px', fontWeight: 800, color: '#1e3a8a' }}>Falta cargar el kilometraje del Partner esta semana</p>
           <p style={{ margin: 0, fontSize: '12.5px', color: '#1e40af' }}>
-            Se pide todos los sábados, para ver los km recorridos por semana en Estadísticas.
+            Se pide todos los viernes, para ver los km recorridos por semana en Estadísticas.
             {ultimoKm !== null && <> Última carga: <strong>{ultimoKm.toLocaleString('es-AR')} km</strong>{ultimaFecha ? ` (${ultimaFecha})` : ''}.</>}
           </p>
         </div>
