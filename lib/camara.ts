@@ -195,7 +195,14 @@ export function calcularCamara(
 
   const totalVendido = vendidoEntre(cultivo, ventas, lotes, fechaBase, hoy);
   const totalCosechado = cosechas.reduce((a, c) => a + c.cantidad, 0);
-  const stockActual = Math.max(0, cantidadBase + totalCosechado - totalVendido);
+  // Redondeado: un paquete es una unidad discreta, y desde que vendidoEntre() convierte
+  // ventas en kg a paquetes-equivalente (kg*1000/gramosPorPaquete) el resultado casi
+  // nunca da un número entero exacto. Sin este redondeo, un stock de p.ej. 483.51 paquetes
+  // se mostraba tal cual con toLocaleString('es-AR') — que usa la COMA como separador
+  // decimal — y salía en pantalla como "483,51" pero interpretado a simple vista como
+  // "483.514" con la coma de miles invertida (formato de EEUU), un salto disparatado que
+  // no era ningún error de cálculo real, solo de formato.
+  const stockActual = Math.round(Math.max(0, cantidadBase + totalCosechado - totalVendido));
 
   // FIFO para días promedio
   // Cola: base primero, luego cosechas ordenadas por fecha ASC
