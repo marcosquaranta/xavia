@@ -24,7 +24,17 @@ export default async function TrasplantarPage({ params }: { params: { id: string
   // los de rúcula — y además cualquier mesada marcada explícitamente como 'albahaca'.
   const variedadAsignada = (v.includes('rucula') || v.includes('rúcula') || esAlbahacaLote) ? 'rucula' : 'lechuga';
   const asignadasOk = esAlbahacaLote ? [variedadAsignada, 'mixta', 'albahaca'] : [variedadAsignada, 'mixta'];
-  const destinos = ubicaciones.filter((u) => u.activo === 'SI' && u.tipo === 'mesada' && u.sector_fase === faseDestino && asignadasOk.includes(u.variedad_asignada));
+  let destinos = ubicaciones.filter((u) => u.activo === 'SI' && u.tipo === 'mesada' && u.sector_fase === faseDestino && asignadasOk.includes(u.variedad_asignada));
+  // Si hay mesadas identificadas para albahaca —marcadas en variedad_asignada, o con
+  // "albahaca" en el nombre— un lote de albahaca SOLO puede ir a esas: si no, se ofrecían
+  // todas las mesadas de rúcula (MR1, MR2, MR2B, MR3) y era fácil mandarlo a la equivocada.
+  // La restricción es solo del lado de la albahaca: la rúcula sigue pudiendo usar esa
+  // mesada como siempre, porque es compartida. Si NINGUNA mesada menciona albahaca, no se
+  // filtra nada y queda el comportamiento anterior (no deja el desplegable vacío).
+  if (esAlbahacaLote) {
+    const dedicadas = destinos.filter((u) => u.variedad_asignada === 'albahaca' || String(u.nombre || '').toLowerCase().includes('albahaca'));
+    if (dedicadas.length > 0) destinos = dedicadas;
+  }
   // Rúcula y albahaca van las dos con 2 celdas por posición (misma espuma, mismo armado).
   const esRucula = variedadAsignada === 'rucula';
   const nombreCultivo = esAlbahacaLote ? 'albahaca' : esRucula ? 'rúcula' : 'lechuga';
