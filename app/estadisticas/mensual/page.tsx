@@ -343,13 +343,16 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
   const camaraRucula = calcularCamara('rucula', registrosCamara, lotes, ventas);
   const camaraLechugaCrespa = calcularCamara('lechuga_crespa', registrosCamara, lotes, ventas);
   const camaraLechugaRoble = calcularCamara('lechuga_roble', registrosCamara, lotes, ventas);
+  const camaraAlbahaca = calcularCamara('albahaca', registrosCamara, lotes, ventas);
   const faltanteRucula = diferenciaAjustesMes('rucula', registrosCamara, lotes, ventas, refDate);
   const faltanteCrespa = diferenciaAjustesMes('lechuga_crespa', registrosCamara, lotes, ventas, refDate);
   const faltanteRoble = diferenciaAjustesMes('lechuga_roble', registrosCamara, lotes, ventas, refDate);
+  const faltanteAlbahaca = diferenciaAjustesMes('albahaca', registrosCamara, lotes, ventas, refDate);
   const faltantesStock = [
     { label: 'Rúcula', color: '#134e4a', actual: camaraRucula.stockActual, ajusteMes: faltanteRucula.acumulado },
     { label: 'Lechuga Crespa', color: '#84cc16', actual: camaraLechugaCrespa.stockActual, ajusteMes: faltanteCrespa.acumulado },
     { label: 'Lechuga Roble', color: '#4d7c0f', actual: camaraLechugaRoble.stockActual, ajusteMes: faltanteRoble.acumulado },
+    { label: 'Albahaca', color: '#15803d', actual: camaraAlbahaca.stockActual, ajusteMes: faltanteAlbahaca.acumulado },
   ];
 
   // Uso real vs. uso teórico — Bolsas (Packaging), Semillas y Espuma Fenólica, del MES

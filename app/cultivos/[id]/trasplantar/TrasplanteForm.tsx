@@ -8,13 +8,14 @@ import NumberInput from '@/components/NumberInput';
 const HOY = new Date().toISOString().split('T')[0];
 
 export default function TrasplanteForm({
-  lote, faseDestino, ubicacionesDestino, usuario, esRucula,
+  lote, faseDestino, ubicacionesDestino, usuario, esRucula, nombreCultivo = 'rúcula',
 }: {
   lote: Lote;
   faseDestino: 'fase_1' | 'fase_2';
   ubicacionesDestino: Ubicacion[];
   usuario: string;
-  esRucula: boolean;
+  esRucula: boolean; // en realidad: "2 celdas por posición" — aplica a rúcula Y albahaca
+  nombreCultivo?: string;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -33,7 +34,7 @@ export default function TrasplanteForm({
   const ubic = ubicacionesDestino.find((u) => u.id_ubicacion === ubicId);
   const orificios = Number(ubic?.orificios_por_perfil || 0);
   const factor = esRucula ? 2 : 1;
-  const labelFactor = esRucula ? '2 plantines/posición (rúcula)' : '1 plantín/posición (lechuga)';
+  const labelFactor = esRucula ? `2 plantines/posición (${nombreCultivo})` : `1 plantín/posición (${nombreCultivo})`;
 
   // Misma función que usa el resto de la app (LoteCard, etc.) — si el lote sigue en
   // plantinera, la cantidad real vive en plantines_iniciales, NUNCA en

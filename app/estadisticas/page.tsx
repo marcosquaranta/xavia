@@ -218,7 +218,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
       { nombre: 'Cámara', color: COLOR_FASE.camara, valores: mesesDescarte.map(m => m[cultivo].camara) },
     ];
   }
-  const CULTIVO_LABEL: Record<CultivoDescarte, string> = { rucula: 'Rúcula', lechuga_crespa: 'Lechuga Crespa', lechuga_roble: 'Lechuga Hoja de Roble' };
+  const CULTIVO_LABEL: Record<CultivoDescarte, string> = { rucula: 'Rúcula', lechuga_crespa: 'Lechuga Crespa', lechuga_roble: 'Lechuga Hoja de Roble', albahaca: 'Albahaca' };
 
   // ── Pérdidas totales por mes — junta Descarte (solo F2→Cosecha) + Faltante de stock +
   // Subocupación en una sola cuenta, todas reconvertidas a plantas para poder sumarlas y
@@ -685,7 +685,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
           <p className="card-title" style={{ margin:'0 0 2px' }}>Descarte por fase</p>
           <p className="card-sub" style={{ margin:'0 0 12px' }}>Plantín→F1 / F1→F2 / F2→Cosecha (plantas) + Cámara (paquetes, descarte explícito cargado al registrar un ajuste de stock) · últimos 12 meses · indicador fijo, no cambia con el filtro de arriba</p>
           <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:'22px', marginBottom:'16px' }}>
-            {(['rucula', 'lechuga_crespa', 'lechuga_roble'] as CultivoDescarte[]).map((cultivo) => (
+            {(['rucula', 'lechuga_crespa', 'lechuga_roble', 'albahaca'] as CultivoDescarte[]).map((cultivo) => (
               <div key={cultivo}>
                 <p style={{ margin:'0 0 6px', fontSize:'13px', fontWeight:700, color:'#374151' }}>{CULTIVO_LABEL[cultivo]}</p>
                 <GraficoBarrasApiladas labels={labelsDescarteMeses} series={serieDescarte(cultivo)} unidad="" />

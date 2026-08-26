@@ -179,7 +179,7 @@ export function variacionVsMesAnterior(lotes: Lote[], clave: keyof ResumenCultiv
 
 // === PROYECCIÓN DE COSECHA SEMANAL (calendario, desde la semana actual en adelante) ===
 
-export interface PuntoProyeccionCosecha { semana: string; label: string; rucula: number; lechuga: number }
+export interface PuntoProyeccionCosecha { semana: string; label: string; rucula: number; lechuga: number; albahaca: number }
 
 function lunesDe(d: Date): Date {
   const r = new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -245,24 +245,29 @@ export function proyeccionCosechaSemanal(
   const variedadMap = new Map(variedades.map((v) => [v.variedad, v]));
   const normVarLocal = (s: string) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
-  function cultivoDe(v: string): 'rucula' | 'lechuga' | null {
+  function cultivoDe(v: string): 'rucula' | 'lechuga' | 'albahaca' | null {
     const vl = String(v || '').toLowerCase();
     if (vl.includes('rucula') || vl.includes('rúcula')) return 'rucula';
-    if (vl.includes('albahaca')) return null;
+    if (vl.includes('albahaca')) return 'albahaca';
     return 'lechuga';
   }
-  function cicloEstimado(variedad: string, rucula: boolean): number {
+  // `cicloCorto` = rúcula o albahaca (comparten mesada y ritmo); la lechuga tiene un ciclo
+  // bastante más largo. Solo se usa como fallback cuando la variedad todavía no tiene
+  // cosechas reales de las que sacar el promedio — el caso de la albahaca al arrancar.
+  function cicloEstimado(variedad: string, cicloCorto: boolean): number {
     const real = ciclosMap.get(variedad);
     if (real && real > 0) return real;
     const v = variedadMap.get(variedad);
     if (v && Number(v.dias_estimados_cosecha) > 0) return Number(v.dias_estimados_cosecha);
-    return rucula ? 30 : 78;
+    return cicloCorto ? 30 : 78;
   }
-  function f2Estimado(variedad: string, rucula: boolean): number {
+  function f2Estimado(variedad: string, cicloCorto: boolean): number {
     const real = f2Map.get(variedad) ?? f2Map.get(normVarLocal(variedad));
     if (real && real > 0) return real;
-    return rucula ? 34 : 40;
+    return cicloCorto ? 34 : 40;
   }
+  // OJO: acá SÍ importa que sea rúcula puntualmente — la albahaca arma 1 paquete por
+  // posición (POSPAQ_ALBAHACA), igual que la lechuga, no 3 como la rúcula.
   function factorPaq(variedad: string, rucula: boolean): number {
     const v = variedadMap.get(variedad);
     const f = v ? Number(v.plantas_por_unidad_esperado) : 0;
@@ -299,26 +304,27 @@ export function proyeccionCosechaSemanal(
     return d;
   }
 
-  const mapa = new Map<string, { rucula: number; lechuga: number }>();
-  for (const d of periodosArr) mapa.set(claveDe(d), { rucula: 0, lechuga: 0 });
+  const mapa = new Map<string, { rucula: number; lechuga: number; albahaca: number }>();
+  for (const d of periodosArr) mapa.set(claveDe(d), { rucula: 0, lechuga: 0, albahaca: 0 });
 
   for (const l of lotes.filter((l) => l.estado === 'activo')) {
     const cultivo = cultivoDe(l.variedad);
     if (!cultivo) continue;
     const rucula = cultivo === 'rucula';
+    const cicloCorto = cultivo === 'rucula' || cultivo === 'albahaca';
 
     let fechaEst: Date | null = null;
     if (l.fase_actual === 'fase_2' && l.fecha_f2) {
       const f2inicio = safeParseDate2(l.fecha_f2);
       if (f2inicio) {
         fechaEst = new Date(f2inicio);
-        fechaEst.setDate(fechaEst.getDate() + f2Estimado(l.variedad, rucula));
+        fechaEst.setDate(fechaEst.getDate() + f2Estimado(l.variedad, cicloCorto));
       }
     }
     if (!fechaEst) {
       const siembra = safeParseDate2(l.fecha_siembra);
       if (!siembra) continue;
-      const ciclo = cicloEstimado(l.variedad, rucula);
+      const ciclo = cicloEstimado(l.variedad, cicloCorto);
       fechaEst = new Date(siembra); fechaEst.setDate(fechaEst.getDate() + ciclo);
     }
 
@@ -334,7 +340,7 @@ export function proyeccionCosechaSemanal(
 
   return periodosArr.map((d) => {
     const v = mapa.get(claveDe(d))!;
-    return { semana: claveDe(d), label: labelDe(d), rucula: Math.round(v.rucula), lechuga: Math.round(v.lechuga) };
+    return { semana: claveDe(d), label: labelDe(d), rucula: Math.round(v.rucula), lechuga: Math.round(v.lechuga), albahaca: Math.round(v.albahaca) };
   });
 }
 

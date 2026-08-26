@@ -158,9 +158,9 @@ export interface ReporteSemanalData {
   mesadasBajas: { nombre: string; nave: number; pct: number }[];
   plantasPerdidasSubocupacion: PlantasPerdidasSubocupacion;
   ventasSemanas: PuntoVentaCultivoSemana[];
-  stock: { rucula: number; lechuga_crespa: number; lechuga_roble: number };
-  faltanteSemana: { rucula: number; lechuga_crespa: number; lechuga_roble: number; total: number };
-  faltanteMes: { rucula: number; lechuga_crespa: number; lechuga_roble: number; total: number };
+  stock: { rucula: number; lechuga_crespa: number; lechuga_roble: number; albahaca: number };
+  faltanteSemana: { rucula: number; lechuga_crespa: number; lechuga_roble: number; albahaca: number; total: number };
+  faltanteMes: { rucula: number; lechuga_crespa: number; lechuga_roble: number; albahaca: number; total: number };
   descartePorFase: DescarteFaseReporte[];
 }
 
@@ -249,15 +249,17 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     rucula: calcularCamara('rucula', registrosCamara, lotes, ventas).stockActual,
     lechuga_crespa: calcularCamara('lechuga_crespa', registrosCamara, lotes, ventas).stockActual,
     lechuga_roble: calcularCamara('lechuga_roble', registrosCamara, lotes, ventas).stockActual,
+    albahaca: calcularCamara('albahaca', registrosCamara, lotes, ventas).stockActual,
   };
   const inicioMesActual = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
   const finMesActual = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0, 23, 59, 59);
   const ajusteRuc = diferenciaAjustesRango('rucula', registrosCamara, lotes, ventas, inicioMesActual, finMesActual);
   const ajusteLecCrespa = diferenciaAjustesRango('lechuga_crespa', registrosCamara, lotes, ventas, inicioMesActual, finMesActual);
   const ajusteLecRoble = diferenciaAjustesRango('lechuga_roble', registrosCamara, lotes, ventas, inicioMesActual, finMesActual);
+  const ajusteAlb = diferenciaAjustesRango('albahaca', registrosCamara, lotes, ventas, inicioMesActual, finMesActual);
   const faltanteMes = {
-    rucula: ajusteRuc.acumulado, lechuga_crespa: ajusteLecCrespa.acumulado, lechuga_roble: ajusteLecRoble.acumulado,
-    total: ajusteRuc.acumulado + ajusteLecCrespa.acumulado + ajusteLecRoble.acumulado,
+    rucula: ajusteRuc.acumulado, lechuga_crespa: ajusteLecCrespa.acumulado, lechuga_roble: ajusteLecRoble.acumulado, albahaca: ajusteAlb.acumulado,
+    total: ajusteRuc.acumulado + ajusteLecCrespa.acumulado + ajusteLecRoble.acumulado + ajusteAlb.acumulado,
   };
   // Faltante de la SEMANA — mismo cálculo, acotado a los últimos 7 días (desdeSemana/hoy),
   // no al mes calendario completo.
@@ -266,9 +268,10 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const ajusteSemRuc = diferenciaAjustesRango('rucula', registrosCamara, lotes, ventas, inicioSemanaDia, finSemanaDia);
   const ajusteSemLecCrespa = diferenciaAjustesRango('lechuga_crespa', registrosCamara, lotes, ventas, inicioSemanaDia, finSemanaDia);
   const ajusteSemLecRoble = diferenciaAjustesRango('lechuga_roble', registrosCamara, lotes, ventas, inicioSemanaDia, finSemanaDia);
+  const ajusteSemAlb = diferenciaAjustesRango('albahaca', registrosCamara, lotes, ventas, inicioSemanaDia, finSemanaDia);
   const faltanteSemana = {
-    rucula: ajusteSemRuc.acumulado, lechuga_crespa: ajusteSemLecCrespa.acumulado, lechuga_roble: ajusteSemLecRoble.acumulado,
-    total: ajusteSemRuc.acumulado + ajusteSemLecCrespa.acumulado + ajusteSemLecRoble.acumulado,
+    rucula: ajusteSemRuc.acumulado, lechuga_crespa: ajusteSemLecCrespa.acumulado, lechuga_roble: ajusteSemLecRoble.acumulado, albahaca: ajusteSemAlb.acumulado,
+    total: ajusteSemRuc.acumulado + ajusteSemLecCrespa.acumulado + ajusteSemLecRoble.acumulado + ajusteSemAlb.acumulado,
   };
 
   return {
@@ -412,8 +415,8 @@ export function construirHtml(d: ReporteSemanalData): string {
 
   // + verde = sobra (contado por encima de lo esperado), − rojo = falta (contado por
   // debajo) — mismo signo que "Dif. acumulada mes" del resto de la app.
-  const stockFilas = (['rucula', 'lechuga_crespa', 'lechuga_roble'] as const).map((c) => {
-    const label = c === 'rucula' ? 'Rúcula' : c === 'lechuga_crespa' ? 'Lechuga Crespa' : 'Lechuga Roble';
+  const stockFilas = (['rucula', 'lechuga_crespa', 'lechuga_roble', 'albahaca'] as const).map((c) => {
+    const label = c === 'rucula' ? 'Rúcula' : c === 'lechuga_crespa' ? 'Lechuga Crespa' : c === 'lechuga_roble' ? 'Lechuga Roble' : 'Albahaca';
     const faltSem = d.faltanteSemana[c], faltMes = d.faltanteMes[c];
     return `<tr>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">${label}</td>

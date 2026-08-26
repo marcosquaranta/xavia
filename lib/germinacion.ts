@@ -7,6 +7,7 @@ export interface GerminacionCultivo { pctGerminacion: number | null; pctSuperviv
 export interface GerminacionMes {
   mes: string; label: string;
   rucula: GerminacionCultivo; lechuga_crespa: GerminacionCultivo; lechuga_roble: GerminacionCultivo;
+  albahaca: GerminacionCultivo;
 }
 
 interface Acc { sobreviveGerm: number; pierdeGerm: number; sobrevivePost: number; pierdePost: number }
@@ -28,7 +29,7 @@ export function germinacionYSupervivenciaPorMes(lotes: Lote[], movimientos: Movi
   for (let i = nMeses - 1; i >= 0; i--) {
     const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
     const mes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    meses.push({ mes, label: `${MESES_CORTO[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`, rucula: { pctGerminacion: null, pctSupervivenciaPostTrasplante: null }, lechuga_crespa: { pctGerminacion: null, pctSupervivenciaPostTrasplante: null }, lechuga_roble: { pctGerminacion: null, pctSupervivenciaPostTrasplante: null } });
+    meses.push({ mes, label: `${MESES_CORTO[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`, rucula: { pctGerminacion: null, pctSupervivenciaPostTrasplante: null }, lechuga_crespa: { pctGerminacion: null, pctSupervivenciaPostTrasplante: null }, lechuga_roble: { pctGerminacion: null, pctSupervivenciaPostTrasplante: null }, albahaca: { pctGerminacion: null, pctSupervivenciaPostTrasplante: null } });
   }
   const idxPorMes = new Map(meses.map((m, i) => [m.mes, i]));
   const lotesMap = new Map(lotes.map((l) => [l.id_lote, l]));
@@ -62,7 +63,7 @@ export function germinacionYSupervivenciaPorMes(lotes: Lote[], movimientos: Movi
   }
 
   for (let idx = 0; idx < meses.length; idx++) {
-    for (const cultivo of ['rucula', 'lechuga_crespa', 'lechuga_roble'] as const) {
+    for (const cultivo of ['rucula', 'lechuga_crespa', 'lechuga_roble', 'albahaca'] as const) {
       const a = acc[`${idx}||${cultivo}`];
       if (!a) continue;
       const baseGerm = a.sobreviveGerm + a.pierdeGerm;

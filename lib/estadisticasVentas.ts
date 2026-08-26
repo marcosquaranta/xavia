@@ -284,12 +284,15 @@ export interface VentasRangoCultivo {
   unidadesKg: number;      // parte del total que vino de ventas por kg (cajón — sin packaging individual)
   unidadesBandeja: number; // solo rúcula: bandejas (packaging propio, no bolsa). Siempre 0 en lechuga.
 }
-export interface VentasRango { rucula: VentasRangoCultivo; lechuga: VentasRangoCultivo }
+// Albahaca va aparte: no es lechuga (antes directamente no se contaba en este rango, así
+// que su venta no aparecía en ningún total que saliera de acá).
+export interface VentasRango { rucula: VentasRangoCultivo; lechuga: VentasRangoCultivo; albahaca: VentasRangoCultivo }
 export function ventasEnRango(ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], desde: string, hasta: string): VentasRango {
   const clienteMap = new Map(clientes.map((c) => [c.id_control, c]));
   const acc: VentasRango = {
     rucula: { unidades: 0, monto: 0, unidadesKg: 0, unidadesBandeja: 0 },
     lechuga: { unidades: 0, monto: 0, unidadesKg: 0, unidadesBandeja: 0 },
+    albahaca: { unidades: 0, monto: 0, unidadesKg: 0, unidadesBandeja: 0 },
   };
   for (const v of ventas) {
     const f = String(v.fecha || '').split(/[T ]/)[0];
@@ -327,9 +330,16 @@ export function ventasEnRango(ventas: VentaDia[], precios: PrecioVenta[], client
       acc.lechuga.unidadesKg += enPaq;
       acc.lechuga.monto += kgL * precioFinal(precios, v.id_control, v.sucursal, keyKg, cliente);
     }
+    // Albahaca: solo por unidad (no hay albahaca_kg ni bandeja).
+    const qtyAlb = Number(v.albahaca) || 0;
+    if (qtyAlb > 0) {
+      acc.albahaca.unidades += qtyAlb;
+      acc.albahaca.monto += qtyAlb * precioFinal(precios, v.id_control, v.sucursal, 'albahaca', cliente);
+    }
   }
   acc.rucula.monto = Math.round(acc.rucula.monto);
   acc.lechuga.monto = Math.round(acc.lechuga.monto);
+  acc.albahaca.monto = Math.round(acc.albahaca.monto);
   return acc;
 }
 

@@ -116,7 +116,7 @@ export function calcularCapacidadProductiva(
   }
 
   // Peso promedio y plantas/paquete por lote cosechado
-  const pesoLoteMap = new Map<string, { gr: number; ppu: number; esRucula: boolean }>();
+  const pesoLoteMap = new Map<string, { gr: number; ppu: number; esRucula: boolean; esAlbahaca: boolean }>();
   for (const l of cosechados) {
     const gr = Number(l.peso_muestra_paquete_gr) > 0
       ? Number(l.peso_muestra_paquete_gr)
@@ -124,7 +124,7 @@ export function calcularCapacidadProductiva(
     const ppu = Number(l.plantas_por_unidad_real) || 0;
     if (gr > 0 || ppu > 0) {
       const v = String(l.variedad || '').toLowerCase();
-      pesoLoteMap.set(l.id_lote, { gr, ppu, esRucula: v.includes('rucula') || v.includes('rúcula') });
+      pesoLoteMap.set(l.id_lote, { gr, ppu, esRucula: v.includes('rucula') || v.includes('rúcula'), esAlbahaca: v.includes('albahaca') });
     }
   }
 
@@ -177,11 +177,20 @@ export function calcularCapacidadProductiva(
     for (const l of cosechados) {
       if (normMes(l.ubicacion_actual) !== mesKey) continue;
       if (naveDe(l.ubicacion_actual) !== mesNave) continue;
-      const esR = String(l.variedad || '').toLowerCase().includes('rucula') || String(l.variedad || '').toLowerCase().includes('rúcula');
+      const vLote = String(l.variedad || '').toLowerCase();
+      const esR = vLote.includes('rucula') || vLote.includes('rúcula');
+      const esAlb = vLote.includes('albahaca');
       const paq = Number(l.unidades_cosechadas) || 0;
-      if (esR) realRuc += paq; else realLech += paq;
+      // La albahaca comparte mesada con la rúcula (Mesada 3) y el modelo de capacidad no
+      // contempla 3 cultivos por mesada: su producción se suma del lado de rúcula para no
+      // perderla (la mesada se clasifica como rúcula por su nombre). Es una aproximación
+      // conocida de una mesada compartida, no un dato exacto por cultivo.
+      if (esR || esAlb) realRuc += paq; else realLech += paq;
       const p = pesoLoteMap.get(l.id_lote);
       if (!p) continue;
+      // ...pero el peso y las plantas/paquete de la albahaca NO entran en ningún promedio:
+      // su paquete es 1 posición y el de rúcula 3, mezclarlos corrompería los dos.
+      if (p.esAlbahaca) continue;
       if (p.gr > 0) (p.esRucula ? pRuc : pLech).push(p.gr);
       if (p.ppu > 0) (p.esRucula ? ppRuc : ppLech).push(p.ppu);
     }

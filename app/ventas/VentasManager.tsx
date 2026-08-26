@@ -92,7 +92,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   const [correlaB,setCorrelaB]=useState<string>('');
   const [enviarEmail,setEnviarEmail]=useState(true);
   const [limpiando,setLimpiando]=useState(false);
-  const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number;diasPromedio:number};lechuga_crespa:{stockActual:number;diasPromedio:number};lechuga_roble:{stockActual:number;diasPromedio:number};factorGrPaq:{rucula:number;lechuga_crespa:number;lechuga_roble:number};ventasHoyYaDescontadas:boolean}|null>(null);
+  const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number;diasPromedio:number};lechuga_crespa:{stockActual:number;diasPromedio:number};lechuga_roble:{stockActual:number;diasPromedio:number};albahaca:{stockActual:number;diasPromedio:number};factorGrPaq:{rucula:number;lechuga_crespa:number;lechuga_roble:number;albahaca:number};ventasHoyYaDescontadas:boolean}|null>(null);
   const [ctdsKg,setCtdsKg]=useState<CKG>({});
   const [ventas7,setVentas7]=useState<VentaDia[]>([]);
   const [facturadasHoy,setFacturadasHoy]=useState<VentaDia[]>([]);
@@ -380,18 +380,19 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   // dónde salía. Separado así se puede ver de un vistazo si lo que aparece en "Ventas de
   // hoy" tiene sentido, sin que quede tapado por mañana/pasado.
   const DIAS_COMPROMETIDO = 3;
-  type CultivoStock = 'rucula' | 'lechuga_crespa' | 'lechuga_roble';
+  type CultivoStock = 'rucula' | 'lechuga_crespa' | 'lechuga_roble' | 'albahaca';
   interface DetalleLinea { nombre: string; cantidad: number }
   interface ComprometidoDia { hoy: number; siguientes2: number; detalleHoy: DetalleLinea[]; detalleSiguientes2: DetalleLinea[] }
   // Junta el total Y el detalle por cliente (qué cantidad de cada uno la compone) en una
   // sola pasada — a pedido explícito: "Ventas de hoy" y "Comprometidas Xd más" antes solo
   // mostraban el número, sin decir a quién corresponde.
   function comprometidoPorCultivoYDia(): Record<CultivoStock, ComprometidoDia> {
-    const cultivosList: CultivoStock[] = ['rucula', 'lechuga_crespa', 'lechuga_roble'];
+    const cultivosList: CultivoStock[] = ['rucula', 'lechuga_crespa', 'lechuga_roble', 'albahaca'];
     const acc: Record<CultivoStock, { hoy: number; siguientes2: number; mapaHoy: Map<string, number>; mapaSiguientes2: Map<string, number> }> = {
       rucula: { hoy: 0, siguientes2: 0, mapaHoy: new Map(), mapaSiguientes2: new Map() },
       lechuga_crespa: { hoy: 0, siguientes2: 0, mapaHoy: new Map(), mapaSiguientes2: new Map() },
       lechuga_roble: { hoy: 0, siguientes2: 0, mapaHoy: new Map(), mapaSiguientes2: new Map() },
+      albahaca: { hoy: 0, siguientes2: 0, mapaHoy: new Map(), mapaSiguientes2: new Map() },
     };
     const hoyReal = new Date();
     const f = (d: Date) => d.toISOString().split('T')[0];
@@ -415,14 +416,14 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       if (fechaEnVentana && vFecha === fecha) continue; // ese día se reemplaza por el vivo de abajo
       const bucket = vFecha === hoyRealStr ? 'hoy' : 'siguientes2';
       const nombre = v.sucursal && v.sucursal !== v.nombre_cliente ? `${v.nombre_cliente} · ${v.sucursal}` : v.nombre_cliente;
-      sumar(bucket, nombre, { rucula: Number(v.rucula) || 0, lechuga_crespa: Number(v.lechuga_crespa) || 0, lechuga_roble: Number(v.hoja_roble) || 0 });
+      sumar(bucket, nombre, { rucula: Number(v.rucula) || 0, lechuga_crespa: Number(v.lechuga_crespa) || 0, lechuga_roble: Number(v.hoja_roble) || 0, albahaca: Number(v.albahaca) || 0 });
     }
     if (fechaEnVentana) {
       const bucket = fecha === hoyRealStr ? 'hoy' : 'siguientes2';
       for (const fl of filas) {
         const vals = ctds[`${fl.id_control}__${fl.sucursal}`]; if (!vals) continue;
         const nombre = fl.sucursal && fl.sucursal !== fl.nombre_cliente ? `${fl.nombre_cliente} · ${fl.sucursal}` : fl.nombre_cliente;
-        sumar(bucket, nombre, { rucula: Number(vals.rucula) || 0, lechuga_crespa: Number(vals.lechuga_crespa) || 0, lechuga_roble: Number(vals.hoja_roble) || 0 });
+        sumar(bucket, nombre, { rucula: Number(vals.rucula) || 0, lechuga_crespa: Number(vals.lechuga_crespa) || 0, lechuga_roble: Number(vals.hoja_roble) || 0, albahaca: Number(vals.albahaca) || 0 });
       }
     }
 

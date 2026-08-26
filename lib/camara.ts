@@ -2,7 +2,7 @@ import type { Lote, VentaDia, StockCamara } from './types';
 import { pesoPromedioRango } from './estadisticas';
 import { GR_PAQ_RUCULA, GR_PAQ_LECHUGA } from './estadisticasVentas';
 
-export type CultivoCamara = 'rucula' | 'lechuga_crespa' | 'lechuga_roble';
+export type CultivoCamara = 'rucula' | 'lechuga_crespa' | 'lechuga_roble' | 'albahaca';
 
 function parseDate(s: any): Date | null {
   if (!s) return null;
@@ -63,12 +63,19 @@ function esRucula(variedad: string) {
 function esCrespa(variedad: string) {
   return String(variedad || '').toLowerCase().includes('crespa');
 }
-// "Roble" es el catch-all de lechuga (hoja de roble + cualquier otra variedad de
-// lechuga que no sea explícitamente crespa) — así nunca se pierde stock de un lote con
-// una variedad rara sin clasificar, igual criterio que ya se usa en lib/usoTeorico.ts.
+function esAlbahaca(variedad: string) {
+  return String(variedad || '').toLowerCase().includes('albahaca');
+}
+// "Roble" es el catch-all de LECHUGA (hoja de roble + cualquier otra variedad de lechuga
+// que no sea explícitamente crespa) — así nunca se pierde stock de un lote con una variedad
+// rara sin clasificar, igual criterio que ya se usa en lib/usoTeorico.ts. OJO: la albahaca
+// se descuenta ANTES de llegar a ese catch-all — si no, toda la cosecha de albahaca se
+// sumaba al stock de hoja de roble (no era "una variedad rara de lechuga", es otro cultivo
+// con su propio stock y su propia venta).
 function matchCultivo(cultivo: CultivoCamara, variedad: string): boolean {
   if (cultivo === 'rucula') return esRucula(variedad);
-  if (esRucula(variedad)) return false;
+  if (cultivo === 'albahaca') return esAlbahaca(variedad);
+  if (esRucula(variedad) || esAlbahaca(variedad)) return false;
   return cultivo === 'lechuga_crespa' ? esCrespa(variedad) : !esCrespa(variedad);
 }
 
@@ -99,7 +106,13 @@ function gramosPorPaqueteUltimaSemana(cultivo: CultivoCamara, lotes: Lote[], mom
   const desde = new Date(momentoRef);
   desde.setDate(desde.getDate() - 7);
   const prom = pesoPromedioRango(lotes, desde, momentoRef);
-  const gr = cultivo === 'rucula' ? prom.rucula : cultivo === 'lechuga_crespa' ? prom.lechugaCrespa : prom.lechugaRoble;
+  // Albahaca no se vende por kg (no existe un campo albahaca_kg en Ventas), así que este
+  // gramaje nunca llega a usarse para ese cultivo — se deja el fallback de lechuga solo
+  // para no devolver 0 y arriesgar una división por cero si algún día se agrega.
+  const gr = cultivo === 'rucula' ? prom.rucula
+    : cultivo === 'lechuga_crespa' ? prom.lechugaCrespa
+    : cultivo === 'lechuga_roble' ? prom.lechugaRoble
+    : 0;
   return gr > 0 ? gr : (cultivo === 'rucula' ? GR_PAQ_RUCULA : GR_PAQ_LECHUGA);
 }
 
@@ -127,6 +140,10 @@ function vendidoEntre(cultivo: CultivoCamara, ventas: VentaDia[], lotes: Lote[],
         const directo = (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0);
         const kg = ((Number(v.rucula_kg) || 0) * 1000) / gramosPorPaquete;
         return acc + directo + kg;
+      }
+      if (cultivo === 'albahaca') {
+        // Solo por unidad: no hay venta de albahaca por kg.
+        return acc + (Number(v.albahaca) || 0);
       }
       if (cultivo === 'lechuga_crespa') {
         const directo = Number(v.lechuga_crespa) || 0;

@@ -55,16 +55,16 @@ const MESES_CORTO_PANEL = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep'
 // Suma la proyección semanal (paquetes esperados por semana) en totales por mes calendario
 // — cada semana se atribuye al mes de su lunes (mismo criterio que el resto de la app para
 // "semana → mes"). Para el panel de datos al lado del gráfico de Proyección de cosecha.
-function proyeccionPorMes(datos: { semana: string; rucula: number; lechuga: number }[]) {
-  const map = new Map<string, { label: string; rucula: number; lechuga: number }>();
+function proyeccionPorMes(datos: { semana: string; rucula: number; lechuga: number; albahaca: number }[]) {
+  const map = new Map<string, { label: string; rucula: number; lechuga: number; albahaca: number }>();
   for (const d of datos) {
     const mk = d.semana.slice(0, 7); // YYYY-MM
     if (!map.has(mk)) {
       const [y, m] = mk.split('-').map(Number);
-      map.set(mk, { label: `${MESES_CORTO_PANEL[m - 1]} ${String(y).slice(2)}`, rucula: 0, lechuga: 0 });
+      map.set(mk, { label: `${MESES_CORTO_PANEL[m - 1]} ${String(y).slice(2)}`, rucula: 0, lechuga: 0, albahaca: 0 });
     }
     const e = map.get(mk)!;
-    e.rucula += d.rucula; e.lechuga += d.lechuga;
+    e.rucula += d.rucula; e.lechuga += d.lechuga; e.albahaca += d.albahaca;
   }
   return [...map.keys()].sort().map((k) => map.get(k)!);
 }
@@ -231,9 +231,11 @@ export default async function PanelPage() {
   const camaraRucula = calcularCamara('rucula', registrosCamara, lotes, ventasPanel);
   const camaraLechugaCrespa = calcularCamara('lechuga_crespa', registrosCamara, lotes, ventasPanel);
   const camaraLechugaRoble = calcularCamara('lechuga_roble', registrosCamara, lotes, ventasPanel);
+  const camaraAlbahaca = calcularCamara('albahaca', registrosCamara, lotes, ventasPanel);
   const ajusteMesRucula = diferenciaAjustesMes('rucula', registrosCamara, lotes, ventasPanel, ahora);
   const ajusteMesLechugaCrespa = diferenciaAjustesMes('lechuga_crespa', registrosCamara, lotes, ventasPanel, ahora);
   const ajusteMesLechugaRoble = diferenciaAjustesMes('lechuga_roble', registrosCamara, lotes, ventasPanel, ahora);
+  const ajusteMesAlbahaca = diferenciaAjustesMes('albahaca', registrosCamara, lotes, ventasPanel, ahora);
 
   const ocupNaves = tubosMesadas.map((n: any) => {
     const f2 = (n.mesadas || []).filter((m: any) => m.sector_fase !== 'fase_1');
@@ -333,9 +335,9 @@ export default async function PanelPage() {
   if (user.rol === 'admin') {
     try {
       const [mesPasadoDF, mesActualDF] = descartePorFaseMes(lotes, movimientos, registrosCamara, 2);
-      const sumaFases = (m: typeof mesActualDF) => (['rucula', 'lechuga_crespa', 'lechuga_roble'] as const)
+      const sumaFases = (m: typeof mesActualDF) => (['rucula', 'lechuga_crespa', 'lechuga_roble', 'albahaca'] as const)
         .reduce((a, c) => a + m[c].plantinF1 + m[c].f1F2 + m[c].f2Cosecha, 0);
-      const cultivosDF = ['rucula', 'lechuga_crespa', 'lechuga_roble'] as const;
+      const cultivosDF = ['rucula', 'lechuga_crespa', 'lechuga_roble', 'albahaca'] as const;
       const porFase = {
         plantinF1: Math.round(cultivosDF.reduce((a, c) => a + mesActualDF[c].plantinF1, 0)),
         f1F2: Math.round(cultivosDF.reduce((a, c) => a + mesActualDF[c].f1F2, 0)),
@@ -608,6 +610,7 @@ export default async function PanelPage() {
                 rucula={{ actual: camaraRucula.stockActual, ajusteMes: ajusteMesRucula.acumulado }}
                 lechugaCrespa={{ actual: camaraLechugaCrespa.stockActual, ajusteMes: ajusteMesLechugaCrespa.acumulado }}
                 lechugaRoble={{ actual: camaraLechugaRoble.stockActual, ajusteMes: ajusteMesLechugaRoble.acumulado }}
+                albahaca={{ actual: camaraAlbahaca.stockActual, ajusteMes: ajusteMesAlbahaca.acumulado }}
                 ventasHoyYaDescontadas={ventasDeHoyYaDescontadas()}
               />
             </div>
@@ -759,6 +762,7 @@ export default async function PanelPage() {
                     <th style={{ textAlign:'left', padding:'2px 4px', fontWeight:600 }}>Período</th>
                     <th style={{ textAlign:'right', padding:'2px 4px', fontWeight:600, color:'#134e4a' }}>Rúc.</th>
                     <th style={{ textAlign:'right', padding:'2px 4px', fontWeight:600, color:'#84cc16' }}>Lech.</th>
+                    <th style={{ textAlign:'right', padding:'2px 4px', fontWeight:600, color:'#15803d' }}>Alb.</th>
                   </tr></thead>
                   <tbody>
                     {proyeccionCosecha.map((d: any, i: number) => (
@@ -766,6 +770,7 @@ export default async function PanelPage() {
                         <td style={{ padding:'3px 4px' }}>{d.label}</td>
                         <td style={{ textAlign:'right', padding:'3px 4px' }}>{d.rucula > 0 ? d.rucula.toLocaleString('es-AR') : '—'}</td>
                         <td style={{ textAlign:'right', padding:'3px 4px' }}>{d.lechuga > 0 ? d.lechuga.toLocaleString('es-AR') : '—'}</td>
+                        <td style={{ textAlign:'right', padding:'3px 4px' }}>{d.albahaca > 0 ? d.albahaca.toLocaleString('es-AR') : '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -778,6 +783,7 @@ export default async function PanelPage() {
                     <th style={{ textAlign:'left', padding:'2px 4px', fontWeight:600 }}>Mes</th>
                     <th style={{ textAlign:'right', padding:'2px 4px', fontWeight:600, color:'#134e4a' }}>Rúc.</th>
                     <th style={{ textAlign:'right', padding:'2px 4px', fontWeight:600, color:'#84cc16' }}>Lech.</th>
+                    <th style={{ textAlign:'right', padding:'2px 4px', fontWeight:600, color:'#15803d' }}>Alb.</th>
                   </tr></thead>
                   <tbody>
                     {proyeccionPorMes(proyeccionCosecha).map((m) => (
@@ -785,6 +791,7 @@ export default async function PanelPage() {
                         <td style={{ padding:'3px 4px', fontWeight:600 }}>{m.label}</td>
                         <td style={{ textAlign:'right', padding:'3px 4px' }}>{Math.round(m.rucula).toLocaleString('es-AR')}</td>
                         <td style={{ textAlign:'right', padding:'3px 4px' }}>{Math.round(m.lechuga).toLocaleString('es-AR')}</td>
+                        <td style={{ textAlign:'right', padding:'3px 4px' }}>{Math.round(m.albahaca).toLocaleString('es-AR')}</td>
                       </tr>
                     ))}
                   </tbody>

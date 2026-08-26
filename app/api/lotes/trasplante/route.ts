@@ -35,8 +35,12 @@ export async function POST(req: NextRequest) {
     if (!ubicDestino) return NextResponse.json({ error: 'ubicacion_no_encontrada' }, { status: 400 });
 
     const cultivo = codigoCultivo(lote.variedad);
-    const esRucula = cultivo === 'R';
-    const factorPlantines = esRucula ? 2 : 1;
+    // Albahaca va con 2 celdas por posición igual que la rúcula (misma espuma, mismo
+    // armado en F2) — sin esto, el formulario (que elige el factor por la variedad de la
+    // MESADA destino) mandaba plantines contados de a 2 y acá se guardaban como si fueran
+    // 1 por posición, duplicando las plantas del lote de albahaca.
+    const dosCeldasPorPosicion = cultivo === 'R' || cultivo === 'A';
+    const factorPlantines = dosCeldasPorPosicion ? 2 : 1;
     const plantasReales = Math.round(plantas_trasplantadas / factorPlantines);
     const plantasQuedanReales = Math.round((plantas_quedan || 0) / factorPlantines);
     // Descarte declarado en el trasplante (mismo criterio que el resto del formulario:

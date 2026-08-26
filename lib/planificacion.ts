@@ -1,5 +1,10 @@
 // ── Constantes del modelo (criterio de Marcelo) ──
 export const CUB = 345, POSPAQ = 3, CUBPOSRUC = 2, CUBPLLEC = 1;
+// Albahaca: se siembra en la MISMA espuma que la rúcula (CUB cubitos por plancha) y en F2
+// va con 2 celdas por posición, igual que rúcula. Lo que cambia es el armado del paquete:
+// cada posición es UN paquete (POSPAQ_ALBAHACA = 1), mientras que la rúcula necesita 3
+// posiciones para armar uno (POSPAQ = 3).
+export const CUBPOSALB = 2, POSPAQ_ALBAHACA = 1;
 export const DIA_SIEMBRA = 3; // miércoles
 export const lotesConv = (d: number) => Math.round(d / 7);
 export const DIAS = [

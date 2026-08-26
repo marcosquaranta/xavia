@@ -5,8 +5,8 @@ import type { CultivoCamara } from '@/lib/camara';
 
 interface CultivoStock { actual: number; ajusteMes: number }
 
-export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, ventasHoyYaDescontadas }: {
-  rucula: CultivoStock; lechugaCrespa: CultivoStock; lechugaRoble: CultivoStock; ventasHoyYaDescontadas: boolean;
+export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, albahaca, ventasHoyYaDescontadas }: {
+  rucula: CultivoStock; lechugaCrespa: CultivoStock; lechugaRoble: CultivoStock; albahaca: CultivoStock; ventasHoyYaDescontadas: boolean;
 }) {
   const [abierto, setAbierto] = useState<CultivoCamara | null>(null);
   const [cantidad, setCantidad] = useState('');
@@ -19,6 +19,7 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, v
     { key: 'rucula' as const, label: 'Rúcula', color: '#134e4a', data: rucula },
     { key: 'lechuga_crespa' as const, label: 'Lechuga Crespa', color: '#84cc16', data: lechugaCrespa },
     { key: 'lechuga_roble' as const, label: 'Lechuga Hoja de Roble', color: '#4d7c0f', data: lechugaRoble },
+    { key: 'albahaca' as const, label: 'Albahaca', color: '#15803d', data: albahaca },
   ];
   const stockAbierto = abierto ? cultivos.find(c => c.key === abierto)!.data.actual : 0;
   const diff = abierto && cantidad !== '' ? Math.round(Number(cantidad) - stockAbierto) : null;

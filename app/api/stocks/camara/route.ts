@@ -17,6 +17,7 @@ export async function GET() {
   const rucula = calcularCamara('rucula', registros, lotes, ventas);
   const lechugaCrespa = calcularCamara('lechuga_crespa', registros, lotes, ventas);
   const lechugaRoble = calcularCamara('lechuga_roble', registros, lotes, ventas);
+  const albahaca = calcularCamara('albahaca', registros, lotes, ventas);
 
   // Factor de conversión: gramos por paquete desde último pesaje testigo registrado
   // Defaults: rúcula 210g (70g × 3 plantas), lechuga 330g
@@ -24,8 +25,12 @@ export async function GET() {
     const esVariedad = (v: string) => {
       const x = String(v || '').toLowerCase();
       const r = x.includes('rucula') || x.includes('rúcula');
+      const alb = x.includes('albahaca');
       if (cultivo === 'rucula') return r;
-      if (r) return false;
+      if (cultivo === 'albahaca') return alb;
+      // Misma corrección que en lib/camara.ts: la albahaca NO puede caer en el catch-all
+      // de "lechuga que no es crespa" (= hoja de roble), es un cultivo aparte.
+      if (r || alb) return false;
       return cultivo === 'lechuga_crespa' ? x.includes('crespa') : !x.includes('crespa');
     };
     const cosechasConPeso = lotes
@@ -41,8 +46,8 @@ export async function GET() {
   }
 
   return NextResponse.json({
-    rucula, lechuga_crespa: lechugaCrespa, lechuga_roble: lechugaRoble,
-    factorGrPaq: { rucula: factorGr('rucula'), lechuga_crespa: factorGr('lechuga_crespa'), lechuga_roble: factorGr('lechuga_roble') },
+    rucula, lechuga_crespa: lechugaCrespa, lechuga_roble: lechugaRoble, albahaca,
+    factorGrPaq: { rucula: factorGr('rucula'), lechuga_crespa: factorGr('lechuga_crespa'), lechuga_roble: factorGr('lechuga_roble'), albahaca: factorGr('albahaca') },
     // Si ya pasó el mediodía (regla del mediodía, ver lib/camara.ts), el "stockActual" de
     // cada cultivo YA tiene descontadas las ventas de hoy — quien consuma esto no debe
     // restarlas de nuevo (ver app/ventas/VentasManager.tsx).

@@ -47,7 +47,7 @@ export interface Variedad {
 
 export interface Ubicacion {
   id_ubicacion: string; nave: number; tipo: 'plantinera' | 'mesada';
-  nombre: string; sector_fase: Fase; variedad_asignada: 'lechuga' | 'rucula' | 'mixta';
+  nombre: string; sector_fase: Fase; variedad_asignada: 'lechuga' | 'rucula' | 'mixta' | 'albahaca';
   modulos: number; perfiles_por_modulo: number; orificios_por_perfil: number;
   capacidad_calculada: number; metros_cuadrados: number;
   orden_visual: number; activo: 'SI' | 'NO'; notas: string;
@@ -265,7 +265,7 @@ export interface StockCamara {
   id_registro: string;
   // 'lechuga' queda solo por compatibilidad con registros viejos (antes del split
   // crespa/roble) — los nuevos conteos van directo a 'lechuga_crespa'/'lechuga_roble'.
-  cultivo: 'rucula' | 'lechuga' | 'lechuga_crespa' | 'lechuga_roble';
+  cultivo: 'rucula' | 'lechuga' | 'lechuga_crespa' | 'lechuga_roble' | 'albahaca';
   fecha: string;
   tipo: 'inicial' | 'ajuste';
   cantidad_paq: number | string;

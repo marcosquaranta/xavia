@@ -90,7 +90,9 @@ export function proyectarEntregas(lotes: Lote[], diasPromedio: Map<string, numbe
         } catch { continue; }
       }
       p.rucula_paquetes_aprox = Math.round(p.rucula_plantas / 3);
-      p.albahaca_paquetes_aprox = Math.round(p.albahaca_plantas / 2);
+      // 1 posición = 1 paquete (POSPAQ_ALBAHACA). Antes dividía por 2, que era una
+      // suposición de cuando todavía no se producía albahaca.
+      p.albahaca_paquetes_aprox = p.albahaca_plantas;
       p.total_plantas = p.lechuga_crespa + p.lechuga_roble + p.rucula_plantas + p.albahaca_plantas;
       entregas.push(p);
     }

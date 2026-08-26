@@ -12,6 +12,7 @@ import type { OcupacionHistorialRow } from './ocupacion';
 // armada en paquetes de ~3 plantas, lechuga es 1 planta = 1 paquete directo.
 const PLANTAS_POR_PAQ_RUCULA = 3;
 const PLANTAS_POR_PAQ_LECHUGA = 1;
+// Albahaca: 1 posición = 1 paquete (POSPAQ_ALBAHACA), así que va 1:1 igual que lechuga.
 function factorPlantaPorPaq(cultivo: CultivoCamara): number {
   return cultivo === 'rucula' ? PLANTAS_POR_PAQ_RUCULA : PLANTAS_POR_PAQ_LECHUGA;
 }
@@ -40,7 +41,7 @@ export function perdidasPorMes(
 ): PerdidasMes[] {
   const mesesDescarte = descartePorFaseMes(lotes, movimientos, registrosCamara, nMeses);
   const mapaDescarte = new Map(mesesDescarte.map((m) => [m.mes, m]));
-  const cultivos: CultivoCamara[] = ['rucula', 'lechuga_crespa', 'lechuga_roble'];
+  const cultivos: CultivoCamara[] = ['rucula', 'lechuga_crespa', 'lechuga_roble', 'albahaca'];
   const hoy = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
 

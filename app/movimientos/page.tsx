@@ -121,7 +121,7 @@ export default async function MovimientosPage({
           ))}
           <span style={{ width: '1px', height: '20px', background: '#e5e7eb', display: 'inline-block' }} />
           <span style={{ fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase' }}>Cultivo</span>
-          {['todos', 'rucula', 'lechuga_crespa', 'lechuga_roble'].map(c => (
+          {['todos', 'rucula', 'lechuga_crespa', 'lechuga_roble', 'albahaca'].map(c => (
             <Link key={c} href={`/movimientos?tipo=${tipoFiltro}&cultivo=${c}&dias=${diasFiltro}`} style={{ textDecoration: 'none' }}>
               <span style={{ padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: cultivoFiltro === c ? 700 : 400, background: cultivoFiltro === c ? '#111827' : '#f3f4f6', color: cultivoFiltro === c ? 'white' : '#374151', cursor: 'pointer' }}>
                 {c === 'todos' ? 'Todos' : CULTIVO_LABEL[c]}

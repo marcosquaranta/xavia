@@ -9,13 +9,14 @@ const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Se
 // cultivo. Objetivo acordado con Marcelo: 95%.
 // ══════════════════════════════════════════════════════════════════════════════════════
 
-export type CultivoOcupacion = 'rucula' | 'lechuga' | 'mixta';
+export type CultivoOcupacion = 'rucula' | 'lechuga' | 'mixta' | 'albahaca';
 
 export interface OcupacionMesCultivo {
   mes: string; label: string;
   rucula: { pct: number | null };
   lechuga: { pct: number | null };
   mixta: { pct: number | null };
+  albahaca: { pct: number | null };
   total: { pct: number | null };
 }
 
@@ -38,7 +39,7 @@ export function ocupacionMensualPorCultivo(historial: OcupacionHistorialRow[], u
   const cultivoDeMesada = new Map<string, CultivoOcupacion>();
   for (const u of mesadas) {
     const va = String(u.variedad_asignada || '').toLowerCase();
-    const cultivo: CultivoOcupacion = va === 'rucula' || va === 'rúcula' ? 'rucula' : va === 'mixta' ? 'mixta' : 'lechuga';
+    const cultivo: CultivoOcupacion = va === 'rucula' || va === 'rúcula' ? 'rucula' : va === 'mixta' ? 'mixta' : va === 'albahaca' ? 'albahaca' : 'lechuga';
     cultivoDeMesada.set(`${normMesada(u.nombre)}||${u.nave}`, cultivo);
     cultivoDeMesada.set(`${normBaseMesada(u.nombre)}||${u.nave}`, cultivo);
   }
@@ -52,7 +53,7 @@ export function ocupacionMensualPorCultivo(historial: OcupacionHistorialRow[], u
   for (let i = nMeses - 1; i >= 0; i--) {
     const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
     const mes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    meses.push({ mes, label: `${MESES_CORTO[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`, rucula: { pct: null }, lechuga: { pct: null }, mixta: { pct: null }, total: { pct: null } });
+    meses.push({ mes, label: `${MESES_CORTO[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`, rucula: { pct: null }, lechuga: { pct: null }, mixta: { pct: null }, albahaca: { pct: null }, total: { pct: null } });
   }
   const idxPorMes = new Map(meses.map((m, i) => [m.mes, i]));
 
@@ -79,6 +80,7 @@ export function ocupacionMensualPorCultivo(historial: OcupacionHistorialRow[], u
     meses[idx].rucula.pct = pct('rucula');
     meses[idx].lechuga.pct = pct('lechuga');
     meses[idx].mixta.pct = pct('mixta');
+    meses[idx].albahaca.pct = pct('albahaca');
     meses[idx].total.pct = pct('total');
   }
   return meses;
@@ -105,7 +107,7 @@ export function plantasPerdidasPorSubocupacion(
   const infoMesada = new Map<string, { cultivo: CultivoOcupacion; orificios: number }>();
   for (const u of mesadas) {
     const va = String(u.variedad_asignada || '').toLowerCase();
-    const cultivo: CultivoOcupacion = va === 'rucula' || va === 'rúcula' ? 'rucula' : va === 'mixta' ? 'mixta' : 'lechuga';
+    const cultivo: CultivoOcupacion = va === 'rucula' || va === 'rúcula' ? 'rucula' : va === 'mixta' ? 'mixta' : va === 'albahaca' ? 'albahaca' : 'lechuga';
     const orificios = Number(u.orificios_por_perfil) || 0;
     infoMesada.set(`${normMesada(u.nombre)}||${u.nave}`, { cultivo, orificios });
     infoMesada.set(`${normBaseMesada(u.nombre)}||${u.nave}`, { cultivo, orificios });
@@ -114,7 +116,9 @@ export function plantasPerdidasPorSubocupacion(
     return infoMesada.get(`${normMesada(mesadaNombre)}||${nave}`) ?? infoMesada.get(`${normBaseMesada(mesadaNombre)}||${nave}`) ?? null;
   }
 
-  let plantasDiaRucula = 0, plantasDiaLechuga = 0; // "mixta" se suma junto a lechuga, mismo criterio catch-all que el resto de la app
+  // "mixta" se suma junto a lechuga (criterio catch-all del resto de la app); la albahaca
+  // va del lado de rúcula porque comparte mesada y ciclo con ella (Mesada 3).
+  let plantasDiaRucula = 0, plantasDiaLechuga = 0;
   for (const r of historial) {
     const f = String(r.fecha || '').slice(0, 10);
     if (!f || f < desde || f > hasta) continue;
@@ -124,7 +128,7 @@ export function plantasPerdidasPorSubocupacion(
     const vacios = Math.max(0, tot - ocu);
     if (vacios <= 0) continue;
     const plantasVacias = vacios * info.orificios;
-    if (info.cultivo === 'rucula') plantasDiaRucula += plantasVacias;
+    if (info.cultivo === 'rucula' || info.cultivo === 'albahaca') plantasDiaRucula += plantasVacias;
     else plantasDiaLechuga += plantasVacias;
   }
 
@@ -147,6 +151,7 @@ export interface EficienciaMesCultivo {
   rucula: { viva: number; descarte: number; pct: number | null };
   lechuga_crespa: { viva: number; descarte: number; pct: number | null };
   lechuga_roble: { viva: number; descarte: number; pct: number | null };
+  albahaca: { viva: number; descarte: number; pct: number | null };
 }
 
 export function eficienciaSiembraCosechaPorMes(lotes: Lote[], nMeses = 6, hastaRef: Date = new Date()): EficienciaMesCultivo[] {
@@ -157,7 +162,7 @@ export function eficienciaSiembraCosechaPorMes(lotes: Lote[], nMeses = 6, hastaR
     const mes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     meses.push({
       mes, label: `${MESES_CORTO[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`,
-      rucula: { viva: 0, descarte: 0, pct: null }, lechuga_crespa: { viva: 0, descarte: 0, pct: null }, lechuga_roble: { viva: 0, descarte: 0, pct: null },
+      rucula: { viva: 0, descarte: 0, pct: null }, lechuga_crespa: { viva: 0, descarte: 0, pct: null }, lechuga_roble: { viva: 0, descarte: 0, pct: null }, albahaca: { viva: 0, descarte: 0, pct: null },
     });
   }
   const idxPorMes = new Map(meses.map((m, i) => [m.mes, i]));
@@ -169,7 +174,9 @@ export function eficienciaSiembraCosechaPorMes(lotes: Lote[], nMeses = 6, hastaR
     const idx = idxPorMes.get(mk); if (idx === undefined) continue;
     // Mismo criterio que la ficha del lote: rúcula cosechada en paquetes se reconvierte a
     // plantas reales con plantas_por_unidad_real (fallback 3, el factor histórico de la
-    // app); lechuga ya está en plantas directamente.
+    // app); lechuga ya está en plantas directamente. Albahaca también va 1:1 — su paquete
+    // es UNA posición (ver POSPAQ_ALBAHACA en lib/planificacion.ts), a diferencia de la
+    // rúcula que arma el paquete con 3.
     const esRucula = cultivo === 'rucula';
     const viva = esRucula
       ? (Number(l.unidades_cosechadas) || 0) * (Number(l.plantas_por_unidad_real) || 3)
@@ -179,7 +186,7 @@ export function eficienciaSiembraCosechaPorMes(lotes: Lote[], nMeses = 6, hastaR
     meses[idx][cultivo].descarte += descarte;
   }
   for (const m of meses) {
-    (['rucula', 'lechuga_crespa', 'lechuga_roble'] as const).forEach((c) => {
+    (['rucula', 'lechuga_crespa', 'lechuga_roble', 'albahaca'] as const).forEach((c) => {
       const base = m[c].viva + m[c].descarte;
       m[c].pct = base > 0 ? Math.round((m[c].viva / base) * 1000) / 10 : null;
     });

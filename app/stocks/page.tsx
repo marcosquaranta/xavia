@@ -34,6 +34,7 @@ export default async function StocksPage() {
   const camaraRucula = calcularCamara('rucula', registrosCamara, lotes, ventas);
   const camaraLechugaCrespa = calcularCamara('lechuga_crespa', registrosCamara, lotes, ventas);
   const camaraLechugaRoble = calcularCamara('lechuga_roble', registrosCamara, lotes, ventas);
+  const camaraAlbahaca = calcularCamara('albahaca', registrosCamara, lotes, ventas);
   const hoy = new Date();
   const valorizacionActual = calcularValorizacionMes(articulos, stocks, hoy.getFullYear(), hoy.getMonth() + 1);
 
@@ -79,7 +80,7 @@ export default async function StocksPage() {
 
         <p style={{ margin: '0 0 3px', fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>📦 Stock de cultivos en cámara</p>
         <p style={{ margin: '0 0 10px', fontSize: '12px', color: '#9ca3af' }}>Conteo físico de rúcula y lechuga ya cosechadas, listas para vender — cargá acá el stock inicial o un ajuste cuando hagas el recuento.</p>
-        <StockCamaraCards rucula={camaraRucula} lechugaCrespa={camaraLechugaCrespa} lechugaRoble={camaraLechugaRoble} valorizacionActual={valorizacionActual.total} />
+        <StockCamaraCards rucula={camaraRucula} lechugaCrespa={camaraLechugaCrespa} lechugaRoble={camaraLechugaRoble} albahaca={camaraAlbahaca} valorizacionActual={valorizacionActual.total} />
 
         <StocksManager
           articulos={articulos.filter((a) => a.activo === 'SI')}
