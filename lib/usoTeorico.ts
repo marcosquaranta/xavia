@@ -10,9 +10,19 @@ export const DRIVERS = [
   { key: 'planchas_sembradas_lechuga_roble',  label: 'Planchas sembradas — lechuga hoja de roble' },
   { key: 'planchas_sembradas_lechuga_otras',  label: 'Planchas sembradas — lechuga otras variedades' },
   { key: 'planchas_sembradas_total',    label: 'Planchas sembradas — total' },
-  { key: 'paquetes_vendidos_rucula',    label: 'Paquetes vendidos — rúcula' },
-  { key: 'paquetes_vendidos_lechuga',   label: 'Paquetes vendidos — lechuga' },
-  { key: 'paquetes_vendidos_total',     label: 'Paquetes vendidos — total' },
+  // OJO: estos 3 incluyen las ventas por KG convertidas a paquete-equivalente. Sirven para
+  // insumos que se consumen igual se venda como se venda (semilla, sustrato, fertilizante),
+  // NO para packaging: una venta por kg va en cajón y no lleva bolsa, y una bandeja lleva
+  // su propia bandeja. Para esos casos están los drivers de más abajo.
+  { key: 'paquetes_vendidos_rucula',    label: 'Paquetes vendidos — rúcula (incluye kg y bandeja)' },
+  { key: 'paquetes_vendidos_lechuga',   label: 'Paquetes vendidos — lechuga (incluye kg)' },
+  { key: 'paquetes_vendidos_total',     label: 'Paquetes vendidos — total (incluye kg y bandeja)' },
+  // Packaging: solo las presentaciones que realmente consumen ese insumo.
+  { key: 'paquetes_vendidos_rucula_bolsa',   label: 'Paquetes vendidos — rúcula EN BOLSA (sin kg ni bandeja)' },
+  { key: 'paquetes_vendidos_rucula_sin_kg',  label: 'Paquetes vendidos — rúcula sin kg (paquete + bandeja)' },
+  { key: 'bandejas_vendidas_rucula',         label: 'Bandejas vendidas — rúcula' },
+  { key: 'paquetes_vendidos_lechuga_sin_kg', label: 'Paquetes vendidos — lechuga sin kg' },
+  { key: 'paquetes_vendidos_total_sin_kg',   label: 'Paquetes vendidos — total sin kg' },
   { key: 'paquetes_cosechados_rucula',  label: 'Paquetes cosechados — rúcula' },
   { key: 'plantas_cosechadas_lechuga',  label: 'Plantas cosechadas — lechuga' },
   { key: 'lotes_sembrados',             label: 'Lotes sembrados' },
@@ -62,6 +72,14 @@ export function calcularDriversMes(
   const hasta = finMes.toISOString().slice(0, 10);
   const ventasRango = ventasEnRango(ventas, precios, clientes, desde, hasta);
 
+  // Desglose para los drivers de packaging: de las unidades totales de rúcula se sacan las
+  // que vinieron por kg (van en cajón, sin bolsa) y las bandejas (packaging propio), y
+  // queda solo lo que efectivamente se embolsó. Ídem lechuga sin la parte de kg.
+  const rucKg = ventasRango.rucula.unidadesKg;
+  const rucBandeja = ventasRango.rucula.unidadesBandeja;
+  const rucBolsa = Math.max(0, ventasRango.rucula.unidades - rucKg - rucBandeja);
+  const lechSinKg = Math.max(0, ventasRango.lechuga.unidades - ventasRango.lechuga.unidadesKg);
+
   return {
     planchas_sembradas_rucula: planchasRucula,
     planchas_sembradas_lechuga: planchasLechuga,
@@ -72,6 +90,11 @@ export function calcularDriversMes(
     paquetes_vendidos_rucula: ventasRango.rucula.unidades,
     paquetes_vendidos_lechuga: ventasRango.lechuga.unidades,
     paquetes_vendidos_total: ventasRango.rucula.unidades + ventasRango.lechuga.unidades,
+    paquetes_vendidos_rucula_bolsa: rucBolsa,
+    paquetes_vendidos_rucula_sin_kg: rucBolsa + rucBandeja,
+    bandejas_vendidas_rucula: rucBandeja,
+    paquetes_vendidos_lechuga_sin_kg: lechSinKg,
+    paquetes_vendidos_total_sin_kg: rucBolsa + rucBandeja + lechSinKg,
     paquetes_cosechados_rucula: paqRucula,
     plantas_cosechadas_lechuga: plantasLech,
     lotes_sembrados: sembrados.length,

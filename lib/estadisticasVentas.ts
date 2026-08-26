@@ -273,11 +273,24 @@ export function resumenMesActual(
 
 // ── Ventas por cultivo (unidades y $ final IVA incluido) en un rango de fechas [desde,hasta]
 // inclusive (YYYY-MM-DD) — para el reporte semanal. Kg convertidos a paquete-equivalente. ──
-export interface VentasRangoCultivo { unidades: number; monto: number }
+// `unidades` es el TOTAL (directas + kg convertidos a paquete-equivalente) — es lo que se
+// usa para medir volumen de venta. Pero para insumos de packaging esa mezcla no sirve: una
+// venta por kg va en cajón, NO lleva bolsa individual, y una bandeja lleva su propia
+// bandeja en vez de bolsa. Por eso se guardan además desagregadas las dos partes que NO
+// consumen bolsa, y así "paquetes embolsados" = unidades − unidadesKg − unidadesBandeja
+// (ver los drivers *_bolsa / *_sin_kg en lib/usoTeorico.ts).
+export interface VentasRangoCultivo {
+  unidades: number; monto: number;
+  unidadesKg: number;      // parte del total que vino de ventas por kg (cajón — sin packaging individual)
+  unidadesBandeja: number; // solo rúcula: bandejas (packaging propio, no bolsa). Siempre 0 en lechuga.
+}
 export interface VentasRango { rucula: VentasRangoCultivo; lechuga: VentasRangoCultivo }
 export function ventasEnRango(ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], desde: string, hasta: string): VentasRango {
   const clienteMap = new Map(clientes.map((c) => [c.id_control, c]));
-  const acc: VentasRango = { rucula: { unidades: 0, monto: 0 }, lechuga: { unidades: 0, monto: 0 } };
+  const acc: VentasRango = {
+    rucula: { unidades: 0, monto: 0, unidadesKg: 0, unidadesBandeja: 0 },
+    lechuga: { unidades: 0, monto: 0, unidadesKg: 0, unidadesBandeja: 0 },
+  };
   for (const v of ventas) {
     const f = String(v.fecha || '').split(/[T ]/)[0];
     if (!f || f < desde || f > hasta) continue;
@@ -287,11 +300,14 @@ export function ventasEnRango(ventas: VentaDia[], precios: PrecioVenta[], client
       const qty = Number((v as any)[key]) || 0;
       if (qty <= 0) continue;
       acc.rucula.unidades += qty;
+      if (key === 'bandeja_rucula') acc.rucula.unidadesBandeja += qty;
       acc.rucula.monto += qty * precioFinal(precios, v.id_control, v.sucursal, key, cliente);
     }
     const kgR = Number(v.rucula_kg) || 0;
     if (kgR > 0) {
-      acc.rucula.unidades += Math.round((kgR * 1000) / GR_PAQ_RUCULA);
+      const enPaq = Math.round((kgR * 1000) / GR_PAQ_RUCULA);
+      acc.rucula.unidades += enPaq;
+      acc.rucula.unidadesKg += enPaq;
       acc.rucula.monto += kgR * precioFinal(precios, v.id_control, v.sucursal, 'rucula_kg', cliente);
     }
 
@@ -306,7 +322,9 @@ export function ventasEnRango(ventas: VentaDia[], precios: PrecioVenta[], client
     for (const keyKg of ['lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const) {
       const kgL = Number((v as any)[keyKg]) || 0;
       if (kgL <= 0) continue;
-      acc.lechuga.unidades += Math.round((kgL * 1000) / GR_PAQ_LECHUGA);
+      const enPaq = Math.round((kgL * 1000) / GR_PAQ_LECHUGA);
+      acc.lechuga.unidades += enPaq;
+      acc.lechuga.unidadesKg += enPaq;
       acc.lechuga.monto += kgL * precioFinal(precios, v.id_control, v.sucursal, keyKg, cliente);
     }
   }
