@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet, batchUpdateRows } from '@/lib/sheets';
-import { enviarResumenPendientes } from '@/lib/resumenFacturacion';
 import { emitirPendientes, enviarAvisoCaePendiente } from '@/lib/facturacionEmitir';
 import type { VentaDia } from '@/lib/types';
 
@@ -51,12 +50,11 @@ export async function POST(req: NextRequest) {
       errores = [{ cliente: 'Xubio', error: e?.message || 'Error al emitir' }];
     }
 
-    // Enviar el resumen de lo que haya quedado pendiente (errores) por mail
-    let mail = false;
-    try { const r = await enviarResumenPendientes(); mail = !!r.ok && (r.facturas || 0) > 0; } catch {}
-
+    // El mail de "Facturación pendiente" se sacó a pedido: el único aviso que queda es el
+    // de CAEs pendientes (enviarAvisoCaePendiente, más arriba). Los errores de emisión se
+    // muestran igual en pantalla al terminar la carga, con el detalle por cliente.
     const clientes = idControls.length;
-    return NextResponse.json({ ok: true, lineas: aCargar.length, clientes, mail, emitidas, errores });
+    return NextResponse.json({ ok: true, lineas: aCargar.length, clientes, emitidas, errores });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Error' }, { status: 500 });
   }
