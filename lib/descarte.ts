@@ -16,8 +16,16 @@ export function clasificarCultivoDescarte(variedad: string): CultivoDescarte | n
   return v.includes('crespa') ? 'lechuga_crespa' : 'lechuga_roble';
 }
 
-export interface DescarteFases { plantinF1: number; f1F2: number; f2Cosecha: number; camara: number }
-function cero(): DescarteFases { return { plantinF1: 0, f1F2: 0, f2Cosecha: 0, camara: 0 }; }
+// Además del descarte de cada fase se guarda la BASE que pasó por esa fase (lo que entró
+// a la transición: descartado + lo que siguió vivo). Sin eso, un "1.200 plantas" no dice
+// nada: puede ser malísimo o irrelevante según si pasaron 3.000 o 300.000 por ahí. El % se
+// calcula sobre esa base, no sobre el total de descarte (que solo decía en qué fase se
+// concentra, no qué tan grave es).
+export interface DescarteFases {
+  plantinF1: number; f1F2: number; f2Cosecha: number; camara: number;
+  basePlantinF1: number; baseF1F2: number; baseF2Cosecha: number;
+}
+function cero(): DescarteFases { return { plantinF1: 0, f1F2: 0, f2Cosecha: 0, camara: 0, basePlantinF1: 0, baseF1F2: 0, baseF2Cosecha: 0 }; }
 
 export interface DescarteFasesMes {
   mes: string;   // YYYY-MM
@@ -53,12 +61,23 @@ export function descartePorFaseMes(lotes: Lote[], movimientos: Movimiento[], reg
     const mk = String(m.fecha || '').slice(0, 7);
     const idx = idxPorMes.get(mk); if (idx === undefined) continue;
     const descarte = Number(m.descarte_calculado) || 0;
-    if (descarte <= 0) continue;
+    const plantas = Number(m.plantas_estimadas) || 0;
     if (m.tipo === 'trasplante') {
-      if (m.fase_origen === 'plantin' && m.fase_destino === 'fase_1') meses[idx][cultivo].plantinF1 += descarte;
-      else if (m.fase_origen === 'fase_1' && m.fase_destino === 'fase_2') meses[idx][cultivo].f1F2 += descarte;
+      // En un trasplante, plantas_estimadas son las que SIGUIERON (el descarte va aparte),
+      // así que la base de la transición es la suma de las dos.
+      const base = plantas + descarte;
+      if (base <= 0) continue;
+      if (m.fase_origen === 'plantin' && m.fase_destino === 'fase_1') {
+        meses[idx][cultivo].plantinF1 += descarte; meses[idx][cultivo].basePlantinF1 += base;
+      } else if (m.fase_origen === 'fase_1' && m.fase_destino === 'fase_2') {
+        meses[idx][cultivo].f1F2 += descarte; meses[idx][cultivo].baseF1F2 += base;
+      }
     } else if (m.tipo === 'cosecha') {
-      meses[idx][cultivo].f2Cosecha += descarte;
+      // En la cosecha, plantas_estimadas YA incluye el descarte (ver app/api/lotes/cosecha:
+      // plantasUsadas = unidades + descarte), así que es la base directamente.
+      const base = plantas > 0 ? plantas : descarte;
+      if (base <= 0) continue;
+      meses[idx][cultivo].f2Cosecha += descarte; meses[idx][cultivo].baseF2Cosecha += base;
     }
   }
 
@@ -81,13 +100,17 @@ export function descartePorFaseMes(lotes: Lote[], movimientos: Movimiento[], reg
 export interface ResumenDescarteCultivo {
   cultivo: CultivoDescarte;
   plantinF1: number; f1F2: number; f2Cosecha: number; camara: number; total: number;
-  pctPlantinF1: number; pctF1F2: number; pctF2Cosecha: number; pctCamara: number;
+  basePlantinF1: number; baseF1F2: number; baseF2Cosecha: number;
+  // % de descarte SOBRE LO QUE PASÓ POR ESA FASE (no sobre el total de descarte) — null si
+  // esa fase no tuvo movimientos en el período, para no mostrar un 0% engañoso.
+  pctPlantinF1: number | null; pctF1F2: number | null; pctF2Cosecha: number | null;
 }
 
-// Resumen en % de dónde se concentra el descarte de cada cultivo, sumado sobre todos los
-// meses del gráfico — el cuadro que acompaña al gráfico de columnas apiladas. Ojo: mezcla
-// plantas (las primeras 3 etapas) con paquetes (cámara) en una misma suma — es una
-// aproximación para ver la distribución relativa, no una cantidad físicamente exacta.
+// Resumen del descarte de cada cultivo, sumado sobre todos los meses del gráfico. El % de
+// cada fase es sobre LO QUE PASÓ POR ESA FASE (descartado + lo que siguió vivo), que es lo
+// que dice si el descarte es grave o no. El `total` en cambio sigue siendo una suma que
+// mezcla plantas (las 3 etapas de producción) con paquetes (cámara): sirve de referencia
+// de volumen, no es una cantidad físicamente exacta.
 export function resumenDescartePorCultivo(meses: DescarteFasesMes[]): ResumenDescarteCultivo[] {
   const cultivos: CultivoDescarte[] = ['rucula', 'lechuga_crespa', 'lechuga_roble', 'albahaca'];
   return cultivos.map((cultivo) => {
@@ -95,13 +118,17 @@ export function resumenDescartePorCultivo(meses: DescarteFasesMes[]): ResumenDes
     const f1F2 = meses.reduce((a, m) => a + m[cultivo].f1F2, 0);
     const f2Cosecha = meses.reduce((a, m) => a + m[cultivo].f2Cosecha, 0);
     const camara = meses.reduce((a, m) => a + m[cultivo].camara, 0);
+    const basePlantinF1 = meses.reduce((a, m) => a + m[cultivo].basePlantinF1, 0);
+    const baseF1F2 = meses.reduce((a, m) => a + m[cultivo].baseF1F2, 0);
+    const baseF2Cosecha = meses.reduce((a, m) => a + m[cultivo].baseF2Cosecha, 0);
     const total = plantinF1 + f1F2 + f2Cosecha + camara;
+    const pctDe = (desc: number, base: number) => base > 0 ? Math.round((desc / base) * 1000) / 10 : null;
     return {
       cultivo, plantinF1, f1F2, f2Cosecha, camara, total,
-      pctPlantinF1: total > 0 ? Math.round((plantinF1 / total) * 1000) / 10 : 0,
-      pctF1F2: total > 0 ? Math.round((f1F2 / total) * 1000) / 10 : 0,
-      pctF2Cosecha: total > 0 ? Math.round((f2Cosecha / total) * 1000) / 10 : 0,
-      pctCamara: total > 0 ? Math.round((camara / total) * 1000) / 10 : 0,
+      basePlantinF1, baseF1F2, baseF2Cosecha,
+      pctPlantinF1: pctDe(plantinF1, basePlantinF1),
+      pctF1F2: pctDe(f1F2, baseF1F2),
+      pctF2Cosecha: pctDe(f2Cosecha, baseF2Cosecha),
     };
   });
 }

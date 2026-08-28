@@ -220,6 +220,28 @@ export function evolucionPrecioPromedio(ventas: VentaDia[], precios: PrecioVenta
 // `fechaRef` fija el mes objetivo (por defecto hoy); `diaCorte` permite recortar ese mes
 // hasta un día puntual (para comparar "lo que va del mes" contra el mismo tramo del mes
 // pasado). Sin diaCorte usa el día de fechaRef (o el mes completo si fechaRef ya pasó).
+// Días de la semana (0=domingo..6=sábado) en los que efectivamente se vende, deducidos de
+// las ventas cargadas. Se pide un mínimo de días con venta para considerar que ese día de
+// la semana es "de reparto" y no una excepción suelta (una entrega puntual un domingo no
+// debería agregar los domingos al prorrateo de todo el mes). Si no hay datos suficientes
+// devuelve el set vacío y quien llama cae al prorrateo por días calendario de siempre.
+const MIN_DIAS_PARA_CONTAR = 2;
+export function diasDeVentaHabituales(ventas: VentaDia[]): Set<number> {
+  const fechasPorDow = new Map<number, Set<string>>();
+  for (const v of ventas) {
+    const f = String(v.fecha || '').split(/[T ]/)[0];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) continue;
+    const d = new Date(f + 'T12:00:00');
+    if (isNaN(d.getTime())) continue;
+    const dow = d.getDay();
+    if (!fechasPorDow.has(dow)) fechasPorDow.set(dow, new Set());
+    fechasPorDow.get(dow)!.add(f);
+  }
+  const out = new Set<number>();
+  for (const [dow, fechas] of fechasPorDow) if (fechas.size >= MIN_DIAS_PARA_CONTAR) out.add(dow);
+  return out;
+}
+
 export interface ResumenMesActual { unidadesMes: number; proyeccionMes: number; precioPromedioMes: number }
 export function resumenMesActual(
   ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], fechaRef: Date = new Date(), diaCorte?: number
@@ -262,8 +284,27 @@ export function resumenMesActual(
   }
   unidades += Math.round((ruculaKgTotal * 1000) / GR_PAQ_RUCULA) + Math.round((lechugaKgTotal * 1000) / GR_PAQ_LECHUGA);
 
+  // Proyección a fin de mes. Antes era (unidades / díasCalendarioTranscurridos) × díasDelMes,
+  // y eso hacía que el número subiera y bajara fuerte de un día para el otro: los domingos
+  // (y cualquier día sin reparto) no se vende, pero igual sumaban al divisor, así que cada
+  // fin de semana la proyección se desplomaba y el lunes volvía a saltar.
+  // Ahora el prorrateo se hace sobre DÍAS DE VENTA: los días de la semana en los que
+  // realmente se factura, deducidos de las ventas de los últimos meses en vez de estar
+  // fijos (si mañana se agrega o saca un día de reparto, se ajusta solo).
   const diasEnMes = new Date(fechaRef.getFullYear(), fechaRef.getMonth() + 1, 0).getDate();
-  const proyeccionMes = corte > 0 ? Math.round((unidades / corte) * diasEnMes) : 0;
+  const diasVentaSemana = diasDeVentaHabituales(ventas);
+  const cuentaDiasVenta = (desde: number, hasta: number) => {
+    let n = 0;
+    for (let d = desde; d <= hasta; d++) {
+      if (diasVentaSemana.has(new Date(fechaRef.getFullYear(), fechaRef.getMonth(), d).getDay())) n++;
+    }
+    return n;
+  };
+  const diasVentaTranscurridos = cuentaDiasVenta(1, corte);
+  const diasVentaDelMes = cuentaDiasVenta(1, diasEnMes);
+  const proyeccionMes = diasVentaTranscurridos > 0 && diasVentaDelMes > 0
+    ? Math.round((unidades / diasVentaTranscurridos) * diasVentaDelMes)
+    : (corte > 0 ? Math.round((unidades / corte) * diasEnMes) : 0);
   // Precio promedio final (IVA incluido): solo ventas por paquete/planta (mismo criterio
   // que evolucionPrecioPromedio) — mezclar bandeja/kg inflaba el promedio al combinar
   // unidades de venta distintas.

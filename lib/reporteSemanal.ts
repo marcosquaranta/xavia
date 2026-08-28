@@ -52,7 +52,13 @@ function clientesConVariacionSemana(ventas: VentaDia[], clientes: ClienteVenta[]
   return filas.sort((a, b) => b.actual - a.actual).slice(0, topN);
 }
 
-export interface DescarteFaseReporte { cultivo: string; plantinF1: number; f1F2: number; f2Cosecha: number; total: number }
+export interface DescarteFaseReporte {
+  cultivo: string; plantinF1: number; f1F2: number; f2Cosecha: number; total: number;
+  // Base = lo que PASÓ por esa fase (descartado + lo que siguió vivo). El % se calcula
+  // sobre eso: un descarte de 1.200 plantas puede ser grave o irrelevante según si por ahí
+  // pasaron 3.000 o 300.000, y el número suelto no lo dice.
+  basePlantinF1: number; baseF1F2: number; baseF2Cosecha: number;
+}
 // Descarte (plantas) de las últimas N semanas, por cultivo (rúcula vs. lechuga
 // combinada, mismo criterio esRuculaV que el resto de este reporte) Y por la etapa donde
 // se pierde — Plantín→F1, F1→F2 (Movimientos tipo "trasplante") y F2→Cosecha (Movimientos
@@ -63,26 +69,34 @@ function descartePorFaseUltimasSemanas(lotes: Lote[], movimientos: Movimiento[],
   const inicio = new Date(lunesActual); inicio.setDate(inicio.getDate() - (nSemanas - 1) * 7);
   const fin = new Date(hoy); fin.setHours(23, 59, 59);
   const lotesMap = new Map(lotes.map(l => [l.id_lote, l]));
-  const acc = { rucula: { plantinF1: 0, f1F2: 0, f2Cosecha: 0 }, lechuga: { plantinF1: 0, f1F2: 0, f2Cosecha: 0 } };
+  const cero = () => ({ plantinF1: 0, f1F2: 0, f2Cosecha: 0, basePlantinF1: 0, baseF1F2: 0, baseF2Cosecha: 0 });
+  const acc = { rucula: cero(), lechuga: cero() };
   for (const m of movimientos) {
     if (!m.fecha) continue;
     const descarte = Number(m.descarte_calculado) || 0;
-    if (descarte <= 0) continue;
+    const plantas = Number(m.plantas_estimadas) || 0;
     const f = new Date(String(m.fecha) + 'T12:00:00');
     if (isNaN(f.getTime()) || f < inicio || f > fin) continue;
     const lote = lotesMap.get(String(m.id_lote || '')); if (!lote) continue;
     const key = esRuculaV(lote.variedad) ? 'rucula' : 'lechuga';
     if (m.tipo === 'trasplante') {
-      if (m.fase_origen === 'plantin' && m.fase_destino === 'fase_1') acc[key].plantinF1 += descarte;
-      else if (m.fase_origen === 'fase_1' && m.fase_destino === 'fase_2') acc[key].f1F2 += descarte;
+      // plantas_estimadas son las que SIGUIERON (el descarte va aparte) -> base = suma.
+      const base = plantas + descarte;
+      if (base <= 0) continue;
+      if (m.fase_origen === 'plantin' && m.fase_destino === 'fase_1') { acc[key].plantinF1 += descarte; acc[key].basePlantinF1 += base; }
+      else if (m.fase_origen === 'fase_1' && m.fase_destino === 'fase_2') { acc[key].f1F2 += descarte; acc[key].baseF1F2 += base; }
     } else if (m.tipo === 'cosecha') {
-      acc[key].f2Cosecha += descarte;
+      // En cosecha plantas_estimadas YA incluye el descarte -> es la base directamente.
+      const base = plantas > 0 ? plantas : descarte;
+      if (base <= 0) continue;
+      acc[key].f2Cosecha += descarte; acc[key].baseF2Cosecha += base;
     }
   }
   return (['rucula', 'lechuga'] as const).map((k) => ({
     cultivo: k === 'rucula' ? 'Rúcula' : 'Lechuga',
     plantinF1: Math.round(acc[k].plantinF1), f1F2: Math.round(acc[k].f1F2), f2Cosecha: Math.round(acc[k].f2Cosecha),
     total: Math.round(acc[k].plantinF1 + acc[k].f1F2 + acc[k].f2Cosecha),
+    basePlantinF1: Math.round(acc[k].basePlantinF1), baseF1F2: Math.round(acc[k].baseF1F2), baseF2Cosecha: Math.round(acc[k].baseF2Cosecha),
   }));
 }
 
@@ -103,7 +117,11 @@ function proyeccionCosechaMensual(
   const idxPorMes = new Map(meses.map((m, i) => [m.clave, i]));
   for (const s of semanas) {
     const idx = idxPorMes.get(s.semana.slice(0, 7)); if (idx === undefined) continue;
-    meses[idx].rucula += s.rucula; meses[idx].lechuga += s.lechuga;
+    // La albahaca se proyecta aparte desde que es un cultivo propio, pero acá se suma a
+    // "lechuga" para no agregar una fila nueva al mail: lo importante es que quede en el
+    // MISMO lado que en la parte ya cosechada de abajo (que la cuenta como lechuga). Sin
+    // esto, lo proyectado y lo real no hablaban del mismo conjunto.
+    meses[idx].rucula += s.rucula; meses[idx].lechuga += s.lechuga + s.albahaca;
   }
   // Sumar lo ya cosechado este mes hasta hoy, para que el mes en curso muestre el total
   // esperado del mes (no solo lo que falta de acá a fin de mes).
@@ -221,6 +239,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const plantasPerdidasSubocupacion = plantasPerdidasPorSubocupacion(
     ocupacionHistorial, ubicaciones, desdeSemana, hastaHoy,
     cicloSemana.rucula || 35, cicloSemana.lechuga || 40,
+    movimientos, // margen de 24hs post-cosecha
   );
 
   // ── Peso promedio de esta semana vs. promedio del mes pasado completo ──
@@ -453,11 +472,20 @@ export function construirHtml(d: ReporteSemanalData): string {
   );
   // Descarte por cultivo Y por fase — tabla en vez de gráfico de barras, para poder abrir
   // las 3 etapas (Plantín→F1, F1→F2, F2→Cosecha) y ver DÓNDE se pierde, no solo cuánto.
+  // Cada fase se muestra como "descartadas (% de las que pasaron por esa fase)" — el
+  // número solo no dice si es grave; el % sobre la base sí. Rojo a partir del 10%.
+  const celdaFaseHtml = (desc: number, base: number) => {
+    if (base <= 0) return '<span style="color:#c8c8c8">—</span>';
+    const pct = Math.round((desc / base) * 1000) / 10;
+    const color = pct >= 10 ? '#dc2626' : '#9ca3af';
+    const peso = pct >= 10 ? '700' : '400';
+    return `${fmtN(desc)} <span style="color:${color};font-weight:${peso}">(${pct}%)</span> <span style="color:#c8c8c8;font-size:11px">de ${fmtN(base)}</span>`;
+  };
   const descarteFaseFilas = d.descartePorFase.map((f) => `<tr>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">${f.cultivo}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${fmtN(f.plantinF1)}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${fmtN(f.f1F2)}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${fmtN(f.f2Cosecha)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${celdaFaseHtml(f.plantinF1, f.basePlantinF1)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${celdaFaseHtml(f.f1F2, f.baseF1F2)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${celdaFaseHtml(f.f2Cosecha, f.baseF2Cosecha)}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:800">${fmtN(f.total)}</td>
     </tr>`).join('');
 
@@ -509,7 +537,7 @@ export function construirHtml(d: ReporteSemanalData): string {
     </table>
     <p style="margin:0 0 20px;font-size:11px;color:#9ca3af">− (rojo) = falta, contado por debajo de lo esperado · + (verde) = sobra, contado por encima de lo esperado.</p>
 
-    <h3 style="margin:0 0 8px;font-size:14px">Descarte por cultivo y por fase <span style="font-weight:400;color:#9ca3af">(plantas, últimas 4 semanas — dónde se pierde)</span></h3>
+    <h3 style="margin:0 0 8px;font-size:14px">Descarte por cultivo y por fase <span style="font-weight:400;color:#9ca3af">(últimas 4 semanas — plantas descartadas y % de las que pasaron por esa fase)</span></h3>
     <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
       <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Plantín→F1</th><th style="padding:6px 10px;text-align:right">F1→F2</th><th style="padding:6px 10px;text-align:right">F2→Cosecha</th><th style="padding:6px 10px;text-align:right">Total</th></tr></thead>
       <tbody>${descarteFaseFilas}</tbody>
@@ -583,7 +611,8 @@ export function construirTexto(d: ReporteSemanalData): string {
 
   L.push(`🗑️ *Descarte por cultivo y por fase* (plantas, últimas 4 semanas — dónde se pierde):`);
   for (const f of d.descartePorFase) {
-    L.push(`  ${f.cultivo}: Plantín→F1 ${fmtN(f.plantinF1)} · F1→F2 ${fmtN(f.f1F2)} · F2→Cosecha ${fmtN(f.f2Cosecha)} · Total ${fmtN(f.total)}`);
+    const pctTxt = (desc: number, base: number) => base > 0 ? `${fmtN(desc)} (${Math.round((desc / base) * 1000) / 10}% de ${fmtN(base)})` : '—';
+    L.push(`  ${f.cultivo}: Plantín→F1 ${pctTxt(f.plantinF1, f.basePlantinF1)} · F1→F2 ${pctTxt(f.f1F2, f.baseF1F2)} · F2→Cosecha ${pctTxt(f.f2Cosecha, f.baseF2Cosecha)} · Total ${fmtN(f.total)}`);
   }
   L.push('');
 

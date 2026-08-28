@@ -300,6 +300,7 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
     `${anioSel}-${String(mesSel).padStart(2, '0')}-01`,
     `${anioSel}-${String(mesSel).padStart(2, '0')}-${String(finMesSelStr.getDate()).padStart(2, '0')}`,
     cicloActualMesRep.rucula || 35, cicloActualMesRep.lechuga || 40,
+    movimientos, // margen de 24hs post-cosecha: una mesada recién cosechada no es subocupación
   );
   const ocupacionUltimoMesRep = [...ocupacionMensualRep].reverse().find((m) => m.total.pct !== null) ?? null;
   const evoOcupacionCultivoRep = {

@@ -218,6 +218,12 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
       { nombre: 'Cámara', color: COLOR_FASE.camara, valores: mesesDescarte.map(m => m[cultivo].camara) },
     ];
   }
+  // Celda de descarte por fase: cantidad + % sobre la base que pasó por esa fase. Si la
+  // fase no tuvo movimientos en el período, se muestra un guión en vez de un 0% engañoso.
+  function celdaFase(desc: number, base: number, pct: number | null) {
+    if (base <= 0) return <span style={{ color:'#d1d5db' }}>—</span>;
+    return <>{Math.round(desc).toLocaleString('es-AR')} <span style={{ color: (pct ?? 0) >= 10 ? '#dc2626' : '#9ca3af', fontWeight: (pct ?? 0) >= 10 ? 700 : 400 }}>({pct}%)</span> <span style={{ color:'#d1d5db', fontSize:'10px' }}>de {Math.round(base).toLocaleString('es-AR')}</span></>;
+  }
   const CULTIVO_LABEL: Record<CultivoDescarte, string> = { rucula: 'Rúcula', lechuga_crespa: 'Lechuga Crespa', lechuga_roble: 'Lechuga Hoja de Roble', albahaca: 'Albahaca' };
 
   // ── Pérdidas totales por mes — junta Descarte (solo F2→Cosecha) + Faltante de stock +
@@ -696,9 +702,9 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             <table style={{ fontSize:'12px', width:'100%' }}>
               <thead><tr>
                 <th style={{ textAlign:'left' }}>Cultivo</th>
-                <th style={{ textAlign:'right' }}>Plantín→F1 (pl)</th>
-                <th style={{ textAlign:'right' }}>F1→F2 (pl)</th>
-                <th style={{ textAlign:'right' }}>F2→Cosecha (pl)</th>
+                <th style={{ textAlign:'right' }} title="Descartadas y, entre paréntesis, qué % son de todas las que pasaron por esa fase">Plantín→F1 (pl)</th>
+                <th style={{ textAlign:'right' }} title="Descartadas y, entre paréntesis, qué % son de todas las que pasaron por esa fase">F1→F2 (pl)</th>
+                <th style={{ textAlign:'right' }} title="Descartadas y, entre paréntesis, qué % son de todas las que pasaron por esa fase">F2→Cosecha (pl)</th>
                 <th style={{ textAlign:'right' }} title="Descarte explícito cargado al registrar un ajuste de stock en cámara">Cámara (paq)</th>
                 <th style={{ textAlign:'right' }}>Total</th>
               </tr></thead>
@@ -706,16 +712,16 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                 {resumenDescarte.map((r) => (
                   <tr key={r.cultivo} style={{ borderTop:'1px solid #f3f4f6' }}>
                     <td style={{ fontWeight:600, padding:'4px 0' }}>{CULTIVO_LABEL[r.cultivo]}</td>
-                    <td style={{ textAlign:'right' }}>{r.plantinF1.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctPlantinF1}%)</span></td>
-                    <td style={{ textAlign:'right' }}>{r.f1F2.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctF1F2}%)</span></td>
-                    <td style={{ textAlign:'right' }}>{r.f2Cosecha.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctF2Cosecha}%)</span></td>
-                    <td style={{ textAlign:'right' }}>{r.camara.toLocaleString('es-AR')} <span style={{ color:'#9ca3af' }}>({r.pctCamara}%)</span></td>
+                    <td style={{ textAlign:'right' }}>{celdaFase(r.plantinF1, r.basePlantinF1, r.pctPlantinF1)}</td>
+                    <td style={{ textAlign:'right' }}>{celdaFase(r.f1F2, r.baseF1F2, r.pctF1F2)}</td>
+                    <td style={{ textAlign:'right' }}>{celdaFase(r.f2Cosecha, r.baseF2Cosecha, r.pctF2Cosecha)}</td>
+                    <td style={{ textAlign:'right' }}>{r.camara.toLocaleString('es-AR')}</td>
                     <td style={{ textAlign:'right', fontWeight:700 }}>{r.total.toLocaleString('es-AR')}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            <p style={{ margin:'8px 0 0', fontSize:'10px', color:'#9ca3af' }}>El total y el % mezclan plantas (primeras 3 etapas) con paquetes (Cámara) — sirve para ver dónde se concentra el descarte, no es una cantidad física exacta.</p>
+            <p style={{ margin:'8px 0 0', fontSize:'10px', color:'#9ca3af' }}>El % de cada fase es sobre lo que PASÓ por esa fase (descartado + lo que siguió vivo), no sobre el total de descarte — así se ve si es grave o no, más allá del volumen. El Total sigue mezclando plantas (3 etapas) con paquetes (Cámara), sirve como referencia de volumen nada más.</p>
             {resumenDescarte.find(r => r.cultivo === 'rucula' && r.plantinF1 === 0) && (
               <p style={{ margin:'8px 0 0', fontSize:'11px', color:'#92400e', background:'#fffbeb', border:'1px solid #fde68a', borderRadius:'6px', padding:'6px 10px' }}>
                 ℹ️ Rúcula sin descarte en Plantín→F1: sí se pide y se calcula igual que en lechuga (mismo formulario de trasplante, misma fórmula, con cartel de confirmación si se deja en 0) — si acá da 0 en todos los meses, es porque los trasplantes cargados vinieron con descarte=0 real, no porque falte medirlo. Vale la pena confirmar con el equipo que estén revisando bien esa etapa en rúcula antes de confirmar "0 pérdida", en vez de tildarlo de memoria.

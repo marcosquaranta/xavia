@@ -1,4 +1,4 @@
-import type { Lote, Ubicacion } from './types';
+import type { Lote, Movimiento, Ubicacion } from './types';
 import type { OcupacionHistorialRow } from './ocupacion';
 import { clasificarCultivoDescarte, type CultivoDescarte } from './descarte';
 
@@ -98,10 +98,34 @@ export interface PlantasPerdidasSubocupacion { rucula: number; lechuga: number; 
 // capacidad ociosa ese día. Sumado en todo el rango y dividido por la duración del ciclo
 // da cuántos ciclos completos (cosechas) de esas plantas se perdieron — un tubo vacío
 // durante exactamente un ciclo es UNA cosecha completa de ese tubo que no se hizo.
+// Días (por mesada) en los que un hueco NO cuenta como subocupación: el día que se cosechó
+// y el siguiente. Una mesada recién cosechada está vacía porque corresponde —hay que
+// limpiarla y volver a trasplantar—, no porque se esté desaprovechando capacidad; sin este
+// margen, cada cosecha se contabilizaba como pérdida al día siguiente.
+const HORAS_BUFFER_POSCOSECHA = 24;
+function diasConBufferPosCosecha(movimientos: Movimiento[], normalizar: (s: string) => string): Set<string> {
+  const out = new Set<string>();
+  const diasBuffer = Math.ceil(HORAS_BUFFER_POSCOSECHA / 24);
+  for (const m of movimientos) {
+    if (m.tipo !== 'cosecha') continue;
+    const f = String(m.fecha || '').slice(0, 10);
+    const mesada = normalizar(String(m.ubicacion_origen || ''));
+    if (!f || !mesada) continue;
+    const d = new Date(f + 'T12:00:00');
+    if (isNaN(d.getTime())) continue;
+    for (let i = 0; i <= diasBuffer; i++) {
+      const x = new Date(d); x.setDate(x.getDate() + i);
+      out.add(`${mesada}||${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`);
+    }
+  }
+  return out;
+}
+
 export function plantasPerdidasPorSubocupacion(
   historial: OcupacionHistorialRow[], ubicaciones: Ubicacion[],
   desde: string, hasta: string, // YYYY-MM-DD, ambos inclusive
-  cicloRuculaDias: number, cicloLechugaDias: number
+  cicloRuculaDias: number, cicloLechugaDias: number,
+  movimientos: Movimiento[] = [], // para el margen post-cosecha; vacío = sin margen (como antes)
 ): PlantasPerdidasSubocupacion {
   const mesadas = ubicaciones.filter((u) => u.tipo === 'mesada');
   const infoMesada = new Map<string, { cultivo: CultivoOcupacion; orificios: number }>();
@@ -118,12 +142,18 @@ export function plantasPerdidasPorSubocupacion(
 
   // "mixta" se suma junto a lechuga (criterio catch-all del resto de la app); la albahaca
   // va del lado de rúcula porque comparte mesada y ciclo con ella (Mesada 3).
+  // Mesada+día en los que un hueco se perdona por ser recién cosechada (ver arriba). Se
+  // normaliza con el mismo criterio que el resto del archivo para que matchee tanto el
+  // nombre que guardó el movimiento como el que trae el histórico.
+  const buffer = diasConBufferPosCosecha(movimientos, normBaseMesada);
+
   let plantasDiaRucula = 0, plantasDiaLechuga = 0;
   for (const r of historial) {
     const f = String(r.fecha || '').slice(0, 10);
     if (!f || f < desde || f > hasta) continue;
     const info = infoDe(String(r.mesada || ''), r.nave);
     if (!info || info.orificios <= 0) continue;
+    if (buffer.has(`${normBaseMesada(String(r.mesada || ''))}||${f}`)) continue;
     const tot = Number(r.tubos_totales) || 0, ocu = Number(r.tubos_ocupados) || 0;
     const vacios = Math.max(0, tot - ocu);
     if (vacios <= 0) continue;

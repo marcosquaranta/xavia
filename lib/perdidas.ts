@@ -79,6 +79,7 @@ export function perdidasPorMes(
     const subocupacion = plantasPerdidasPorSubocupacion(
       ocupacionHistorial, ubicaciones, desdeStr, hastaStr,
       cicloDelMes.rucula || 35, cicloDelMes.lechuga || 40,
+      movimientos, // margen de 24hs post-cosecha
     ).total;
 
     out.push({
