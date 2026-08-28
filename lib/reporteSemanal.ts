@@ -165,12 +165,146 @@ function cosechaRealEnRango(lotes: Lote[], movimientos: Movimiento[], desde: Dat
   return acc;
 }
 
+// ── Destacados de la semana ─────────────────────────────────────────────────────────
+// Lo que se sale de lo normal en los datos que ya trae el reporte, para que quien lo abre
+// no tenga que escanear seis tablas buscando qué cambió. NO es un resumen de todo: solo
+// entra lo que supera un umbral explícito, y si no hay nada que supere umbral la sección
+// dice justamente eso (mejor un "sin novedades" honesto que rellenar con ruido).
+//
+// Los umbrales son deliberadamente altos: la idea es que si algo aparece acá, valga la
+// pena mirarlo. Todo se calcula sobre comparaciones que el reporte ya venía haciendo, no
+// hay ninguna fuente de datos nueva.
+export type TonoDestacado = 'bueno' | 'malo' | 'neutro';
+export interface Destacado { tono: TonoDestacado; titulo: string; detalle: string }
+
+const UMBRAL_CLIENTE_PCT = 30;      // % de cambio de un cliente semana vs. semana
+const UMBRAL_CLIENTE_UNIDADES = 150; // ...y además tiene que mover volumen, para que un
+                                     // cliente chico que pasó de 2 a 5 no ocupe el lugar
+const UMBRAL_PESO_PCT = 8;          // % de cambio del peso promedio por paquete
+const UMBRAL_CICLO_PCT = 10;        // % de cambio del ciclo F2
+const UMBRAL_DESCARTE_PCT = 10;     // % de descarte sobre lo que pasó por la fase
+const UMBRAL_VENTA_PCT = 20;        // % de cambio de la venta total de la semana
+const UMBRAL_FALTANTE_PAQ = 100;    // paquetes faltantes en el conteo de cámara de la semana
+
+function destacadosDeLaSemana(d: Omit<ReporteSemanalData, 'destacados'>): Destacado[] {
+  const out: Destacado[] = [];
+  const pctCambio = (act: number, ant: number): number | null =>
+    ant > 0 ? Math.round(((act - ant) / ant) * 100) : null;
+  const signo = (n: number) => (n > 0 ? '+' : '');
+
+  // ── Venta total de la semana ──
+  const ventaAct = d.ventasSemana.rucula.unidades + d.ventasSemana.lechuga.unidades + d.ventasSemana.albahaca.unidades;
+  const ventaAnt = d.ventasSemanaAnterior.rucula.unidades + d.ventasSemanaAnterior.lechuga.unidades + d.ventasSemanaAnterior.albahaca.unidades;
+  const pv = pctCambio(ventaAct, ventaAnt);
+  if (pv !== null && Math.abs(pv) >= UMBRAL_VENTA_PCT) {
+    out.push({
+      tono: pv > 0 ? 'bueno' : 'malo',
+      titulo: `Venta de la semana ${pv > 0 ? 'subió' : 'bajó'} ${Math.abs(pv)}%`,
+      detalle: `${fmtN(ventaAct)} u esta semana contra ${fmtN(ventaAnt)} la anterior.`,
+    });
+  }
+
+  // ── Clientes con saltos o caídas fuertes ──
+  for (const c of d.clientesVariacion) {
+    if (c.deltaPct === null) {
+      // Cliente que no compró nada la semana pasada y esta sí: no hay % posible, pero si
+      // el volumen es relevante es justamente el tipo de cosa que hay que ver.
+      if (c.actual >= UMBRAL_CLIENTE_UNIDADES && c.anterior === 0) {
+        out.push({ tono: 'bueno', titulo: `${c.nombre} volvió a comprar`, detalle: `${fmtN(c.actual)} u esta semana, la anterior no había comprado.` });
+      }
+      continue;
+    }
+    if (Math.abs(c.deltaPct) < UMBRAL_CLIENTE_PCT) continue;
+    if (Math.abs(c.deltaUnidades) < UMBRAL_CLIENTE_UNIDADES) continue;
+    out.push({
+      tono: c.deltaPct > 0 ? 'bueno' : 'malo',
+      titulo: `${c.nombre} ${c.deltaPct > 0 ? 'subió' : 'bajó'} ${Math.abs(c.deltaPct)}%`,
+      detalle: `${fmtN(c.actual)} u esta semana contra ${fmtN(c.anterior)} la anterior (${signo(c.deltaUnidades)}${fmtN(c.deltaUnidades)} u).`,
+    });
+  }
+
+  // ── Peso promedio por paquete (más pesado es mejor: mismo paquete, más producto) ──
+  for (const [label, act, ant] of [
+    ['Rúcula', d.pesoSemana.rucula, d.pesoMesAnterior.rucula],
+    ['Lechuga crespa', d.pesoSemana.lechugaCrespa, d.pesoMesAnterior.lechugaCrespa],
+    ['Lechuga roble', d.pesoSemana.lechugaRoble, d.pesoMesAnterior.lechugaRoble],
+  ] as const) {
+    if (!(act > 0) || !(ant > 0)) continue;
+    const p = pctCambio(act, ant);
+    if (p === null || Math.abs(p) < UMBRAL_PESO_PCT) continue;
+    out.push({
+      tono: p > 0 ? 'bueno' : 'malo',
+      titulo: `Peso de ${label.toLowerCase()} ${p > 0 ? 'subió' : 'bajó'} ${Math.abs(p)}%`,
+      detalle: `${act}g por paquete esta semana contra ${ant}g de promedio el mes pasado.`,
+    });
+  }
+
+  // ── Ciclos F2 (menos días es mejor) ──
+  for (const [label, act, ant] of [
+    ['Rúcula', d.cicloSemana.rucula, d.cicloMesAnterior.rucula],
+    ['Lechuga', d.cicloSemana.lechuga, d.cicloMesAnterior.lechuga],
+  ] as const) {
+    if (!(act > 0) || !(ant > 0)) continue;
+    const p = pctCambio(act, ant);
+    if (p === null || Math.abs(p) < UMBRAL_CICLO_PCT) continue;
+    out.push({
+      tono: p < 0 ? 'bueno' : 'malo',
+      titulo: `Ciclo de ${label.toLowerCase()} ${p < 0 ? 'bajó' : 'subió'} ${Math.abs(p)}%`,
+      detalle: `${act} días en F2 esta semana contra ${ant} de promedio el mes pasado${p < 0 ? ' — se cosecha más rápido' : ' — tarda más en estar listo'}.`,
+    });
+  }
+
+  // ── Descarte alto en alguna fase ──
+  for (const f of d.descartePorFase) {
+    for (const [fase, desc, base] of [
+      ['Plantín→F1', f.plantinF1, f.basePlantinF1],
+      ['F1→F2', f.f1F2, f.baseF1F2],
+      ['F2→Cosecha', f.f2Cosecha, f.baseF2Cosecha],
+    ] as const) {
+      if (base <= 0) continue;
+      const p = Math.round((desc / base) * 1000) / 10;
+      if (p < UMBRAL_DESCARTE_PCT) continue;
+      out.push({
+        tono: 'malo',
+        titulo: `Descarte alto en ${f.cultivo} — ${fase}: ${p}%`,
+        detalle: `${fmtN(desc)} plantas descartadas de ${fmtN(base)} que pasaron por esa fase (últimas 4 semanas).`,
+      });
+    }
+  }
+
+  // ── Faltante de stock en cámara (lo contado por debajo de lo esperado) ──
+  if (d.faltanteSemana.total < -UMBRAL_FALTANTE_PAQ) {
+    out.push({
+      tono: 'malo',
+      titulo: `Faltaron ${fmtN(Math.abs(d.faltanteSemana.total))} paq en el conteo de cámara`,
+      detalle: 'Se contó menos de lo que el sistema esperaba según cosechas y ventas de la semana.',
+    });
+  }
+
+  // ── Mesadas muy vacías ──
+  const muyBajas = d.mesadasBajas.filter((m) => m.pct < 70);
+  if (muyBajas.length > 0) {
+    out.push({
+      tono: 'malo',
+      titulo: `${muyBajas.length} mesada(s) por debajo del 70% de ocupación`,
+      detalle: muyBajas.map((m) => `N${m.nave} ${m.nombre} (${m.pct}%)`).join(' · '),
+    });
+  }
+
+  // Primero lo malo (es lo que hay que accionar), después lo bueno. Tope de 8 para que la
+  // sección siga siendo un titular y no otra tabla larga.
+  const orden = (t: TonoDestacado) => (t === 'malo' ? 0 : t === 'bueno' ? 1 : 2);
+  return out.sort((a, b) => orden(a.tono) - orden(b.tono)).slice(0, 8);
+}
+
 export interface ReporteSemanalData {
+  destacados: Destacado[];
   fechaGenerado: string;
   ventasSemana: VentasRango;
   ventasSemanaAnterior: VentasRango;
   ventasMesActual: ResumenMesActual;
   ventasMesAnteriorTotal: number;
+  ventasMesAnteriorMonto: number;
   clientesVariacion: ClienteVariacionSemana[];
   proyeccionMesActual: { rucula: number; lechuga: number };
   cosechaRealMesAnterior: { rucula: number; lechuga: number };
@@ -214,7 +348,9 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   // ── Ventas del mes en curso: acumulado a hoy, proyección a fin de mes y total real del mes pasado ──
   const ventasMesActual = resumenMesActual(ventas, precios, clientes, hoy);
   const diasEnMesPasado = new Date(mesPasadoRef.getFullYear(), mesPasadoRef.getMonth() + 1, 0).getDate();
-  const ventasMesAnteriorTotal = resumenMesActual(ventas, precios, clientes, mesPasadoRef, diasEnMesPasado).unidadesMes;
+  const resumenMesPasado = resumenMesActual(ventas, precios, clientes, mesPasadoRef, diasEnMesPasado);
+  const ventasMesAnteriorTotal = resumenMesPasado.unidadesMes;
+  const ventasMesAnteriorMonto = resumenMesPasado.montoMes;
 
   // ── Proyección de cosecha MENSUAL (no semanal — la semanal no se estaba cumpliendo),
   // SOLO el mes en curso (a pedido: nada de proyección de meses futuros, muy poco
@@ -300,15 +436,18 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     total: ajusteSemRuc.acumulado + ajusteSemLecCrespa.acumulado + ajusteSemLecRoble.acumulado + ajusteSemAlb.acumulado,
   };
 
-  return {
+  // Los destacados se arman al final, sobre todo lo demás ya calculado — no leen nada por
+  // su cuenta, solo marcan lo que se sale de lo normal en esos mismos números.
+  const datosSinDestacados = {
     fechaGenerado: fmtISO(hoy),
-    ventasSemana, ventasSemanaAnterior, ventasMesActual, ventasMesAnteriorTotal, clientesVariacion,
+    ventasSemana, ventasSemanaAnterior, ventasMesActual, ventasMesAnteriorTotal, ventasMesAnteriorMonto, clientesVariacion,
     proyeccionMesActual, cosechaRealMesAnterior,
     cicloSemana, cicloSemanaAnterior, cicloMesAnterior,
     pesoSemana, pesoMesAnterior,
     ocupacion, mesadasBajas, plantasPerdidasSubocupacion, ventasSemanas,
     stock, faltanteSemana, faltanteMes, descartePorFase,
   };
+  return { ...datosSinDestacados, destacados: destacadosDeLaSemana(datosSinDestacados) };
 }
 
 // ── Armado del mail y envío (Resend) ──
@@ -503,10 +642,34 @@ export function construirHtml(d: ReporteSemanalData): string {
       <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:800">${fmtN(f.total)}${esRuculaFila(f.cultivo) ? ` <span style="font-weight:400;color:#9ca3af">(${enPaq(f.total)})</span>` : ''}</td>
     </tr>`).join('');
 
+  // Lo que se salió de lo normal esta semana, arriba de todo: si algo aparece acá es
+  // porque superó un umbral explícito (ver destacadosDeLaSemana), no es un resumen.
+  // Colores planos y tabla en vez de flex/grid, que es lo único que Gmail renderiza bien.
+  const COLOR_TONO = { malo: '#dc2626', bueno: '#059669', neutro: '#6b7280' } as const;
+  const ICONO_TONO = { malo: '🔴', bueno: '🟢', neutro: '•' } as const;
+  const destacadosHtml = d.destacados.length === 0
+    ? `<div style="border-left:4px solid #d1d5db;background:#fafafa;padding:10px 14px;margin-bottom:22px">
+         <p style="margin:0;font-size:13px;color:#6b7280">Sin movimientos fuera de lo normal esta semana — todo dentro de los rangos habituales.</p>
+       </div>`
+    : `<div style="border-left:4px solid #111827;background:#fafafa;padding:12px 14px;margin-bottom:22px">
+         <p style="margin:0 0 8px;font-size:14px;font-weight:800">Para mirar esta semana</p>
+         <table style="border-collapse:collapse;width:100%;font-size:13px">
+           ${d.destacados.map((x) => `<tr>
+             <td style="padding:4px 8px 4px 0;vertical-align:top;white-space:nowrap">${ICONO_TONO[x.tono]}</td>
+             <td style="padding:4px 0">
+               <strong style="color:${COLOR_TONO[x.tono]}">${x.titulo}</strong><br>
+               <span style="color:#6b7280">${x.detalle}</span>
+             </td>
+           </tr>`).join('')}
+         </table>
+       </div>`;
+
   return `
   <div style="font-family:system-ui,Arial,sans-serif;color:#111;max-width:640px">
     <h2 style="margin:0 0 4px">Reporte semanal — Xavia</h2>
     <p style="margin:0 0 20px;color:#6b7280;font-size:13px">${d.fechaGenerado}</p>
+
+    ${destacadosHtml}
 
     <h3 style="margin:0 0 8px;font-size:14px">Ventas — últimos 7 días <span style="font-weight:400;color:#9ca3af">(vs. 7 días anteriores)</span></h3>
     <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
@@ -528,7 +691,9 @@ export function construirHtml(d: ReporteSemanalData): string {
       <tbody>
         <tr><td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">Acumulado al día de hoy</td><td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${fmtN(d.ventasMesActual.unidadesMes)} u</td><td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">—</td></tr>
         <tr><td style="padding:6px 10px;font-weight:600">Proyectado a fin de mes</td><td style="padding:6px 10px;text-align:right">${fmtN(d.ventasMesActual.proyeccionMes)} u</td><td style="padding:6px 10px;text-align:right">${flechaHtml(pct(d.ventasMesActual.proyeccionMes, d.ventasMesAnteriorTotal), true)}</td></tr>
-        <tr><td style="padding:6px 10px;color:#9ca3af;font-size:11px" colspan="3">Mes pasado (total real): ${fmtN(d.ventasMesAnteriorTotal)} u</td></tr>
+        <tr><td style="padding:6px 10px;font-weight:600">Facturado al día de hoy</td><td style="padding:6px 10px;text-align:right">${fmtMoneda(d.ventasMesActual.montoMes)}</td><td style="padding:6px 10px;text-align:right">—</td></tr>
+        <tr style="background:#fafafa"><td style="padding:6px 10px;font-weight:800">Proyectado a fin de mes ($)</td><td style="padding:6px 10px;text-align:right;font-weight:800">${fmtMoneda(d.ventasMesActual.proyeccionMonto)}</td><td style="padding:6px 10px;text-align:right">${flechaHtml(pct(d.ventasMesActual.proyeccionMonto, d.ventasMesAnteriorMonto), true)}</td></tr>
+        <tr><td style="padding:6px 10px;color:#9ca3af;font-size:11px" colspan="3">Mes pasado (total real): ${fmtN(d.ventasMesAnteriorTotal)} u · ${fmtMoneda(d.ventasMesAnteriorMonto)} — el $ se valoriza con el precio real de cada cliente (IVA incluido), no con un promedio.</td></tr>
       </tbody>
     </table>
 
@@ -586,6 +751,17 @@ export function construirTexto(d: ReporteSemanalData): string {
   L.push(d.fechaGenerado);
   L.push('');
 
+  if (d.destacados.length === 0) {
+    L.push(`*Para mirar esta semana*`);
+    L.push(`Sin movimientos fuera de lo normal — todo dentro de los rangos habituales.`);
+  } else {
+    L.push(`*Para mirar esta semana*`);
+    for (const x of d.destacados) {
+      L.push(`${x.tono === 'malo' ? '🔴' : x.tono === 'bueno' ? '🟢' : '•'} ${x.titulo} — ${x.detalle}`);
+    }
+  }
+  L.push('');
+
   L.push(`🛒 *Ventas — últimos 7 días* (vs. 7 días ant.)`);
   L.push(`Rúcula: ${fmtN(d.ventasSemana.rucula.unidades)} u · ${fmtMoneda(d.ventasSemana.rucula.monto)} (${p2(pct(d.ventasSemana.rucula.unidades, d.ventasSemanaAnterior.rucula.unidades))})`);
   L.push(`Lechuga: ${fmtN(d.ventasSemana.lechuga.unidades)} u · ${fmtMoneda(d.ventasSemana.lechuga.monto)} (${p2(pct(d.ventasSemana.lechuga.unidades, d.ventasSemanaAnterior.lechuga.unidades))})`);
@@ -607,7 +783,9 @@ export function construirTexto(d: ReporteSemanalData): string {
   L.push(`📅 *Ventas — mes en curso*`);
   L.push(`Acumulado a hoy: ${fmtN(d.ventasMesActual.unidadesMes)} u`);
   L.push(`Proyectado a fin de mes: ${fmtN(d.ventasMesActual.proyeccionMes)} u (${p2(pct(d.ventasMesActual.proyeccionMes, d.ventasMesAnteriorTotal))} vs. mes ant.)`);
-  L.push(`Mes pasado (total real): ${fmtN(d.ventasMesAnteriorTotal)} u`);
+  L.push(`Facturado al día de hoy: ${fmtMoneda(d.ventasMesActual.montoMes)}`);
+  L.push(`Proyectado a fin de mes ($): ${fmtMoneda(d.ventasMesActual.proyeccionMonto)} (${p2(pct(d.ventasMesActual.proyeccionMonto, d.ventasMesAnteriorMonto))} vs. mes ant.)`);
+  L.push(`Mes pasado (total real): ${fmtN(d.ventasMesAnteriorTotal)} u · ${fmtMoneda(d.ventasMesAnteriorMonto)}`);
   L.push('');
 
   L.push(`🌱 *Proyección de cosecha — este mes* (vs. real mes pasado)`);

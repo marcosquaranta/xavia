@@ -242,7 +242,14 @@ export function diasDeVentaHabituales(ventas: VentaDia[]): Set<number> {
   return out;
 }
 
-export interface ResumenMesActual { unidadesMes: number; proyeccionMes: number; precioPromedioMes: number }
+export interface ResumenMesActual {
+  unidadesMes: number; proyeccionMes: number; precioPromedioMes: number;
+  // Facturado del mes hasta el corte y su proyección a fin de mes, con el MISMO prorrateo
+  // por días de venta que las unidades. Se valoriza cada línea con el precio real de ese
+  // cliente (IVA incluido según su tipo de factura), incluidas las ventas por kg y las
+  // bandejas — no es unidades × precio promedio, que se desviaría según el mix.
+  montoMes: number; proyeccionMonto: number;
+}
 export function resumenMesActual(
   ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], fechaRef: Date = new Date(), diaCorte?: number
 ): ResumenMesActual {
@@ -265,11 +272,16 @@ export function resumenMesActual(
   const KEYS_KG_UNIDADES = ['rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
   let unidades = 0, ingresosComparables = 0, unidadesComparables = 0;
   let ruculaKgTotal = 0, lechugaKgTotal = 0;
+  let monto = 0; // facturado total del mes, TODAS las presentaciones (incluye kg y bandeja)
   for (const v of delMes) {
     const cliente = clienteMap.get(v.id_control);
     for (const key of PROD_KEYS) {
       const qty = Number((v as any)[key]) || 0;
       if (qty <= 0) continue;
+      // El monto se valoriza siempre, con el precio de ESA presentación para ESE cliente:
+      // las ventas por kg tienen su propio precio por kg, así que entran acá aunque queden
+      // afuera del precio promedio por unidad de más abajo.
+      monto += qty * precioFinal(precios, v.id_control, v.sucursal, key, cliente);
       if ((KEYS_KG_UNIDADES as readonly string[]).includes(key)) {
         if (key === 'rucula_kg') ruculaKgTotal += qty;
         else lechugaKgTotal += qty; // lechuga_kg (legacy) + lechuga_kg_crespa + lechuga_kg_roble
@@ -302,14 +314,16 @@ export function resumenMesActual(
   };
   const diasVentaTranscurridos = cuentaDiasVenta(1, corte);
   const diasVentaDelMes = cuentaDiasVenta(1, diasEnMes);
-  const proyeccionMes = diasVentaTranscurridos > 0 && diasVentaDelMes > 0
-    ? Math.round((unidades / diasVentaTranscurridos) * diasVentaDelMes)
-    : (corte > 0 ? Math.round((unidades / corte) * diasEnMes) : 0);
+  const factorProyeccion = diasVentaTranscurridos > 0 && diasVentaDelMes > 0
+    ? diasVentaDelMes / diasVentaTranscurridos
+    : (corte > 0 ? diasEnMes / corte : 0);
+  const proyeccionMes = Math.round(unidades * factorProyeccion);
+  const proyeccionMonto = Math.round(monto * factorProyeccion);
   // Precio promedio final (IVA incluido): solo ventas por paquete/planta (mismo criterio
   // que evolucionPrecioPromedio) — mezclar bandeja/kg inflaba el promedio al combinar
   // unidades de venta distintas.
   const precioPromedioMes = unidadesComparables > 0 ? Math.round((ingresosComparables / unidadesComparables) * 100) / 100 : 0;
-  return { unidadesMes: unidades, proyeccionMes, precioPromedioMes };
+  return { unidadesMes: unidades, proyeccionMes, precioPromedioMes, montoMes: Math.round(monto), proyeccionMonto };
 }
 
 // ── Ventas por cultivo (unidades y $ final IVA incluido) en un rango de fechas [desde,hasta]
