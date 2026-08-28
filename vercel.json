@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/crosschex-diario",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/backup-datos",
+      "schedule": "0 6 * * 0"
     }
   ]
 }

@@ -28,10 +28,28 @@ fichaje y conteo de cámara vive ahí.
 
 Repetilo una vez por mes. Con eso, lo peor que puede pasar es perder el último mes.
 
-### Backup automático
+### Backup automático (ya configurado) ✅
 
-**Google Takeout** (https://takeout.google.com) permite programar una exportación
-automática cada 2 meses, durante un año. Elegí solo Drive → la planilla de Xavia.
+**Todos los domingos a las 3 de la mañana**, la app exporta las 23 hojas de la planilla a
+CSV y las manda por mail como adjuntos. Un archivo por hoja, se abren directo en Excel.
+
+Lo importante: el backup queda **fuera de Google Drive**, en una casilla de mail. Si el
+problema es la cuenta de Google, una copia dentro de Drive no sirve de nada.
+
+> ⚠️ **Configurá `BACKUP_EMAIL_TO` en Vercel con una casilla que NO sea de la misma cuenta
+> de Google que la planilla.** Si el backup llega a un Gmail de esa misma cuenta, queda
+> expuesto exactamente al mismo riesgo que quiere cubrir. Por defecto va a
+> `administracion@xavia.com.ar`.
+
+No hay que hacer nada más: los mails se acumulan solos. Guardalos o archivalos, no los
+borres. Para pedir una copia al momento (antes de tocar datos a mano, por ejemplo), un
+admin puede entrar a `/api/cron/backup-datos`.
+
+Si una hoja falla, el resto se manda igual y el mail avisa cuál faltó — perder una hoja es
+mucho mejor que perder el backup entero por una.
+
+**Google Takeout** (https://takeout.google.com) es un segundo cinturón: permite programar
+una exportación automática cada 2 meses, durante un año. Elegí solo Drive → la planilla.
 
 ### Recuperación de emergencia
 
@@ -127,8 +145,9 @@ así que un repositorio expuesto no compromete la app: las claves viven solo en 
 
 ## Lo mínimo indispensable
 
-Si vas a hacer una sola cosa: **descargá la planilla en .xlsx y guardala fuera de Drive,
-una vez por mes.** Eso cubre el 90% del riesgo real.
+El backup semanal por mail ya cubre lo más importante y corre solo. Lo único que
+**sí depende de vos**: que `BACKUP_EMAIL_TO` apunte a una casilla fuera de la cuenta de
+Google, y no borrar esos mails.
 
 Lo segundo: **activá verificación en dos pasos** en la cuenta de Google y en GitHub. La
 mayoría de los "hackeos" son contraseñas robadas, no ataques sofisticados — y el 2FA los
