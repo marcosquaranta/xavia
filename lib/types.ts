@@ -297,7 +297,8 @@ export interface Empleado {
                                    // teóricas de la quincena se calculan solas según el calendario
   horas_sabado: number | string;  // horas por sábado (horario diferenciado) — 0/vacío = no trabaja sábados
   presentismo: number | string; // monto fijo — se pierde por falta o por 2+ tardanzas en la quincena
-  hora_entrada_esperada: string; // "08:00"
+  hora_entrada_esperada: string; // "08:00" — lunes a viernes
+  hora_entrada_esperada_sabado: string; // "09:00" — vacío = usa la de lunes a viernes
   hora_salida_esperada: string;  // "17:00"
   activo: 'SI' | 'NO';
 }

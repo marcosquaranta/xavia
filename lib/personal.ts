@@ -226,7 +226,14 @@ export function calcularResumenQuincena(
         continue;
       }
       const { horas, entrada: entradaMin, salidaFinal: salidaMin, incompleto } = sumarHorasPares(checks);
-      const esperadaMin = emp?.hora_entrada_esperada ? minDeHora(emp.hora_entrada_esperada) : null;
+      // Los sábados se entra más tarde que de lunes a viernes, así que la hora esperada
+      // de ese día es propia (hora_entrada_esperada_sabado). Si está vacía se usa la de
+      // lunes a viernes, que es como venía funcionando hasta ahora — sin ese campo
+      // cargado, los sábados marcaban tardanza a todo el mundo.
+      const horaEsperadaDia = (dow === 6 && emp?.hora_entrada_esperada_sabado)
+        ? emp.hora_entrada_esperada_sabado
+        : emp?.hora_entrada_esperada;
+      const esperadaMin = horaEsperadaDia ? minDeHora(horaEsperadaDia) : null;
       const tardanzaMin = esperadaMin !== null && entradaMin <= LIMITE_ENTRADA_RARA_MIN ? Math.max(0, entradaMin - esperadaMin) : 0;
       // De más/de menos: contra lo esperado ese día (o contra un turno de 8hs si no hay
       // horario configurado, salvo domingo que siempre compara contra 0). "De más" solo

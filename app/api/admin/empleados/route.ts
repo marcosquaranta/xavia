@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
-import { appendRowObj, asegurarHoja, deleteRow, readSheet, updateRow } from '@/lib/sheets';
+import { appendRowObj, asegurarColumna, asegurarHoja, deleteRow, readSheet, updateRow } from '@/lib/sheets';
 import type { Empleado } from '@/lib/types';
 
-const HEADERS = ['workno', 'nombre', 'sueldo_hora', 'horas_teoricas_quincena', 'horas_lv', 'horas_sabado', 'presentismo', 'hora_entrada_esperada', 'hora_salida_esperada', 'activo'];
+const HEADERS = ['workno', 'nombre', 'sueldo_hora', 'horas_teoricas_quincena', 'horas_lv', 'horas_sabado', 'presentismo', 'hora_entrada_esperada', 'hora_entrada_esperada_sabado', 'hora_salida_esperada', 'activo'];
 
 export async function POST(req: NextRequest) {
   if (!(await isAdmin())) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
       horas_sabado: Number(body.horas_sabado) || 0,
       presentismo: Number(body.presentismo) || 50000,
       hora_entrada_esperada: body.hora_entrada_esperada || '08:00',
+      hora_entrada_esperada_sabado: body.hora_entrada_esperada_sabado || '',
       hora_salida_esperada: body.hora_salida_esperada || '17:00',
       activo: 'SI',
     });
@@ -38,6 +39,10 @@ export async function PATCH(req: NextRequest) {
   try {
     const { workno, ...fields } = await req.json();
     if (!workno) return NextResponse.json({ error: 'falta_workno' }, { status: 400 });
+    // La columna de hora de entrada de sábado se agregó después, así que en planillas ya
+    // creadas no existe — sin esto updateRow no tendría dónde escribirla y el valor se
+    // perdía en silencio.
+    await asegurarColumna('Empleados', 'hora_entrada_esperada_sabado');
     const ok = await updateRow('Empleados', 'workno', String(workno), fields);
     if (!ok) return NextResponse.json({ error: 'no_encontrado' }, { status: 404 });
     return NextResponse.json({ ok: true });

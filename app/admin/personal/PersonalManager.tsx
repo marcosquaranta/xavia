@@ -32,6 +32,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
       horas_sabado: String(emp?.horas_sabado || 0),
       presentismo: String(emp?.presentismo ?? 50000),
       hora_entrada_esperada: emp?.hora_entrada_esperada || '08:00',
+      hora_entrada_esperada_sabado: emp?.hora_entrada_esperada_sabado || '',
       hora_salida_esperada: emp?.hora_salida_esperada || '17:00',
       presentismo_manual: r.presentismoManual || '',
       extras: String(r.extras || 0),
@@ -51,6 +52,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
       horas_sabado: Number(form.horas_sabado) || 0,
       presentismo: Number(form.presentismo) || 0,
       hora_entrada_esperada: form.hora_entrada_esperada,
+      hora_entrada_esperada_sabado: form.hora_entrada_esperada_sabado,
       hora_salida_esperada: form.hora_salida_esperada,
     };
     try {
@@ -137,7 +139,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                           ⚠ {r.faltas} falta(s)
                         </span>
                       )}
-                      {emp && <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#9ca3af' }}>Horario esperado: {emp.hora_entrada_esperada || '—'} a {emp.hora_salida_esperada || '—'}</p>}
+                      {emp && <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#9ca3af' }}>Horario esperado: {emp.hora_entrada_esperada || '—'} a {emp.hora_salida_esperada || '—'}{emp.hora_entrada_esperada_sabado ? ' · sáb. desde ' + emp.hora_entrada_esperada_sabado : ''}</p>}
                     </td>
                     <td style={{ textAlign: 'right' }}>{fmtN(r.horasReales)} hs</td>
                     <td style={{ textAlign: 'right', color: '#6b7280' }}>{editandoEsta ? (
@@ -225,6 +227,13 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                           <input type="time" value={form.hora_entrada_esperada} onChange={(e) => setForm((f) => ({ ...f, hora_entrada_esperada: e.target.value }))} style={{ fontSize: '12px', marginRight: '8px' }} />
                           a{' '}
                           <input type="time" value={form.hora_salida_esperada} onChange={(e) => setForm((f) => ({ ...f, hora_salida_esperada: e.target.value }))} style={{ fontSize: '12px' }} />
+                        </div>
+                        <div style={{ marginBottom: '6px' }}>
+                          Entrada los sábados:{' '}
+                          <input type="time" value={form.hora_entrada_esperada_sabado} onChange={(e) => setForm((f) => ({ ...f, hora_entrada_esperada_sabado: e.target.value }))} style={{ fontSize: '12px' }} />
+                          <span style={{ marginLeft: '10px', color: '#9ca3af' }}>
+                            Vacío = usa la de lunes a viernes ({form.hora_entrada_esperada || '—'}). Cargala si los sábados entran más tarde, si no marca tardanza a todos.
+                          </span>
                         </div>
                         <div>
                           Horas por día — lunes a viernes:{' '}
