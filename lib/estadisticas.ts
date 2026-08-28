@@ -236,6 +236,90 @@ function f2RealPorVariedad(lotes: Lote[], ultimos: number = 5): Map<string, numb
  * suficiente como para amortiguar ese corrimiento de tanda sin perder toda la resolución
  * semanal.
  */
+// Fecha estimada de cosecha de CADA lote activo, con su cultivo y los paquetes esperados.
+// Es el motor que comparten la proyección por período (Panel) y la mensual (reporte
+// semanal): antes la mensual se armaba sumando los buckets SEMANALES cuyo lunes caía en el
+// mes, y eso atribuía la semana entera al mes de su lunes — a fin de mes, una semana que
+// era casi toda del mes siguiente se contaba completa en el mes actual (ej. la semana del
+// 31/8 al 6/9 sumaba entera a agosto). Con la fecha por lote cada uno cae en su mes real.
+export interface CosechaEstimadaLote {
+  id_lote: string;
+  fecha: Date;      // fecha estimada de cosecha
+  vencido: boolean; // la fecha estimada ya pasó (el lote sigue activo sin cosecharse)
+  cultivo: 'rucula' | 'lechuga' | 'albahaca';
+  paquetes: number;
+}
+export function cosechasEstimadasPorLote(
+  lotes: Lote[], variedades: import('./types').Variedad[], hoyRef: Date = new Date()
+): CosechaEstimadaLote[] {
+  const ciclosMap = cicloRealPorVariedad(lotes, [], 5);
+  const f2Map = f2RealPorVariedad(lotes, 5);
+  const variedadMap = new Map(variedades.map((v) => [v.variedad, v]));
+  const normVarLocal = (s: string) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+  function cultivoDe(v: string): 'rucula' | 'lechuga' | 'albahaca' | null {
+    const vl = String(v || '').toLowerCase();
+    if (vl.includes('rucula') || vl.includes('rúcula')) return 'rucula';
+    if (vl.includes('albahaca')) return 'albahaca';
+    return 'lechuga';
+  }
+  function cicloEstimado(variedad: string, cicloCorto: boolean): number {
+    const real = ciclosMap.get(variedad);
+    if (real && real > 0) return real;
+    const v = variedadMap.get(variedad);
+    if (v && Number(v.dias_estimados_cosecha) > 0) return Number(v.dias_estimados_cosecha);
+    return cicloCorto ? 30 : 78;
+  }
+  function f2Estimado(variedad: string, cicloCorto: boolean): number {
+    const real = f2Map.get(variedad) ?? f2Map.get(normVarLocal(variedad));
+    if (real && real > 0) return real;
+    return cicloCorto ? 34 : 40;
+  }
+  // La albahaca arma 1 paquete por posición (POSPAQ_ALBAHACA), igual que la lechuga; solo
+  // la rúcula necesita 3.
+  function factorPaq(variedad: string, rucula: boolean): number {
+    const v = variedadMap.get(variedad);
+    const f = v ? Number(v.plantas_por_unidad_esperado) : 0;
+    return f > 0 ? f : (rucula ? 3 : 1);
+  }
+
+  const out: CosechaEstimadaLote[] = [];
+  const hoy0 = new Date(hoyRef.getFullYear(), hoyRef.getMonth(), hoyRef.getDate());
+  for (const l of lotes.filter((l) => l.estado === 'activo')) {
+    const cultivo = cultivoDe(l.variedad);
+    if (!cultivo) continue;
+    const rucula = cultivo === 'rucula';
+    const cicloCorto = cultivo === 'rucula' || cultivo === 'albahaca';
+
+    let fechaEst: Date | null = null;
+    if (l.fase_actual === 'fase_2' && l.fecha_f2) {
+      const f2inicio = safeParseDate2(l.fecha_f2);
+      if (f2inicio) {
+        fechaEst = new Date(f2inicio);
+        fechaEst.setDate(fechaEst.getDate() + f2Estimado(l.variedad, cicloCorto));
+      }
+    }
+    if (!fechaEst) {
+      const siembra = safeParseDate2(l.fecha_siembra);
+      if (!siembra) continue;
+      fechaEst = new Date(siembra);
+      fechaEst.setDate(fechaEst.getDate() + cicloEstimado(l.variedad, cicloCorto));
+    }
+
+    const plantas = Number(l.plantas_estimadas_actual) || Number(l.plantines_iniciales) || 0;
+    if (plantas <= 0) continue;
+    const f = factorPaq(l.variedad, rucula);
+    out.push({
+      id_lote: String(l.id_lote || ''),
+      fecha: fechaEst,
+      vencido: fechaEst < hoy0,
+      cultivo,
+      paquetes: f > 1 ? plantas / f : plantas,
+    });
+  }
+  return out;
+}
+
 export function proyeccionCosechaSemanal(
   lotes: Lote[], variedades: import('./types').Variedad[], semanas = 8, diasPorPeriodo = 7
 ): PuntoProyeccionCosecha[] {

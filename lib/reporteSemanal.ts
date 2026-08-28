@@ -1,7 +1,7 @@
 import { readSheet } from './sheets';
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, PrecioVenta, ClienteVenta, VentaHistorica, StockCamara } from './types';
 import { tubosPorMesada, type OcupacionHistorialRow } from './ocupacion';
-import { proyeccionCosechaSemanal, ciclosPorSemana, pesoPromedioRango, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, type PesoPromedioMes } from './estadisticas';
+import { cosechasEstimadasPorLote, ciclosPorSemana, pesoPromedioRango, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, type PesoPromedioMes } from './estadisticas';
 import { calcularCamara, diferenciaAjustesRango } from './camara';
 import { ventasPorCultivoUltimasSemanas, resumenMesActual, ventasEnRango, GR_PAQ_RUCULA, GR_PAQ_LECHUGA, type PuntoVentaCultivoSemana, type VentasRango, type ResumenMesActual } from './estadisticasVentas';
 import { plantasPerdidasPorSubocupacion, type PlantasPerdidasSubocupacion } from './kpisOperativos';
@@ -109,19 +109,25 @@ function proyeccionCosechaMensual(
   lotes: Lote[], variedades: Variedad[], movimientos: Movimiento[], nMeses = 4
 ): { label: string; rucula: number; lechuga: number }[] {
   const hoy = new Date();
-  const semanas = proyeccionCosechaSemanal(lotes, variedades, nMeses * 5); // margen: ~5 semanas/mes
   const meses = Array.from({ length: nMeses }, (_, i) => {
     const d = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
     return { label: `${MESES_CORTO[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`, clave: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, rucula: 0, lechuga: 0 };
   });
   const idxPorMes = new Map(meses.map((m, i) => [m.clave, i]));
-  for (const s of semanas) {
-    const idx = idxPorMes.get(s.semana.slice(0, 7)); if (idx === undefined) continue;
-    // La albahaca se proyecta aparte desde que es un cultivo propio, pero acá se suma a
-    // "lechuga" para no agregar una fila nueva al mail: lo importante es que quede en el
-    // MISMO lado que en la parte ya cosechada de abajo (que la cuenta como lechuga). Sin
-    // esto, lo proyectado y lo real no hablaban del mismo conjunto.
-    meses[idx].rucula += s.rucula; meses[idx].lechuga += s.lechuga + s.albahaca;
+  // Se atribuye cada lote al mes de SU fecha estimada. Antes esto sumaba buckets semanales
+  // cuyo lunes caía en el mes, y una semana a caballo de dos meses se contaba entera en el
+  // mes de su lunes: parada a fin de mes, la semana siguiente (casi toda del mes que viene)
+  // engordaba el mes actual. Los lotes VENCIDOS (fecha estimada ya pasada y todavía sin
+  // cosechar) se cuentan en el mes en curso, que es cuando realmente se van a levantar.
+  const claveMes = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const claveMesEnCurso = claveMes(hoy);
+  for (const est of cosechasEstimadasPorLote(lotes, variedades, hoy)) {
+    const idx = idxPorMes.get(est.vencido ? claveMesEnCurso : claveMes(est.fecha));
+    if (idx === undefined) continue;
+    // La albahaca va sumada a "lechuga" para no agregar una fila al mail — lo importante es
+    // que quede del MISMO lado que en la parte ya cosechada de abajo.
+    if (est.cultivo === 'rucula') meses[idx].rucula += est.paquetes;
+    else meses[idx].lechuga += est.paquetes;
   }
   // Sumar lo ya cosechado este mes hasta hoy, para que el mes en curso muestre el total
   // esperado del mes (no solo lo que falta de acá a fin de mes).
@@ -523,6 +529,12 @@ export function construirHtml(d: ReporteSemanalData): string {
       <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Este mes (est.)</th><th style="padding:6px 10px;text-align:right">Mes pasado (real)</th><th style="padding:6px 10px;text-align:right">Var.</th></tr></thead>
       <tbody>${cosechaFilas}</tbody>
     </table>
+    <p style="margin:-12px 0 20px;font-size:11px;color:#9ca3af;line-height:1.5">
+      Es lo que se espera <strong>cosechar</strong> en el mes calendario (lo ya cosechado hasta hoy + lo estimado de los lotes activos,
+      cada uno en el mes de su fecha estimada; los lotes atrasados cuentan en el mes en curso).
+      No tiene por qué coincidir con "Proyectado a fin de mes" de Ventas: eso es lo que se espera <strong>vender</strong>,
+      y además rúcula va en paquetes y lechuga en plantas. La diferencia entre las dos es, a grandes rasgos, lo que se acumula en cámara o se descarta.
+    </p>
 
     <h3 style="margin:0 0 8px;font-size:14px">Ciclos y peso de esta semana</h3>
     <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
@@ -593,6 +605,7 @@ export function construirTexto(d: ReporteSemanalData): string {
   L.push(`🌱 *Proyección de cosecha — este mes* (vs. real mes pasado)`);
   L.push(`Rúcula: ${fmtN(d.proyeccionMesActual.rucula)} est. / ${fmtN(d.cosechaRealMesAnterior.rucula)} real`);
   L.push(`Lechuga: ${fmtN(d.proyeccionMesActual.lechuga)} est. / ${fmtN(d.cosechaRealMesAnterior.lechuga)} real`);
+  L.push(`(Es lo que se espera COSECHAR en el mes; "Proyectado a fin de mes" de Ventas es lo que se espera VENDER — no tienen por qué coincidir.)`);
   L.push('');
 
   // Ciclo: al lado del valor de esta semana, de dónde viene (valor de la semana/mes
