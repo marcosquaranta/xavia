@@ -3,6 +3,7 @@ import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, PrecioVenta, Clie
 import { tubosPorMesada, type OcupacionHistorialRow } from './ocupacion';
 import { cosechasEstimadasPorLote, ciclosPorSemana, pesoPromedioRango, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, type PesoPromedioMes } from './estadisticas';
 import { calcularCamara, diferenciaAjustesRango } from './camara';
+import { POSPAQ } from './planificacion'; // 3 posiciones (plantas) por paquete de rúcula
 import { ventasPorCultivoUltimasSemanas, resumenMesActual, ventasEnRango, GR_PAQ_RUCULA, GR_PAQ_LECHUGA, type PuntoVentaCultivoSemana, type VentasRango, type ResumenMesActual } from './estadisticasVentas';
 import { plantasPerdidasPorSubocupacion, type PlantasPerdidasSubocupacion } from './kpisOperativos';
 
@@ -478,6 +479,13 @@ export function construirHtml(d: ReporteSemanalData): string {
   );
   // Descarte por cultivo Y por fase — tabla en vez de gráfico de barras, para poder abrir
   // las 3 etapas (Plantín→F1, F1→F2, F2→Cosecha) y ver DÓNDE se pierde, no solo cuánto.
+  // La rúcula se cuenta en PLANTAS en todo lo que es descarte y pérdidas, pero se vende
+  // en paquetes de ~3 plantas — un número en plantas no se compara de memoria contra lo
+  // que se factura. Se agrega el equivalente en paquetes entre paréntesis. La lechuga va
+  // 1 planta = 1 paquete, así que ahí no aporta nada y no se muestra.
+  const esRuculaFila = (cultivo: string) => cultivo.toLowerCase().startsWith('rúc') || cultivo.toLowerCase().startsWith('ruc');
+  const enPaq = (plantas: number) => `${fmtN(Math.round(plantas / POSPAQ))} paq`;
+
   // Cada fase se muestra como "descartadas (% de las que pasaron por esa fase)" — el
   // número solo no dice si es grave; el % sobre la base sí. Rojo a partir del 10%.
   const celdaFaseHtml = (desc: number, base: number) => {
@@ -492,7 +500,7 @@ export function construirHtml(d: ReporteSemanalData): string {
       <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${celdaFaseHtml(f.plantinF1, f.basePlantinF1)}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${celdaFaseHtml(f.f1F2, f.baseF1F2)}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${celdaFaseHtml(f.f2Cosecha, f.baseF2Cosecha)}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:800">${fmtN(f.total)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:800">${fmtN(f.total)}${esRuculaFila(f.cultivo) ? ` <span style="font-weight:400;color:#9ca3af">(${enPaq(f.total)})</span>` : ''}</td>
     </tr>`).join('');
 
   return `
@@ -561,7 +569,7 @@ export function construirHtml(d: ReporteSemanalData): string {
     <div style="margin-bottom:10px">${mesadasBajasHtml}</div>
     ${d.plantasPerdidasSubocupacion.total > 0 ? `<p style="margin:10px 0 0;font-size:12px;color:#b45309">
       🌱 ~<strong>${fmtN(d.plantasPerdidasSubocupacion.total)}</strong> plantas perdidas por subocupación esta semana
-      (Rúcula ${fmtN(d.plantasPerdidasSubocupacion.rucula)} · Lechuga ${fmtN(d.plantasPerdidasSubocupacion.lechuga)})
+      (Rúcula ${fmtN(d.plantasPerdidasSubocupacion.rucula)} pl <span style="color:#9ca3af">(${enPaq(d.plantasPerdidasSubocupacion.rucula)})</span> · Lechuga ${fmtN(d.plantasPerdidasSubocupacion.lechuga)} pl)
       <span style="color:#9ca3af">— tubos vacíos convertidos a plantas, usando el ciclo F2 actual como referencia</span>
     </p>` : ''}
   </div>`;
@@ -625,7 +633,7 @@ export function construirTexto(d: ReporteSemanalData): string {
   L.push(`🗑️ *Descarte por cultivo y por fase* (plantas, últimas 4 semanas — dónde se pierde):`);
   for (const f of d.descartePorFase) {
     const pctTxt = (desc: number, base: number) => base > 0 ? `${fmtN(desc)} (${Math.round((desc / base) * 1000) / 10}% de ${fmtN(base)})` : '—';
-    L.push(`  ${f.cultivo}: Plantín→F1 ${pctTxt(f.plantinF1, f.basePlantinF1)} · F1→F2 ${pctTxt(f.f1F2, f.baseF1F2)} · F2→Cosecha ${pctTxt(f.f2Cosecha, f.baseF2Cosecha)} · Total ${fmtN(f.total)}`);
+    L.push(`  ${f.cultivo}: Plantín→F1 ${pctTxt(f.plantinF1, f.basePlantinF1)} · F1→F2 ${pctTxt(f.f1F2, f.baseF1F2)} · F2→Cosecha ${pctTxt(f.f2Cosecha, f.baseF2Cosecha)} · Total ${fmtN(f.total)}${f.cultivo.toLowerCase().startsWith('rúc') ? ` (${fmtN(Math.round(f.total / POSPAQ))} paq)` : ''}`);
   }
   L.push('');
 
@@ -638,7 +646,7 @@ export function construirTexto(d: ReporteSemanalData): string {
     L.push(`✓ Ninguna mesada F2 por debajo del 90%.`);
   }
   if (d.plantasPerdidasSubocupacion.total > 0) {
-    L.push(`🌱 ~${fmtN(d.plantasPerdidasSubocupacion.total)} plantas perdidas por subocupación esta semana (Rúcula ${fmtN(d.plantasPerdidasSubocupacion.rucula)} / Lechuga ${fmtN(d.plantasPerdidasSubocupacion.lechuga)}) — ref. ciclo F2 actual`);
+    L.push(`🌱 ~${fmtN(d.plantasPerdidasSubocupacion.total)} plantas perdidas por subocupación esta semana (Rúcula ${fmtN(d.plantasPerdidasSubocupacion.rucula)} pl = ${fmtN(Math.round(d.plantasPerdidasSubocupacion.rucula / POSPAQ))} paq / Lechuga ${fmtN(d.plantasPerdidasSubocupacion.lechuga)} pl) — ref. ciclo F2 actual`);
   }
 
   return L.join('\n');

@@ -13,6 +13,7 @@ import { descartePorFaseMes, resumenDescartePorCultivo, type CultivoDescarte } f
 import { ocupacionMensualPorCultivo, eficienciaSiembraCosechaPorMes, type EficienciaMesCultivo } from '@/lib/kpisOperativos';
 import { perdidasPorMes } from '@/lib/perdidas';
 import { cicloMesPromedio } from '@/lib/estadisticas';
+import { POSPAQ } from '@/lib/planificacion'; // 3 plantas por paquete de rúcula
 import type { OcupacionHistorialRow } from '@/lib/ocupacion';
 import type { Lote, Movimiento, Ubicacion, KilometrajeVehiculo, StockCamara, ProductividadDiaria, VentaDia } from '@/lib/types';
 import Header from '@/components/Header';
@@ -224,6 +225,10 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     if (base <= 0) return <span style={{ color:'#d1d5db' }}>—</span>;
     return <>{Math.round(desc).toLocaleString('es-AR')} <span style={{ color: (pct ?? 0) >= 10 ? '#dc2626' : '#9ca3af', fontWeight: (pct ?? 0) >= 10 ? 700 : 400 }}>({pct}%)</span> <span style={{ color:'#d1d5db', fontSize:'10px' }}>de {Math.round(base).toLocaleString('es-AR')}</span></>;
   }
+  // La rúcula se cuenta en PLANTAS acá, pero se vende en paquetes de ~3 — el número en
+  // plantas no se compara de memoria contra lo que se factura, así que se agrega el
+  // equivalente. En lechuga 1 planta = 1 paquete, no aporta nada y no se muestra.
+  const enPaqRucula = (plantas: number) => `${Math.round(plantas / POSPAQ).toLocaleString('es-AR')} paq`;
   const CULTIVO_LABEL: Record<CultivoDescarte, string> = { rucula: 'Rúcula', lechuga_crespa: 'Lechuga Crespa', lechuga_roble: 'Lechuga Hoja de Roble', albahaca: 'Albahaca' };
 
   // ── Pérdidas totales por mes — junta Descarte (solo F2→Cosecha) + Faltante de stock +
@@ -716,7 +721,10 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                     <td style={{ textAlign:'right' }}>{celdaFase(r.f1F2, r.baseF1F2, r.pctF1F2)}</td>
                     <td style={{ textAlign:'right' }}>{celdaFase(r.f2Cosecha, r.baseF2Cosecha, r.pctF2Cosecha)}</td>
                     <td style={{ textAlign:'right' }}>{r.camara.toLocaleString('es-AR')}</td>
-                    <td style={{ textAlign:'right', fontWeight:700 }}>{r.total.toLocaleString('es-AR')}</td>
+                    <td style={{ textAlign:'right', fontWeight:700 }}>
+                      {r.total.toLocaleString('es-AR')}
+                      {r.cultivo === 'rucula' && <span style={{ fontWeight:400, color:'#9ca3af' }}> ({enPaqRucula(r.total)})</span>}
+                    </td>
                   </tr>
                 ))}
               </tbody>
