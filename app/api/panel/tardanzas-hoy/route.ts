@@ -1,19 +1,18 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import { getRegistrosCrossChex } from '@/lib/crosschex';
+import { leerFichajesCache } from '@/lib/fichajesCache';
 import { calcularResumenQuincena, rangoQuincena, tardanzasDeHoy } from '@/lib/personal';
 import type { Empleado, PersonalQuincena } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
-// CrossChex limita a 1 pedido cada 15s (ver lib/crosschex.ts) — un token+datos "en frío"
-// puede tardar ~15-20s, más que el timeout por defecto de la función serverless.
-export const maxDuration = 60;
 
-// Tardanzas DE HOY (no de toda la quincena) para el banner del home — separado del
-// render principal del Panel (antes vivía ahí adentro, bloqueando la carga de TODA la
-// página ~15-20s por el límite real de CrossChex). El Panel ahora carga instantáneo y
-// este dato se trae aparte, desde un componente cliente (ver TardanzasHoyBanner.tsx).
+// Tardanzas DE HOY (no de toda la quincena) para el banner del home. Lee la caché local
+// de fichajes (hoja FichajesDiarios, que llena el cron diario) — ya NO le pide nada a
+// CrossChex, que con su límite de 1 pedido/15s hacía que este endpoint tardara ~60s en
+// responder cada vez que se abría el home. La contra es que el banner muestra los
+// ingresos hasta la última corrida del cron (10hs), que es justo después del horario de
+// entrada, así que a los fines del aviso de tardanzas da igual.
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
@@ -25,7 +24,7 @@ export async function GET() {
     const { desde, hasta } = rangoQuincena(hoy.getFullYear(), hoy.getMonth() + 1, quincenaActual);
     const [empleados, registros, ajustes] = await Promise.all([
       readSheet<Empleado>('Empleados').catch(() => []),
-      getRegistrosCrossChex(desde, hasta),
+      leerFichajesCache(desde.slice(0, 10), hasta.slice(0, 10)),
       readSheet<PersonalQuincena>('PersonalQuincena').catch(() => []),
     ]);
     const ajustesMap: Record<string, { presentismoManual?: 'SI' | 'NO' | '' }> = {};
@@ -38,8 +37,8 @@ export async function GET() {
     const tardanzas = tardanzasDeHoy(resumenPersonal);
     return NextResponse.json({ tardanzas });
   } catch (err: any) {
-    // Si CrossChex está caído o tarda, el banner simplemente no aparece — no debe romper
-    // nada del resto del home, que ya terminó de renderizar hace rato.
+    // Si la hoja de caché todavía no existe o falla la lectura, el banner simplemente no
+    // aparece — no debe romper nada del resto del home.
     return NextResponse.json({ tardanzas: [], error: err?.message || 'error' });
   }
 }

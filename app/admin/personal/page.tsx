@@ -2,11 +2,12 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import { getRegistrosCrossChex } from '@/lib/crosschex';
-import { calcularResumenQuincena, rangoQuincena, type AjusteQuincena, type ResumenEmpleado } from '@/lib/personal';
+import { leerFichajesCache, diasEnCache } from '@/lib/fichajesCache';
+import { calcularResumenQuincena, rangoQuincena, hoyArg, type AjusteQuincena, type ResumenEmpleado } from '@/lib/personal';
 import type { Empleado, PersonalQuincena } from '@/lib/types';
 import Header from '@/components/Header';
 import PersonalManager from './PersonalManager';
+import SincronizarFichajes from './SincronizarFichajes';
 
 export const dynamic = 'force-dynamic';
 // Pide fichajes de la quincena a CrossChex en vivo — con el límite real de CrossChex
@@ -28,6 +29,7 @@ export default async function PersonalPage({ searchParams }: { searchParams: { a
   let empleados: Empleado[] = [];
   let resumen: ResumenEmpleado[] = [];
   let err: string | null = null;
+  const diasSinSincronizar: string[] = [];
   try {
     const [empleadosData, ajustesData] = await Promise.all([
       readSheet<Empleado>('Empleados').catch(() => []),
@@ -40,10 +42,24 @@ export default async function PersonalPage({ searchParams }: { searchParams: { a
       ajustes[String(a.workno)] = { presentismoManual: a.presentismo_manual, extras: Number(a.extras) || 0, horasExtras: Number(a.horas_extras) || 0 };
     }
     const { desde, hasta } = rangoQuincena(anio, mes, quincena);
-    const registros = await getRegistrosCrossChex(desde, hasta);
+    // Lee la caché local de fichajes (hoja FichajesDiarios) en vez de pedirle a CrossChex,
+    // que con su límite de 1 pedido/15s hacía que esta página tardara ~60-75s en abrir.
+    // La caché la llena el cron diario (/api/cron/crosschex-diario), que también acepta un
+    // rango a mano para sincronizar una quincena vieja que todavía no esté guardada.
+    const desdeDia = desde.slice(0, 10), hastaDia = hasta.slice(0, 10);
+    const registros = await leerFichajesCache(desdeDia, hastaDia);
     resumen = calcularResumenQuincena(registros, empleados, anio, mes, quincena, ajustes);
+    // Días de la quincena (hasta hoy) que todavía no tienen ningún fichaje guardado — para
+    // avisar en pantalla en vez de mostrar una quincena en cero como si nadie hubiera venido.
+    const cacheados = await diasEnCache();
+    const hoyDia = hoyArg();
+    for (let d = new Date(desdeDia + 'T12:00:00'); d <= new Date(hastaDia + 'T12:00:00'); d.setDate(d.getDate() + 1)) {
+      const f = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      if (f > hoyDia) break;
+      if (!cacheados.has(f)) diasSinSincronizar.push(f);
+    }
   } catch (e: any) {
-    err = e?.message || 'Error consultando CrossChex';
+    err = e?.message || 'Error leyendo los fichajes guardados';
   }
 
   // Navegación mes/quincena anterior-siguiente, preservando la otra dimensión.
@@ -78,6 +94,10 @@ export default async function PersonalPage({ searchParams }: { searchParams: { a
               <p style={{ margin: '6px 0 0', fontSize: '12px' }}>Configurá CROSSCHEX_API_KEY y CROSSCHEX_API_SECRET en las variables de entorno de Vercel.</p>
             )}
           </div>
+        )}
+
+        {!err && diasSinSincronizar.length > 0 && (
+          <SincronizarFichajes desde={diasSinSincronizar[0]} hasta={diasSinSincronizar[diasSinSincronizar.length - 1]} dias={diasSinSincronizar} />
         )}
 
         {!err && <PersonalManager resumen={resumen} empleados={empleados} anio={anio} mes={mes} quincena={quincena} />}
