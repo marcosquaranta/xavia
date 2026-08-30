@@ -203,11 +203,15 @@ export function TarjetaIndicadores({ datos }: { datos: ResumenMesActual }) {
 // paga por encima, rojo el que paga por debajo, amarillo el que está en el promedio. El
 // umbral es relativo (±5%), así se recalibra solo cuando cambian los precios de lista.
 const COLOR_BUENO = '#008300', COLOR_MEDIO = '#eda100', COLOR_MALO = '#e34948';
-// El eje X arranca en $1.000 en vez de en 0: dejarlo en 0 comprime a todos los clientes
+// El eje X arranca en $1.300 en vez de en 0: dejarlo en 0 comprime a todos los clientes
 // contra el borde derecho y no se distingue uno de otro. PERO nunca se recorta un cliente
 // para lograrlo — si alguno paga menos de eso, el eje baja hasta incluirlo. Un cliente que
 // paga poco es justamente el que hay que ver, no el que conviene esconder.
-const X_MINIMO_PREFERIDO = 1000;
+const X_MINIMO_PREFERIDO = 1300;
+
+// El eje Y con un decimal: con "k" redondeado a entero, 2.100 y 2.400 se leían los dos
+// "2k" y no se distinguía un cliente de otro.
+const fmtMilesDecimal = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n));
 
 // El color sale del CRUCE de las dos variables, no del precio solo: un cliente que paga
 // bien pero compra poco no es lo mismo que uno que paga bien y se lleva medio galpón.
@@ -232,7 +236,7 @@ export function GraficoClientesPrecioVolumen({ datos, titulo = 'Clientes — pre
     return (
       <div style={cardStyle}>
         <p style={titleStyle}>{titulo}</p>
-        <p style={{ color: INK_MUTED, fontSize: '12px', textAlign: 'center', padding: '40px 0' }}>Sin ventas cargadas este mes.</p>
+        <p style={{ color: INK_MUTED, fontSize: '12px', textAlign: 'center', padding: '40px 0' }}>Sin ventas cargadas en los últimos 30 días.</p>
       </div>
     );
   }
@@ -275,7 +279,7 @@ export function GraficoClientesPrecioVolumen({ datos, titulo = 'Clientes — pre
 
   return (
     <div style={cardStyle}>
-      <p style={titleStyle}>{titulo} <span style={{ fontWeight: 400, color: '#9ca3af' }}>· mes en curso</span></p>
+      <p style={titleStyle}>{titulo} <span style={{ fontWeight: 400, color: '#9ca3af' }}>· últimos 30 días</span></p>
       <ResponsiveContainer width="100%" height={300}>
         <ScatterChart margin={{ top: 10, right: 18, bottom: 26, left: 10 }}>
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" />
@@ -284,8 +288,8 @@ export function GraficoClientesPrecioVolumen({ datos, titulo = 'Clientes — pre
             tickFormatter={(v) => fmtMoneda(v)} tick={{ fontSize: 11, fill: INK_SECUNDARIA }}
             label={{ value: 'Precio promedio por unidad', position: 'insideBottom', offset: -16, fontSize: 11, fill: INK_MUTED }} />
           <YAxis type="number" dataKey="unidades" name="Unidades"
-            tickFormatter={fmtMiles} tick={{ fontSize: 11, fill: INK_SECUNDARIA }}
-            label={{ value: 'Unidades del mes', angle: -90, position: 'insideLeft', fontSize: 11, fill: INK_MUTED }} />
+            tickFormatter={fmtMilesDecimal} tick={{ fontSize: 11, fill: INK_SECUNDARIA }}
+            label={{ value: 'Unidades (30 días)', angle: -90, position: 'insideLeft', fontSize: 11, fill: INK_MUTED }} />
           <ReferenceLine x={medPrecio} stroke={INK_MUTED} strokeDasharray="4 4" />
           <ReferenceLine y={medVolumen} stroke={INK_MUTED} strokeDasharray="4 4" />
           <Tooltip content={<TooltipScatter />} cursor={{ strokeDasharray: '3 3' }} />
@@ -305,10 +309,11 @@ export function GraficoClientesPrecioVolumen({ datos, titulo = 'Clientes — pre
         <span style={{ color: INK_MUTED }}>líneas punteadas = la mitad de los clientes de cada lado ({fmtMoneda(medPrecio)} · {fmtEntero(medVolumen)} u)</span>
       </div>
       <p style={{ margin: '8px 0 0', fontSize: '11px', color: INK_MUTED, lineHeight: 1.5 }}>
-        El color compara a cada cliente contra el resto del mes: las líneas punteadas parten a los clientes
-        por la mitad en cada eje. Arriba a la izquierda (mucho volumen a precio bajo) es donde más conviene
-        mirar. El precio promedio se calcula solo sobre paquete/planta: mezclar bandeja y kg da un número
-        que no se puede comparar entre clientes.
+        Ventana móvil de 30 días: un cliente que hace más de un mes que no compra no aparece. El color compara
+        a cada cliente contra el resto: las líneas punteadas parten a los clientes por la mitad en cada eje.
+        Arriba a la izquierda (mucho volumen a precio bajo) es donde más conviene mirar. El precio promedio se
+        calcula solo sobre paquete/planta: mezclar bandeja y kg da un número que no se puede comparar entre
+        clientes.
       </p>
 
       <TablaToggle>
@@ -317,7 +322,7 @@ export function GraficoClientesPrecioVolumen({ datos, titulo = 'Clientes — pre
             <thead><tr style={{ color: INK_MUTED }}>
               <th style={{ textAlign: 'left', padding: '3px 6px 3px 0' }}>Cliente</th>
               <th style={{ textAlign: 'right', padding: '3px 6px' }}>Precio prom.</th>
-              <th style={{ textAlign: 'right', padding: '3px 6px' }}>Unidades</th>
+              <th style={{ textAlign: 'right', padding: '3px 6px' }}>Unidades (30d)</th>
               <th style={{ textAlign: 'right', padding: '3px 0' }}>Facturado</th>
             </tr></thead>
             <tbody>
@@ -351,7 +356,7 @@ function TooltipScatter({ active, payload }: any) {
         {d.nombre}
       </p>
       <div style={{ color: INK_SECUNDARIA }}>Precio promedio: <strong style={{ color: '#111827' }}>{fmtMoneda(d.precioPromedio)}</strong></div>
-      <div style={{ color: INK_SECUNDARIA }}>Unidades del mes: <strong style={{ color: '#111827' }}>{fmtEntero(d.unidades)}</strong></div>
+      <div style={{ color: INK_SECUNDARIA }}>Unidades (30 días): <strong style={{ color: '#111827' }}>{fmtEntero(d.unidades)}</strong></div>
       <div style={{ color: INK_SECUNDARIA }}>Facturado: <strong style={{ color: '#111827' }}>{fmtMoneda(d.monto)}</strong></div>
     </div>
   );

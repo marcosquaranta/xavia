@@ -220,9 +220,10 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
   const evolArticulo = evolucionVentaPorArticulo(ventasRep, 12, historicas);
   const evolClienteMensual = evolucionVentaPorCliente(ventasRep, clientes, 6, 6);
   const evolPrecio = evolucionPrecioPromedio(ventasRep, precios, clientes, 12);
-  // Mismo gráfico que en Ventas, pero anclado al MES DEL INFORME (refDate), no a hoy —
-  // si se mira el informe de un mes cerrado tiene que mostrar los clientes de ese mes.
-  const clientesPrecioVolumen = clientesPrecioVsVolumen(ventasRep, precios, clientes, refDate);
+  // Mismo gráfico que en Ventas: ventana móvil de 30 días, pero terminando en el MES DEL
+  // INFORME (refDate) y no en hoy — mirando el informe de un mes ya cerrado tiene que
+  // mostrar los clientes de ese momento, no los de ahora.
+  const clientesPrecioVolumen = clientesPrecioVsVolumen(ventasRep, precios, clientes, refDate, 30);
   const clientesMes = clientesMesConVariacion(ventas, clientes, anioSel, mesSel, 8);
 
   // ── 2. PRODUCCIÓN ──
@@ -492,7 +493,7 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
           <GraficoVentaPorCliente mensual={evolClienteMensual} ocultarToggle />
         </div>
         <div style={{ marginBottom: '14px' }}>
-          <GraficoClientesPrecioVolumen datos={clientesPrecioVolumen} titulo={`Clientes — precio vs. volumen · ${nombre}`} />
+          <GraficoClientesPrecioVolumen datos={clientesPrecioVolumen} titulo={`Clientes — precio vs. volumen · 30 días hasta ${nombre}`} />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '14px', marginBottom: '14px' }}>
           <GraficoPrecioPromedio datos={evolPrecio} />

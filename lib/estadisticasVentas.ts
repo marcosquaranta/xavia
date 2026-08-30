@@ -243,10 +243,16 @@ export function diasDeVentaHabituales(ventas: VentaDia[]): Set<number> {
   return out;
 }
 
-// ── Clientes: precio promedio vs. volumen del mes (para el gráfico de dispersión) ──
-// Cada cliente es un punto: X = lo que paga en promedio por unidad, Y = cuánto compra en
-// el mes. Sirve para ver de un vistazo quién compra mucho barato (abajo a la izquierda no
+// ── Clientes: precio promedio vs. volumen (para el gráfico de dispersión) ──
+// Cada cliente es un punto: X = lo que paga en promedio por unidad, Y = cuánto compró.
+// Sirve para ver de un vistazo quién compra mucho barato (abajo a la izquierda no
 // preocupa; ARRIBA a la izquierda sí: mucho volumen a precio bajo) y quién paga bien.
+//
+// La ventana es MÓVIL (últimos `dias` hasta `hasta`), no el mes calendario: a principio de
+// mes el mes en curso tiene 3 o 4 días cargados y el gráfico quedaba vacío o con un cliente
+// suelto arriba de todo. De paso resuelve solo el otro problema: un cliente que hace más de
+// un mes que no compra directamente no tiene ventas en la ventana y no aparece — antes se
+// arrastraba con el volumen de un mes viejo como si siguiera activo.
 //
 // El precio promedio se calcula SOLO sobre paquete/planta (mismo criterio que
 // precioPromedioMes): mezclar bandeja y kg promedia unidades de venta distintas y da un
@@ -255,14 +261,18 @@ export function diasDeVentaHabituales(ventas: VentaDia[]): Set<number> {
 export interface ClientePrecioVolumen {
   id_control: string;
   nombre: string;
-  unidades: number;       // volumen del mes (todas las presentaciones, kg convertido)
+  unidades: number;       // volumen de la ventana (todas las presentaciones, kg convertido)
   precioPromedio: number; // $ por unidad comparable (IVA incluido)
-  monto: number;          // facturado del mes
+  monto: number;          // facturado en la ventana
 }
 export function clientesPrecioVsVolumen(
-  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], fechaRef: Date = new Date()
+  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], hasta: Date = new Date(), dias = 30
 ): ClientePrecioVolumen[] {
-  const mk = mesKey(fechaRef.toISOString().slice(0, 10));
+  const fmtDia = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const hastaStr = fmtDia(hasta);
+  const desdeD = new Date(hasta.getFullYear(), hasta.getMonth(), hasta.getDate());
+  desdeD.setDate(desdeD.getDate() - (dias - 1));
+  const desdeStr = fmtDia(desdeD);
   const clienteMap = new Map(clientes.map((c) => [c.id_control, c]));
   const nombreMap = new Map(clientes.map((c) => [String(c.id_control), nombreClienteVisible(c)]));
   const PRICE_KEYS = [...KEYS_RUCULA, ...KEYS_LECHUGA, 'albahaca'] as const;
@@ -270,7 +280,8 @@ export function clientesPrecioVsVolumen(
 
   const acc = new Map<string, { unidades: number; monto: number; ingComparable: number; uComparable: number; kgRuc: number; kgLec: number }>();
   for (const v of ventas) {
-    if (mesKey(v.fecha) !== mk) continue;
+    const f = String(v.fecha || '').split(/[T ]/)[0];
+    if (!f || f < desdeStr || f > hastaStr) continue;
     const id = String(v.id_control || '');
     if (!id) continue;
     const cliente = clienteMap.get(v.id_control);
