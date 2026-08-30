@@ -2,9 +2,10 @@
 import { useState } from 'react';
 import {
   ResponsiveContainer, BarChart, Bar, Line, LineChart, XAxis, YAxis,
-  CartesianGrid, Tooltip, Legend, LabelList, ScatterChart, Scatter, Cell, ReferenceLine,
+  CartesianGrid, Tooltip, Legend, LabelList,
 } from 'recharts';
 import type { PuntoArticulo, EvolucionClientes, PuntoPrecio, ResumenMesActual, ClientePrecioVolumen } from '@/lib/estadisticasVentas';
+import GraficoValorComercial from './GraficoValorComercial';
 
 // Paleta categórica (orden fijo, validada — ver skill de dataviz). Los slots aqua/
 // amarillo/magenta quedan bajo 3:1 de contraste sobre blanco, por eso cada gráfico
@@ -194,178 +195,6 @@ export function TarjetaIndicadores({ datos }: { datos: ResumenMesActual }) {
   );
 }
 
-// ── Clientes: precio promedio (X) vs. volumen del mes (Y) ────────────────────
-// Cada punto es un cliente. Lo que se busca leer es el CUADRANTE, no el punto exacto:
-// arriba a la izquierda (mucho volumen a precio bajo) es donde más plata se deja sobre la
-// mesa, y es justo lo que una tabla ordenada por volumen no deja ver.
-//
-// El color va por precio contra el promedio general PONDERADO por volumen: verde el que
-// paga por encima, rojo el que paga por debajo, amarillo el que está en el promedio. El
-// umbral es relativo (±5%), así se recalibra solo cuando cambian los precios de lista.
-const COLOR_BUENO = '#008300', COLOR_MEDIO = '#eda100', COLOR_MALO = '#e34948';
-// El eje X arranca en $1.300 en vez de en 0: dejarlo en 0 comprime a todos los clientes
-// contra el borde derecho y no se distingue uno de otro. PERO nunca se recorta un cliente
-// para lograrlo — si alguno paga menos de eso, el eje baja hasta incluirlo. Un cliente que
-// paga poco es justamente el que hay que ver, no el que conviene esconder.
-const X_MINIMO_PREFERIDO = 1300;
-
-// El eje Y con un decimal: con "k" redondeado a entero, 2.100 y 2.400 se leían los dos
-// "2k" y no se distinguía un cliente de otro.
-const fmtMilesDecimal = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n));
-
-// El color sale del CRUCE de las dos variables, no del precio solo: un cliente que paga
-// bien pero compra poco no es lo mismo que uno que paga bien y se lleva medio galpón.
-// "Mucho / poco" es siempre RELATIVO al resto de los clientes del mes — se parte por la
-// mediana de cada eje, que no se deja arrastrar por un cliente enorme o carísimo como sí
-// haría el promedio.
-//
-//   verde    mucho volumen + buen precio      (los que hay que cuidar)
-//   amarillo mucho volumen + precio regular, o buen precio + poco volumen
-//   rojo     poco volumen + precio bajo       (los que menos aportan)
-function medianaDe(valores: number[]): number {
-  if (!valores.length) return 0;
-  const o = [...valores].sort((a, b) => a - b);
-  const m = Math.floor(o.length / 2);
-  return o.length % 2 ? o[m] : (o[m - 1] + o[m]) / 2;
-}
-
-export function GraficoClientesPrecioVolumen({ datos, titulo = 'Clientes — precio vs. volumen' }: {
-  datos: ClientePrecioVolumen[]; titulo?: string;
-}) {
-  if (!datos.length) {
-    return (
-      <div style={cardStyle}>
-        <p style={titleStyle}>{titulo}</p>
-        <p style={{ color: INK_MUTED, fontSize: '12px', textAlign: 'center', padding: '40px 0' }}>Sin ventas cargadas en los últimos 30 días.</p>
-      </div>
-    );
-  }
-  // Corte por MEDIANA de cada eje: divide a los clientes en mitades sin que un cliente
-  // gigante (o uno que paga carísimo) corra el umbral para todos los demás.
-  const medPrecio = medianaDe(datos.map((d) => d.precioPromedio));
-  const medVolumen = medianaDe(datos.map((d) => d.unidades));
-  const colorDe = (d: ClientePrecioVolumen) => {
-    const buenPrecio = d.precioPromedio >= medPrecio;
-    const muchoVolumen = d.unidades >= medVolumen;
-    if (buenPrecio && muchoVolumen) return COLOR_BUENO;
-    if (buenPrecio || muchoVolumen) return COLOR_MEDIO;
-    return COLOR_MALO;
-  };
-  const puntos = datos.map((d) => ({ ...d, color: colorDe(d) }));
-  const leyenda = [
-    { color: COLOR_BUENO, texto: 'Mucho volumen y buen precio' },
-    { color: COLOR_MEDIO, texto: 'Mucho volumen o buen precio' },
-    { color: COLOR_MALO, texto: 'Poco volumen y precio bajo' },
-  ];
-  // Extremos del eje X, con aire a los costados para que las etiquetas no se corten.
-  const minPrecio = Math.min(...datos.map((d) => d.precioPromedio));
-  const maxPrecio = Math.max(...datos.map((d) => d.precioPromedio));
-  const xMin = minPrecio >= X_MINIMO_PREFERIDO ? X_MINIMO_PREFERIDO : Math.floor((minPrecio * 0.92) / 100) * 100;
-  const xMax = Math.ceil((maxPrecio * 1.12) / 100) * 100;
-
-  // Etiqueta con el nombre del cliente al lado de cada punto. Nombres largos cortados,
-  // que si no se pisan entre ellos y tapan el gráfico.
-  const EtiquetaNombre = (props: any) => {
-    const { x, y, index } = props;
-    const d = puntos[index];
-    if (!d || x === undefined || y === undefined) return null;
-    const corto = d.nombre.length > 16 ? d.nombre.slice(0, 15) + '…' : d.nombre;
-    return (
-      <text x={x} y={y - 11} textAnchor="middle" fontSize={10} fill={INK_SECUNDARIA} fontWeight={600}>
-        {corto}
-      </text>
-    );
-  };
-
-  return (
-    <div style={cardStyle}>
-      <p style={titleStyle}>{titulo} <span style={{ fontWeight: 400, color: '#9ca3af' }}>· últimos 30 días</span></p>
-      <ResponsiveContainer width="100%" height={300}>
-        <ScatterChart margin={{ top: 10, right: 18, bottom: 26, left: 10 }}>
-          <CartesianGrid stroke={GRID} strokeDasharray="3 3" />
-          <XAxis type="number" dataKey="precioPromedio" name="Precio promedio"
-            domain={[xMin, xMax]}
-            tickFormatter={(v) => fmtMoneda(v)} tick={{ fontSize: 11, fill: INK_SECUNDARIA }}
-            label={{ value: 'Precio promedio por unidad', position: 'insideBottom', offset: -16, fontSize: 11, fill: INK_MUTED }} />
-          <YAxis type="number" dataKey="unidades" name="Unidades"
-            tickFormatter={fmtMilesDecimal} tick={{ fontSize: 11, fill: INK_SECUNDARIA }}
-            label={{ value: 'Unidades (30 días)', angle: -90, position: 'insideLeft', fontSize: 11, fill: INK_MUTED }} />
-          <ReferenceLine x={medPrecio} stroke={INK_MUTED} strokeDasharray="4 4" />
-          <ReferenceLine y={medVolumen} stroke={INK_MUTED} strokeDasharray="4 4" />
-          <Tooltip content={<TooltipScatter />} cursor={{ strokeDasharray: '3 3' }} />
-          <Scatter data={puntos} shape="circle">
-            {puntos.map((p) => <Cell key={p.id_control} fill={p.color} r={9} />)}
-            <LabelList content={EtiquetaNombre} />
-          </Scatter>
-        </ScatterChart>
-      </ResponsiveContainer>
-
-      {/* Referencias y letra chica van DENTRO del desplegable: el gráfico ya se lee solo
-          (colores + nombre de cada cliente), y tener seis renglones de texto fijo abajo
-          hacía que la tarjeta ocupara el doble de lo necesario. */}
-      <TablaToggle>
-        {() => (
-          <>
-          <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', fontSize: '11px', color: INK_SECUNDARIA, marginBottom: '8px' }}>
-            {leyenda.map((l) => (
-              <span key={l.texto} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <span style={{ width: 9, height: 9, borderRadius: '50%', background: l.color, display: 'inline-block' }} />{l.texto}
-              </span>
-            ))}
-            <span style={{ color: INK_MUTED }}>líneas punteadas = la mitad de los clientes de cada lado ({fmtMoneda(medPrecio)} · {fmtEntero(medVolumen)} u)</span>
-          </div>
-          <p style={{ margin: '0 0 10px', fontSize: '11px', color: INK_MUTED, lineHeight: 1.5 }}>
-            Ventana móvil de 30 días: un cliente que hace más de un mes que no compra no aparece. El color compara
-            a cada cliente contra el resto: las líneas punteadas parten a los clientes por la mitad en cada eje.
-            Arriba a la izquierda (mucho volumen a precio bajo) es donde más conviene mirar. A los clientes por kg
-            se les estiman las unidades con el peso real de las plantas cosechadas en la ventana, para llegar al
-            precio por unidad que estarían pagando.
-          </p>
-          <table style={{ fontSize: '11px', width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr style={{ color: INK_MUTED }}>
-              <th style={{ textAlign: 'left', padding: '3px 6px 3px 0' }}>Cliente</th>
-              <th style={{ textAlign: 'right', padding: '3px 6px' }}>Precio prom.</th>
-              <th style={{ textAlign: 'right', padding: '3px 6px' }}>Unidades (30d)</th>
-              <th style={{ textAlign: 'right', padding: '3px 0' }}>Facturado</th>
-            </tr></thead>
-            <tbody>
-              {puntos.map((p) => (
-                <tr key={p.id_control} style={{ borderTop: '1px solid #f1f0eb' }}>
-                  <td style={{ padding: '3px 6px 3px 0' }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.color, display: 'inline-block', marginRight: 5 }} />
-                    {p.nombre}
-                  </td>
-                  <td style={{ textAlign: 'right', padding: '3px 6px' }}>{fmtMoneda(p.precioPromedio)}</td>
-                  <td style={{ textAlign: 'right', padding: '3px 6px' }}>{fmtEntero(p.unidades)}</td>
-                  <td style={{ textAlign: 'right', padding: '3px 0' }}>{fmtMoneda(p.monto)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </>
-        )}
-      </TablaToggle>
-    </div>
-  );
-}
-
-function TooltipScatter({ active, payload }: any) {
-  if (!active || !payload?.length) return null;
-  const d = payload[0]?.payload;
-  if (!d) return null;
-  return (
-    <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
-      <p style={{ margin: '0 0 4px', fontWeight: 700, color: '#111827' }}>
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: d.color, display: 'inline-block', marginRight: 5 }} />
-        {d.nombre}
-      </p>
-      <div style={{ color: INK_SECUNDARIA }}>Precio promedio: <strong style={{ color: '#111827' }}>{fmtMoneda(d.precioPromedio)}</strong></div>
-      <div style={{ color: INK_SECUNDARIA }}>Unidades (30 días): <strong style={{ color: '#111827' }}>{fmtEntero(d.unidades)}</strong></div>
-      <div style={{ color: INK_SECUNDARIA }}>Facturado: <strong style={{ color: '#111827' }}>{fmtMoneda(d.monto)}</strong></div>
-    </div>
-  );
-}
-
 export default function VentasEvolucionCharts({ articulo, clienteSemanal, clienteMensual, precio, resumenMes, clientesPrecioVolumen }: {
   articulo: PuntoArticulo[]; clienteSemanal: EvolucionClientes; clienteMensual: EvolucionClientes; precio: PuntoPrecio[]; resumenMes: ResumenMesActual;
   clientesPrecioVolumen: ClientePrecioVolumen[];
@@ -378,10 +207,8 @@ export default function VentasEvolucionCharts({ articulo, clienteSemanal, client
         <GraficoVentaPorCliente semanal={clienteSemanal} mensual={clienteMensual} />
       </div>
       <TarjetaIndicadores datos={resumenMes} />
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: '14px' }}>
-        <GraficoPrecioPromedio datos={precio} />
-        <GraficoClientesPrecioVolumen datos={clientesPrecioVolumen} />
-      </div>
+      <GraficoValorComercial datos={clientesPrecioVolumen} />
+      <GraficoPrecioPromedio datos={precio} />
     </div>
   );
 }

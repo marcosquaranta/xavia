@@ -16,7 +16,8 @@ import type { Lote, Movimiento, Ubicacion, VentaDia, ClienteVenta, PrecioVenta, 
 import Header from '@/components/Header';
 import GraficoEvolucion from '../GraficoEvolucion';
 import GraficoPesaje from '../GraficoPesaje';
-import { GraficoVentaPorArticulo, GraficoVentaPorCliente, GraficoPrecioPromedio, GraficoClientesPrecioVolumen } from '@/app/ventas/VentasEvolucionCharts';
+import { GraficoVentaPorArticulo, GraficoVentaPorCliente, GraficoPrecioPromedio } from '@/app/ventas/VentasEvolucionCharts';
+import GraficoValorComercial from '@/app/ventas/GraficoValorComercial';
 import CopiarInformeBoton from './CopiarInformeBoton';
 export const dynamic = 'force-dynamic';
 
@@ -493,7 +494,7 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
           <GraficoVentaPorCliente mensual={evolClienteMensual} ocultarToggle />
         </div>
         <div style={{ marginBottom: '14px' }}>
-          <GraficoClientesPrecioVolumen datos={clientesPrecioVolumen} titulo={`Clientes — precio vs. volumen · 30 días hasta ${nombre}`} />
+          <GraficoValorComercial datos={clientesPrecioVolumen} subtitulo={`30 días hasta ${nombre}`} />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '14px', marginBottom: '14px' }}>
           <GraficoPrecioPromedio datos={evolPrecio} />
