@@ -18,10 +18,20 @@ import type { ClienteVenta } from './types';
 // (ver lib/facturacionEmitir.ts) — ahí el nombre tiene que ser el legal, no el apodo.
 export function nombreClienteVisible(c: Pick<ClienteVenta, 'alias' | 'nombre_display' | 'nombre_xubio' | 'id_control'> | undefined | null): string {
   if (!c) return '';
-  return String(c.alias || '').trim()
+  return primerAlias(c.alias)
     || String(c.nombre_display || '').trim()
     || String(c.nombre_xubio || '').trim()
     || String(c.id_control || '');
+}
+
+// La columna alias NO guarda un nombre: guarda la LISTA de nombres con los que se conoce
+// al cliente, separada por "|" (misma convención que la columna sucursales), para poder
+// matchearlo escrito de distintas formas. Ej: "Poly|Poly PN|Poly Puerto Norte|Poly Fisherton".
+// En pantalla va solo el primero — mostrar la lista entera daba nombres impresentables
+// como "La Reina|Reina · Funes", y peor: dos sucursales del mismo cliente se veían
+// idénticas porque el chorizo de alias tapaba la diferencia.
+function primerAlias(alias: unknown): string {
+  return String(alias || '').split("|")[0].trim();
 }
 
 // Mapa id_control → nombre visible, listo para usar en cualquier pantalla que tenga ids
