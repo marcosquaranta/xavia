@@ -456,11 +456,24 @@ export default async function PanelPage() {
   const cicloMesPasado = cicloMesPromedio(lotes, movimientos, mesPasadoRef);
 
   const hoyStr = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
-  // Recordatorio de stock físico en cámara (paquetes) — todos los días, después del
-  // mediodía. Se calcula la hora en huso de Argentina explícitamente (no new Date().
-  // getHours(), que en el server corre en UTC y dispararía 3 horas antes de tiempo).
+  // Recordatorio de stock físico en cámara (paquetes) — después del mediodía, y solo si
+  // hace 3 días o más que no se hace. Antes salía TODOS los días aunque el conteo se
+  // hubiera hecho esa misma mañana, y un aviso que aparece siempre deja de leerse.
+  // La hora se calcula en huso de Argentina explícitamente (no new Date().getHours(), que
+  // en el server corre en UTC y dispararía 3 horas antes de tiempo).
   const horaArg = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Argentina/Buenos_Aires', hour: 'numeric', hour12: false }).format(new Date()));
-  const esDiaStockCamara = horaArg >= 12;
+  const DIAS_SIN_STOCK_PARA_AVISAR = 3;
+  // Último conteo de CUALQUIER cultivo: el stock se hace de todos juntos, así que alcanza
+  // con el registro más reciente de la hoja para saber hace cuánto no se cuenta.
+  const ultimoStockStr = registrosCamara
+    .map(r => String(r.fecha || '').split(/[T ]/)[0])
+    .filter(f => /^\d{4}-\d{2}-\d{2}$/.test(f))
+    .sort()
+    .pop() || null;
+  const diasSinStock = ultimoStockStr
+    ? Math.max(0, Math.round((new Date(fmtISODate(hoy) + 'T12:00:00').getTime() - new Date(ultimoStockStr + 'T12:00:00').getTime()) / 86400000))
+    : null; // null = nunca se hizo un conteo
+  const esDiaStockCamara = horaArg >= 12 && (diasSinStock === null || diasSinStock >= DIAS_SIN_STOCK_PARA_AVISAR);
 
   // Recordatorio de kilometraje del Partner — se pide los viernes, y queda pendiente
   // (se sigue mostrando) todos los días de la semana hasta que se cargue una lectura.
@@ -489,7 +502,12 @@ export default async function PanelPage() {
           <div style={{ background:'#fef3c7', border:'2px solid #f59e0b', borderRadius:'10px', padding:'16px 18px', marginBottom:'14px', display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }}>
             <span style={{ fontSize:'28px', lineHeight:1 }}>📦</span>
             <div style={{ flex:1, minWidth:'260px' }}>
-              <p style={{ margin:'0 0 4px', fontSize:'15px', fontWeight:800, color:'#92400e' }}>Recordá hacer el stock de paquetes en cámara</p>
+              <p style={{ margin:'0 0 4px', fontSize:'15px', fontWeight:800, color:'#92400e' }}>
+                Recordá hacer el stock de paquetes en cámara
+                {diasSinStock === null
+                  ? ' — nunca se hizo un conteo'
+                  : ` — hace ${diasSinStock} día${diasSinStock === 1 ? '' : 's'} que no se hace`}
+              </p>
               <p style={{ margin:0, fontSize:'12.5px', color:'#78350f' }}>
                 Hacelo <strong>una vez que ya se cargaron las cosechas/ventas del día</strong> — nunca a la mitad, porque el conteo queda comparado contra un stock esperado a medio actualizar.
               </p>

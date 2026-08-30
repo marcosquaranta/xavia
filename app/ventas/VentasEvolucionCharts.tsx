@@ -202,8 +202,28 @@ export function TarjetaIndicadores({ datos }: { datos: ResumenMesActual }) {
 // El color va por precio contra el promedio general PONDERADO por volumen: verde el que
 // paga por encima, rojo el que paga por debajo, amarillo el que está en el promedio. El
 // umbral es relativo (±5%), así se recalibra solo cuando cambian los precios de lista.
-const UMBRAL_COLOR_PCT = 5;
 const COLOR_BUENO = '#008300', COLOR_MEDIO = '#eda100', COLOR_MALO = '#e34948';
+// El eje X arranca en $1.000 en vez de en 0: dejarlo en 0 comprime a todos los clientes
+// contra el borde derecho y no se distingue uno de otro. PERO nunca se recorta un cliente
+// para lograrlo — si alguno paga menos de eso, el eje baja hasta incluirlo. Un cliente que
+// paga poco es justamente el que hay que ver, no el que conviene esconder.
+const X_MINIMO_PREFERIDO = 1000;
+
+// El color sale del CRUCE de las dos variables, no del precio solo: un cliente que paga
+// bien pero compra poco no es lo mismo que uno que paga bien y se lleva medio galpón.
+// "Mucho / poco" es siempre RELATIVO al resto de los clientes del mes — se parte por la
+// mediana de cada eje, que no se deja arrastrar por un cliente enorme o carísimo como sí
+// haría el promedio.
+//
+//   verde    mucho volumen + buen precio      (los que hay que cuidar)
+//   amarillo mucho volumen + precio regular, o buen precio + poco volumen
+//   rojo     poco volumen + precio bajo       (los que menos aportan)
+function medianaDe(valores: number[]): number {
+  if (!valores.length) return 0;
+  const o = [...valores].sort((a, b) => a - b);
+  const m = Math.floor(o.length / 2);
+  return o.length % 2 ? o[m] : (o[m - 1] + o[m]) / 2;
+}
 
 export function GraficoClientesPrecioVolumen({ datos, titulo = 'Clientes — precio vs. volumen' }: {
   datos: ClientePrecioVolumen[]; titulo?: string;
@@ -216,38 +236,62 @@ export function GraficoClientesPrecioVolumen({ datos, titulo = 'Clientes — pre
       </div>
     );
   }
-  // Promedio PONDERADO por volumen, no promedio simple de precios: es el precio real al
-  // que se vendió el mes, no el punto medio entre un cliente grande y uno chico.
-  const totalU = datos.reduce((a, d) => a + d.unidades, 0);
-  const promedio = totalU > 0 ? datos.reduce((a, d) => a + d.precioPromedio * d.unidades, 0) / totalU : 0;
-  const colorDe = (precio: number) => {
-    if (promedio <= 0) return COLOR_MEDIO;
-    const dif = ((precio - promedio) / promedio) * 100;
-    return dif >= UMBRAL_COLOR_PCT ? COLOR_BUENO : dif <= -UMBRAL_COLOR_PCT ? COLOR_MALO : COLOR_MEDIO;
+  // Corte por MEDIANA de cada eje: divide a los clientes en mitades sin que un cliente
+  // gigante (o uno que paga carísimo) corra el umbral para todos los demás.
+  const medPrecio = medianaDe(datos.map((d) => d.precioPromedio));
+  const medVolumen = medianaDe(datos.map((d) => d.unidades));
+  const colorDe = (d: ClientePrecioVolumen) => {
+    const buenPrecio = d.precioPromedio >= medPrecio;
+    const muchoVolumen = d.unidades >= medVolumen;
+    if (buenPrecio && muchoVolumen) return COLOR_BUENO;
+    if (buenPrecio || muchoVolumen) return COLOR_MEDIO;
+    return COLOR_MALO;
   };
-  const puntos = datos.map((d) => ({ ...d, color: colorDe(d.precioPromedio) }));
+  const puntos = datos.map((d) => ({ ...d, color: colorDe(d) }));
   const leyenda = [
-    { color: COLOR_BUENO, texto: 'Paga por encima del promedio' },
-    { color: COLOR_MEDIO, texto: 'En el promedio' },
-    { color: COLOR_MALO, texto: 'Paga por debajo' },
+    { color: COLOR_BUENO, texto: 'Mucho volumen y buen precio' },
+    { color: COLOR_MEDIO, texto: 'Mucho volumen o buen precio' },
+    { color: COLOR_MALO, texto: 'Poco volumen y precio bajo' },
   ];
+  // Extremos del eje X, con aire a los costados para que las etiquetas no se corten.
+  const minPrecio = Math.min(...datos.map((d) => d.precioPromedio));
+  const maxPrecio = Math.max(...datos.map((d) => d.precioPromedio));
+  const xMin = minPrecio >= X_MINIMO_PREFERIDO ? X_MINIMO_PREFERIDO : Math.floor((minPrecio * 0.92) / 100) * 100;
+  const xMax = Math.ceil((maxPrecio * 1.12) / 100) * 100;
+
+  // Etiqueta con el nombre del cliente al lado de cada punto. Nombres largos cortados,
+  // que si no se pisan entre ellos y tapan el gráfico.
+  const EtiquetaNombre = (props: any) => {
+    const { x, y, index } = props;
+    const d = puntos[index];
+    if (!d || x === undefined || y === undefined) return null;
+    const corto = d.nombre.length > 16 ? d.nombre.slice(0, 15) + '…' : d.nombre;
+    return (
+      <text x={x} y={y - 11} textAnchor="middle" fontSize={10} fill={INK_SECUNDARIA} fontWeight={600}>
+        {corto}
+      </text>
+    );
+  };
 
   return (
     <div style={cardStyle}>
       <p style={titleStyle}>{titulo} <span style={{ fontWeight: 400, color: '#9ca3af' }}>· mes en curso</span></p>
-      <ResponsiveContainer width="100%" height={260}>
+      <ResponsiveContainer width="100%" height={300}>
         <ScatterChart margin={{ top: 10, right: 18, bottom: 26, left: 10 }}>
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" />
           <XAxis type="number" dataKey="precioPromedio" name="Precio promedio"
+            domain={[xMin, xMax]}
             tickFormatter={(v) => fmtMoneda(v)} tick={{ fontSize: 11, fill: INK_SECUNDARIA }}
             label={{ value: 'Precio promedio por unidad', position: 'insideBottom', offset: -16, fontSize: 11, fill: INK_MUTED }} />
           <YAxis type="number" dataKey="unidades" name="Unidades"
             tickFormatter={fmtMiles} tick={{ fontSize: 11, fill: INK_SECUNDARIA }}
             label={{ value: 'Unidades del mes', angle: -90, position: 'insideLeft', fontSize: 11, fill: INK_MUTED }} />
-          <ReferenceLine x={promedio} stroke={INK_MUTED} strokeDasharray="4 4" />
+          <ReferenceLine x={medPrecio} stroke={INK_MUTED} strokeDasharray="4 4" />
+          <ReferenceLine y={medVolumen} stroke={INK_MUTED} strokeDasharray="4 4" />
           <Tooltip content={<TooltipScatter />} cursor={{ strokeDasharray: '3 3' }} />
-          <Scatter data={puntos}>
-            {puntos.map((p) => <Cell key={p.id_control} fill={p.color} />)}
+          <Scatter data={puntos} shape="circle">
+            {puntos.map((p) => <Cell key={p.id_control} fill={p.color} r={9} />)}
+            <LabelList content={EtiquetaNombre} />
           </Scatter>
         </ScatterChart>
       </ResponsiveContainer>
@@ -258,12 +302,13 @@ export function GraficoClientesPrecioVolumen({ datos, titulo = 'Clientes — pre
             <span style={{ width: 9, height: 9, borderRadius: '50%', background: l.color, display: 'inline-block' }} />{l.texto}
           </span>
         ))}
-        <span style={{ color: INK_MUTED }}>línea punteada = promedio ({fmtMoneda(promedio)})</span>
+        <span style={{ color: INK_MUTED }}>líneas punteadas = la mitad de los clientes de cada lado ({fmtMoneda(medPrecio)} · {fmtEntero(medVolumen)} u)</span>
       </div>
       <p style={{ margin: '8px 0 0', fontSize: '11px', color: INK_MUTED, lineHeight: 1.5 }}>
-        Arriba a la izquierda = mucho volumen a precio bajo, que es donde más conviene mirar. El precio
-        promedio se calcula solo sobre paquete/planta: mezclar bandeja y kg da un número que no se puede
-        comparar entre clientes.
+        El color compara a cada cliente contra el resto del mes: las líneas punteadas parten a los clientes
+        por la mitad en cada eje. Arriba a la izquierda (mucho volumen a precio bajo) es donde más conviene
+        mirar. El precio promedio se calcula solo sobre paquete/planta: mezclar bandeja y kg da un número
+        que no se puede comparar entre clientes.
       </p>
 
       <TablaToggle>
