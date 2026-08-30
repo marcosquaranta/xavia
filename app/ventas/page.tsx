@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import type { ClienteVenta, PrecioVenta, VentaDia, VentaHistorica, PedidoFijo } from '@/lib/types';
+import type { ClienteVenta, PrecioVenta, VentaDia, VentaHistorica, PedidoFijo, Lote } from '@/lib/types';
 import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionVentaPorClienteSemanal, evolucionPrecioPromedio, resumenMesActual, clientesPrecioVsVolumen } from '@/lib/estadisticasVentas';
 import Header from '@/components/Header';
 import VentasManager from './VentasManager';
@@ -57,12 +57,16 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
   let clientes: ClienteVenta[] = [], precios: PrecioVenta[] = [], ventas: VentaDia[] = [];
   let historicas: VentaHistorica[] = [];
   let pedidosFijos: PedidoFijo[] = [];
+  let lotes: Lote[] = [];
   let err: string | null = null;
   try {
-    [clientes, precios, ventas, historicas, pedidosFijos] = await Promise.all([
+    [clientes, precios, ventas, historicas, pedidosFijos, lotes] = await Promise.all([
       readSheet<ClienteVenta>('Clientes'), readSheet<PrecioVenta>('Precios'), readSheet<VentaDia>('Ventas'),
       readSheet<VentaHistorica>('VentasHistoricas').catch(() => []),
       readSheet<PedidoFijo>('PedidosFijos').catch(() => []),
+      // Solo para estimar el peso real de las plantas y poder convertir las ventas por kg
+      // a unidades-equivalente en el gráfico de clientes.
+      readSheet<Lote>('Lotes').catch(() => []),
     ]);
   } catch (e: any) { err = e?.message || 'Error'; }
   if (err) return (<><Header user={user} current="ventas" /><div className="container"><div className="alert-box error">{err}</div></div></>);
@@ -74,7 +78,7 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
   const evolClienteMensual = evolucionVentaPorCliente(ventas, clientes, 6, 5);
   const evolPrecio = evolucionPrecioPromedio(ventas, precios, clientes, 12);
   const resumenMes = resumenMesActual(ventas, precios, clientes);
-  const clientesPrecioVolumen = clientesPrecioVsVolumen(ventas, precios, clientes);
+  const clientesPrecioVolumen = clientesPrecioVsVolumen(ventas, precios, clientes, lotes);
 
   return (
     <>

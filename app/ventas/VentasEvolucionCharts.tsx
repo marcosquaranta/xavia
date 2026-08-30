@@ -41,7 +41,7 @@ function TablaToggle({ children }: { children: () => React.ReactNode }) {
   return (
     <div style={{ marginTop: '8px' }}>
       <button onClick={() => setAbierta((v) => !v)} style={{ background: 'none', border: 'none', color: '#2563eb', fontSize: '11px', cursor: 'pointer', padding: 0 }}>
-        {abierta ? '▾ Ocultar tabla de datos' : '▸ Ver tabla de datos'}
+        {abierta ? '▾ Ocultar referencias y tabla' : '▸ Ver referencias y tabla de datos'}
       </button>
       {abierta && <div style={{ overflowX: 'auto', marginTop: '8px' }}>{children()}</div>}
     </div>
@@ -300,24 +300,27 @@ export function GraficoClientesPrecioVolumen({ datos, titulo = 'Clientes — pre
         </ScatterChart>
       </ResponsiveContainer>
 
-      <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', fontSize: '11px', color: INK_SECUNDARIA, marginTop: '4px' }}>
-        {leyenda.map((l) => (
-          <span key={l.texto} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <span style={{ width: 9, height: 9, borderRadius: '50%', background: l.color, display: 'inline-block' }} />{l.texto}
-          </span>
-        ))}
-        <span style={{ color: INK_MUTED }}>líneas punteadas = la mitad de los clientes de cada lado ({fmtMoneda(medPrecio)} · {fmtEntero(medVolumen)} u)</span>
-      </div>
-      <p style={{ margin: '8px 0 0', fontSize: '11px', color: INK_MUTED, lineHeight: 1.5 }}>
-        Ventana móvil de 30 días: un cliente que hace más de un mes que no compra no aparece. El color compara
-        a cada cliente contra el resto: las líneas punteadas parten a los clientes por la mitad en cada eje.
-        Arriba a la izquierda (mucho volumen a precio bajo) es donde más conviene mirar. El precio promedio se
-        calcula solo sobre paquete/planta: mezclar bandeja y kg da un número que no se puede comparar entre
-        clientes.
-      </p>
-
+      {/* Referencias y letra chica van DENTRO del desplegable: el gráfico ya se lee solo
+          (colores + nombre de cada cliente), y tener seis renglones de texto fijo abajo
+          hacía que la tarjeta ocupara el doble de lo necesario. */}
       <TablaToggle>
         {() => (
+          <>
+          <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', fontSize: '11px', color: INK_SECUNDARIA, marginBottom: '8px' }}>
+            {leyenda.map((l) => (
+              <span key={l.texto} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: l.color, display: 'inline-block' }} />{l.texto}
+              </span>
+            ))}
+            <span style={{ color: INK_MUTED }}>líneas punteadas = la mitad de los clientes de cada lado ({fmtMoneda(medPrecio)} · {fmtEntero(medVolumen)} u)</span>
+          </div>
+          <p style={{ margin: '0 0 10px', fontSize: '11px', color: INK_MUTED, lineHeight: 1.5 }}>
+            Ventana móvil de 30 días: un cliente que hace más de un mes que no compra no aparece. El color compara
+            a cada cliente contra el resto: las líneas punteadas parten a los clientes por la mitad en cada eje.
+            Arriba a la izquierda (mucho volumen a precio bajo) es donde más conviene mirar. A los clientes por kg
+            se les estiman las unidades con el peso real de las plantas cosechadas en la ventana, para llegar al
+            precio por unidad que estarían pagando.
+          </p>
           <table style={{ fontSize: '11px', width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr style={{ color: INK_MUTED }}>
               <th style={{ textAlign: 'left', padding: '3px 6px 3px 0' }}>Cliente</th>
@@ -339,6 +342,7 @@ export function GraficoClientesPrecioVolumen({ datos, titulo = 'Clientes — pre
               ))}
             </tbody>
           </table>
+          </>
         )}
       </TablaToggle>
     </div>

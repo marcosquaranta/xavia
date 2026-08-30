@@ -223,7 +223,7 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
   // Mismo gráfico que en Ventas: ventana móvil de 30 días, pero terminando en el MES DEL
   // INFORME (refDate) y no en hoy — mirando el informe de un mes ya cerrado tiene que
   // mostrar los clientes de ese momento, no los de ahora.
-  const clientesPrecioVolumen = clientesPrecioVsVolumen(ventasRep, precios, clientes, refDate, 30);
+  const clientesPrecioVolumen = clientesPrecioVsVolumen(ventasRep, precios, clientes, lotes, refDate, 30);
   const clientesMes = clientesMesConVariacion(ventas, clientes, anioSel, mesSel, 8);
 
   // ── 2. PRODUCCIÓN ──

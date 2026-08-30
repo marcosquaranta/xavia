@@ -1,5 +1,6 @@
-import type { VentaDia, ClienteVenta, PrecioVenta, VentaHistorica } from './types';
+import type { VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, Lote } from './types';
 import { nombreClienteVisible } from './clientes';
+import { pesoPromedioRango } from './estadisticas';
 
 // Gramos por paquete/planta — mismos defaults que /api/stocks/camara cuando no hay
 // pesaje testigo reciente. Se usan acá para poder sumar ventas por KG (cajón) al
@@ -254,10 +255,14 @@ export function diasDeVentaHabituales(ventas: VentaDia[]): Set<number> {
 // un mes que no compra directamente no tiene ventas en la ventana y no aparece — antes se
 // arrastraba con el volumen de un mes viejo como si siguiera activo.
 //
-// El precio promedio se calcula SOLO sobre paquete/planta (mismo criterio que
-// precioPromedioMes): mezclar bandeja y kg promedia unidades de venta distintas y da un
-// número que no se puede comparar entre clientes. El volumen en cambio es el total, kg
-// incluido — es lo que realmente se le entrega.
+// Los clientes que compran por KG entran igual: los kilos se pasan a unidades-equivalente
+// con el PESO REAL de las plantas cosechadas en la misma ventana (pesoPromedioRango), no
+// con el gramaje fijo de la app, y de ahí sale a qué precio por unidad se les estaría
+// vendiendo. Antes quedaban afuera del gráfico por no tener un precio comparable — y son
+// justo los de más volumen, que es lo que hay que mirar.
+//
+// La bandeja sí queda afuera del precio promedio (es otra presentación, con su propio
+// precio, que no se compara contra un paquete suelto), aunque suma al volumen.
 export interface ClientePrecioVolumen {
   id_control: string;
   nombre: string;
@@ -266,7 +271,7 @@ export interface ClientePrecioVolumen {
   monto: number;          // facturado en la ventana
 }
 export function clientesPrecioVsVolumen(
-  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], hasta: Date = new Date(), dias = 30
+  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], lotes: Lote[] = [], hasta: Date = new Date(), dias = 30
 ): ClientePrecioVolumen[] {
   const fmtDia = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const hastaStr = fmtDia(hasta);
@@ -278,14 +283,26 @@ export function clientesPrecioVsVolumen(
   const PRICE_KEYS = [...KEYS_RUCULA, ...KEYS_LECHUGA, 'albahaca'] as const;
   const KEYS_KG = ['rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
 
-  const acc = new Map<string, { unidades: number; monto: number; ingComparable: number; uComparable: number; kgRuc: number; kgLec: number }>();
+  // Gramos por unidad para convertir los kilos, tomados de lo REALMENTE cosechado en la
+  // misma ventana: si las plantas vienen más chicas, el mismo kilo son más unidades y el
+  // precio por unidad que paga ese cliente baja. Sin cosechas en la ventana (o sin lotes,
+  // que es como la llaman los tests) cae al gramaje fijo de siempre.
+  const peso = pesoPromedioRango(lotes, desdeD, hasta);
+  const gramosDe = (key: string): number => {
+    if (key === 'rucula_kg') return peso.rucula > 0 ? peso.rucula : GR_PAQ_RUCULA;
+    if (key === 'lechuga_kg_crespa') return peso.lechugaCrespa > 0 ? peso.lechugaCrespa : GR_PAQ_LECHUGA;
+    if (key === 'lechuga_kg_roble') return peso.lechugaRoble > 0 ? peso.lechugaRoble : GR_PAQ_LECHUGA;
+    return peso.lechuga > 0 ? peso.lechuga : GR_PAQ_LECHUGA; // lechuga_kg legado, sin split
+  };
+
+  const acc = new Map<string, { unidades: number; monto: number; ingComparable: number; uComparable: number }>();
   for (const v of ventas) {
     const f = String(v.fecha || '').split(/[T ]/)[0];
     if (!f || f < desdeStr || f > hastaStr) continue;
     const id = String(v.id_control || '');
     if (!id) continue;
     const cliente = clienteMap.get(v.id_control);
-    if (!acc.has(id)) acc.set(id, { unidades: 0, monto: 0, ingComparable: 0, uComparable: 0, kgRuc: 0, kgLec: 0 });
+    if (!acc.has(id)) acc.set(id, { unidades: 0, monto: 0, ingComparable: 0, uComparable: 0 });
     const a = acc.get(id)!;
     for (const key of PROD_KEYS) {
       const qty = Number((v as any)[key]) || 0;
@@ -293,24 +310,29 @@ export function clientesPrecioVsVolumen(
       const precio = precioFinal(precios, v.id_control, v.sucursal, key, cliente);
       a.monto += qty * precio;
       if ((KEYS_KG as readonly string[]).includes(key)) {
-        if (key === 'rucula_kg') a.kgRuc += qty; else a.kgLec += qty;
+        // qty son KILOS: se pasan a unidades-equivalente con el peso real de la ventana, y
+        // el mismo importe dividido por esas unidades da el precio por unidad equivalente.
+        const uEquivalentes = (qty * 1000) / gramosDe(key);
+        a.unidades += uEquivalentes;
+        a.ingComparable += qty * precio;
+        a.uComparable += uEquivalentes;
       } else {
         a.unidades += qty;
-      }
-      if ((PRICE_KEYS as readonly string[]).includes(key)) {
-        a.ingComparable += qty * precio;
-        a.uComparable += qty;
+        if ((PRICE_KEYS as readonly string[]).includes(key)) {
+          a.ingComparable += qty * precio;
+          a.uComparable += qty;
+        }
       }
     }
   }
 
   const out: ClientePrecioVolumen[] = [];
   for (const [id, a] of acc) {
-    const unidades = a.unidades + Math.round((a.kgRuc * 1000) / GR_PAQ_RUCULA) + Math.round((a.kgLec * 1000) / GR_PAQ_LECHUGA);
+    const unidades = Math.round(a.unidades);
     if (unidades <= 0) continue;
-    // Sin ventas por paquete/planta no hay precio comparable (cliente 100% por kg): queda
-    // afuera del gráfico en vez de aparecer en $0 y ensuciar la lectura del eje.
-    if (a.uComparable <= 0) continue;
+    // Solo queda afuera un cliente que no tenga NINGUNA venta valorizable (ej. todo en
+    // bandeja sin precio cargado): sin eso el punto iría a $0 y rompería la escala del eje.
+    if (a.uComparable <= 0 || a.ingComparable <= 0) continue;
     out.push({
       id_control: id,
       nombre: nombreMap.get(id) || id,
