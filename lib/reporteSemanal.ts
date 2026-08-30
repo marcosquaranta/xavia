@@ -3,6 +3,7 @@ import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, PrecioVenta, Clie
 import { tubosPorMesada, type OcupacionHistorialRow } from './ocupacion';
 import { cosechasEstimadasPorLote, ciclosPorSemana, pesoPromedioRango, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, type PesoPromedioMes } from './estadisticas';
 import { calcularCamara, diferenciaAjustesRango } from './camara';
+import { nombreClienteVisible } from './clientes';
 import { POSPAQ } from './planificacion'; // 3 posiciones (plantas) por paquete de rúcula
 import { ventasPorCultivoUltimasSemanas, resumenMesActual, ventasEnRango, GR_PAQ_RUCULA, GR_PAQ_LECHUGA, type PuntoVentaCultivoSemana, type VentasRango, type ResumenMesActual } from './estadisticasVentas';
 import { plantasPerdidasPorSubocupacion, type PlantasPerdidasSubocupacion } from './kpisOperativos';
@@ -43,7 +44,7 @@ export interface ClienteVariacionSemana { nombre: string; actual: number; anteri
 function clientesConVariacionSemana(ventas: VentaDia[], clientes: ClienteVenta[], desde: string, hasta: string, desdeAnt: string, hastaAnt: string, topN = 6): ClienteVariacionSemana[] {
   const actual = sumaPorClienteEnRango(ventas, desde, hasta);
   const anterior = sumaPorClienteEnRango(ventas, desdeAnt, hastaAnt);
-  const nombreMap = new Map(clientes.map(c => [c.id_control, c.nombre_display || c.nombre_xubio || c.id_control]));
+  const nombreMap = new Map(clientes.map(c => [c.id_control, nombreClienteVisible(c)]));
   const filas = Array.from(actual.entries()).map(([id_control, act]) => {
     const ant = anterior.get(id_control) || 0;
     const deltaUnidades = Math.round(act - ant);

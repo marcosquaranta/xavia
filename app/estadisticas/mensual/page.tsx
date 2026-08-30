@@ -11,6 +11,7 @@ import { productividadDeMes, productividadPlantasDeMes } from '@/lib/productivid
 import { ocupacionMensualPorCultivo, eficienciaSiembraCosechaPorMes, plantasPerdidasPorSubocupacion } from '@/lib/kpisOperativos';
 import { cicloMesPromedio } from '@/lib/estadisticas';
 import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionPrecioPromedio, clientesPrecioVsVolumen } from '@/lib/estadisticasVentas';
+import { nombreClienteVisible } from '@/lib/clientes';
 import type { Lote, Movimiento, Ubicacion, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, Articulo, StockMes, StockCamara, ProductividadDiaria } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from '../GraficoEvolucion';
@@ -138,7 +139,7 @@ function clientesMesConVariacion(ventas: VentaDia[], clientes: ClienteVenta[], a
   let mesPrev = mes - 1, anioPrev = anio; if (mesPrev === 0) { mesPrev = 12; anioPrev--; }
   const actual = sumaPorClienteEnMes(ventas, anio, mes);
   const pasado = sumaPorClienteEnMes(ventas, anioPrev, mesPrev);
-  const nombreMap = new Map(clientes.map(c => [c.id_control, c.nombre_display || c.nombre_xubio || c.id_control]));
+  const nombreMap = new Map(clientes.map(c => [c.id_control, nombreClienteVisible(c)]));
   const totalMes = Array.from(actual.values()).reduce((a, b) => a + b, 0);
   const filas = Array.from(actual.entries()).map(([id_control, total]) => {
     const prev = pasado.get(id_control) || 0;

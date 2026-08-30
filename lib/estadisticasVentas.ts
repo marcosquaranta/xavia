@@ -1,4 +1,5 @@
 import type { VentaDia, ClienteVenta, PrecioVenta, VentaHistorica } from './types';
+import { nombreClienteVisible } from './clientes';
 
 // Gramos por paquete/planta — mismos defaults que /api/stocks/camara cuando no hay
 // pesaje testigo reciente. Se usan acá para poder sumar ventas por KG (cajón) al
@@ -165,7 +166,7 @@ function construirEvolucionCliente(
     const rec = porCliente.get(v.id_control)!;
     rec[k] = (rec[k] || 0) + total;
   }
-  const nombreMap = new Map(clientes.map((c) => [c.id_control, c.nombre_display || c.nombre_xubio || c.id_control]));
+  const nombreMap = new Map(clientes.map((c) => [c.id_control, nombreClienteVisible(c)]));
   const entradas = Array.from(porCliente.entries()).map(([id_control, valores]) => ({
     id_control, nombre: nombreMap.get(id_control) || id_control, valores,
     total: Object.values(valores).reduce((a, b) => a + b, 0),
@@ -263,7 +264,7 @@ export function clientesPrecioVsVolumen(
 ): ClientePrecioVolumen[] {
   const mk = mesKey(fechaRef.toISOString().slice(0, 10));
   const clienteMap = new Map(clientes.map((c) => [c.id_control, c]));
-  const nombreMap = new Map(clientes.map((c) => [String(c.id_control), c.nombre_display || c.nombre_xubio || String(c.id_control)]));
+  const nombreMap = new Map(clientes.map((c) => [String(c.id_control), nombreClienteVisible(c)]));
   const PRICE_KEYS = [...KEYS_RUCULA, ...KEYS_LECHUGA, 'albahaca'] as const;
   const KEYS_KG = ['rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
 
@@ -508,7 +509,7 @@ const DOW_LARGO = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Vierne
 export interface ClienteDiaCargado { nombre: string; totalPaq: number; totalKg: number }
 export interface DiaCargado { fecha: string; label: string; clientes: ClienteDiaCargado[]; totalPaqDia: number; totalKgDia: number }
 export function ventasCargadasSemana(ventas: VentaDia[], clientes: ClienteVenta[], hoy: Date = new Date()): DiaCargado[] {
-  const nombreMap = new Map(clientes.map((c) => [c.id_control, c.nombre_display || c.nombre_xubio || c.id_control]));
+  const nombreMap = new Map(clientes.map((c) => [c.id_control, nombreClienteVisible(c)]));
   const lunes = lunesDeSemana(hoy);
   const hoyStr = fmtISOLocal(hoy);
   const KEYS_PAQ = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca'] as const;

@@ -1,5 +1,6 @@
 import type { CajonMovimiento, ClienteVenta, VentaDia } from './types';
 import { GR_PAQ_RUCULA, GR_PAQ_LECHUGA } from './estadisticasVentas';
+import { mapaNombresClientes } from './clientes';
 
 // Vive acá (y no en app/api/cajones/config/route.ts) porque un route.ts de Next solo
 // puede exportar handlers HTTP y un puñado de opciones conocidas (GET, POST, config,
@@ -42,7 +43,7 @@ export function saldoPorCliente(movimientos: CajonMovimiento[], clientes: Client
   // — sin este cast, esta Map nunca hacía match contra el id_control (siempre string) del
   // resto de la función, y CUALQUIER cliente caía siempre al fallback (mostraba el
   // id_control pelado, para TODOS, no solo el que no se encontraba de verdad).
-  const nombreMap = new Map(clientes.map(c => [String(c.id_control), c.nombre_display || c.nombre_xubio || String(c.id_control)]));
+  const nombreMap = mapaNombresClientes(clientes);
   const porCliente = new Map<string, CajonMovimiento[]>();
   for (const m of movimientos) {
     const id = String(m.id_control || '');

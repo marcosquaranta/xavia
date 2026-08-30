@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import type { VentaDia, ClienteVenta, ConfigItem } from '@/lib/types';
+import { mapaNombresClientes } from '@/lib/clientes';
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -13,7 +14,7 @@ export async function GET() {
       readSheet<ConfigItem>('Config'),
     ]);
 
-    const clienteMap = new Map(clientes.map(c => [String(c.id_control), c.nombre_display || c.nombre_xubio || c.id_control]));
+    const clienteMap = mapaNombresClientes(clientes);
 
     // Una línea por (exportación, cliente) — en Xubio se factura una sola vez por cliente
     // por tanda, aunque combine varias sucursales, así que agrupar por cliente (no por

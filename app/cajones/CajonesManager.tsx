@@ -3,6 +3,7 @@ import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import type { CajonMovimiento, ClienteVenta } from '@/lib/types';
 import type { SaldoCajonCliente, AlertaCajon } from '@/lib/cajones';
+import { nombreClienteVisible } from '@/lib/clientes';
 import NumberInput from '@/components/NumberInput';
 
 const HOY = new Date().toISOString().split('T')[0];
@@ -46,7 +47,7 @@ export default function CajonesManager({ saldos, alertas, clientes, movimientos,
   // cargada como número, no como texto), esta comparación nunca hacía match contra el id
   // (siempre string, viene de un <select>) — cualquier registro nuevo guardaba
   // nombre_cliente vacío/con el id pelado, en vez del nombre real del cliente.
-  const nombreCliente = (id: string) => clientes.find(c => String(c.id_control) === id)?.nombre_display || clientes.find(c => String(c.id_control) === id)?.nombre_xubio || id;
+  const nombreCliente = (id: string) => nombreClienteVisible(clientes.find(c => String(c.id_control) === id)) || id;
 
   // Info del cliente elegido en el formulario — aparece apenas se selecciona, para poder
   // chequear el saldo actual antes de confirmar (y, en un ajuste, ver la diferencia al toque).
@@ -207,7 +208,7 @@ export default function CajonesManager({ saldos, alertas, clientes, movimientos,
             <label style={{ fontSize: '11px', color: '#6b7280' }}>Cliente</label>
             <select value={idControl} onChange={e => setIdControl(e.target.value)} disabled={guardando}>
               <option value="">Elegir cliente...</option>
-              {clientes.map(c => <option key={c.id_control} value={c.id_control}>{c.nombre_display || c.nombre_xubio}</option>)}
+              {clientes.map(c => <option key={c.id_control} value={c.id_control}>{nombreClienteVisible(c)}</option>)}
             </select>
           </div>
           {tipo !== 'ajuste' && (

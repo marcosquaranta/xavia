@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import type { ClienteVenta, PrecioVenta, VentaDia } from '@/lib/types';
+import { nombreClienteVisible } from '@/lib/clientes';
 import Header from '@/components/Header';
 import FacturacionManager from './FacturacionManager';
 
@@ -76,7 +77,7 @@ export default async function FacturacionPage() {
     if (!lineas.length) continue;
     facturas.push({
       id_control: idControl,
-      cliente: cliente?.nombre_display || cliente?.nombre_xubio || idControl,
+      cliente: nombreClienteVisible(cliente) || idControl,
       letra: cliente?.tipo_factura || '?',
       fecha: lineasV[0].fecha,
       lineas,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet, updateRow, batchUpdateRows } from '@/lib/sheets';
 import type { ClienteVenta, PrecioVenta, VentaDia, ConfigItem, Lote } from '@/lib/types';
+import { nombreClienteVisible } from '@/lib/clientes';
 import * as XLSX from 'xlsx';
 // Email via Resend API (sin dependencias extra)
 
@@ -161,7 +162,7 @@ export async function POST(req: NextRequest) {
       );
       if (!tieneVentas) continue;
       facturasGeneradas++;
-      clientesFacturados.push(cliente.nombre_display || cliente.nombre_xubio || idControl);
+      clientesFacturados.push(nombreClienteVisible(cliente) || idControl);
 
       const esA = cliente.tipo_factura === 'A';
       const pv = Number(cliente.punto_venta);

@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { ClienteVenta, PedidoFijo } from '@/lib/types';
+import { nombreClienteVisible } from '@/lib/clientes';
 
 interface Props { clientes: ClienteVenta[]; pedidos: PedidoFijo[]; }
 
@@ -21,8 +22,8 @@ function mkFilas(cs: ClienteVenta[]): FilaCliente[] {
   for (const c of cs) {
     if (c.activo !== 'SI') continue;
     const sucs = c.sucursales ? c.sucursales.split('|').map((s) => s.trim()).filter(Boolean) : [];
-    if (!sucs.length) out.push({ id_control: c.id_control, nombre_cliente: c.nombre_xubio, sucursal: c.nombre_xubio, nombre_display: c.nombre_display || c.nombre_xubio });
-    else for (const s of sucs) out.push({ id_control: c.id_control, nombre_cliente: c.nombre_xubio, sucursal: s, nombre_display: `${c.nombre_display || c.nombre_xubio} · ${s.split(' ').slice(-1)[0]}` });
+    if (!sucs.length) out.push({ id_control: c.id_control, nombre_cliente: c.nombre_xubio, sucursal: c.nombre_xubio, nombre_display: nombreClienteVisible(c) });
+    else for (const s of sucs) out.push({ id_control: c.id_control, nombre_cliente: c.nombre_xubio, sucursal: s, nombre_display: `${nombreClienteVisible(c)} · ${s.split(' ').slice(-1)[0]}` });
   }
   return out.sort((a, b) => a.nombre_display.localeCompare(b.nombre_display));
 }

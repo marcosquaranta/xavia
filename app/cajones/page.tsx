@@ -3,6 +3,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { saldoPorCliente, alertasCajones, DEFAULT_UNIDADES_POR_CAJON_RUCULA, DEFAULT_UNIDADES_POR_CAJON_LECHUGA } from '@/lib/cajones';
 import type { CajonMovimiento, ClienteVenta } from '@/lib/types';
+import { nombreClienteVisible } from '@/lib/clientes';
 import Header from '@/components/Header';
 import CajonesManager from './CajonesManager';
 export const dynamic = 'force-dynamic';
@@ -32,7 +33,7 @@ export default async function CajonesPage() {
   const saldos = saldoPorCliente(movimientos, clientes);
   const alertas = alertasCajones(saldos, 7);
 
-  const clientesActivos = clientes.filter(c => c.activo === 'SI').sort((a, b) => (a.nombre_display || a.nombre_xubio).localeCompare(b.nombre_display || b.nombre_xubio));
+  const clientesActivos = clientes.filter(c => c.activo === 'SI').sort((a, b) => nombreClienteVisible(a).localeCompare(nombreClienteVisible(b)));
 
   return (
     <>

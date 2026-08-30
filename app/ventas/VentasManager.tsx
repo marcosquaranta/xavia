@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import type { ClienteVenta, PrecioVenta, VentaDia, PedidoFijo } from '@/lib/types';
 import { ventasCargadasSemana } from '@/lib/estadisticasVentas';
+import { nombreClienteVisible } from '@/lib/clientes';
 
 const PP = [
   { key:'rucula',         xubio:'Rucula Hidropónica',                     label:'Rúcula',     color:'#166534' },
@@ -60,8 +61,8 @@ function mkFilas(cs: ClienteVenta[], freq: Record<string,number>): Fila[] {
     ordenMap[c.id_control] = Number(c.orden) || 0;
     const unidad = c.unidad || 'paq';
     const sucs = c.sucursales ? c.sucursales.split('|').map(s=>s.trim()).filter(Boolean) : [];
-    if (!sucs.length) { out.push({id_control:c.id_control,nombre_cliente:c.nombre_xubio,sucursal:c.nombre_xubio,nombre_display:c.nombre_display||c.nombre_xubio,tipo:c.tipo_factura,unidad}); }
-    else { for (const s of sucs) out.push({id_control:c.id_control,nombre_cliente:c.nombre_xubio,sucursal:s,nombre_display:`${c.nombre_display||c.nombre_xubio} · ${s.split(' ').slice(-1)[0]}`,tipo:c.tipo_factura,unidad}); }
+    if (!sucs.length) { out.push({id_control:c.id_control,nombre_cliente:c.nombre_xubio,sucursal:c.nombre_xubio,nombre_display:nombreClienteVisible(c),tipo:c.tipo_factura,unidad}); }
+    else { for (const s of sucs) out.push({id_control:c.id_control,nombre_cliente:c.nombre_xubio,sucursal:s,nombre_display:`${nombreClienteVisible(c)} · ${s.split(' ').slice(-1)[0]}`,tipo:c.tipo_factura,unidad}); }
   }
   // Orden manual (Admin → Clientes de venta) tiene prioridad si está fijado — más bajo
   // primero. Sin orden fijado (0), cae al criterio de siempre: frecuencia de compra
@@ -386,6 +387,16 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   // Junta el total Y el detalle por cliente (qué cantidad de cada uno la compone) en una
   // sola pasada — a pedido explícito: "Ventas de hoy" y "Comprometidas Xd más" antes solo
   // mostraban el número, sin decir a quién corresponde.
+  // Las filas ya traen nombre_display (alias del cliente + sucursal); v.nombre_cliente es
+  // la RAZÓN SOCIAL que quedó guardada en la venta al facturar ("NAF S.R.L."), que no es
+  // como se le dice al cliente en la quinta. Se busca la fila por id+sucursal y se cae a
+  // la razón social solo si el cliente ya no existe en la lista.
+  function nombreVisible(id_control: string, sucursal: string, nombreGuardado?: string): string {
+    const fila = filas.find(f => f.id_control === id_control && f.sucursal === sucursal)
+      || filas.find(f => f.id_control === id_control);
+    return fila?.nombre_display || nombreGuardado || id_control;
+  }
+
   function comprometidoPorCultivoYDia(): Record<CultivoStock, ComprometidoDia> {
     const cultivosList: CultivoStock[] = ['rucula', 'lechuga_crespa', 'lechuga_roble', 'albahaca'];
     const acc: Record<CultivoStock, { hoy: number; siguientes2: number; mapaHoy: Map<string, number>; mapaSiguientes2: Map<string, number> }> = {
@@ -415,14 +426,14 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       const vFecha = String(v.fecha || '').split(/[T ]/)[0];
       if (fechaEnVentana && vFecha === fecha) continue; // ese día se reemplaza por el vivo de abajo
       const bucket = vFecha === hoyRealStr ? 'hoy' : 'siguientes2';
-      const nombre = v.sucursal && v.sucursal !== v.nombre_cliente ? `${v.nombre_cliente} · ${v.sucursal}` : v.nombre_cliente;
+      const nombre = nombreVisible(String(v.id_control), String(v.sucursal || ''), v.nombre_cliente);
       sumar(bucket, nombre, { rucula: Number(v.rucula) || 0, lechuga_crespa: Number(v.lechuga_crespa) || 0, lechuga_roble: Number(v.hoja_roble) || 0, albahaca: Number(v.albahaca) || 0 });
     }
     if (fechaEnVentana) {
       const bucket = fecha === hoyRealStr ? 'hoy' : 'siguientes2';
       for (const fl of filas) {
         const vals = ctds[`${fl.id_control}__${fl.sucursal}`]; if (!vals) continue;
-        const nombre = fl.sucursal && fl.sucursal !== fl.nombre_cliente ? `${fl.nombre_cliente} · ${fl.sucursal}` : fl.nombre_cliente;
+        const nombre = fl.nombre_display || fl.nombre_cliente;
         sumar(bucket, nombre, { rucula: Number(vals.rucula) || 0, lechuga_crespa: Number(vals.lechuga_crespa) || 0, lechuga_roble: Number(vals.hoja_roble) || 0, albahaca: Number(vals.albahaca) || 0 });
       }
     }
@@ -457,7 +468,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       const key = `${id_control}__${sucursal}__${fechaLinea}`;
       const ex = map.get(key);
       if (ex) { ex.rucula += rucula; ex.lechuga_crespa += lechuga_crespa; ex.lechuga_roble += lechuga_roble; ex.total += total; }
-      else map.set(key, { nombre: sucursal && sucursal !== nombre_cliente ? `${nombre_cliente} · ${sucursal}` : nombre_cliente, fecha: fechaLinea, rucula, lechuga_crespa, lechuga_roble, total });
+      else map.set(key, { nombre: nombreVisible(id_control, sucursal, nombre_cliente), fecha: fechaLinea, rucula, lechuga_crespa, lechuga_roble, total });
     }
     for (const v of ventasComprometidas) {
       const vFecha = String(v.fecha || '').split(/[T ]/)[0];
