@@ -10,12 +10,12 @@ import { ocupacionPromedioPorNave, type OcupacionHistorialRow } from '@/lib/ocup
 import { productividadDeMes, productividadPlantasDeMes } from '@/lib/productividad';
 import { ocupacionMensualPorCultivo, eficienciaSiembraCosechaPorMes, plantasPerdidasPorSubocupacion } from '@/lib/kpisOperativos';
 import { cicloMesPromedio } from '@/lib/estadisticas';
-import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionPrecioPromedio } from '@/lib/estadisticasVentas';
+import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionPrecioPromedio, clientesPrecioVsVolumen } from '@/lib/estadisticasVentas';
 import type { Lote, Movimiento, Ubicacion, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, Articulo, StockMes, StockCamara, ProductividadDiaria } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoEvolucion from '../GraficoEvolucion';
 import GraficoPesaje from '../GraficoPesaje';
-import { GraficoVentaPorArticulo, GraficoVentaPorCliente, GraficoPrecioPromedio } from '@/app/ventas/VentasEvolucionCharts';
+import { GraficoVentaPorArticulo, GraficoVentaPorCliente, GraficoPrecioPromedio, GraficoClientesPrecioVolumen } from '@/app/ventas/VentasEvolucionCharts';
 import CopiarInformeBoton from './CopiarInformeBoton';
 export const dynamic = 'force-dynamic';
 
@@ -219,6 +219,9 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
   const evolArticulo = evolucionVentaPorArticulo(ventasRep, 12, historicas);
   const evolClienteMensual = evolucionVentaPorCliente(ventasRep, clientes, 6, 6);
   const evolPrecio = evolucionPrecioPromedio(ventasRep, precios, clientes, 12);
+  // Mismo gráfico que en Ventas, pero anclado al MES DEL INFORME (refDate), no a hoy —
+  // si se mira el informe de un mes cerrado tiene que mostrar los clientes de ese mes.
+  const clientesPrecioVolumen = clientesPrecioVsVolumen(ventasRep, precios, clientes, refDate);
   const clientesMes = clientesMesConVariacion(ventas, clientes, anioSel, mesSel, 8);
 
   // ── 2. PRODUCCIÓN ──
@@ -486,6 +489,9 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '14px', marginBottom: '14px' }}>
           <GraficoVentaPorArticulo datos={evolArticulo} />
           <GraficoVentaPorCliente mensual={evolClienteMensual} ocultarToggle />
+        </div>
+        <div style={{ marginBottom: '14px' }}>
+          <GraficoClientesPrecioVolumen datos={clientesPrecioVolumen} titulo={`Clientes — precio vs. volumen · ${nombre}`} />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '14px', marginBottom: '14px' }}>
           <GraficoPrecioPromedio datos={evolPrecio} />

@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import type { ClienteVenta, PrecioVenta, VentaDia, VentaHistorica, PedidoFijo } from '@/lib/types';
-import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionVentaPorClienteSemanal, evolucionPrecioPromedio, resumenMesActual } from '@/lib/estadisticasVentas';
+import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionVentaPorClienteSemanal, evolucionPrecioPromedio, resumenMesActual, clientesPrecioVsVolumen } from '@/lib/estadisticasVentas';
 import Header from '@/components/Header';
 import VentasManager from './VentasManager';
 import XubioResumen from './XubioResumen';
@@ -74,6 +74,7 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
   const evolClienteMensual = evolucionVentaPorCliente(ventas, clientes, 6, 5);
   const evolPrecio = evolucionPrecioPromedio(ventas, precios, clientes, 12);
   const resumenMes = resumenMesActual(ventas, precios, clientes);
+  const clientesPrecioVolumen = clientesPrecioVsVolumen(ventas, precios, clientes);
 
   return (
     <>
@@ -88,7 +89,7 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
             📄 Facturación →
           </Link>
         </div>
-        <VentasEvolucionCharts articulo={evolArticulo} clienteSemanal={evolClienteSemanal} clienteMensual={evolClienteMensual} precio={evolPrecio} resumenMes={resumenMes} />
+        <VentasEvolucionCharts articulo={evolArticulo} clienteSemanal={evolClienteSemanal} clienteMensual={evolClienteMensual} precio={evolPrecio} resumenMes={resumenMes} clientesPrecioVolumen={clientesPrecioVolumen} />
         <div className="card">
           <VentasManager clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} pedidosFijos={pedidosFijos.filter(p=>p.activo==='SI')} initialFecha={searchParams.fecha} />
           <XubioResumen />

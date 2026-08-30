@@ -2,9 +2,9 @@
 import { useState } from 'react';
 import {
   ResponsiveContainer, BarChart, Bar, Line, LineChart, XAxis, YAxis,
-  CartesianGrid, Tooltip, Legend, LabelList,
+  CartesianGrid, Tooltip, Legend, LabelList, ScatterChart, Scatter, Cell, ReferenceLine,
 } from 'recharts';
-import type { PuntoArticulo, EvolucionClientes, PuntoPrecio, ResumenMesActual } from '@/lib/estadisticasVentas';
+import type { PuntoArticulo, EvolucionClientes, PuntoPrecio, ResumenMesActual, ClientePrecioVolumen } from '@/lib/estadisticasVentas';
 
 // Paleta categórica (orden fijo, validada — ver skill de dataviz). Los slots aqua/
 // amarillo/magenta quedan bajo 3:1 de contraste sobre blanco, por eso cada gráfico
@@ -180,13 +180,13 @@ export function TarjetaIndicadores({ datos }: { datos: ResumenMesActual }) {
     { label: 'Precio promedio', valor: fmtMoneda(datos.precioPromedioMes) },
   ];
   return (
-    <div style={cardStyle}>
-      <p style={titleStyle}>Indicadores <span style={{ fontWeight: 400, color: '#9ca3af' }}>· mes en curso</span></p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', height: '220px', justifyContent: 'center' }}>
+    <div style={{ ...cardStyle, padding: '12px 16px' }}>
+      <p style={{ ...titleStyle, marginBottom: '10px' }}>Indicadores <span style={{ fontWeight: 400, color: '#9ca3af' }}>· mes en curso</span></p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: '10px' }}>
         {items.map((it) => (
-          <div key={it.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderBottom: '1px solid #f1f0eb', paddingBottom: '10px' }}>
-            <span style={{ fontSize: '12px', color: INK_SECUNDARIA }}>{it.label}</span>
-            <strong style={{ fontSize: '20px', color: '#111827' }}>{it.valor}</strong>
+          <div key={it.label}>
+            <p style={{ margin: '0 0 2px', fontSize: '11px', color: INK_SECUNDARIA, lineHeight: 1.3 }}>{it.label}</p>
+            <strong style={{ fontSize: '22px', color: '#111827', lineHeight: 1 }}>{it.valor}</strong>
           </div>
         ))}
       </div>
@@ -194,8 +194,127 @@ export function TarjetaIndicadores({ datos }: { datos: ResumenMesActual }) {
   );
 }
 
-export default function VentasEvolucionCharts({ articulo, clienteSemanal, clienteMensual, precio, resumenMes }: {
+// ── Clientes: precio promedio (X) vs. volumen del mes (Y) ────────────────────
+// Cada punto es un cliente. Lo que se busca leer es el CUADRANTE, no el punto exacto:
+// arriba a la izquierda (mucho volumen a precio bajo) es donde más plata se deja sobre la
+// mesa, y es justo lo que una tabla ordenada por volumen no deja ver.
+//
+// El color va por precio contra el promedio general PONDERADO por volumen: verde el que
+// paga por encima, rojo el que paga por debajo, amarillo el que está en el promedio. El
+// umbral es relativo (±5%), así se recalibra solo cuando cambian los precios de lista.
+const UMBRAL_COLOR_PCT = 5;
+const COLOR_BUENO = '#008300', COLOR_MEDIO = '#eda100', COLOR_MALO = '#e34948';
+
+export function GraficoClientesPrecioVolumen({ datos, titulo = 'Clientes — precio vs. volumen' }: {
+  datos: ClientePrecioVolumen[]; titulo?: string;
+}) {
+  if (!datos.length) {
+    return (
+      <div style={cardStyle}>
+        <p style={titleStyle}>{titulo}</p>
+        <p style={{ color: INK_MUTED, fontSize: '12px', textAlign: 'center', padding: '40px 0' }}>Sin ventas cargadas este mes.</p>
+      </div>
+    );
+  }
+  // Promedio PONDERADO por volumen, no promedio simple de precios: es el precio real al
+  // que se vendió el mes, no el punto medio entre un cliente grande y uno chico.
+  const totalU = datos.reduce((a, d) => a + d.unidades, 0);
+  const promedio = totalU > 0 ? datos.reduce((a, d) => a + d.precioPromedio * d.unidades, 0) / totalU : 0;
+  const colorDe = (precio: number) => {
+    if (promedio <= 0) return COLOR_MEDIO;
+    const dif = ((precio - promedio) / promedio) * 100;
+    return dif >= UMBRAL_COLOR_PCT ? COLOR_BUENO : dif <= -UMBRAL_COLOR_PCT ? COLOR_MALO : COLOR_MEDIO;
+  };
+  const puntos = datos.map((d) => ({ ...d, color: colorDe(d.precioPromedio) }));
+  const leyenda = [
+    { color: COLOR_BUENO, texto: 'Paga por encima del promedio' },
+    { color: COLOR_MEDIO, texto: 'En el promedio' },
+    { color: COLOR_MALO, texto: 'Paga por debajo' },
+  ];
+
+  return (
+    <div style={cardStyle}>
+      <p style={titleStyle}>{titulo} <span style={{ fontWeight: 400, color: '#9ca3af' }}>· mes en curso</span></p>
+      <ResponsiveContainer width="100%" height={260}>
+        <ScatterChart margin={{ top: 10, right: 18, bottom: 26, left: 10 }}>
+          <CartesianGrid stroke={GRID} strokeDasharray="3 3" />
+          <XAxis type="number" dataKey="precioPromedio" name="Precio promedio"
+            tickFormatter={(v) => fmtMoneda(v)} tick={{ fontSize: 11, fill: INK_SECUNDARIA }}
+            label={{ value: 'Precio promedio por unidad', position: 'insideBottom', offset: -16, fontSize: 11, fill: INK_MUTED }} />
+          <YAxis type="number" dataKey="unidades" name="Unidades"
+            tickFormatter={fmtMiles} tick={{ fontSize: 11, fill: INK_SECUNDARIA }}
+            label={{ value: 'Unidades del mes', angle: -90, position: 'insideLeft', fontSize: 11, fill: INK_MUTED }} />
+          <ReferenceLine x={promedio} stroke={INK_MUTED} strokeDasharray="4 4" />
+          <Tooltip content={<TooltipScatter />} cursor={{ strokeDasharray: '3 3' }} />
+          <Scatter data={puntos}>
+            {puntos.map((p) => <Cell key={p.id_control} fill={p.color} />)}
+          </Scatter>
+        </ScatterChart>
+      </ResponsiveContainer>
+
+      <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', fontSize: '11px', color: INK_SECUNDARIA, marginTop: '4px' }}>
+        {leyenda.map((l) => (
+          <span key={l.texto} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <span style={{ width: 9, height: 9, borderRadius: '50%', background: l.color, display: 'inline-block' }} />{l.texto}
+          </span>
+        ))}
+        <span style={{ color: INK_MUTED }}>línea punteada = promedio ({fmtMoneda(promedio)})</span>
+      </div>
+      <p style={{ margin: '8px 0 0', fontSize: '11px', color: INK_MUTED, lineHeight: 1.5 }}>
+        Arriba a la izquierda = mucho volumen a precio bajo, que es donde más conviene mirar. El precio
+        promedio se calcula solo sobre paquete/planta: mezclar bandeja y kg da un número que no se puede
+        comparar entre clientes.
+      </p>
+
+      <TablaToggle>
+        {() => (
+          <table style={{ fontSize: '11px', width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr style={{ color: INK_MUTED }}>
+              <th style={{ textAlign: 'left', padding: '3px 6px 3px 0' }}>Cliente</th>
+              <th style={{ textAlign: 'right', padding: '3px 6px' }}>Precio prom.</th>
+              <th style={{ textAlign: 'right', padding: '3px 6px' }}>Unidades</th>
+              <th style={{ textAlign: 'right', padding: '3px 0' }}>Facturado</th>
+            </tr></thead>
+            <tbody>
+              {puntos.map((p) => (
+                <tr key={p.id_control} style={{ borderTop: '1px solid #f1f0eb' }}>
+                  <td style={{ padding: '3px 6px 3px 0' }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.color, display: 'inline-block', marginRight: 5 }} />
+                    {p.nombre}
+                  </td>
+                  <td style={{ textAlign: 'right', padding: '3px 6px' }}>{fmtMoneda(p.precioPromedio)}</td>
+                  <td style={{ textAlign: 'right', padding: '3px 6px' }}>{fmtEntero(p.unidades)}</td>
+                  <td style={{ textAlign: 'right', padding: '3px 0' }}>{fmtMoneda(p.monto)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </TablaToggle>
+    </div>
+  );
+}
+
+function TooltipScatter({ active, payload }: any) {
+  if (!active || !payload?.length) return null;
+  const d = payload[0]?.payload;
+  if (!d) return null;
+  return (
+    <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
+      <p style={{ margin: '0 0 4px', fontWeight: 700, color: '#111827' }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: d.color, display: 'inline-block', marginRight: 5 }} />
+        {d.nombre}
+      </p>
+      <div style={{ color: INK_SECUNDARIA }}>Precio promedio: <strong style={{ color: '#111827' }}>{fmtMoneda(d.precioPromedio)}</strong></div>
+      <div style={{ color: INK_SECUNDARIA }}>Unidades del mes: <strong style={{ color: '#111827' }}>{fmtEntero(d.unidades)}</strong></div>
+      <div style={{ color: INK_SECUNDARIA }}>Facturado: <strong style={{ color: '#111827' }}>{fmtMoneda(d.monto)}</strong></div>
+    </div>
+  );
+}
+
+export default function VentasEvolucionCharts({ articulo, clienteSemanal, clienteMensual, precio, resumenMes, clientesPrecioVolumen }: {
   articulo: PuntoArticulo[]; clienteSemanal: EvolucionClientes; clienteMensual: EvolucionClientes; precio: PuntoPrecio[]; resumenMes: ResumenMesActual;
+  clientesPrecioVolumen: ClientePrecioVolumen[];
 }) {
   if (!articulo.length && !clienteSemanal.meses.length && !precio.length) return null;
   return (
@@ -204,9 +323,10 @@ export default function VentasEvolucionCharts({ articulo, clienteSemanal, client
         <GraficoVentaPorArticulo datos={articulo} />
         <GraficoVentaPorCliente semanal={clienteSemanal} mensual={clienteMensual} />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: '14px' }}>
+      <TarjetaIndicadores datos={resumenMes} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: '14px' }}>
         <GraficoPrecioPromedio datos={precio} />
-        <TarjetaIndicadores datos={resumenMes} />
+        <GraficoClientesPrecioVolumen datos={clientesPrecioVolumen} />
       </div>
     </div>
   );

@@ -242,6 +242,74 @@ export function diasDeVentaHabituales(ventas: VentaDia[]): Set<number> {
   return out;
 }
 
+// ── Clientes: precio promedio vs. volumen del mes (para el gráfico de dispersión) ──
+// Cada cliente es un punto: X = lo que paga en promedio por unidad, Y = cuánto compra en
+// el mes. Sirve para ver de un vistazo quién compra mucho barato (abajo a la izquierda no
+// preocupa; ARRIBA a la izquierda sí: mucho volumen a precio bajo) y quién paga bien.
+//
+// El precio promedio se calcula SOLO sobre paquete/planta (mismo criterio que
+// precioPromedioMes): mezclar bandeja y kg promedia unidades de venta distintas y da un
+// número que no se puede comparar entre clientes. El volumen en cambio es el total, kg
+// incluido — es lo que realmente se le entrega.
+export interface ClientePrecioVolumen {
+  id_control: string;
+  nombre: string;
+  unidades: number;       // volumen del mes (todas las presentaciones, kg convertido)
+  precioPromedio: number; // $ por unidad comparable (IVA incluido)
+  monto: number;          // facturado del mes
+}
+export function clientesPrecioVsVolumen(
+  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], fechaRef: Date = new Date()
+): ClientePrecioVolumen[] {
+  const mk = mesKey(fechaRef.toISOString().slice(0, 10));
+  const clienteMap = new Map(clientes.map((c) => [c.id_control, c]));
+  const nombreMap = new Map(clientes.map((c) => [String(c.id_control), c.nombre_display || c.nombre_xubio || String(c.id_control)]));
+  const PRICE_KEYS = [...KEYS_RUCULA, ...KEYS_LECHUGA, 'albahaca'] as const;
+  const KEYS_KG = ['rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
+
+  const acc = new Map<string, { unidades: number; monto: number; ingComparable: number; uComparable: number; kgRuc: number; kgLec: number }>();
+  for (const v of ventas) {
+    if (mesKey(v.fecha) !== mk) continue;
+    const id = String(v.id_control || '');
+    if (!id) continue;
+    const cliente = clienteMap.get(v.id_control);
+    if (!acc.has(id)) acc.set(id, { unidades: 0, monto: 0, ingComparable: 0, uComparable: 0, kgRuc: 0, kgLec: 0 });
+    const a = acc.get(id)!;
+    for (const key of PROD_KEYS) {
+      const qty = Number((v as any)[key]) || 0;
+      if (qty <= 0) continue;
+      const precio = precioFinal(precios, v.id_control, v.sucursal, key, cliente);
+      a.monto += qty * precio;
+      if ((KEYS_KG as readonly string[]).includes(key)) {
+        if (key === 'rucula_kg') a.kgRuc += qty; else a.kgLec += qty;
+      } else {
+        a.unidades += qty;
+      }
+      if ((PRICE_KEYS as readonly string[]).includes(key)) {
+        a.ingComparable += qty * precio;
+        a.uComparable += qty;
+      }
+    }
+  }
+
+  const out: ClientePrecioVolumen[] = [];
+  for (const [id, a] of acc) {
+    const unidades = a.unidades + Math.round((a.kgRuc * 1000) / GR_PAQ_RUCULA) + Math.round((a.kgLec * 1000) / GR_PAQ_LECHUGA);
+    if (unidades <= 0) continue;
+    // Sin ventas por paquete/planta no hay precio comparable (cliente 100% por kg): queda
+    // afuera del gráfico en vez de aparecer en $0 y ensuciar la lectura del eje.
+    if (a.uComparable <= 0) continue;
+    out.push({
+      id_control: id,
+      nombre: nombreMap.get(id) || id,
+      unidades,
+      precioPromedio: Math.round((a.ingComparable / a.uComparable) * 100) / 100,
+      monto: Math.round(a.monto),
+    });
+  }
+  return out.sort((x, y) => y.unidades - x.unidades);
+}
+
 export interface ResumenMesActual {
   unidadesMes: number; proyeccionMes: number; precioPromedioMes: number;
   // Facturado del mes hasta el corte y su proyección a fin de mes, con el MISMO prorrateo
