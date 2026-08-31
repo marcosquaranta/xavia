@@ -7,8 +7,8 @@ import type { ClientePrecioVolumen } from '@/lib/estadisticasVentas';
 // No es un scatter decorativo: la lectura es por CUADRANTE y por VALOR COMERCIAL.
 //
 // Está hecho en SVG a mano y no con la librería de gráficos (como el resto de los de esta
-// pantalla) por dos cosas que necesitan control fino: el fondo de isocuantas —bandas donde
-// Precio × Volumen es constante— y el acomodado de las etiquetas para que no se pisen.
+// pantalla) por dos cosas que necesitan control fino: el fondo de bandas de valor y el
+// acomodado de las etiquetas para que no se pisen.
 //
 // Los PUNTOS son todos del mismo color y tamaño a propósito: el color vive en el fondo, y
 // pintar además los puntos hacía competir dos codificaciones para lo mismo.
@@ -19,8 +19,8 @@ const INK_MUTED = '#898781';
 const PUNTO = '#1f2937';       // gris oscuro, único color de los puntos
 const GRID = '#eeede8';
 
-// Rampa pastel de menor a mayor valor comercial (rojo → naranja → amarillo → verde).
-// Deliberadamente desaturada: es fondo, no tiene que competir con los datos.
+// Rampa pastel de menor a mayor valor comercial. Deliberadamente desaturada: es fondo, no
+// tiene que competir con los datos, y un rojo fuerte hacía ver mal a clientes que no lo son.
 const RAMPA = ['#f7ece6', '#faf1e4', '#fcf7e5', '#f4f8e6', '#ebf5e8', '#e2f0e6'];
 const BANDAS = RAMPA.length;
 
@@ -78,39 +78,40 @@ export default function GraficoValorComercial({ datos, titulo = 'Clientes — pr
   const py = (u: number) => Y1 - ((u - yMin) / (yMax - yMin || 1)) * (Y1 - Y0);
 
   const puntos: Punto[] = datos.map((d) => ({ ...d, x: px(d.precioPromedio), y: py(d.unidades) }));
+  const xProm = px(precioProm), yProm = py(volumenProm);
 
-  // ── Fondo: bandas de igual Precio × Volumen ────────────────────────────────────────
-  // Para un valor v, los clientes que lo alcanzan están sobre la hipérbola u = v / precio:
-  // más precio compensa menos volumen y al revés. Cada banda es la región entre dos de
-  // esas curvas, así que el degradado tiene sentido económico y no es una diagonal linda.
-  // Los cortes NO se reparten sobre todo el rango teórico (0 a precioMax × volumenMax):
-  // ningún cliente se acerca a ese techo, así que casi todos caían en la banda más baja y
-  // el mapa daba la sensación de que está todo mal. Se reparten sobre el rango REAL de los
-  // clientes, de modo que el color diga la posición de cada uno RESPECTO DEL RESTO. La
-  // primera y la última banda absorben lo que queda fuera de ese rango.
-  const vMaxPlot = xMax * yMax;
-  const valores = datos.map((d) => d.precioPromedio * d.unidades);
-  const vLo = Math.max(0, Math.min(...valores) * 0.5);
-  const vHi = Math.max(...valores) * 1.1;
-  const cortes = [0];
-  for (let i = 0; i < BANDAS - 1; i++) cortes.push(vLo + ((vHi - vLo) * i) / Math.max(1, BANDAS - 2));
-  cortes.push(Math.max(vMaxPlot, vHi * 1.5));
-  const bandas = Array.from({ length: BANDAS }, (_, i) => ({ d: pathBanda(cortes[i], cortes[i + 1]), fill: RAMPA[i] }));
+  // ── Fondo: bandas de valor comercial ───────────────────────────────────────────────
+  // El primer intento usaba isocuantas de Precio × Volumen. Matemáticamente impecable,
+  // pero inservible con estos datos: el volumen entre clientes varía ~85 veces y el precio
+  // apenas ~1,5. En un producto, el volumen manda y el precio casi no pesa — el mapa
+  // terminaba siendo un mapa de volumen, y un cliente que paga caro pero compra poco caía
+  // en la banda más cálida como si fuera un mal cliente.
+  //
+  // Ahora el puntaje es el PROMEDIO de las dos posiciones relativas (0 a 1 en cada eje),
+  // así precio y volumen pesan lo mismo. Se mantiene la idea de fondo —más precio compensa
+  // menos volumen— pero las bandas son diagonales rectas en vez de hipérbolas, y quedan
+  // alineadas con los cuadrantes: arriba a la derecha lo más verde, abajo a la izquierda lo
+  // más cálido, y los dos cuadrantes cruzados en el medio, que es lo que dice la leyenda.
+  const bandas = Array.from({ length: BANDAS }, (_, i) => ({
+    d: pathBanda(i / BANDAS, (i + 1) / BANDAS),
+    fill: RAMPA[i],
+  }));
 
-  function curva(v: number, desdeIzq: boolean): string {
-    const PASOS = 48;
+  // Borde superior de la zona con puntaje `s`: para cada x, el volumen que la alcanza.
+  function curva(s: number, desdeIzq: boolean): string {
+    const PASOS = 2; // recta: alcanza con los extremos
     const pts: string[] = [];
     for (let k = 0; k <= PASOS; k++) {
       const i = desdeIzq ? k : PASOS - k;
       const x = X0 + ((X1 - X0) * i) / PASOS;
-      const precio = xMin + ((x - X0) / (X1 - X0)) * (xMax - xMin);
-      const u = precio > 0 ? v / precio : yMax;
-      pts.push(`${x.toFixed(1)} ${py(Math.max(yMin, Math.min(yMax, u))).toFixed(1)}`);
+      const nx = (x - X0) / (X1 - X0);
+      const ny = Math.max(0, Math.min(1, 2 * s - nx));
+      pts.push(`${x.toFixed(1)} ${(Y1 - ny * (Y1 - Y0)).toFixed(1)}`);
     }
     return pts.join(' L ');
   }
-  function pathBanda(v1: number, v2: number): string {
-    return `M ${curva(v2, true)} L ${curva(v1, false)} Z`;
+  function pathBanda(s1: number, s2: number): string {
+    return `M ${curva(s2, true)} L ${curva(s1, false)} Z`;
   }
 
   // ── Ticks ──────────────────────────────────────────────────────────────────────────
@@ -148,7 +149,6 @@ export default function GraficoValorComercial({ datos, titulo = 'Clientes — pr
   }
 
   const insights = calcularInsights(datos, precioProm, volumenProm);
-  const xProm = px(precioProm), yProm = py(volumenProm);
 
   return (
     <div style={card}>
@@ -174,11 +174,13 @@ export default function GraficoValorComercial({ datos, titulo = 'Clientes — pr
               <line key={`gx${v}`} x1={px(v)} x2={px(v)} y1={Y0} y2={Y1} stroke={GRID} strokeWidth={1} />
             ))}
 
-            {/* Cuadrantes: referencias discretas, sin carteles que tapen los datos */}
-            <TextoCuadrante x={X1 - 8} y={Y0 + 13} anchor="end" texto="DEFENDER Y HACER CRECER" />
-            <TextoCuadrante x={X0 + 8} y={Y0 + 13} anchor="start" texto="CAPTURAR PRECIO" />
-            <TextoCuadrante x={X1 - 8} y={Y1 - 8} anchor="end" texto="DESARROLLAR VOLUMEN" />
-            <TextoCuadrante x={X0 + 8} y={Y1 - 8} anchor="start" texto="REVISAR" />
+            {/* Cada cuadrante lleva su nombre EN EL MEDIO de su zona, no en la esquina del
+                gráfico: con las líneas de promedio descentradas, un cartel en la esquina
+                queda lejos de la zona que nombra y hay franjas que parecen no tener nombre. */}
+            <TextoCuadrante x={(xProm + X1) / 2} y={(Y0 + yProm) / 2} texto="DEFENDER Y HACER CRECER" />
+            <TextoCuadrante x={(X0 + xProm) / 2} y={(Y0 + yProm) / 2} texto="CAPTURAR PRECIO" />
+            <TextoCuadrante x={(xProm + X1) / 2} y={(yProm + Y1) / 2} texto="DESARROLLAR VOLUMEN" />
+            <TextoCuadrante x={(X0 + xProm) / 2} y={(yProm + Y1) / 2} texto="REVISAR" />
 
             {/* Líneas de promedio */}
             <line x1={xProm} x2={xProm} y1={Y0} y2={Y1} stroke={INK_SEC} strokeWidth={1} strokeDasharray="4 4" opacity={0.55} />
@@ -243,9 +245,10 @@ export default function GraficoValorComercial({ datos, titulo = 'Clientes — pr
               ))}
             </div>
             <p style={{ margin: '8px 0 0', fontSize: '10.5px', color: INK_MUTED, lineHeight: 1.45 }}>
-              Las bandas del fondo unen combinaciones de igual precio × volumen: más precio compensa menos
-              volumen y al revés. El color es <strong>relativo a tus propios clientes</strong>: marca la posición
-              de cada uno respecto del resto, no una nota absoluta.
+              Las bandas del fondo combinan precio y volumen con el mismo peso, así que más precio compensa
+              menos volumen y al revés. El color es <strong>relativo a tus propios clientes</strong>: marca la
+              posición de cada uno respecto del resto, no una nota absoluta — siempre va a haber alguien más
+              cerca de cada extremo.
             </p>
           </div>
 
@@ -350,9 +353,9 @@ function Encabezado({ titulo, subtitulo }: { titulo: string; subtitulo: string }
   );
 }
 
-function TextoCuadrante({ x, y, anchor, texto }: { x: number; y: number; anchor: 'start' | 'end'; texto: string }) {
+function TextoCuadrante({ x, y, texto }: { x: number; y: number; texto: string }) {
   return (
-    <text x={x} y={y} textAnchor={anchor} fontSize={8.5} fill={INK_MUTED} letterSpacing="0.5" opacity={0.75} pointerEvents="none">
+    <text x={x} y={y} textAnchor="middle" fontSize={8.5} fill={INK_MUTED} letterSpacing="0.6" opacity={0.6} pointerEvents="none">
       {texto}
     </text>
   );
