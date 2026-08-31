@@ -21,7 +21,7 @@ const GRID = '#eeede8';
 
 // Rampa pastel de menor a mayor valor comercial (rojo → naranja → amarillo → verde).
 // Deliberadamente desaturada: es fondo, no tiene que competir con los datos.
-const RAMPA = ['#fbeae7', '#fdeee1', '#fdf5e2', '#f7f7e2', '#eef5e6', '#e6f3ea'];
+const RAMPA = ['#f7ece6', '#faf1e4', '#fcf7e5', '#f4f8e6', '#ebf5e8', '#e2f0e6'];
 const BANDAS = RAMPA.length;
 
 // El eje X arranca en $1.300 salvo que algún cliente pague menos: nunca se recorta un
@@ -83,12 +83,19 @@ export default function GraficoValorComercial({ datos, titulo = 'Clientes — pr
   // Para un valor v, los clientes que lo alcanzan están sobre la hipérbola u = v / precio:
   // más precio compensa menos volumen y al revés. Cada banda es la región entre dos de
   // esas curvas, así que el degradado tiene sentido económico y no es una diagonal linda.
-  const vMax = xMax * yMax;
-  const bandas = Array.from({ length: BANDAS }, (_, i) => {
-    const v1 = (vMax * i) / BANDAS;
-    const v2 = (vMax * (i + 1)) / BANDAS;
-    return { d: pathBanda(v1, v2), fill: RAMPA[i] };
-  });
+  // Los cortes NO se reparten sobre todo el rango teórico (0 a precioMax × volumenMax):
+  // ningún cliente se acerca a ese techo, así que casi todos caían en la banda más baja y
+  // el mapa daba la sensación de que está todo mal. Se reparten sobre el rango REAL de los
+  // clientes, de modo que el color diga la posición de cada uno RESPECTO DEL RESTO. La
+  // primera y la última banda absorben lo que queda fuera de ese rango.
+  const vMaxPlot = xMax * yMax;
+  const valores = datos.map((d) => d.precioPromedio * d.unidades);
+  const vLo = Math.max(0, Math.min(...valores) * 0.5);
+  const vHi = Math.max(...valores) * 1.1;
+  const cortes = [0];
+  for (let i = 0; i < BANDAS - 1; i++) cortes.push(vLo + ((vHi - vLo) * i) / Math.max(1, BANDAS - 2));
+  cortes.push(Math.max(vMaxPlot, vHi * 1.5));
+  const bandas = Array.from({ length: BANDAS }, (_, i) => ({ d: pathBanda(cortes[i], cortes[i + 1]), fill: RAMPA[i] }));
 
   function curva(v: number, desdeIzq: boolean): string {
     const PASOS = 48;
@@ -147,9 +154,9 @@ export default function GraficoValorComercial({ datos, titulo = 'Clientes — pr
     <div style={card}>
       <Encabezado titulo={titulo} subtitulo={subtitulo} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(300px,1fr))', gap: '18px', alignItems: 'start' }}>
+      <div>
         {/* ── Gráfico ── */}
-        <div style={{ position: 'relative', minWidth: 0, gridColumn: 'span 1' }}>
+        <div style={{ position: 'relative', minWidth: 0 }}>
           <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
             <defs>
               <clipPath id="areaGrafico"><rect x={X0} y={Y0} width={X1 - X0} height={Y1 - Y0} /></clipPath>
@@ -211,16 +218,20 @@ export default function GraficoValorComercial({ datos, titulo = 'Clientes — pr
           {hover && <Tooltip p={hover} precioProm={precioProm} volumenProm={volumenProm} />}
         </div>
 
-        {/* ── Panel lateral ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', minWidth: 0 }}>
+      </div>
+
+      {/* Todo lo que no es el gráfico va detrás de un link: la tarjeta entra al lado de
+          otro gráfico sin ocupar media pantalla, y quien quiere el detalle lo abre. */}
+      <Desplegable>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: '18px', alignItems: 'start' }}>
           <div>
             <p style={subtituloPanel}>Mapa de valor comercial</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
               {[
-                { c: RAMPA[5], t: 'Alto valor', d: 'Alto precio + alto volumen', a: 'Defender y hacer crecer' },
+                { c: RAMPA[5], t: 'Mayor valor', d: 'Precio y volumen altos', a: 'Defender y hacer crecer' },
                 { c: RAMPA[3], t: 'Valor medio alto', d: 'Buen equilibrio', a: 'Oportunidad de optimización' },
-                { c: RAMPA[1], t: 'Valor medio bajo', d: 'Precio o volumen bajos', a: 'Revisar estrategia' },
-                { c: RAMPA[0], t: 'Bajo valor', d: 'Bajo precio + bajo volumen', a: 'Revisar condiciones y rentabilidad' },
+                { c: RAMPA[1], t: 'Valor medio', d: 'Precio o volumen por debajo del resto', a: 'Hay margen para crecer' },
+                { c: RAMPA[0], t: 'Menor valor relativo', d: 'Precio y volumen por debajo del resto', a: 'Revisar condiciones' },
               ].map((x) => (
                 <div key={x.t} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
                   <span style={{ width: 12, height: 12, borderRadius: 3, background: x.c, border: '1px solid #e4e3dd', flexShrink: 0, marginTop: 2 }} />
@@ -233,7 +244,8 @@ export default function GraficoValorComercial({ datos, titulo = 'Clientes — pr
             </div>
             <p style={{ margin: '8px 0 0', fontSize: '10.5px', color: INK_MUTED, lineHeight: 1.45 }}>
               Las bandas del fondo unen combinaciones de igual precio × volumen: más precio compensa menos
-              volumen y al revés.
+              volumen y al revés. El color es <strong>relativo a tus propios clientes</strong>: marca la posición
+              de cada uno respecto del resto, no una nota absoluta.
             </p>
           </div>
 
@@ -252,9 +264,22 @@ export default function GraficoValorComercial({ datos, titulo = 'Clientes — pr
             )}
           </div>
         </div>
-      </div>
+        <TablaDatos puntos={puntos} precioProm={precioProm} volumenProm={volumenProm} />
+      </Desplegable>
+    </div>
+  );
+}
 
-      <TablaDatos puntos={puntos} precioProm={precioProm} volumenProm={volumenProm} />
+// Un solo link abre leyenda, insights y tabla. Antes la leyenda y los insights estaban
+// siempre visibles al costado y la tarjeta ocupaba el ancho entero de la pantalla.
+function Desplegable({ children }: { children: React.ReactNode }) {
+  const [abierto, setAbierto] = useState(false);
+  return (
+    <div style={{ marginTop: '10px' }}>
+      <button onClick={() => setAbierto((v) => !v)} style={{ background: 'none', border: 'none', color: '#2563eb', fontSize: '11.5px', cursor: 'pointer', padding: 0, fontWeight: 600 }}>
+        {abierto ? '▾ Ocultar mapa de valor e insights' : '▸ Ver mapa de valor, insights y tabla'}
+      </button>
+      {abierto && <div style={{ marginTop: '12px' }}>{children}</div>}
     </div>
   );
 }
@@ -365,15 +390,10 @@ function Fila({ k, v, color }: { k: string; v: string; color?: string }) {
 }
 
 function TablaDatos({ puntos, precioProm, volumenProm }: { puntos: Punto[]; precioProm: number; volumenProm: number }) {
-  const [abierta, setAbierta] = useState(false);
   const orden = [...puntos].sort((a, b) => b.monto - a.monto);
   return (
-    <div style={{ marginTop: '12px' }}>
-      <button onClick={() => setAbierta((v) => !v)} style={{ background: 'none', border: 'none', color: '#2563eb', fontSize: '11px', cursor: 'pointer', padding: 0 }}>
-        {abierta ? '▾ Ocultar tabla de datos' : '▸ Ver tabla de datos'}
-      </button>
-      {abierta && (
-        <div style={{ overflowX: 'auto', marginTop: '8px' }}>
+    <div style={{ marginTop: '16px' }}>
+        <div style={{ overflowX: 'auto' }}>
           <table style={{ fontSize: '11px', width: '100%', borderCollapse: 'collapse', minWidth: '460px' }}>
             <thead><tr style={{ color: INK_MUTED }}>
               <th style={{ textAlign: 'left', padding: '3px 6px 3px 0' }}>Cliente</th>
@@ -402,7 +422,6 @@ function TablaDatos({ puntos, precioProm, volumenProm }: { puntos: Punto[]; prec
             real de las plantas cosechadas en la misma ventana, para llegar al precio por paquete equivalente.
           </p>
         </div>
-      )}
     </div>
   );
 }

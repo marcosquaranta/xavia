@@ -207,8 +207,10 @@ export default function VentasEvolucionCharts({ articulo, clienteSemanal, client
         <GraficoVentaPorCliente semanal={clienteSemanal} mensual={clienteMensual} />
       </div>
       <TarjetaIndicadores datos={resumenMes} />
-      <GraficoValorComercial datos={clientesPrecioVolumen} />
-      <GraficoPrecioPromedio datos={precio} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: '14px' }}>
+        <GraficoValorComercial datos={clientesPrecioVolumen} />
+        <GraficoPrecioPromedio datos={precio} />
+      </div>
     </div>
   );
 }

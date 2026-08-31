@@ -493,10 +493,8 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
           <GraficoVentaPorArticulo datos={evolArticulo} />
           <GraficoVentaPorCliente mensual={evolClienteMensual} ocultarToggle />
         </div>
-        <div style={{ marginBottom: '14px' }}>
-          <GraficoValorComercial datos={clientesPrecioVolumen} subtitulo={`30 días hasta ${nombre}`} />
-        </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '14px', marginBottom: '14px' }}>
+          <GraficoValorComercial datos={clientesPrecioVolumen} subtitulo={`30 días hasta ${nombre}`} />
           <GraficoPrecioPromedio datos={evolPrecio} />
           <div style={cardStyle}>
             <p className="card-title" style={{ margin: '0 0 2px' }}>Venta por cliente — {nombre}</p>
