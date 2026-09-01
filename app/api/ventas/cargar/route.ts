@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet, batchUpdateRows } from '@/lib/sheets';
-import { emitirPendientes, enviarAvisoCaePendiente } from '@/lib/facturacionEmitir';
+import { emitirPendientes } from '@/lib/facturacionEmitir';
 import type { VentaDia } from '@/lib/types';
 
 const QTY_KEYS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'];
@@ -41,17 +41,16 @@ export async function POST(req: NextRequest) {
       const r = await emitirPendientes(idControls);
       emitidas = r.emitidas; errores = r.errores;
       if (errores.length) console.error('[ventas/cargar] errores al emitir a Xubio:', JSON.stringify(errores));
-      if (emitidas.length) {
-        try { await enviarAvisoCaePendiente(emitidas, fecha); }
-        catch (e: any) { console.error('[ventas/cargar] error enviando aviso de CAEs pendientes:', e); }
-      }
+      // El aviso de CAEs pendientes ya NO sale acá: un día con tres cargas mandaba tres
+      // mails. Las emisiones quedan registradas (ver lib/caePendientes.ts) y sale un solo
+      // aviso acumulado por la mañana, desde /api/cron/cae-pendientes.
     } catch (e: any) {
       console.error('[ventas/cargar] excepción al emitir a Xubio:', e);
       errores = [{ cliente: 'Xubio', error: e?.message || 'Error al emitir' }];
     }
 
     // El mail de "Facturación pendiente" se sacó a pedido: el único aviso que queda es el
-    // de CAEs pendientes (enviarAvisoCaePendiente, más arriba). Los errores de emisión se
+    // de CAEs pendientes, que ahora sale una vez por día. Los errores de emisión se
     // muestran igual en pantalla al terminar la carga, con el detalle por cliente.
     const clientes = idControls.length;
     return NextResponse.json({ ok: true, lineas: aCargar.length, clientes, emitidas, errores });

@@ -1,4 +1,5 @@
 import { readSheet, batchUpdateRows } from './sheets';
+import { registrarEmitidas } from './caePendientes';
 import type { ClienteVenta, PrecioVenta, VentaDia } from './types';
 import { getClientesXubio, matchClienteXubio, emitirFactura, PRODUCTO_CODIGO } from './xubio';
 
@@ -84,58 +85,6 @@ async function enviarDetalleVentaCliente(
   }
 }
 
-// Aviso de que se emitieron comprobantes en Xubio (vía API, al "Cargar ventas") pero
-// falta hacer a mano en Xubio los dos pasos que el plan actual no permite por API:
-// obtener el CAE y enviar la factura por correo.
-export async function enviarAvisoCaePendiente(emitidas: ResultadoEmision['emitidas'], fecha: string): Promise<{ ok: boolean; error?: string }> {
-  if (!emitidas.length) return { ok: true };
-  if (!process.env.RESEND_API_KEY) return { ok: false, error: 'RESEND_API_KEY no configurada' };
-
-  const [y, m, d] = String(fecha || '').split(/[T ]/)[0].split('-');
-  const fechaFmt = d && m && y ? `${d}/${m}/${y}` : String(fecha || '');
-  const clientesTxt = emitidas.map(e => e.cliente).join(', ');
-
-  const rows = emitidas.map(e => `
-    <tr>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee">${e.cliente}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee">${e.numero || '—'}</td>
-    </tr>`).join('');
-
-  const html = `
-    <div style="font-family:system-ui,Arial,sans-serif;color:#111;max-width:600px">
-      <h2 style="margin:0 0 4px">CAEs pendientes — ${fechaFmt}</h2>
-      <p style="margin:0 0 14px;color:#555">Se emitieron <strong>${emitidas.length}</strong> comprobante(s) en Xubio para: <strong>${clientesTxt}</strong>. El plan actual de Xubio no permite pedir el CAE ni enviar por correo vía API, así que faltan estos dos pasos a mano en Xubio:</p>
-      <ol style="margin:0 0 14px;color:#333">
-        <li>Obtener CAE</li>
-        <li>Enviar por correo</li>
-      </ol>
-      <table style="border-collapse:collapse;width:100%;font-size:14px">
-        <thead><tr style="background:#f5f5f5">
-          <th style="padding:6px 10px;text-align:left">Cliente</th>
-          <th style="padding:6px 10px;text-align:left">Comprobante</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
-
-  try {
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from: 'Xavia App <ventas@xavia.com.ar>',
-        to: ['administracion@xavia.com.ar'],
-        subject: `CAEs pendientes — ${clientesTxt} — ${fechaFmt}`,
-        html,
-      }),
-    });
-    if (!res.ok) { const err = await res.json().catch(() => ({})); return { ok: false, error: (err as any).message || `HTTP ${res.status}` }; }
-    return { ok: true };
-  } catch (e: any) {
-    return { ok: false, error: e?.message || 'excepción al enviar' };
-  }
-}
-
 export interface ResultadoEmision {
   emitidas: { cliente: string; numero?: string; cae?: string; emailCliente?: 'enviado' | 'sin_email' | 'error' }[];
   errores: { cliente: string; error: string }[];
@@ -176,6 +125,7 @@ export async function emitirPendientes(idControls?: string[] | null): Promise<Re
 
   const emitidas: ResultadoEmision['emitidas'] = [];
   const errores: { cliente: string; error: string }[] = [];
+  const paraRegistrar: { cliente: string; numero?: string; cae?: string; fechaVenta: string }[] = [];
 
   for (const { idControl, sucursal, lineas } of grupos.values()) {
     const cliente = clientesMap.get(idControl);
@@ -240,6 +190,7 @@ export async function emitirPendientes(idControls?: string[] | null): Promise<Re
       }
 
       emitidas.push(emitida);
+      paraRegistrar.push({ cliente: nombre, numero: res.numeroDocumento, cae: res.cae, fechaVenta: lineas[0].fecha });
       await batchUpdateRows('Ventas', 'id_venta', lineas.map(l => ({
         keyValue: l.id_venta,
         updates: { exportado: res.numeroDocumento || 'FACTURADO' },
@@ -250,5 +201,8 @@ export async function emitirPendientes(idControls?: string[] | null): Promise<Re
     }
   }
 
+  // Queda registrado para el aviso diario de CAEs (ver lib/caePendientes.ts). Antes el
+  // mail salía acá mismo, uno por cada carga de ventas.
+  await registrarEmitidas(paraRegistrar);
   return { emitidas, errores };
 }
