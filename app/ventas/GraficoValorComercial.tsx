@@ -23,6 +23,7 @@ const GRID = '#eeede8';
 // tiene que competir con los datos, y un rojo fuerte hacía ver mal a clientes que no lo son.
 const RAMPA = ['#f7ece6', '#faf1e4', '#fcf7e5', '#f4f8e6', '#ebf5e8', '#e2f0e6'];
 const BANDAS = RAMPA.length;
+const CONTRASTE = 1.6;  // cuánto se estira la rampa alrededor del centro (ver `bordes`)
 
 // El eje X arranca en $1.300 salvo que algún cliente pague menos: nunca se recorta un
 // punto para ganar escala — el que paga poco es justo el que hay que ver.
@@ -81,32 +82,38 @@ export default function GraficoValorComercial({ datos, titulo = 'Clientes — pr
   const xProm = px(precioProm), yProm = py(volumenProm);
 
   // ── Fondo: bandas de valor comercial ───────────────────────────────────────────────
-  // El primer intento usaba isocuantas de Precio × Volumen. Matemáticamente impecable,
-  // pero inservible con estos datos: el volumen entre clientes varía ~85 veces y el precio
-  // apenas ~1,5. En un producto, el volumen manda y el precio casi no pesa — el mapa
-  // terminaba siendo un mapa de volumen, y un cliente que paga caro pero compra poco caía
-  // en la banda más cálida como si fuera un mal cliente.
-  //
-  // Ahora el puntaje es el PROMEDIO de las dos posiciones relativas (0 a 1 en cada eje),
-  // así precio y volumen pesan lo mismo. Se mantiene la idea de fondo —más precio compensa
-  // menos volumen— pero las bandas son diagonales rectas en vez de hipérbolas, y quedan
-  // alineadas con los cuadrantes: arriba a la derecha lo más verde, abajo a la izquierda lo
-  // más cálido, y los dos cuadrantes cruzados en el medio, que es lo que dice la leyenda.
+  // El puntaje de cada lugar del plano es el PROMEDIO de la posición relativa en los dos
+  // ejes (ver escalaRelativa), así precio y volumen pesan lo mismo y más precio compensa
+  // menos volumen. Como el 0,5 de cada eje cae exactamente en su promedio, el cruce de las
+  // dos líneas punteadas es el centro de la escala: pasando las dos, el fondo es verde.
+  const escP = escalaRelativa(datos.map((d) => d.precioPromedio), precioProm);
+  const escV = escalaRelativa(datos.map((d) => d.unidades), volumenProm);
+
+  // Los cortes entre bandas se estiran alrededor del centro (CONTRASTE): comprimir los
+  // extremos deja a casi todos amontonados en el medio y la rampa se usaría por la mitad.
+  // Estirar el contraste no cambia el orden de nadie ni de qué lado del centro cae: el corte
+  // del medio sigue siendo exactamente el cruce de los dos promedios. Los dos extremos van
+  // bien afuera de la escala para que el color llegue hasta los bordes del gráfico.
+  const bordes = Array.from({ length: BANDAS + 1 }, (_, i) =>
+    i === 0 ? -5 : i === BANDAS ? 6 : 0.5 + (i / BANDAS - 0.5) / CONTRASTE);
   const bandas = Array.from({ length: BANDAS }, (_, i) => ({
-    d: pathBanda(i / BANDAS, (i + 1) / BANDAS),
+    d: pathBanda(bordes[i], bordes[i + 1]),
     fill: RAMPA[i],
   }));
 
   // Borde superior de la zona con puntaje `s`: para cada x, el volumen que la alcanza.
+  // Con la escala partida en dos tramos por eje la curva ya no es una recta, así que se
+  // muestrea a lo ancho en vez de unir los extremos.
+  const acotar = (v: number) => Math.max(Y0 - 4000, Math.min(Y1 + 4000, v));
   function curva(s: number, desdeIzq: boolean): string {
-    const PASOS = 2; // recta: alcanza con los extremos
+    const PASOS = 32;
     const pts: string[] = [];
     for (let k = 0; k <= PASOS; k++) {
       const i = desdeIzq ? k : PASOS - k;
-      const x = X0 + ((X1 - X0) * i) / PASOS;
-      const nx = (x - X0) / (X1 - X0);
-      const ny = Math.max(0, Math.min(1, 2 * s - nx));
-      pts.push(`${x.toFixed(1)} ${(Y1 - ny * (Y1 - Y0)).toFixed(1)}`);
+      const xPix = X0 + ((X1 - X0) * i) / PASOS;
+      const precio = xMin + ((xPix - X0) / (X1 - X0)) * (xMax - xMin);
+      const ny = 2 * s - escP.pos(precio);
+      pts.push(`${xPix.toFixed(1)} ${acotar(py(escV.inv(ny))).toFixed(1)}`);
     }
     return pts.join(' L ');
   }
@@ -230,10 +237,10 @@ export default function GraficoValorComercial({ datos, titulo = 'Clientes — pr
             <p style={subtituloPanel}>Mapa de valor comercial</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
               {[
-                { c: RAMPA[5], t: 'Mayor valor', d: 'Precio y volumen altos', a: 'Defender y hacer crecer' },
-                { c: RAMPA[3], t: 'Valor medio alto', d: 'Buen equilibrio', a: 'Oportunidad de optimización' },
-                { c: RAMPA[1], t: 'Valor medio', d: 'Precio o volumen por debajo del resto', a: 'Hay margen para crecer' },
-                { c: RAMPA[0], t: 'Menor valor relativo', d: 'Precio y volumen por debajo del resto', a: 'Revisar condiciones' },
+                { c: RAMPA[5], t: 'Mayor valor', d: 'Bien arriba del promedio en los dos ejes', a: 'Defender y hacer crecer' },
+                { c: RAMPA[3], t: 'Arriba del promedio', d: 'Pasa el cruce de las dos líneas punteadas', a: 'Optimizar el eje más flojo' },
+                { c: RAMPA[2], t: 'Abajo del promedio', d: 'No llega al cruce: por precio, por volumen o por los dos', a: 'Hay margen para crecer' },
+                { c: RAMPA[0], t: 'Menor valor relativo', d: 'Bien abajo del promedio en los dos ejes', a: 'Revisar condiciones' },
               ].map((x) => (
                 <div key={x.t} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
                   <span style={{ width: 12, height: 12, borderRadius: 3, background: x.c, border: '1px solid #e4e3dd', flexShrink: 0, marginTop: 2 }} />
@@ -245,10 +252,13 @@ export default function GraficoValorComercial({ datos, titulo = 'Clientes — pr
               ))}
             </div>
             <p style={{ margin: '8px 0 0', fontSize: '10.5px', color: INK_MUTED, lineHeight: 1.45 }}>
-              Las bandas del fondo combinan precio y volumen con el mismo peso, así que más precio compensa
-              menos volumen y al revés. El color es <strong>relativo a tus propios clientes</strong>: marca la
-              posición de cada uno respecto del resto, no una nota absoluta — siempre va a haber alguien más
-              cerca de cada extremo.
+              El fondo mide qué tan lejos del promedio está cada cliente en los dos ejes, con el mismo peso,
+              así que más precio compensa menos volumen y al revés. El cruce de las líneas punteadas es el
+              centro exacto de la escala: <strong>todo lo que pasa las dos líneas cae del lado verde</strong> y
+              todo lo que no llega a ninguna cae del lado cálido. Cada mitad se mide contra su propio grupo,
+              para que un cliente muy grande no aplaste al resto. El color es <strong>relativo a tus propios
+              clientes</strong>: marca posiciones, no una nota absoluta — siempre va a haber alguien más cerca
+              de cada extremo.
             </p>
           </div>
 
@@ -427,6 +437,42 @@ function TablaDatos({ puntos, precioProm, volumenProm }: { puntos: Punto[]; prec
         </div>
     </div>
   );
+}
+
+// ── Escala relativa de un eje ────────────────────────────────────────────────────────
+// Lleva un valor a una posición 0..1 donde 0,5 es SIEMPRE el promedio y el 1 (o el 0) es el
+// promedio de los clientes que están de ese lado. Dos motivos:
+//
+// 1. Que el 0,5 caiga en el promedio es lo que hace que el fondo y las líneas punteadas
+//    cuenten la misma historia. Antes la posición se medía sobre el largo del eje, y el
+//    largo del eje lo fija el cliente más grande: había clientes arriba de los dos
+//    promedios —o sea, en el cuadrante bueno— a los que igual les tocaba color del medio,
+//    porque el eje Y llegaba hasta el volumen del cliente más grande de todos.
+// 2. Cada mitad se mide con su propia vara. El volumen entre clientes varía unas 85 veces y
+//    el precio apenas 1,5: contra el máximo, un solo cliente enorme aplasta a todo el resto
+//    contra el cero.
+//
+// 3. Los extremos se comprimen (tanh). Sin comprimir, el que paga muy por encima del
+//    promedio se lleva el puntaje entero: como el precio varía poco entre clientes, un
+//    cliente 20% más caro queda a 2 desvíos y le gana a otro que compra 6 veces más. Con la
+//    compresión, despegarse mucho en un eje no alcanza para tapar al otro.
+//
+// pos() e inv() son inversas exactas porque si no el color del fondo y el puntaje del punto
+// que está parado ahí dejarían de coincidir. pos() vive siempre entre 0 y 1, así que las
+// seis bandas cubren todo el plano.
+function escalaRelativa(valores: number[], prom: number) {
+  const promDe = (xs: number[], porDefecto: number) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : porDefecto);
+  const anclaBaja = promDe(valores.filter((v) => v < prom), Math.min(...valores));
+  const anclaAlta = promDe(valores.filter((v) => v > prom), Math.max(...valores));
+  const spanBajo = prom - anclaBaja || 1;
+  const spanAlto = anclaAlta - prom || 1;
+  return {
+    pos: (v: number) => 0.5 + 0.5 * Math.tanh((v - prom) / (v < prom ? spanBajo : spanAlto)),
+    inv: (p: number) => {
+      const z = Math.atanh(Math.max(-1 + 1e-12, Math.min(1 - 1e-12, 2 * p - 1)));
+      return prom + z * (z < 0 ? spanBajo : spanAlto);
+    },
+  };
 }
 
 // Marcas de eje "redondas" dentro del rango, para no llenar el eje de números raros.
