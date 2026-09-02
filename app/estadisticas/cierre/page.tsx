@@ -10,7 +10,13 @@ export const dynamic = 'force-dynamic';
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const $ = (n: number) => `$${Math.round(n).toLocaleString('es-AR')}`;
 const pct = (n: number) => `${n > 0 ? '+' : ''}${Math.round(n)}%`;
+// Una variación contra una base casi nula no informa nada: "+1.178.671%" ocupa lugar y no
+// dice más que "el mes pasado no hubo". Se corta en 999%.
 const variacion = (act: number, ant: number): number | null => (ant === 0 ? null : ((act - ant) / Math.abs(ant)) * 100);
+const pctVar = (v: number) => (Math.abs(v) > 999 ? (v > 0 ? '> +999%' : '< −999%') : pct(v));
+
+// Las categorías de artículo vienen del texto libre de la planilla, muchas en mayúsculas.
+const capitalizar = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 
 const cell: React.CSSProperties = { padding: '5px 10px', fontSize: '13px' };
 const cellNum: React.CSSProperties = { ...cell, textAlign: 'right', fontVariantNumeric: 'tabular-nums' };
@@ -80,7 +86,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
         </td>
         <td style={{ ...cellNum, color: '#9ca3af', fontSize: '12px' }}>{$(antMonto)}</td>
         <td style={{ ...cellNum, fontSize: '12px', color: v === null ? '#d1d5db' : v > 0 ? '#b45309' : '#059669' }}>
-          {v === null ? '—' : pct(v)}
+          {v === null ? '—' : pctVar(v)}
         </td>
       </tr>
     );
@@ -144,7 +150,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
 
               <Fila label="Costo variable" monto={act.costoVariable.total} antMonto={ant.costoVariable.total} nivel="total" />
               {act.costoVariable.lineas.map((l) => (
-                <Fila key={l.label} label={l.label} monto={l.monto} antMonto={montoAnterior(l.label, ant.costoVariable.lineas)} />
+                <Fila key={l.label} label={l.fuente === 'stock' ? capitalizar(l.label) : l.label} monto={l.monto} antMonto={montoAnterior(l.label, ant.costoVariable.lineas)} />
               ))}
 
               <Fila label="Costos fijos" monto={act.costosFijos.total} antMonto={ant.costosFijos.total} nivel="total" />
