@@ -135,7 +135,11 @@ export interface Gasto {
   descripcion: string;
   categoria: CategoriaGasto;
   monto: number | string;
-  medio_pago: MedioPagoGasto | string;
+  medio_pago: MedioPagoGasto | string;   // de dónde sale la plata
+  // Solo para categoria 'movimiento_interno': a dónde entra. Un movimiento entre cuentas
+  // tiene dos puntas —sale de Macro, entra a VISA— y con una sola no se puede reconstruir
+  // ningún saldo: la plata desaparecería de un lado sin aparecer del otro.
+  medio_pago_destino: MedioPagoGasto | string;
   usuario: string;
   fecha_carga: string;
   aplicado_stock: 'SI' | 'NO' | '';  // 'SI' = ya confirmado (o descartado) como compra de Stocks, no debe volver a sugerirse

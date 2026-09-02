@@ -4,11 +4,12 @@ import { readSheet } from '@/lib/sheets';
 import type { Articulo, StockMes, Lote, VentaDia, StockCamara, PrecioVenta, ClienteVenta, Gasto } from '@/lib/types';
 import Header from '@/components/Header';
 import StocksManager from './StocksManager';
-import StockCamaraCards from '@/components/StockCamaraCards';
 import { calcularCamara } from '@/lib/camara';
 import { calcularValorizacionMes } from '@/lib/valorizacionStock';
 import { calcularDriversMes } from '@/lib/usoTeorico';
 import { alertasStockBajo } from '@/lib/alertasPanel';
+import { leerDescartes, sinDescartadas } from '@/lib/alertasDescartadas';
+import DescartarAlerta from '@/components/DescartarAlerta';
 export const dynamic = 'force-dynamic';
 
 export default async function StocksPage() {
@@ -45,7 +46,9 @@ export default async function StocksPage() {
   const diasEnMesPrevAlertas = new Date(anioPrevAlertas, mesPrevAlertas, 0).getDate();
   const driversStockActual = calcularDriversMes(lotes, ventas, precios, clientes, hoy.getFullYear(), hoy.getMonth() + 1);
   const driversStockMesAnterior = calcularDriversMes(lotes, ventas, precios, clientes, anioPrevAlertas, mesPrevAlertas);
-  const alertasStock = alertasStockBajo(articulos, stocks, driversStockActual, driversStockMesAnterior, hoy.getFullYear(), hoy.getMonth() + 1, diasEnMesPrevAlertas, 15);
+  const alertasStockTodas = alertasStockBajo(articulos, stocks, driversStockActual, driversStockMesAnterior, hoy.getFullYear(), hoy.getMonth() + 1, diasEnMesPrevAlertas, 15);
+  const descartes = await leerDescartes();
+  const alertasStock = sinDescartadas(alertasStockTodas, descartes, hoy.getFullYear(), hoy.getMonth() + 1);
 
   if (err) return (
     <>
@@ -72,7 +75,10 @@ export default async function StocksPage() {
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               {alertasStock.map((a, i) => (
-                <p key={i} style={{ margin: 0, fontSize: '13px', color: '#7f1d1d' }}>{a.msg}</p>
+                <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                  <p style={{ margin: 0, fontSize: '13px', color: '#7f1d1d', flex: 1 }}>{a.msg}</p>
+                  {a.clave && <DescartarAlerta clave={a.clave} anio={hoy.getFullYear()} mes={hoy.getMonth() + 1} />}
+                </div>
               ))}
             </div>
           </div>
@@ -80,7 +86,6 @@ export default async function StocksPage() {
 
         <p style={{ margin: '0 0 3px', fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>📦 Stock de cultivos en cámara</p>
         <p style={{ margin: '0 0 10px', fontSize: '12px', color: '#9ca3af' }}>Conteo físico de rúcula y lechuga ya cosechadas, listas para vender — cargá acá el stock inicial o un ajuste cuando hagas el recuento.</p>
-        <StockCamaraCards rucula={camaraRucula} lechugaCrespa={camaraLechugaCrespa} lechugaRoble={camaraLechugaRoble} albahaca={camaraAlbahaca} valorizacionActual={valorizacionActual.total} />
 
         <StocksManager
           articulos={articulos.filter((a) => a.activo === 'SI')}

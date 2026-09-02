@@ -10,6 +10,8 @@ import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAUL
 import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
 import { evolucionVentaPorArticulo, resumenMesActual } from '@/lib/estadisticasVentas';
 import { generarAlertas, motivoAlertaCosecha, alertasStockBajo, type MotivoAlertaCosecha } from '@/lib/alertasPanel';
+import { leerDescartes, sinDescartadas } from '@/lib/alertasDescartadas';
+import DescartarAlerta from '@/components/DescartarAlerta';
 import { calcularDriversMes } from '@/lib/usoTeorico';
 import { calcularCamara, diferenciaAjustesMes, ventasDeHoyYaDescontadas } from '@/lib/camara';
 import { saldoPorCliente, alertasCajones } from '@/lib/cajones';
@@ -287,9 +289,10 @@ export default async function PanelPage() {
     const driversStockActualPanel = calcularDriversMes(lotes, ventasPanel, preciosPanel, clientesPanel, hoy.getFullYear(), hoy.getMonth() + 1);
     const driversStockPasadoPanel = calcularDriversMes(lotes, ventasPanel, preciosPanel, clientesPanel, anioPrevStock, mesPrevStock);
     const alertasStockPanel = alertasStockBajo(articulosPanel, stocksPanel, driversStockActualPanel, driversStockPasadoPanel, hoy.getFullYear(), hoy.getMonth() + 1, diasEnMesPrevStock, 15);
+    const descartesPanel = await leerDescartes();
     alertas = [
       ...alertas,
-      ...alertasStockPanel.map(a => ({ ...a, href: '/stocks' })),
+      ...sinDescartadas(alertasStockPanel, descartesPanel, hoy.getFullYear(), hoy.getMonth() + 1).map(a => ({ ...a, href: '/stocks' })),
     ];
   } catch {}
 
@@ -543,6 +546,11 @@ export default async function PanelPage() {
                         ) : a.href ? (
                           <Link href={a.href} style={{ textDecoration:'none', color:'inherit', fontWeight:600 }}>{a.msg}</Link>
                         ) : a.msg}
+                        {(a as any).clave && (
+                          <span style={{ marginLeft:'auto' }}>
+                            <DescartarAlerta clave={(a as any).clave} anio={hoy.getFullYear()} mes={hoy.getMonth() + 1} color="inherit" />
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>

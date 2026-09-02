@@ -4,7 +4,7 @@ import { calcularUsoTeorico, categoriaSinUsoTeorico, type DriversMes } from './u
 // categoria 'lote_atraso' = atraso puntual de trasplante/cosecha de un lote — ese detalle
 // ya se ve en las secciones "Cosechar"/"Trasplantar" del home (con su propio color por
 // tiempo transcurrido), así que el Panel las excluye de "Alertas" para no duplicar.
-export interface Alerta { tipo: 'error' | 'warn' | 'info'; msg: string; lote?: string; href?: string; prioridad?: number; categoria?: 'lote_atraso' | 'general' }
+export interface Alerta { tipo: 'error' | 'warn' | 'info'; msg: string; lote?: string; href?: string; prioridad?: number; categoria?: 'lote_atraso' | 'general'; clave?: string }
 
 function safeDate(s: any): Date | null {
   try { const str = String(s || '').split(/[\sT]/)[0]; return str ? new Date(str + 'T12:00:00') : null; } catch { return null; }
@@ -176,6 +176,9 @@ export function alertasStockBajo(
       alertas.push({
         tipo: 'error',
         msg: `${art.articulo}: ${cuenta} · ritmo ${fmt(usoPorDia)} ${u}/día → dura ~${diasTxt}d más — reponer`,
+        // Por artículo, no por texto: el mensaje lleva números que cambian todos los días y
+        // un descarte atado al texto duraría hasta el próximo recálculo.
+        clave: `stockbajo__${art.id_articulo}`,
       });
     }
   }

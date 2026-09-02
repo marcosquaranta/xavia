@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, isAdmin } from '@/lib/auth';
-import { readSheet, appendRowObj } from '@/lib/sheets';
+import { readSheet, appendRowObj, asegurarColumna } from '@/lib/sheets';
 import { CATEGORIAS_GASTO, type Gasto } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
@@ -9,9 +9,15 @@ export async function POST(req: NextRequest) {
   if (!(await isAdmin())) return NextResponse.json({ error: 'solo_admin' }, { status: 403 });
 
   try {
-    const { fecha, descripcion, categoria, monto, medio_pago, id_articulo, cantidad } = await req.json();
+    const { fecha, descripcion, categoria, monto, medio_pago, medio_pago_destino, id_articulo, cantidad } = await req.json();
     if (!fecha || !descripcion || !medio_pago || monto === undefined) {
       return NextResponse.json({ error: 'datos_incompletos' }, { status: 400 });
+    }
+    // Un movimiento entre cuentas sin destino deja la plata saliendo de un lado y no
+    // entrando a ninguno: los saldos no cerrarían nunca.
+    if (categoria === 'movimiento_interno') {
+      if (!medio_pago_destino) return NextResponse.json({ error: 'falta_destino' }, { status: 400 });
+      if (medio_pago_destino === medio_pago) return NextResponse.json({ error: 'destino_igual_origen' }, { status: 400 });
     }
     const montoNum = Number(monto);
     if (!isFinite(montoNum) || montoNum <= 0) {
@@ -19,6 +25,7 @@ export async function POST(req: NextRequest) {
     }
     const cantidadNum = Number(cantidad) || 0;
 
+    await asegurarColumna('Gastos', 'medio_pago_destino');
     const gastos = await readSheet<Gasto>('Gastos');
     const maxId = gastos
       .map((g) => parseInt(String(g.id_gasto).replace('GAS-', '') || '0'))
@@ -32,6 +39,7 @@ export async function POST(req: NextRequest) {
       categoria: CATEGORIAS_GASTO.some((c) => c.value === categoria) ? categoria : 'gastos_generales',
       monto: montoNum,
       medio_pago,
+      medio_pago_destino: categoria === 'movimiento_interno' ? medio_pago_destino : '',
       usuario: user.email,
       fecha_carga: new Date().toISOString().split('T')[0],
       id_articulo: id_articulo || '',

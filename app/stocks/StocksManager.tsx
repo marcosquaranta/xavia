@@ -127,10 +127,13 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
 
   // Ingresar compra puntual de un artículo — crea el Gasto (categoría insumos) y suma la
   // cantidad a "Compras" de este mes en un solo paso, pidiendo cantidad, precio unitario
-  // y medio de pago (obligatorio: sin medio de pago no deja confirmar). Dos entradas a
-  // este mismo flujo: el botón 🛒 de cada fila (artículo ya elegido) y el botón grande
-  // "Cargar compra" de arriba de todo (elegís el artículo desde un desplegable general).
-  const [comprandoPara, setComprandoPara] = useState<string | null>(null);
+  // y medio de pago (obligatorio: sin medio de pago no deja confirmar). Una sola entrada:
+  // el botón "Cargar compra" de arriba de todo, donde se elige el artículo. Antes había
+  // además un 🛒 por fila con su propio panel — dos caminos al mismo lugar, y en la fila
+  // convivía con un campo "Compras" editable que hacía lo mismo pero SIN medio de pago.
+  // Las compras se cargan desde el boton grande de arriba; en la lista solo se ven. Este
+  // estado es para corregir a mano lo ya cargado de un articulo en el mes.
+  const [editandoCompras, setEditandoCompras] = useState<string | null>(null);
   const [compraGeneral, setCompraGeneral] = useState(false);
   const [compraGeneralArticulo, setCompraGeneralArticulo] = useState('');
   const [compraCantidad, setCompraCantidad] = useState('');
@@ -142,13 +145,7 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
   function resetFormCompra() {
     setCompraCantidad(''); setCompraPrecio(''); setCompraMedioPago(''); setErrorCompra(null);
   }
-  function abrirCompra(id_articulo: string) {
-    setCompraGeneral(false); setCreandoArticuloPara(null);
-    setComprandoPara(id_articulo);
-    resetFormCompra();
-  }
   function abrirCompraGeneral() {
-    setComprandoPara(null);
     setCompraGeneral(true); setCompraGeneralArticulo(''); setCreandoArticuloPara(null);
     resetFormCompra();
   }
@@ -166,7 +163,7 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
       });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || 'Error');
-      setComprandoPara(null); setCompraGeneral(false);
+      setCompraGeneral(false);
       router.refresh();
     } catch (err: any) {
       setErrorCompra(err.message || 'No se pudo guardar la compra');
@@ -210,16 +207,22 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
     return stockMes.find((s) => s.id_articulo === id_articulo);
   }
 
-  function getEdit(id: string) {
-    const s = getStock(id);
-    if (editValues[id]) return editValues[id];
-    if (s) return { ini: String(num(s.stock_inicial)), comp: String(num(s.compras)), fin: String(num(s.stock_final)), precio: num(s.precio_unitario) > 0 ? String(num(s.precio_unitario)) : '', notas: s.notas || '' };
-    // Sin registro: pre-completar stock inicial = stock final del mes anterior
+  // El stock inicial NO se edita: por definicion es el stock final del mes anterior. Antes
+  // era un campo mas y podia quedar desalineado con el cierre del mes previo, que es
+  // justamente lo que rompe la cadena de `inicial + compras - final`.
+  function stockInicialDe(id: string): string {
     let mesPrev = mes - 1, anioPrev = anio;
     if (mesPrev === 0) { mesPrev = 12; anioPrev--; }
     const sPrev = stocks.find((st) => st.id_articulo === id && String(st.anio) === String(anioPrev) && String(st.mes) === String(mesPrev));
-    const iniAuto = sPrev && num(sPrev.stock_final) > 0 ? String(num(sPrev.stock_final)) : '';
-    return { ini: iniAuto, comp: '', fin: '', precio: '', notas: '' };
+    return sPrev && num(sPrev.stock_final) > 0 ? String(num(sPrev.stock_final)) : '';
+  }
+
+  function getEdit(id: string) {
+    const ini = stockInicialDe(id);
+    const s = getStock(id);
+    if (editValues[id]) return { ...editValues[id], ini };
+    if (s) return { ini, comp: String(num(s.compras)), fin: String(num(s.stock_final)), precio: num(s.precio_unitario) > 0 ? String(num(s.precio_unitario)) : '', notas: s.notas || '' };
+    return { ini, comp: '', fin: '', precio: '', notas: '' };
   }
 
   // Último precio de compra conocido de un artículo, a la fecha del mes visualizado
@@ -539,7 +542,7 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                     </div>
                     <div>
                       <label style={{ fontSize: '10px', color: '#dc2626', fontWeight: 700 }}>Precio unitario (IVA incluido)</label>
-                      <input type="number" min={0} step={0.01} value={compraPrecio} onChange={(e) => setCompraPrecio(e.target.value)}
+                      <input type="number" min={0} step={0.1} value={compraPrecio} onChange={(e) => setCompraPrecio(e.target.value)}
                         style={{ width: '110px', fontSize: '12px', padding: '5px 8px' }} disabled={guardandoCompra} />
                     </div>
                     <div>
@@ -924,37 +927,41 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                       const modificado = editValues[art.id_articulo] !== undefined;
                       const diffRef = r.esReferencia && r.usoReferencia !== null ? r.usoReal - r.usoReferencia : null;
                       const diffColor = r.diff !== null ? (r.diff > 0 ? '#dc2626' : '#059669') : diffRef !== null ? '#7c6fda' : '#9ca3af';
-                      const comprandoAqui = comprandoPara === art.id_articulo;
                       return (
                         <React.Fragment key={art.id_articulo}>
-                        <tr style={{ background: modificado ? '#fefce8' : comprandoAqui ? '#eff6ff' : 'transparent' }}>
+                        <tr style={{ background: modificado ? '#fefce8' : 'transparent' }}>
                           <td style={{ fontWeight: 500 }}>{art.articulo}</td>
                           <td style={{ textAlign: 'center', color: '#9ca3af', fontSize: '11px' }}>{art.unidad_medida}</td>
-                          <td style={{ padding: '2px 4px' }}>
-                            <input type="number" value={vals.ini} onChange={(e) => setField(art.id_articulo, 'ini', e.target.value)}
-                              onBlur={() => autoguardar(art.id_articulo)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                              style={{ width: '100%', textAlign: 'right', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '3px 6px' }}
-                              min={0} step={0.001} />
+                          <td style={{ textAlign: 'right', fontSize: '12px', color: '#6b7280' }}
+                            title="No se edita: es el stock final del mes anterior">
+                            {vals.ini ? fmt(num(vals.ini)) : '—'}
                           </td>
                           <td style={{ padding: '2px 4px' }}>
-                            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                              <input type="number" value={vals.comp} onChange={(e) => setField(art.id_articulo, 'comp', e.target.value)}
-                                onBlur={() => autoguardar(art.id_articulo)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                                title="Editable directo — para dejar registrada una compra CON gasto y medio de pago, usá el botón 🛒"
-                                style={{ width: '100%', textAlign: 'right', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '3px 6px' }}
-                                min={0} step={0.001} />
-                              <button onClick={() => comprandoAqui ? setComprandoPara(null) : abrirCompra(art.id_articulo)}
-                                title="Registrar compra con gasto asociado (medio de pago) — opcional, para contabilidad"
-                                className={comprandoAqui ? 'btn' : 'btn secondary'} style={{ fontSize: '11px', padding: '3px 7px', flexShrink: 0 }}>
-                                🛒
-                              </button>
+                            <div style={{ display: 'flex', gap: '4px', alignItems: 'center', justifyContent: 'flex-end' }}>
+                              {editandoCompras === art.id_articulo ? (
+                                <input type="number" value={vals.comp} autoFocus
+                                  onChange={(e) => setField(art.id_articulo, 'comp', e.target.value)}
+                                  onBlur={() => { autoguardar(art.id_articulo); setEditandoCompras(null); }}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                                  style={{ width: '100%', textAlign: 'right', fontSize: '12px', border: '1px solid #2563eb', borderRadius: '4px', padding: '3px 6px' }}
+                                  min={0} step={0.001} />
+                              ) : (
+                                <>
+                                  <span style={{ fontSize: '12px', fontWeight: num(vals.comp) > 0 ? 600 : 400, color: num(vals.comp) > 0 ? '#111827' : '#d1d5db' }}>
+                                    {num(vals.comp) > 0 ? fmt(num(vals.comp)) : '—'}
+                                  </span>
+                                  <button onClick={() => setEditandoCompras(art.id_articulo)}
+                                    title="Corregir a mano lo comprado de este articulo en este mes. Para registrar una compra nueva con su medio de pago, usa Cargar compra arriba."
+                                    className="btn secondary" style={{ fontSize: '10px', padding: '2px 6px', flexShrink: 0 }}>
+                                    ✏️
+                                  </button>
+                                </>
+                              )}
                             </div>
                           </td>
-                          <td style={{ padding: '2px 4px' }}>
-                            <input type="number" value={vals.precio} onChange={(e) => setField(art.id_articulo, 'precio', e.target.value)}
-                              onBlur={() => autoguardar(art.id_articulo)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                              style={{ width: '100%', textAlign: 'right', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '3px 6px' }}
-                              min={0} step={0.01} placeholder={r.precio !== null ? fmt(r.precio, 2) : '—'} />
+                          <td style={{ textAlign: 'right', fontSize: '12px', color: r.precio !== null ? '#6b7280' : '#d1d5db' }}
+                            title="Se carga junto con la compra, no aca">
+                            {r.precio !== null ? '$' + fmt(r.precio, 1) : '—'}
                           </td>
                           <td style={{ padding: '2px 4px' }}>
                             <input type="number" value={vals.fin} onChange={(e) => setField(art.id_articulo, 'fin', e.target.value)}
@@ -1006,51 +1013,6 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                             ) : null}
                           </td>
                         </tr>
-                        {comprandoAqui && (
-                          <tr style={{ background: '#eff6ff' }}>
-                            <td colSpan={12} style={{ padding: '10px 12px' }}>
-                              <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                                <p style={{ margin: 0, fontSize: '12px', fontWeight: 700, color: '#1e40af', width: '100%' }}>
-                                  🛒 Ingresar compra — {art.articulo}
-                                </p>
-                                <div>
-                                  <label style={{ fontSize: '10px' }}>Cantidad ({art.unidad_medida})</label>
-                                  <input type="number" min={0} step={0.001} value={compraCantidad} onChange={(e) => setCompraCantidad(e.target.value)}
-                                    style={{ width: '110px', fontSize: '12px', padding: '5px 8px' }} disabled={guardandoCompra} />
-                                </div>
-                                <div>
-                                  <label style={{ fontSize: '10px', color: '#dc2626', fontWeight: 700 }}>Precio unitario (IVA incluido)</label>
-                                  <input type="number" min={0} step={0.01} value={compraPrecio} onChange={(e) => setCompraPrecio(e.target.value)}
-                                    style={{ width: '110px', fontSize: '12px', padding: '5px 8px' }} disabled={guardandoCompra} />
-                                </div>
-                                <div>
-                                  <label style={{ fontSize: '10px' }}>Medio de pago</label>
-                                  <select value={compraMedioPago} onChange={(e) => setCompraMedioPago(e.target.value)}
-                                    style={{ width: '140px', fontSize: '12px', padding: '5px 8px', color: compraMedioPago ? '#111827' : '#dc2626' }} disabled={guardandoCompra}>
-                                    <option value="">— elegir —</option>
-                                    {MEDIOS_PAGO.map((m) => <option key={m} value={m}>{m}</option>)}
-                                  </select>
-                                </div>
-                                {Number(compraCantidad) > 0 && Number(compraPrecio) > 0 && (
-                                  <p style={{ margin: '0 0 8px', fontSize: '12px', color: '#6b7280' }}>
-                                    Total: <strong>${fmt(Number(compraCantidad) * Number(compraPrecio), 0)}</strong>
-                                  </p>
-                                )}
-                                <button onClick={() => confirmarCompra(art.id_articulo)} disabled={guardandoCompra} className="btn" style={{ fontSize: '12px', padding: '6px 14px' }}>
-                                  {guardandoCompra ? 'Guardando…' : '✓ Confirmar compra'}
-                                </button>
-                                <button onClick={() => setComprandoPara(null)} className="btn secondary" style={{ fontSize: '12px', padding: '6px 14px' }} disabled={guardandoCompra}>
-                                  Cancelar
-                                </button>
-                              </div>
-                              {errorCompra && <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#dc2626' }}>{errorCompra}</p>}
-                              <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#6b7280' }}>
-                                Esto suma la cantidad a "Compras" de este mes y crea el gasto correspondiente (categoría Insumos, medio de pago obligatorio) en la planilla de Gastos.
-                                Para cargar o corregir Compras sin que quede como gasto/salida de fondos — solo control de stock — editá el campo "Compras" directo en la fila, se guarda solo al salir del campo.
-                              </p>
-                            </td>
-                          </tr>
-                        )}
                         </React.Fragment>
                       );
                     })}

@@ -24,6 +24,8 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
   const [fecha, setFecha] = useState(hoyISO());
   const [descripcion, setDescripcion] = useState('');
   const [categoria, setCategoria] = useState<CategoriaGasto>('gastos_generales');
+  const [medioDestino, setMedioDestino] = useState('');
+  const esMovimiento = categoria === 'movimiento_interno';
   const [monto, setMonto] = useState(0);
   const [medioPago, setMedioPago] = useState<string>(MEDIOS[0]);
   const [idArticulo, setIdArticulo] = useState('');
@@ -66,18 +68,20 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
     setError(null);
     if (!descripcion.trim()) { setError('Ingresá una descripción'); return; }
     if (monto <= 0) { setError('Ingresá un monto mayor a 0'); return; }
+    if (esMovimiento && !medioDestino) { setError('Elegí a qué cuenta entra la plata'); return; }
     setGuardando(true);
     try {
       const res = await fetch('/api/gastos/nuevo', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fecha, descripcion, categoria, monto, medio_pago: medioPago,
+          ...(esMovimiento ? { medio_pago_destino: medioDestino } : {}),
           ...(categoria === 'insumos' ? { id_articulo: idArticulo, cantidad } : {}),
         }),
       });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || 'Error al guardar');
-      setDescripcion(''); setMonto(0); setFecha(hoyISO()); setCategoria('gastos_generales'); setMedioPago(MEDIOS[0]);
+      setDescripcion(''); setMonto(0); setFecha(hoyISO()); setCategoria('gastos_generales'); setMedioPago(MEDIOS[0]); setMedioDestino('');
       setIdArticulo(''); setCantidad('');
       router.refresh();
     } catch (err: any) {
@@ -162,12 +166,29 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
             <NumberInput value={monto} onChange={setMonto} min={0} disabled={guardando} placeholder="0" />
           </div>
           <div>
-            <label>Medio de pago</label>
+            <label>{esMovimiento ? 'Sale de' : 'Medio de pago'}</label>
             <select value={medioPago} onChange={(e) => setMedioPago(e.target.value)} disabled={guardando}>
               {MEDIOS.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
+          {esMovimiento && (
+            <div>
+              <label style={{ color: medioDestino ? undefined : '#dc2626' }}>Entra a</label>
+              <select value={medioDestino} onChange={(e) => setMedioDestino(e.target.value)} disabled={guardando}
+                style={{ borderColor: medioDestino ? undefined : '#dc2626' }}>
+                <option value="">Elegí la cuenta…</option>
+                {MEDIOS.filter((m) => m !== medioPago).map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+          )}
         </div>
+
+        {esMovimiento && (
+          <p style={{ margin: '0 0 12px', fontSize: '11.5px', color: '#6b7280', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '8px 10px' }}>
+            Esto no es un gasto: es plata que cambia de cuenta —por ejemplo pagar el resumen de la tarjeta desde el banco—
+            y por eso no entra al resultado del mes. El gasto ya quedó registrado cuando se hizo el consumo.
+          </p>
+        )}
 
         {categoria === 'insumos' && (
           <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px', marginBottom: '12px' }}>
@@ -291,7 +312,9 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
                     <tr key={g.id_gasto}>
                       <td>{fmtFecha(g.fecha)}</td>
                       <td>{g.descripcion}</td>
-                      <td style={{ color: '#6b7280' }}>{g.medio_pago}</td>
+                      <td style={{ color: '#6b7280' }}>
+                        {g.medio_pago}{g.medio_pago_destino ? ` → ${g.medio_pago_destino}` : ''}
+                      </td>
                       <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtMoneda(Number(g.monto) || 0)}</td>
                       <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
                         <button onClick={() => empezarEdicion(g)} title="Editar" style={{ background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', fontSize: '12px', marginRight: '4px' }}>✎</button>
