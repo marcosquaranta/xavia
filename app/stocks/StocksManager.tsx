@@ -5,7 +5,7 @@ import Link from 'next/link';
 import type { Articulo, StockMes, Lote, VentaDia, PrecioVenta, ClienteVenta, Gasto } from '@/lib/types';
 import { MEDIOS_PAGO } from '@/lib/types';
 import { calcularDriversMes, calcularUsoReferencia, categoriaSinUsoTeorico, usoTeoricoDeArticulo, DRIVERS } from '@/lib/usoTeorico';
-import { destacadosDeUso, UMBRAL_PCT } from '@/lib/destacadosStock';
+import { analizarDesviosDeUso, UMBRAL_PCT } from '@/lib/destacadosStock';
 import { matchArticuloPorTexto } from '@/lib/matchArticulo';
 
 function copiarTSV(filas: (string | number)[][]) {
@@ -331,7 +331,10 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
       // de uso teórico configurada.
       const usoMesPasado = getUso(art.id_articulo, anioPrev, mesPrev);
       const pctVsMesPasado = usoMesPasado !== null && usoMesPasado !== 0 ? ((usoReal - usoMesPasado) / Math.abs(usoMesPasado)) * 100 : null;
-      return { art, ini, comp, fin, usoReal, usoTeorico, diff, pct, usoReferencia, esReferencia, precio, valorizado, usoMesPasado, pctVsMesPasado };
+      // Vacío no es lo mismo que cero: si el recuento de fin de mes no se hizo, no hay uso
+      // real que comparar (ver analizarDesviosDeUso).
+      const finCargado = String(vals.fin ?? '').trim() !== '';
+      return { art, ini, comp, fin, finCargado, usoReal, usoTeorico, diff, pct, usoReferencia, esReferencia, precio, valorizado, usoMesPasado, pctVsMesPasado };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [artActivos, editValues, stockMes, drivers, driversMesAnterior, stocks, anio, mes, anioPrev, mesPrev]);
@@ -357,11 +360,11 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
 
   // Los tres o cuatro artículos que se fueron de línea este mes, para no tener que leer la
   // tabla entera buscándolos. La lógica de qué es "grande" vive en lib/destacadosStock.ts.
-  const destacados = useMemo(() => destacadosDeUso(resumenArticulos.map((r) => ({
+  const analisisUso = useMemo(() => analizarDesviosDeUso(resumenArticulos.map((r) => ({
     id: r.art.id_articulo,
     articulo: r.art.articulo,
     unidad: r.art.unidad_medida,
-    ini: r.ini, comp: r.comp, fin: r.fin,
+    ini: r.ini, comp: r.comp, fin: r.fin, finCargado: r.finCargado,
     usoReal: r.usoReal,
     usoTeorico: r.usoTeorico,
     usoMesPasado: r.usoMesPasado,
@@ -610,13 +613,15 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
               <p style={{ margin: '0 0 8px', fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 Lo que se fue de línea — {MESES[mes - 1]} {anio}
               </p>
-              {destacados.length === 0 ? (
-                <p style={{ margin: 0, fontSize: '12px', color: '#059669' }}>
-                  Ningún artículo se desvió más de {UMBRAL_PCT}% de su referencia este mes.
+              {analisisUso.destacados.length === 0 ? (
+                <p style={{ margin: 0, fontSize: '12px', color: analisisUso.sinStockFinal > 0 ? '#92400e' : '#059669' }}>
+                  {analisisUso.sinStockFinal > 0
+                    ? `Todavía no se puede comparar: faltan cargar ${analisisUso.sinStockFinal} stock(s) final(es) de este mes.`
+                    : `Ningún artículo se desvió más de ${UMBRAL_PCT}% de su referencia este mes.`}
                 </p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {destacados.map((d) => {
+                  {analisisUso.destacados.map((d) => {
                     const mas = d.desvio > 0;
                     const color = mas ? '#dc2626' : '#059669';
                     return (
@@ -641,6 +646,11 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                       </div>
                     );
                   })}
+                  {analisisUso.sinStockFinal > 0 && (
+                    <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#92400e' }}>
+                      Quedan {analisisUso.sinStockFinal} artículo(s) sin stock final cargado este mes: hasta que se cuenten, su uso no se puede comparar.
+                    </p>
+                  )}
                 </div>
               )}
             </div>

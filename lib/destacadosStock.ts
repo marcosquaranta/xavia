@@ -11,6 +11,12 @@
 // 2. No hay umbral en pesos. Con la inflación, cualquier número fijo queda viejo en meses y
 //    empieza a dejar pasar todo. Se muestran los N más grandes del mes, sean cuales sean.
 //
+// Y una tercera, aprendida mirando la app con datos reales: si el stock final del mes no
+// está cargado, no hay uso que analizar. La cuenta es `inicial + compras − final`, así que
+// un final vacío se lee como cero y el "uso" da igual a todo el stock inicial: en el mes en
+// curso, antes del recuento, TODOS los artículos aparecían disparados 500%. Un artículo
+// entra al análisis solo si su stock final fue cargado.
+//
 // Contra qué se compara: si el artículo tiene fórmula de uso teórico, contra eso, que es un
 // target de verdad. Si no la tiene —fertilizantes, ácido, cajones, varios: ver
 // categoriaSinUsoTeorico en usoTeorico.ts— contra el uso del mes pasado, que es un dato
@@ -28,6 +34,7 @@ export interface FilaUso {
   ini: number;
   comp: number;
   fin: number;
+  finCargado: boolean;   // si el recuento de fin de mes todavía no se hizo, no hay uso real
   usoReal: number;
   usoTeorico: number | null;
   usoMesPasado: number | null;
@@ -50,12 +57,22 @@ export interface DestacadoUso {
 
 const fmtN = (n: number) => Math.abs(n) >= 100 ? Math.round(n).toLocaleString('es-AR') : String(Math.round(n * 10) / 10);
 
-export function destacadosDeUso(filas: FilaUso[], max = MAX_DESTACADOS): DestacadoUso[] {
+export interface AnalisisUso {
+  destacados: DestacadoUso[];
+  sinStockFinal: number;   // artículos con movimiento en el mes pero sin recuento final cargado
+}
+
+export function analizarDesviosDeUso(filas: FilaUso[], max = MAX_DESTACADOS): AnalisisUso {
   const candidatos: DestacadoUso[] = [];
+  let sinStockFinal = 0;
 
   for (const f of filas) {
     // Sin nada cargado este mes no hay uso que comparar (y "0 − 0" no es un desvío).
     if (!f.ini && !f.comp && !f.fin) continue;
+
+    // Mes todavía sin cerrar: el uso daría igual a todo el stock inicial. No es un desvío,
+    // es un dato que falta — y decirlo sirve más que inventar una alerta.
+    if (!f.finCargado) { sinStockFinal++; continue; }
 
     const tieneTeorico = f.usoTeorico !== null && f.usoTeorico > 0;
     const tieneMesPasado = f.usoMesPasado !== null && f.usoMesPasado > 0;
@@ -92,7 +109,7 @@ export function destacadosDeUso(filas: FilaUso[], max = MAX_DESTACADOS): Destaca
     .sort((a, b) => Math.abs(b.desvioPesos!) - Math.abs(a.desvioPesos!));
   const sinPlata = candidatos.filter((c) => c.desvioPesos === null)
     .sort((a, b) => Math.abs(b.desvioPct ?? 0) - Math.abs(a.desvioPct ?? 0));
-  return [...conPlata, ...sinPlata].slice(0, max);
+  return { destacados: [...conPlata, ...sinPlata].slice(0, max), sinStockFinal };
 }
 
 // La app no puede saber POR QUÉ se desvió — eso lo sabe quien estuvo en el galpón. Lo que sí
