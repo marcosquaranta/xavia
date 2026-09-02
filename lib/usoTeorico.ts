@@ -1,4 +1,4 @@
-import type { Lote, VentaDia, PrecioVenta, ClienteVenta } from './types';
+import type { Lote, VentaDia, PrecioVenta, ClienteVenta, Articulo } from './types';
 import { ventasEnRango } from './estadisticasVentas';
 
 const CUBOS_POR_PLANCHA = 345;
@@ -121,6 +121,30 @@ export function calcularUsoTeorico(formulaUso: string, factorUso: number, driver
   const driverValue = (drivers as any)[formulaUso];
   if (driverValue === undefined) return null;
   return driverValue * (Number(factorUso) || 0);
+}
+
+// ── Categorías sin uso teórico ───────────────────────────────────────────────────────
+// Hay insumos cuyo consumo no lo manda ningún driver de producción ni de venta: los
+// fertilizantes y el ácido se dosifican por lectura del tanque (conductividad y pH, que
+// dependen del agua y del clima, no de cuántas planchas se sembraron), los cajones
+// plásticos son retornables y "Varios" es un cajón de sastre con cosas que no se parecen
+// entre sí. Para esos, tanto el uso teórico como su referencia estimada son números
+// inventados que ensucian la lectura: la columna queda en "—" y la comparación que sí
+// significa algo pasa a ser contra el uso del mes pasado, que es un dato medido.
+const CATEGORIAS_SIN_USO_TEORICO = ['fertilizante', 'acido', 'cajon', 'vario'];
+
+export function categoriaSinUsoTeorico(categoria: string): boolean {
+  const c = String(categoria || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  return CATEGORIAS_SIN_USO_TEORICO.some((k) => c.includes(k));
+}
+
+// Uso teórico de un artículo concreto: lo mismo que calcularUsoTeorico pero respetando las
+// categorías excluidas. Es el que hay que usar siempre que se tenga el artículo a mano.
+export function usoTeoricoDeArticulo(
+  art: Pick<Articulo, 'categoria' | 'formula_uso' | 'factor_uso'>, drivers: DriversMes,
+): number | null {
+  if (categoriaSinUsoTeorico(art.categoria)) return null;
+  return calcularUsoTeorico(art.formula_uso, Number(art.factor_uso) || 0, drivers);
 }
 
 // Para artículos SIN fórmula de uso teórico configurada (ácidos, sales, insumos genéricos

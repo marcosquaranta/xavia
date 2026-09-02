@@ -1,5 +1,5 @@
 import type { Lote, Articulo, StockMes, Movimiento } from './types';
-import { calcularUsoTeorico, type DriversMes } from './usoTeorico';
+import { calcularUsoTeorico, categoriaSinUsoTeorico, type DriversMes } from './usoTeorico';
 
 // categoria 'lote_atraso' = atraso puntual de trasplante/cosecha de un lote — ese detalle
 // ya se ve en las secciones "Cosechar"/"Trasplantar" del home (con su propio color por
@@ -135,7 +135,9 @@ export function alertasStockBajo(
   if (mesAnteriorNum === 0) { mesAnteriorNum = 12; anioAnteriorNum--; }
 
   const alertas: Alerta[] = [];
-  for (const art of articulos.filter((a) => a.activo === 'SI' && a.formula_uso)) {
+  // Se saltean las categorías sin uso teórico: la alerta proyecta el stock con ese mismo
+  // número, así que sin uso teórico confiable no hay proyección confiable que avisar.
+  for (const art of articulos.filter((a) => a.activo === 'SI' && a.formula_uso && !categoriaSinUsoTeorico(a.categoria))) {
     const stockDelArticulo = stocks.filter((s) => String(s.id_articulo) === String(art.id_articulo));
     if (!stockDelArticulo.length) continue; // sin ningún registro histórico, no se puede estimar
 

@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { Articulo, StockMes, Lote, VentaDia, PrecioVenta, ClienteVenta, Gasto } from '@/lib/types';
 import { MEDIOS_PAGO } from '@/lib/types';
-import { calcularDriversMes, calcularUsoTeorico, calcularUsoReferencia, DRIVERS } from '@/lib/usoTeorico';
+import { calcularDriversMes, calcularUsoReferencia, categoriaSinUsoTeorico, usoTeoricoDeArticulo, DRIVERS } from '@/lib/usoTeorico';
 import { matchArticuloPorTexto } from '@/lib/matchArticulo';
 
 function copiarTSV(filas: (string | number)[][]) {
@@ -310,13 +310,15 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
       const vals = getEdit(art.id_articulo);
       const ini = num(vals.ini), comp = num(vals.comp), fin = num(vals.fin);
       const usoReal = ini + comp - fin;
-      const usoTeorico = calcularUsoTeorico(art.formula_uso, Number(art.factor_uso) || 0, drivers);
+      const usoTeorico = usoTeoricoDeArticulo(art, drivers);
       const diff = usoTeorico !== null ? usoReal - usoTeorico : null;
       const pct = usoTeorico !== null && usoTeorico !== 0 ? (diff! / usoTeorico) * 100 : null;
       // Sin fórmula configurada: en vez de "—", una referencia = uso del mes anterior
-      // escalado por la variación de venta total mes vs. mes anterior.
+      // escalado por la variación de venta total mes vs. mes anterior. No aplica a las
+      // categorías excluidas: ahí el uso no sigue a la venta y la referencia sería tan
+      // inventada como el teórico (ver categoriaSinUsoTeorico).
       let usoReferencia: number | null = null;
-      if (usoTeorico === null) {
+      if (usoTeorico === null && !categoriaSinUsoTeorico(art.categoria)) {
         const usoMesAnterior = getUso(art.id_articulo, anioPrev, mesPrev);
         usoReferencia = calcularUsoReferencia(usoMesAnterior, drivers.paquetes_vendidos_total, driversMesAnterior.paquetes_vendidos_total);
       }
