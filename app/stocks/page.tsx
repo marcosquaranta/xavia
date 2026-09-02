@@ -1,10 +1,9 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import type { Articulo, StockMes, Lote, VentaDia, StockCamara, PrecioVenta, ClienteVenta, Gasto } from '@/lib/types';
+import type { Articulo, StockMes, Lote, VentaDia, PrecioVenta, ClienteVenta, Gasto } from '@/lib/types';
 import Header from '@/components/Header';
 import StocksManager from './StocksManager';
-import { calcularCamara } from '@/lib/camara';
 import { calcularValorizacionMes } from '@/lib/valorizacionStock';
 import { calcularDriversMes } from '@/lib/usoTeorico';
 import { alertasStockBajo } from '@/lib/alertasPanel';
@@ -16,26 +15,21 @@ export default async function StocksPage() {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
   let articulos: Articulo[] = [], stocks: StockMes[] = [], lotes: Lote[] = [];
-  let ventas: VentaDia[] = [], registrosCamara: StockCamara[] = [];
+  let ventas: VentaDia[] = [];
   let precios: PrecioVenta[] = [], clientes: ClienteVenta[] = [], gastos: Gasto[] = [];
   let err: string | null = null;
   try {
-    [articulos, stocks, lotes, ventas, registrosCamara, precios, clientes, gastos] = await Promise.all([
+    [articulos, stocks, lotes, ventas, precios, clientes, gastos] = await Promise.all([
       readSheet<Articulo>('Articulos'),
       readSheet<StockMes>('Stocks'),
       readSheet<Lote>('Lotes'),
       readSheet<VentaDia>('Ventas'),
-      readSheet<StockCamara>('StockCamara').catch(() => []),
       readSheet<PrecioVenta>('Precios'),
       readSheet<ClienteVenta>('Clientes'),
       readSheet<Gasto>('Gastos').catch(() => []),
     ]);
   } catch (e: any) { err = e?.message || 'Error'; }
 
-  const camaraRucula = calcularCamara('rucula', registrosCamara, lotes, ventas);
-  const camaraLechugaCrespa = calcularCamara('lechuga_crespa', registrosCamara, lotes, ventas);
-  const camaraLechugaRoble = calcularCamara('lechuga_roble', registrosCamara, lotes, ventas);
-  const camaraAlbahaca = calcularCamara('albahaca', registrosCamara, lotes, ventas);
   const hoy = new Date();
   const valorizacionActual = calcularValorizacionMes(articulos, stocks, hoy.getFullYear(), hoy.getMonth() + 1);
 
@@ -83,9 +77,6 @@ export default async function StocksPage() {
             </div>
           </div>
         )}
-
-        <p style={{ margin: '0 0 3px', fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>📦 Stock de cultivos en cámara</p>
-        <p style={{ margin: '0 0 10px', fontSize: '12px', color: '#9ca3af' }}>Conteo físico de rúcula y lechuga ya cosechadas, listas para vender — cargá acá el stock inicial o un ajuste cuando hagas el recuento.</p>
 
         <StocksManager
           articulos={articulos.filter((a) => a.activo === 'SI')}
