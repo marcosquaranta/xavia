@@ -7,8 +7,18 @@ const CULTIVOS = [
   { key: 'lechuga', label: 'Lechuga', color: '#84cc16', bg: '#f0fdf4' },
 ];
 
-export default function GraficoPesaje({ puntos, labelFn }: { puntos: PuntoPesaje[]; labelFn?: (fecha: string) => string }) {
-  const fmtLabel = labelFn || ((f: string) => f.slice(5));
+const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+// `escala` dice cómo leer la fecha de cada punto, no una función de formato: este es un
+// componente cliente y las páginas que lo usan son server components — una función pasada
+// como prop no se puede serializar y hace explotar la página entera en runtime.
+export default function GraficoPesaje({ puntos, escala = 'dia' }: { puntos: PuntoPesaje[]; escala?: 'dia' | 'mes' }) {
+  // 'dia' = fecha real YYYY-MM-DD → "MM-DD". 'mes' = fecha sintética YYYY-MM → "Ago 26".
+  const fmtLabel = (f: string) => {
+    if (escala !== 'mes') return f.slice(5);
+    const [y, m] = f.split('-').map(Number);
+    return `${MESES_CORTO[m - 1] || ''} ${String(y).slice(2)}`;
+  };
   if (!puntos.length) return (
     <div style={{ background: '#fafafa', border: '1px solid #f3f4f6', borderRadius: '8px', padding: '32px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
       No hay cosechas con pesaje testigo registradas. Se actualizará cuando se registren cosechas por paquete con peso.

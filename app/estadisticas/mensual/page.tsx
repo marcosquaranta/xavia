@@ -554,7 +554,7 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
           <div style={cardStyle}>
             <p className="card-title" style={{ margin: '0 0 2px' }}>Evolución de pesaje testigo — últimos 180 días</p>
             <p className="card-sub" style={{ margin: '0 0 10px' }}>Gramos por paquete, por mes</p>
-            <GraficoPesaje puntos={puntosPesaje180} labelFn={(f) => { const [y, m] = f.split('-').map(Number); return `${MESES_CORTO[m - 1]} ${String(y).slice(2)}`; }} />
+            <GraficoPesaje puntos={puntosPesaje180} escala="mes" />
           </div>
           <div style={cardStyle}>
             <p className="card-title" style={{ margin: '0 0 2px' }}>Plantas por paquete — últimos 30 días</p>
