@@ -95,19 +95,39 @@ export interface StockMes {
   fecha_carga: string;
 }
 
-export type CategoriaGasto = 'insumos' | 'gastos_generales' | 'sueldos' | 'mantenimiento' | 'inversion_equipamiento' | 'inversion_nave3' | 'abonos' | 'impuestos';
+// Las categorías son las líneas del EERR: cada una cae en costo variable, en costo fijo o
+// afuera del resultado. Fletes y Energía + Agua son COSTO VARIABLE aunque se carguen como
+// gasto y no pasen por Stocks — el cierre las toma de acá y NO de la planilla de stock, para
+// no contarlas dos veces si además existiera un artículo de esa categoría.
+export type CategoriaGasto =
+  | 'insumos' | 'gastos_generales' | 'sueldos' | 'mantenimiento'
+  | 'inversion_equipamiento' | 'inversion_nave3' | 'abonos' | 'impuestos'
+  | 'alquiler' | 'staff' | 'fletes_combustible' | 'energia_agua'
+  | 'otros_ingresos' | 'movimiento_interno';
 export const CATEGORIAS_GASTO: { value: CategoriaGasto; label: string }[] = [
   { value: 'gastos_generales', label: 'Gastos generales' },
   { value: 'insumos', label: 'Insumos' },
+  { value: 'fletes_combustible', label: 'Fletes y combustible' },
+  { value: 'energia_agua', label: 'Energía y agua' },
   { value: 'sueldos', label: 'Sueldos' },
   { value: 'mantenimiento', label: 'Mantenimiento' },
+  { value: 'alquiler', label: 'Alquiler' },
+  { value: 'staff', label: 'Staff (contador, marketing, asesoramiento)' },
   { value: 'inversion_equipamiento', label: 'Inversión en equipamiento' },
   { value: 'inversion_nave3', label: 'Inversión 3ra Nave' },
   { value: 'abonos', label: 'Abonos' },
   { value: 'impuestos', label: 'Impuestos' },
+  { value: 'otros_ingresos', label: 'Otros ingresos (FCI, intereses)' },
+  { value: 'movimiento_interno', label: 'Movimiento entre medios de pago (no es gasto)' },
 ];
-export type MedioPagoGasto = 'Brubank' | 'Macro' | 'Caja MQ' | 'Caja FL' | 'Caja Marce' | 'Caja JP';
-export const MEDIOS_PAGO: MedioPagoGasto[] = ['Brubank', 'Macro', 'Caja MQ', 'Caja FL', 'Caja Marce', 'Caja JP'];
+
+// 'VISA' registra el CONSUMO con tarjeta, con la fecha en que se consumió. El pago del
+// resumen a fin de mes NO es un gasto nuevo: es plata que va del banco a la tarjeta, y va
+// cargado con categoría 'movimiento_interno'. Si se cargara como gasto, cada compra con
+// tarjeta contaría dos veces en el resultado del mes.
+// 'Aporte socios' es financiamiento, no costo: entra al flujo de fondos, nunca al resultado.
+export type MedioPagoGasto = 'Brubank' | 'Macro' | 'VISA' | 'Caja MQ' | 'Caja FL' | 'Caja Marce' | 'Caja JP' | 'Aporte socios';
+export const MEDIOS_PAGO: MedioPagoGasto[] = ['Brubank', 'Macro', 'VISA', 'Caja MQ', 'Caja FL', 'Caja Marce', 'Caja JP', 'Aporte socios'];
 export interface Gasto {
   id_gasto: string;
   fecha: string;

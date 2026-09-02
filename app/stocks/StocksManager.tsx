@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { Articulo, StockMes, Lote, VentaDia, PrecioVenta, ClienteVenta, Gasto } from '@/lib/types';
 import { MEDIOS_PAGO } from '@/lib/types';
 import { calcularDriversMes, calcularUsoReferencia, categoriaSinUsoTeorico, usoTeoricoDeArticulo, DRIVERS } from '@/lib/usoTeorico';
+import { destacadosDeUso, UMBRAL_PCT } from '@/lib/destacadosStock';
 import { matchArticuloPorTexto } from '@/lib/matchArticulo';
 
 function copiarTSV(filas: (string | number)[][]) {
@@ -354,6 +355,19 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
     };
   }, [resumenArticulos, artActivos]);
 
+  // Los tres o cuatro artículos que se fueron de línea este mes, para no tener que leer la
+  // tabla entera buscándolos. La lógica de qué es "grande" vive en lib/destacadosStock.ts.
+  const destacados = useMemo(() => destacadosDeUso(resumenArticulos.map((r) => ({
+    id: r.art.id_articulo,
+    articulo: r.art.articulo,
+    unidad: r.art.unidad_medida,
+    ini: r.ini, comp: r.comp, fin: r.fin,
+    usoReal: r.usoReal,
+    usoTeorico: r.usoTeorico,
+    usoMesPasado: r.usoMesPasado,
+    precio: r.precio,
+  }))), [resumenArticulos]);
+
   // Gastos "insumos" del mes seleccionado, aún no aplicados — sugerencia de compra.
   const [matchOverride, setMatchOverride] = useState<Record<string, string>>({});
   const [cantidadGasto, setCantidadGasto] = useState<Record<string, string>>({});
@@ -591,6 +605,45 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                 </div>
               )}
             </div>
+            {/* Lo que se fue de línea: arriba de todo, para no tener que barrer la tabla. */}
+            <div style={{ marginTop: '12px', borderTop: '1px solid #f3f4f6', paddingTop: '10px' }}>
+              <p style={{ margin: '0 0 8px', fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Lo que se fue de línea — {MESES[mes - 1]} {anio}
+              </p>
+              {destacados.length === 0 ? (
+                <p style={{ margin: 0, fontSize: '12px', color: '#059669' }}>
+                  Ningún artículo se desvió más de {UMBRAL_PCT}% de su referencia este mes.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {destacados.map((d) => {
+                    const mas = d.desvio > 0;
+                    const color = mas ? '#dc2626' : '#059669';
+                    return (
+                      <div key={d.id} style={{ borderLeft: `3px solid ${color}`, paddingLeft: '10px' }}>
+                        <p style={{ margin: 0, fontSize: '13px', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'baseline' }}>
+                          <span style={{ fontWeight: 700 }}>{d.articulo}</span>
+                          <span style={{ color, fontWeight: 800 }}>
+                            {mas ? '+' : '−'}{fmt(Math.abs(d.desvio))} {d.unidad}
+                            {d.desvioPct !== null && ` (${mas ? '+' : ''}${fmt(d.desvioPct, 0)}%)`}
+                          </span>
+                          {d.desvioPesos !== null && (
+                            <span style={{ color, fontWeight: 700, fontSize: '12px' }}>
+                              ≈ {mas ? '+' : '−'}${fmt(Math.abs(d.desvioPesos), 0)}
+                            </span>
+                          )}
+                        </p>
+                        <p style={{ margin: '1px 0 0', fontSize: '11.5px', color: '#4b5563' }}>
+                          Usó <strong>{fmt(d.usoReal)} {d.unidad}</strong> y {d.referencia === 'teorico' ? 'el teórico' : 'el mes pasado'} daba{' '}
+                          <strong>{fmt(d.esperado)} {d.unidad}</strong> · <span style={{ color: '#9ca3af' }}>{d.detalle}</span>
+                        </p>
+                        <p style={{ margin: '1px 0 0', fontSize: '11px', color: '#6b7280' }}>{d.nota}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
             {consolidado.sinConfigurar > 0 && (
               <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '6px 10px' }}>
                 El "Uso teórico" de cada artículo se calcula con los números de "Usos del sistema" de abajo (planchas sembradas, paquetes vendidos, etc.) — asignale una fórmula y un factor en{' '}
@@ -632,19 +685,6 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                   </tbody>
                 </table>
                 {copiado && <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#059669', fontWeight: 600 }}>✓ {copiado}</p>}
-              </div>
-            )}
-            {consolidado.top.length > 0 && (
-              <div style={{ marginTop: '10px', borderTop: '1px solid #f3f4f6', paddingTop: '8px' }}>
-                <p style={{ margin: '0 0 4px', fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase' }}>Mayores desvíos</p>
-                {consolidado.top.map((r) => (
-                  <p key={r.art.id_articulo} style={{ margin: '2px 0', fontSize: '12px' }}>
-                    <span style={{ fontWeight: 500 }}>{r.art.articulo}</span>{' '}
-                    <span style={{ color: (r.diff ?? 0) > 0 ? '#dc2626' : '#059669', fontWeight: 700 }}>
-                      {(r.pct ?? 0) > 0 ? '+' : ''}{fmt(r.pct ?? 0, 0)}%
-                    </span>
-                  </p>
-                ))}
               </div>
             )}
           </div>
