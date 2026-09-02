@@ -27,23 +27,50 @@ import { precioUltimoConocido } from './valorizacionStock';
 
 const num = (v: any) => { const n = Number(v); return isNaN(n) ? 0 : n; };
 
-// Categorías de gasto que son COSTO VARIABLE, con el nombre que llevan en el EERR.
-const VARIABLES_DE_GASTOS: { cat: CategoriaGasto; label: string }[] = [
-  { cat: 'fletes_combustible', label: 'Fletes y combustible' },
-  { cat: 'energia_agua', label: 'Energía + agua' },
-  { cat: 'cultivos_reventa', label: 'Cultivos de reventa' },
+// Las líneas del EERR son las MISMAS que las del Excel y en el mismo orden, aunque en el mes
+// no tengan movimiento: si aparecen y desaparecen según el mes, no se puede comparar una
+// columna contra la otra ni contra el Excel.
+//
+// Las categorías de artículo son texto libre en la planilla ("PACKAGING", "Bolsas"), así que
+// se mapean por palabra clave. Lo que no cae en ninguna va a Varios, igual que en el Excel.
+const LINEAS_VARIABLE: { label: string; claves?: string[]; cat?: CategoriaGasto }[] = [
+  { label: 'Ácido', claves: ['acido'] },
+  { label: 'Packaging', claves: ['packaging', 'bolsa'] },
+  { label: 'Cajones plásticos', claves: ['cajon'] },
+  { label: 'Espuma fenólica', claves: ['espuma'] },
+  { label: 'Fertilizantes', claves: ['fertilizante'] },
+  { label: 'Fletes y combustible', cat: 'fletes_combustible' },
+  { label: 'Foliares', claves: ['foliar'] },
+  { label: 'Semillas', claves: ['semilla'] },
+  { label: 'Energía + agua', cat: 'energia_agua' },
+  { label: 'Insumos de limpieza', claves: ['limpieza'] },
+  { label: 'Cultivos de reventa', cat: 'cultivos_reventa' },
+  { label: 'Varios', claves: [] },   // catch-all: todo lo que no matcheó arriba
 ];
 
 // Costos fijos: cada línea del EERR y las categorías de gasto que la componen.
+// "Otros ingresos y egresos" va acá adentro, no aparte: en el Excel es una línea más de
+// costos fijos (verificado — las ocho líneas suman exactamente el total del bloque).
 const FIJOS: { label: string; cats: CategoriaGasto[]; esInversion?: boolean }[] = [
   { label: 'Sueldos equipo', cats: ['sueldos'] },
   { label: 'Mantenimiento', cats: ['mantenimiento'] },
   { label: 'Inversión en equipamiento', cats: ['inversion_equipamiento', 'inversion_nave3'], esInversion: true },
-  { label: 'Impuestos', cats: ['impuestos'] },
+  { label: 'Impuestos (autónomos, IVA, IIBB)', cats: ['impuestos'] },
   { label: 'Alquiler', cats: ['alquiler'] },
   { label: 'Staff (contador, marketing, asesoramiento)', cats: ['staff'] },
   { label: 'Otros (abonos, seguros, trámites)', cats: ['abonos', 'gastos_generales'] },
+  { label: 'Otros ingresos (Rdo FCI) y egresos', cats: ['otros_ingresos'] },
 ];
+
+const normalizar = (s: string) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+function lineaDeCategoria(categoria: string): string {
+  const c = normalizar(categoria);
+  for (const l of LINEAS_VARIABLE) {
+    if (l.claves && l.claves.length && l.claves.some((k) => c.includes(k))) return l.label;
+  }
+  return 'Varios';
+}
 
 export interface LineaEERR { label: string; monto: number; fuente: 'stock' | 'gastos' }
 export interface LineaVenta { label: string; unidades: number; monto: number }
@@ -54,7 +81,7 @@ export interface EERR {
   ventas: { total: number; porCultivo: LineaVenta[] };
   costoVariable: { total: number; lineas: LineaEERR[] };
   costosFijos: { total: number; sinInversion: number; lineas: LineaEERR[] };
-  otrosIngresos: number;
+  inversion: number;
   resultado: number;
   resultadoSinInversion: number;
   masaSalarial: number;        // base de las previsiones de despidos y SAC
@@ -101,7 +128,8 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
     const consumo = ini + comp - fin;
     const precio = precioUltimoConocido(d.stocks, art.id_articulo, anio, mes);
     if (precio === null) { if (consumo !== 0) sinPrecio++; continue; }
-    consumoPorCat.set(art.categoria, (consumoPorCat.get(art.categoria) || 0) + consumo * precio);
+    const linea = lineaDeCategoria(art.categoria);
+    consumoPorCat.set(linea, (consumoPorCat.get(linea) || 0) + consumo * precio);
   }
 
   const gastosMes = d.gastos.filter((g) => {
@@ -111,23 +139,18 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
   const sumaCats = (cats: CategoriaGasto[]) =>
     gastosMes.filter((g) => cats.includes(g.categoria)).reduce((a, g) => a + num(g.monto), 0);
 
-  const lineasVariable: LineaEERR[] = [
-    ...[...consumoPorCat.entries()]
-      .map(([categoria, monto]) => ({ label: categoria, monto, fuente: 'stock' as const }))
-      .sort((a, b) => b.monto - a.monto),
-    ...VARIABLES_DE_GASTOS
-      .map(({ cat, label }) => ({ label, monto: sumaCats([cat]), fuente: 'gastos' as const }))
-      .filter((l) => l.monto !== 0),
-  ];
+  const lineasVariable: LineaEERR[] = LINEAS_VARIABLE.map((l) => (
+    l.cat
+      ? { label: l.label, monto: sumaCats([l.cat]), fuente: 'gastos' as const }
+      : { label: l.label, monto: consumoPorCat.get(l.label) || 0, fuente: 'stock' as const }
+  ));
   const totalVariable = lineasVariable.reduce((a, l) => a + l.monto, 0);
 
   // ── Costos fijos ──
   const lineasFijas: LineaEERR[] = FIJOS
-    .map(({ label, cats }) => ({ label, monto: sumaCats(cats), fuente: 'gastos' as const }))
-    .filter((l) => l.monto !== 0);
+    .map(({ label, cats }) => ({ label, monto: sumaCats(cats), fuente: 'gastos' as const }));
   const totalFijos = lineasFijas.reduce((a, l) => a + l.monto, 0);
   const inversion = sumaCats(['inversion_equipamiento', 'inversion_nave3']);
-  const otrosIngresos = sumaCats(['otros_ingresos']);
   const masaSalarial = sumaCats(['sueldos']);
 
   // ── Avisos: lo que hace que el número no cierre ──
@@ -139,14 +162,19 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
   if (sinStockFinal) avisos.push(`${sinStockFinal} artículo(s) con movimiento pero sin stock final cargado: su consumo no se puede calcular y falta en el costo variable.`);
   if (sinPrecio) avisos.push(`${sinPrecio} artículo(s) consumidos sin precio de compra conocido: su consumo no se puede valorizar.`);
 
-  const resultado = totalVentas + otrosIngresos - totalVariable - totalFijos;
+  // Igual que en el Excel: ventas menos los dos bloques de costo, sin sumar nada aparte.
+  // Verificado contra agosto — 22.681.957 − 5.208.704 − 18.507.309 = −1.034.056, exacto.
+  const resultado = totalVentas - totalVariable - totalFijos;
   return {
     anio, mes,
     ventas: { total: totalVentas, porCultivo },
     costoVariable: { total: totalVariable, lineas: lineasVariable },
     costosFijos: { total: totalFijos, sinInversion: totalFijos - inversion, lineas: lineasFijas },
-    otrosIngresos,
+    inversion,
     resultado,
+    // El resultado sin inversión es el resultado devolviéndole lo gastado en equipamiento:
+    // la inversión no es costo de operar, es plata puesta en el negocio. Verificado contra
+    // agosto — −1.034.056 + 8.476.004 = 7.441.948, exacto.
     resultadoSinInversion: resultado + inversion,
     masaSalarial,
     avisos,

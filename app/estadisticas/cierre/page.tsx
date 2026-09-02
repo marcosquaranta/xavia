@@ -7,22 +7,12 @@ import type { Articulo, StockMes, Gasto, VentaDia, PrecioVenta, ClienteVenta } f
 import Header from '@/components/Header';
 import { leerPrevisiones, previsionDelMes } from '@/lib/previsiones';
 import PrevisionesEditor from './PrevisionesEditor';
+import TablaEERR from './TablaEERR';
 export const dynamic = 'force-dynamic';
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const $ = (n: number) => `$${Math.round(n).toLocaleString('es-AR')}`;
-const pct = (n: number) => `${n > 0 ? '+' : ''}${Math.round(n)}%`;
-// Una variación contra una base casi nula no informa nada: "+1.178.671%" ocupa lugar y no
-// dice más que "el mes pasado no hubo". Se corta en 999%.
-const variacion = (act: number, ant: number): number | null => (ant === 0 ? null : ((act - ant) / Math.abs(ant)) * 100);
-const pctVar = (v: number) => (Math.abs(v) > 999 ? (v > 0 ? '> +999%' : '< −999%') : pct(v));
 
-// Las categorías de artículo vienen del texto libre de la planilla, muchas en mayúsculas.
-const capitalizar = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
-
-const cell: React.CSSProperties = { padding: '5px 10px', fontSize: '13px' };
-const cellNum: React.CSSProperties = { ...cell, textAlign: 'right', fontVariantNumeric: 'tabular-nums' };
-const cellDetalle: React.CSSProperties = { ...cell, paddingLeft: '26px', color: '#4b5563' };
 
 export default async function CierreMensualPage({ searchParams }: { searchParams: { anio?: string; mes?: string } }) {
   const user = await getCurrentUser();
@@ -71,32 +61,6 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
 
   // Cada línea del bloque anterior, para poder comparar aunque una categoría exista en un
   // mes y no en el otro.
-  const montoAnterior = (label: string, lineas: { label: string; monto: number }[]) =>
-    lineas.find((l) => l.label === label)?.monto ?? 0;
-
-  const Fila = ({ label, monto, antMonto, nivel = 'detalle' }: { label: string; monto: number; antMonto: number; nivel?: 'total' | 'detalle' | 'resultado' }) => {
-    const v = variacion(monto, antMonto);
-    const esTotal = nivel === 'total', esRes = nivel === 'resultado';
-    return (
-      <tr style={{ borderTop: esTotal || esRes ? '1px solid #e5e7eb' : '1px solid #f6f6f4' }}>
-        <td style={{
-          ...(esTotal || esRes ? cell : cellDetalle),
-          fontWeight: esTotal || esRes ? 700 : 400,
-          textTransform: esTotal ? 'uppercase' : 'none',
-          letterSpacing: esTotal ? '0.3px' : 0,
-          fontSize: esRes ? '14px' : esTotal ? '12px' : '13px',
-        }}>{label}</td>
-        <td style={{ ...cellNum, fontWeight: esTotal || esRes ? 800 : 500, fontSize: esRes ? '15px' : '13px', color: esRes && monto < 0 ? '#dc2626' : '#111827' }}>
-          {$(monto)}
-        </td>
-        <td style={{ ...cellNum, color: '#9ca3af', fontSize: '12px' }}>{$(antMonto)}</td>
-        <td style={{ ...cellNum, fontSize: '12px', color: v === null ? '#d1d5db' : v > 0 ? '#b45309' : '#059669' }}>
-          {v === null ? '—' : pctVar(v)}
-        </td>
-      </tr>
-    );
-  };
-
   return (
     <>
       <Header user={user} current="estadisticas" />
@@ -132,46 +96,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
           </div>
         )}
 
-        <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '560px' }}>
-            <thead>
-              <tr style={{ background: '#fafaf9' }}>
-                <th style={{ ...cell, textAlign: 'left', fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Concepto</th>
-                <th style={{ ...cellNum, fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.4px' }}>{nombre}</th>
-                <th style={{ ...cellNum, fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.4px' }}>{nombrePrev}</th>
-                <th style={{ ...cellNum, fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Var.</th>
-              </tr>
-            </thead>
-            <tbody>
-              <Fila label="Ventas" monto={act.ventas.total} antMonto={ant.ventas.total} nivel="total" />
-              {act.ventas.porCultivo.filter((c) => c.monto > 0 || montoAnterior(c.label, ant.ventas.porCultivo) > 0).map((c) => (
-                <tr key={c.label} style={{ borderTop: '1px solid #f6f6f4' }}>
-                  <td style={cellDetalle}>{c.label} <span style={{ color: '#9ca3af', fontSize: '11.5px' }}>· {Math.round(c.unidades).toLocaleString('es-AR')} u</span></td>
-                  <td style={{ ...cellNum, fontWeight: 500 }}>{$(c.monto)}</td>
-                  <td style={{ ...cellNum, color: '#9ca3af', fontSize: '12px' }}>{$(montoAnterior(c.label, ant.ventas.porCultivo))}</td>
-                  <td style={{ ...cellNum, fontSize: '12px', color: '#d1d5db' }}></td>
-                </tr>
-              ))}
-
-              <Fila label="Costo variable" monto={act.costoVariable.total} antMonto={ant.costoVariable.total} nivel="total" />
-              {act.costoVariable.lineas.map((l) => (
-                <Fila key={l.label} label={l.fuente === 'stock' ? capitalizar(l.label) : l.label} monto={l.monto} antMonto={montoAnterior(l.label, ant.costoVariable.lineas)} />
-              ))}
-
-              <Fila label="Costos fijos" monto={act.costosFijos.total} antMonto={ant.costosFijos.total} nivel="total" />
-              {act.costosFijos.lineas.map((l) => (
-                <Fila key={l.label} label={l.label} monto={l.monto} antMonto={montoAnterior(l.label, ant.costosFijos.lineas)} />
-              ))}
-
-              {(act.otrosIngresos !== 0 || ant.otrosIngresos !== 0) && (
-                <Fila label="Otros ingresos" monto={act.otrosIngresos} antMonto={ant.otrosIngresos} nivel="total" />
-              )}
-
-              <Fila label="Resultado final" monto={act.resultado} antMonto={ant.resultado} nivel="resultado" />
-              <Fila label="Resultado sin inversión" monto={act.resultadoSinInversion} antMonto={ant.resultadoSinInversion} nivel="resultado" />
-            </tbody>
-          </table>
-        </div>
+        <TablaEERR act={act} ant={ant} nombre={nombre} nombrePrev={nombrePrev} />
 
         <div className="card" style={{ marginTop: '12px' }}>
           <p style={{ margin: '0 0 6px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
