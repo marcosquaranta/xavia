@@ -5,6 +5,8 @@ import { readSheet } from '@/lib/sheets';
 import { calcularEERR, previsionesSugeridas } from '@/lib/eerr';
 import type { Articulo, StockMes, Gasto, VentaDia, PrecioVenta, ClienteVenta } from '@/lib/types';
 import Header from '@/components/Header';
+import { leerPrevisiones, previsionDelMes } from '@/lib/previsiones';
+import PrevisionesEditor from './PrevisionesEditor';
 export const dynamic = 'force-dynamic';
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -29,12 +31,14 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
 
   let articulos: Articulo[] = [], stocks: StockMes[] = [], gastos: Gasto[] = [];
   let ventas: VentaDia[] = [], precios: PrecioVenta[] = [], clientes: ClienteVenta[] = [];
+  let previsiones: Awaited<ReturnType<typeof leerPrevisiones>> = [];
   let err: string | null = null;
   try {
-    [articulos, stocks, gastos, ventas, precios, clientes] = await Promise.all([
+    [articulos, stocks, gastos, ventas, precios, clientes, previsiones] = await Promise.all([
       readSheet<Articulo>('Articulos'), readSheet<StockMes>('Stocks'), readSheet<Gasto>('Gastos'),
       readSheet<VentaDia>('Ventas'), readSheet<PrecioVenta>('Precios').catch(() => []),
       readSheet<ClienteVenta>('Clientes').catch(() => []),
+      leerPrevisiones(),
     ]);
   } catch (e: any) { err = e?.message || 'Error cargando datos'; }
 
@@ -55,6 +59,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   const act = calcularEERR(datos, anio, mes);
   const ant = calcularEERR(datos, anioPrev, mesPrev);
   const prev = previsionesSugeridas(act.masaSalarial);
+  const guardada = previsionDelMes(previsiones, anio, mes);
 
   const esMesActual = anio === hoy.getFullYear() && mes === (hoy.getMonth() + 1);
   const hrefMes = (a: number, m: number) => `/estadisticas/cierre?anio=${a}&mes=${m}`;
@@ -170,15 +175,17 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
 
         <div className="card" style={{ marginTop: '12px' }}>
           <p style={{ margin: '0 0 6px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Previsiones sugeridas — {nombre}
+            Previsiones — {nombre}
           </p>
-          <p style={{ margin: '0 0 8px', fontSize: '12px', color: '#6b7280' }}>
-            Sobre una masa salarial de <strong>{$(act.masaSalarial)}</strong>. Todavía no se guardan ni se pueden editar — eso viene en el paso siguiente.
-          </p>
-          <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
-            <div><span style={{ fontSize: '18px', fontWeight: 800 }}>{$(prev.despidos)}</span><span style={{ fontSize: '11.5px', color: '#6b7280', marginLeft: '6px' }}>despidos (6%)</span></div>
-            <div><span style={{ fontSize: '18px', fontWeight: 800 }}>{$(prev.sac)}</span><span style={{ fontSize: '11.5px', color: '#6b7280', marginLeft: '6px' }}>SAC (1/12)</span></div>
-          </div>
+          <PrevisionesEditor
+            anio={anio} mes={mes} masaSalarial={act.masaSalarial} sugeridas={prev}
+            guardadas={guardada ? {
+              despidos: Number(guardada.despidos) || 0,
+              sac: Number(guardada.sac) || 0,
+              notas: String(guardada.notas || ''),
+              fecha: String(guardada.fecha_carga || ''),
+            } : null}
+          />
         </div>
 
         <div className="card" style={{ marginTop: '12px', background: '#fafaf9' }}>
