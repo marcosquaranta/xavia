@@ -89,22 +89,15 @@ export default function GraficoValorComercial({ datos, titulo = 'Clientes — pr
   const escP = escalaRelativa(datos.map((d) => d.precioPromedio), precioProm);
   const escV = escalaRelativa(datos.map((d) => d.unidades), volumenProm);
 
-  // Los cortes entre bandas se estiran alrededor del centro (CONTRASTE): comprimir los
-  // extremos deja a casi todos amontonados en el medio y la rampa se usaría por la mitad.
-  // Estirar el contraste no cambia el orden de nadie ni de qué lado del centro cae: el corte
-  // del medio sigue siendo exactamente el cruce de los dos promedios. Los dos extremos van
-  // bien afuera de la escala para que el color llegue hasta los bordes del gráfico.
-  const bordes = Array.from({ length: BANDAS + 1 }, (_, i) =>
-    i === 0 ? -5 : i === BANDAS ? 6 : 0.5 + (i / BANDAS - 0.5) / CONTRASTE);
-  const bandas = Array.from({ length: BANDAS }, (_, i) => ({
-    d: pathBanda(bordes[i], bordes[i + 1]),
-    fill: RAMPA[i],
-  }));
+  // OJO con el orden de acá abajo: `bandas` se calcula en el acto y termina llamando a
+  // acotar(). Si acotar queda declarado DESPUÉS, es un const en zona muerta temporal y el
+  // gráfico revienta en el navegador con "Cannot access 'X' before initialization" — sin
+  // que ni tsc ni el build lo vean. Primero las herramientas, después lo que las usa.
+  function acotar(v: number): number { return Math.max(Y0 - 4000, Math.min(Y1 + 4000, v)); }
 
   // Borde superior de la zona con puntaje `s`: para cada x, el volumen que la alcanza.
   // Con la escala partida en dos tramos por eje la curva ya no es una recta, así que se
   // muestrea a lo ancho en vez de unir los extremos.
-  const acotar = (v: number) => Math.max(Y0 - 4000, Math.min(Y1 + 4000, v));
   function curva(s: number, desdeIzq: boolean): string {
     const PASOS = 32;
     const pts: string[] = [];
@@ -120,6 +113,18 @@ export default function GraficoValorComercial({ datos, titulo = 'Clientes — pr
   function pathBanda(s1: number, s2: number): string {
     return `M ${curva(s2, true)} L ${curva(s1, false)} Z`;
   }
+
+  // Los cortes entre bandas se estiran alrededor del centro (CONTRASTE): comprimir los
+  // extremos deja a casi todos amontonados en el medio y la rampa se usaría por la mitad.
+  // Estirar el contraste no cambia el orden de nadie ni de qué lado del centro cae: el corte
+  // del medio sigue siendo exactamente el cruce de los dos promedios. Los dos extremos van
+  // bien afuera de la escala para que el color llegue hasta los bordes del gráfico.
+  const bordes = Array.from({ length: BANDAS + 1 }, (_, i) =>
+    i === 0 ? -5 : i === BANDAS ? 6 : 0.5 + (i / BANDAS - 0.5) / CONTRASTE);
+  const bandas = Array.from({ length: BANDAS }, (_, i) => ({
+    d: pathBanda(bordes[i], bordes[i + 1]),
+    fill: RAMPA[i],
+  }));
 
   // ── Ticks ──────────────────────────────────────────────────────────────────────────
   const ticksX = ticks(xMin, xMax, 5);
