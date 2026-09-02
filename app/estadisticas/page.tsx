@@ -580,6 +580,7 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             <h1 className="page-title">Estadísticas</h1>
             <p className="page-subtitle">{nombre}</p>
           </div>
+          <Link href="/estadisticas/cierre" className="btn secondary" style={{ fontSize:'12px' }}>📊 Cierre mensual (EERR) →</Link>
           <Link href="/estadisticas/mensual" className="btn secondary" style={{ fontSize:'12px' }}>📧 Análisis mensual (para mail) →</Link>
         </div>
 

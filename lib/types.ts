@@ -102,13 +102,14 @@ export interface StockMes {
 export type CategoriaGasto =
   | 'insumos' | 'gastos_generales' | 'sueldos' | 'mantenimiento'
   | 'inversion_equipamiento' | 'inversion_nave3' | 'abonos' | 'impuestos'
-  | 'alquiler' | 'staff' | 'fletes_combustible' | 'energia_agua'
+  | 'alquiler' | 'staff' | 'fletes_combustible' | 'energia_agua' | 'cultivos_reventa'
   | 'otros_ingresos' | 'movimiento_interno';
 export const CATEGORIAS_GASTO: { value: CategoriaGasto; label: string }[] = [
   { value: 'gastos_generales', label: 'Gastos generales' },
   { value: 'insumos', label: 'Insumos' },
   { value: 'fletes_combustible', label: 'Fletes y combustible' },
   { value: 'energia_agua', label: 'Energía y agua' },
+  { value: 'cultivos_reventa', label: 'Cultivos de reventa' },
   { value: 'sueldos', label: 'Sueldos' },
   { value: 'mantenimiento', label: 'Mantenimiento' },
   { value: 'alquiler', label: 'Alquiler' },
