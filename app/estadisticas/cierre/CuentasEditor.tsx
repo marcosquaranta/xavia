@@ -51,8 +51,11 @@ export default function CuentasEditor({ anio, mes, cobranzas, saldos }: {
   }
 
   const totalCobrado = cobranzas.reduce((a, c) => a + (Number(c.monto) || 0), 0);
-  const conMovimiento = saldos.filter((s) => s.hayInicial || s.cobranzas || s.gastos || s.entradas || s.salidas || s.real !== null);
-  const filas = conMovimiento.length ? conMovimiento : saldos;
+  // Se muestran TODAS las cuentas aunque no hayan tenido movimiento: si solo aparecieran
+  // las que se movieron, no habría dónde cargar el saldo real de las demás — y el primer
+  // mes, que es justo cuando hay que sembrar los saldos iniciales, no aparecería casi
+  // ninguna.
+  const filas = saldos;
 
   return (
     <div>
