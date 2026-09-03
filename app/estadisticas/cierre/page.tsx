@@ -8,6 +8,8 @@ import Header from '@/components/Header';
 import { leerPrevisiones, previsionDelMes } from '@/lib/previsiones';
 import PrevisionesEditor from './PrevisionesEditor';
 import TablaEERR from './TablaEERR';
+import { leerCobranzas, leerSaldos, saldosDelMes, type Cobranza, type SaldoCuenta } from '@/lib/cuentas';
+import CuentasEditor from './CuentasEditor';
 export const dynamic = 'force-dynamic';
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -22,13 +24,14 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   let articulos: Articulo[] = [], stocks: StockMes[] = [], gastos: Gasto[] = [];
   let ventas: VentaDia[] = [], precios: PrecioVenta[] = [], clientes: ClienteVenta[] = [];
   let previsiones: Awaited<ReturnType<typeof leerPrevisiones>> = [];
+  let cobranzas: Cobranza[] = [], saldosGuardados: SaldoCuenta[] = [];
   let err: string | null = null;
   try {
-    [articulos, stocks, gastos, ventas, precios, clientes, previsiones] = await Promise.all([
+    [articulos, stocks, gastos, ventas, precios, clientes, previsiones, cobranzas, saldosGuardados] = await Promise.all([
       readSheet<Articulo>('Articulos'), readSheet<StockMes>('Stocks'), readSheet<Gasto>('Gastos'),
       readSheet<VentaDia>('Ventas'), readSheet<PrecioVenta>('Precios').catch(() => []),
       readSheet<ClienteVenta>('Clientes').catch(() => []),
-      leerPrevisiones(),
+      leerPrevisiones(), leerCobranzas(), leerSaldos(),
     ]);
   } catch (e: any) { err = e?.message || 'Error cargando datos'; }
 
@@ -50,6 +53,14 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   const ant = calcularEERR(datos, anioPrev, mesPrev);
   const prev = previsionesSugeridas(act.masaSalarial);
   const guardada = previsionDelMes(previsiones, anio, mes);
+
+  const mm = String(mes).padStart(2, '0');
+  const desdeMes = `${anio}-${mm}-01`;
+  const hastaMes = `${anio}-${mm}-${String(new Date(anio, mes, 0).getDate()).padStart(2, '0')}`;
+  const cobranzasMes = cobranzas
+    .filter((c) => { const f = String(c.fecha || '').split(/[T ]/)[0]; return f >= desdeMes && f <= hastaMes; })
+    .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
+  const saldos = saldosDelMes(gastos, cobranzas, saldosGuardados, anio, mes);
 
   const esMesActual = anio === hoy.getFullYear() && mes === (hoy.getMonth() + 1);
   const hrefMes = (a: number, m: number) => `/estadisticas/cierre?anio=${a}&mes=${m}`;
@@ -111,6 +122,13 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
               fecha: String(guardada.fecha_carga || ''),
             } : null}
           />
+        </div>
+
+        <div className="card" style={{ marginTop: '12px' }}>
+          <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            Cobranzas y saldos — {nombre}
+          </p>
+          <CuentasEditor anio={anio} mes={mes} cobranzas={cobranzasMes} saldos={saldos} />
         </div>
 
         <div className="card" style={{ marginTop: '12px', background: '#fafaf9' }}>
