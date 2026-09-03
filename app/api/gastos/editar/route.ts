@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, isAdmin } from '@/lib/auth';
 import { updateRow } from '@/lib/sheets';
-import { CATEGORIAS_GASTO } from '@/lib/types';
+import { CATEGORIAS_GASTO, admiteMontoNegativo } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     const { id_gasto, fecha, descripcion, categoria, monto, medio_pago } = await req.json();
     if (!id_gasto) return NextResponse.json({ error: 'falta_id' }, { status: 400 });
     const montoNum = Number(monto);
-    if (!isFinite(montoNum) || montoNum <= 0) {
+    if (!isFinite(montoNum) || montoNum === 0 || (montoNum < 0 && !admiteMontoNegativo(categoria))) {
       return NextResponse.json({ error: 'monto_invalido' }, { status: 400 });
     }
 

@@ -127,6 +127,16 @@ export const CATEGORIAS_GASTO: { value: CategoriaGasto; label: string }[] = [
 // cargado con categoría 'movimiento_interno'. Si se cargara como gasto, cada compra con
 // tarjeta contaría dos veces en el resultado del mes.
 // 'Aporte socios' es financiamiento, no costo: entra al flujo de fondos, nunca al resultado.
+// "Otros ingresos" es la única categoría que admite monto negativo, y por eso existe la
+// función en vez de repetir la condición en cada validación. En el EERR es una línea de
+// costos fijos que puede ir para los dos lados —así está en el Excel, "Otros Ingresos (Rdo
+// FCI) y Egresos"— y con un mes de FCI a favor el neto da negativo: menos costo, más
+// resultado. En el saldo de la cuenta funciona igual sin tocar nada: un gasto negativo es
+// plata que entra.
+export function admiteMontoNegativo(categoria: string): boolean {
+  return categoria === 'otros_ingresos';
+}
+
 export type MedioPagoGasto = 'Brubank' | 'Macro' | 'VISA' | 'Caja MQ' | 'Caja FL' | 'Caja Marce' | 'Caja JP' | 'Aporte socios';
 export const MEDIOS_PAGO: MedioPagoGasto[] = ['Brubank', 'Macro', 'VISA', 'Caja MQ', 'Caja FL', 'Caja Marce', 'Caja JP', 'Aporte socios'];
 export interface Gasto {

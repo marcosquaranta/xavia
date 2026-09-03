@@ -1,7 +1,7 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { CATEGORIAS_GASTO, MEDIOS_PAGO, type Gasto, type CategoriaGasto, type Articulo } from '@/lib/types';
+import { CATEGORIAS_GASTO, MEDIOS_PAGO, admiteMontoNegativo, type Gasto, type CategoriaGasto, type Articulo } from '@/lib/types';
 import NumberInput from '@/components/NumberInput';
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -26,6 +26,7 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
   const [categoria, setCategoria] = useState<CategoriaGasto>('gastos_generales');
   const [medioDestino, setMedioDestino] = useState('');
   const esMovimiento = categoria === 'movimiento_interno';
+  const aceptaNegativo = admiteMontoNegativo(categoria);
   const [monto, setMonto] = useState(0);
   const [medioPago, setMedioPago] = useState<string>(MEDIOS[0]);
   const [idArticulo, setIdArticulo] = useState('');
@@ -67,7 +68,8 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
     e.preventDefault();
     setError(null);
     if (!descripcion.trim()) { setError('Ingresá una descripción'); return; }
-    if (monto <= 0) { setError('Ingresá un monto mayor a 0'); return; }
+    if (monto === 0) { setError('Ingresá un monto'); return; }
+    if (monto < 0 && !aceptaNegativo) { setError('Ingresá un monto mayor a 0'); return; }
     if (esMovimiento && !medioDestino) { setError('Elegí a qué cuenta entra la plata'); return; }
     setGuardando(true);
     try {
@@ -163,7 +165,12 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
           </div>
           <div>
             <label>Monto</label>
-            <NumberInput value={monto} onChange={setMonto} min={0} disabled={guardando} placeholder="0" />
+            <NumberInput value={monto} onChange={setMonto} min={aceptaNegativo ? undefined : 0} disabled={guardando} placeholder="0" />
+            {aceptaNegativo && (
+              <p style={{ margin: '3px 0 0', fontSize: '10.5px', color: '#6b7280' }}>
+                Un ingreso (rendimiento del FCI, intereses) va en <strong>negativo</strong>: resta costo y sube el resultado.
+              </p>
+            )}
           </div>
           <div>
             <label>{esMovimiento ? 'Sale de' : 'Medio de pago'}</label>
@@ -299,7 +306,7 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
                           </select>
                         </td>
                         <td style={{ padding: '2px 4px' }}>
-                          <input type="number" value={editVals.monto} onChange={(e) => setEditVals({ ...editVals, monto: Number(e.target.value) || 0 })} style={{ width: '100%', textAlign: 'right', fontSize: '12px', padding: '3px 6px', border: '1px solid #e5e7eb', borderRadius: '4px' }} min={0} step={0.01} />
+                          <input type="number" value={editVals.monto} onChange={(e) => setEditVals({ ...editVals, monto: Number(e.target.value) || 0 })} style={{ width: '100%', textAlign: 'right', fontSize: '12px', padding: '3px 6px', border: '1px solid #e5e7eb', borderRadius: '4px' }} min={admiteMontoNegativo(editVals.categoria) ? undefined : 0} step={0.01} />
                         </td>
                         <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
                           <button onClick={guardarEdicion} disabled={guardando} style={{ background: '#059669', color: 'white', border: 'none', borderRadius: '4px', padding: '3px 7px', fontSize: '11px', cursor: 'pointer', marginRight: '3px' }}>✓</button>

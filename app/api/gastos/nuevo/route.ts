@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, isAdmin } from '@/lib/auth';
 import { readSheet, appendRowObj, asegurarColumna } from '@/lib/sheets';
-import { CATEGORIAS_GASTO, type Gasto } from '@/lib/types';
+import { CATEGORIAS_GASTO, admiteMontoNegativo, type Gasto } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
@@ -20,7 +20,8 @@ export async function POST(req: NextRequest) {
       if (medio_pago_destino === medio_pago) return NextResponse.json({ error: 'destino_igual_origen' }, { status: 400 });
     }
     const montoNum = Number(monto);
-    if (!isFinite(montoNum) || montoNum <= 0) {
+    const negativoOk = admiteMontoNegativo(categoria);
+    if (!isFinite(montoNum) || montoNum === 0 || (montoNum < 0 && !negativoOk)) {
       return NextResponse.json({ error: 'monto_invalido' }, { status: 400 });
     }
     const cantidadNum = Number(cantidad) || 0;
