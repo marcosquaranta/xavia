@@ -11,6 +11,8 @@ import TablaEERR from './TablaEERR';
 import { leerCobranzas, leerSaldos, saldosDelMes, type Cobranza, type SaldoCuenta } from '@/lib/cuentas';
 import CuentasEditor from './CuentasEditor';
 import { nombreClienteVisible } from '@/lib/clientes';
+import { pasosDelCierre, resumenChecklist } from '@/lib/cierreChecklist';
+import ChecklistCierre from './ChecklistCierre';
 export const dynamic = 'force-dynamic';
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -62,6 +64,8 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
     .filter((c) => { const f = String(c.fecha || '').split(/[T ]/)[0]; return f >= desdeMes && f <= hastaMes; })
     .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
   const saldos = saldosDelMes(gastos, cobranzas, saldosGuardados, anio, mes);
+  const pasos = pasosDelCierre({ eerr: act, gastos, stocks, articulos, cobranzas: cobranzasMes, saldos, hayPrevision: !!guardada, anio, mes });
+  const resumenPasos = resumenChecklist(pasos);
 
   const esMesActual = anio === hoy.getFullYear() && mes === (hoy.getMonth() + 1);
   const hrefMes = (a: number, m: number) => `/eerr?anio=${a}&mes=${m}`;
@@ -107,11 +111,13 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
           </div>
         )}
 
+        <ChecklistCierre pasos={pasos} {...resumenPasos} />
+
         <TablaEERR act={act} ant={ant} nombre={nombre} nombrePrev={nombrePrev} />
 
         <div className="card" style={{ marginTop: '12px' }}>
           <p style={{ margin: '0 0 6px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Previsiones — {nombre}
+            Previsiones y cuentas corrientes — {nombre}
           </p>
           <PrevisionesEditor
             anio={anio} mes={mes} masaSalarial={act.masaSalarial} sugeridas={prev}
@@ -144,6 +150,9 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
             <li><strong>Los gastos de «Insumos» no se suman aparte:</strong> ya están contados dentro del consumo de Stocks. Si alguno quedó sin aplicar a stock, aparece arriba como aviso.</li>
             <li><strong>Quedan afuera del resultado:</strong> los movimientos entre medios de pago (pagar el resumen de la tarjeta no es un gasto nuevo) y los aportes de socios, que son financiamiento.</li>
           </ul>
+          <p style={{ margin: '10px 0 0', fontSize: '12.5px' }}>
+            <Link href="/eerr/instrucciones" style={{ color: '#2563eb', fontWeight: 600 }}>Instrucciones completas del cierre de mes →</Link>
+          </p>
         </div>
       </div>
     </>

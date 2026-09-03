@@ -28,6 +28,10 @@ export default function CuentasEditor({ anio, mes, cobranzas, saldos, clientes }
   const [cliente, setCliente] = useState('');
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // El saldo inicial normalmente no se toca: es el cierre del mes anterior. Pero el primer
+  // mes ese cierre no existe, y sin poder sembrarlo la conciliación nunca puede dar. Se
+  // guarda como el saldo REAL del mes anterior, que es exactamente lo que es.
+  const [inicialSemilla, setInicialSemilla] = useState<Record<string, string>>({});
   const [saldoReal, setSaldoReal] = useState<Record<string, string>>(
     Object.fromEntries(saldos.map((s) => [s.medio, s.real === null ? '' : String(Math.round(s.real))])),
   );
@@ -57,6 +61,7 @@ export default function CuentasEditor({ anio, mes, cobranzas, saldos, clientes }
   }
 
   const totalCobrado = cobranzas.reduce((a, c) => a + (Number(c.monto) || 0), 0);
+  const mesPrev = mes === 1 ? { anio: anio - 1, mes: 12 } : { anio, mes: mes - 1 };
   // Se muestran TODAS las cuentas aunque no hayan tenido movimiento: si solo aparecieran
   // las que se movieron, no habría dónde cargar el saldo real de las demás — y el primer
   // mes, que es justo cuando hay que sembrar los saldos iniciales, no aparecería casi
@@ -152,7 +157,22 @@ export default function CuentasEditor({ anio, mes, cobranzas, saldos, clientes }
                     {s.medio}
                     {!s.hayInicial && <span title="No hay saldo de cierre del mes anterior: el inicial arranca en cero" style={{ color: '#b45309', marginLeft: '4px' }}>·</span>}
                   </td>
-                  <td style={{ ...celNum, color: '#9ca3af' }}>{$(s.inicial)}</td>
+                  <td style={{ ...cel, textAlign: 'right' }}>
+                    {s.hayInicial ? (
+                      <span style={{ color: '#9ca3af', fontVariantNumeric: 'tabular-nums' }}>{$(s.inicial)}</span>
+                    ) : (
+                      <input type="number" value={inicialSemilla[s.medio] ?? ''} step={1} disabled={ocupado}
+                        onChange={(e) => setInicialSemilla((p) => ({ ...p, [s.medio]: e.target.value }))}
+                        onBlur={() => {
+                          const v = inicialSemilla[s.medio];
+                          if (v === '' || v === undefined) return;
+                          llamar({ accion: 'saldo_guardar', anio: mesPrev.anio, mes: mesPrev.mes, medio_pago: s.medio, saldo_real: Number(v) });
+                        }}
+                        title="No hay cierre del mes anterior: cargá acá el saldo con el que arranca esta cuenta. Se guarda como el cierre del mes pasado."
+                        placeholder="sembrar"
+                        style={{ width: '100px', textAlign: 'right', fontSize: '12.5px', padding: '3px 6px', border: '1px dashed #d1d5db', borderRadius: '4px' }} />
+                    )}
+                  </td>
                   <td style={{ ...celNum, color: s.cobranzas ? '#059669' : '#d1d5db' }}>{$(s.cobranzas)}</td>
                   <td style={{ ...celNum, color: s.gastos ? '#b45309' : '#d1d5db' }}>{$(s.gastos)}</td>
                   <td style={{ ...celNum, color: '#6b7280' }}>{$(s.entradas - s.salidas)}</td>
@@ -180,6 +200,7 @@ export default function CuentasEditor({ anio, mes, cobranzas, saldos, clientes }
       </div>
       <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#9ca3af', lineHeight: 1.5 }}>
         El saldo inicial de cada cuenta es el <strong>saldo real que cargaste el mes anterior</strong>, igual que el stock de insumos.
+        La primera vez no existe: escribilo en la columna «Inicial» y queda guardado como el cierre del mes pasado.
         La diferencia contra el resumen es plata que se movió sin quedar registrada: mientras no dé ✓, falta cargar algo.
         Un movimiento entre cuentas no se cuenta como gasto — sale de una y entra en la otra.
         El <strong>cliente es opcional</strong>: para los saldos no hace falta, pero cada cobranza que lo lleve acerca a poder calcular deudores por venta acá en vez de en Xubio.
