@@ -4,6 +4,10 @@ import { useRouter } from 'next/navigation';
 import { MEDIOS_PAGO } from '@/lib/types';
 import type { Cobranza, SaldoMes } from '@/lib/cuentas';
 
+// El cliente es opcional a propósito. Hoy la cuenta corriente vive en Xubio y para los
+// saldos alcanza con el total por cuenta; pero cada cobranza que sí lo lleve es un paso
+// hacia poder calcular deudores por venta acá, sin tener que volver atrás a completarlas.
+
 // Cobranzas del mes y conciliación de cada cuenta. La diferencia entre el saldo calculado y
 // el del resumen es plata que se movió sin quedar registrada: mientras no sea cero, falta
 // cargar algo. Es el mismo control que hoy se hace a mano contra Xubio.
@@ -12,14 +16,16 @@ const $ = (n: number) => `$${Math.round(n).toLocaleString('es-AR')}`;
 const cel: React.CSSProperties = { padding: '5px 8px', fontSize: '12.5px' };
 const celNum: React.CSSProperties = { ...cel, textAlign: 'right', fontVariantNumeric: 'tabular-nums' };
 
-export default function CuentasEditor({ anio, mes, cobranzas, saldos }: {
+export default function CuentasEditor({ anio, mes, cobranzas, saldos, clientes }: {
   anio: number; mes: number; cobranzas: Cobranza[]; saldos: SaldoMes[];
+  clientes: { id: string; nombre: string }[];
 }) {
   const router = useRouter();
   const [fecha, setFecha] = useState(`${anio}-${String(mes).padStart(2, '0')}-${String(new Date(anio, mes, 0).getDate()).padStart(2, '0')}`);
   const [medio, setMedio] = useState<string>(MEDIOS_PAGO[0]);
   const [monto, setMonto] = useState('');
   const [notas, setNotas] = useState('');
+  const [cliente, setCliente] = useState('');
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saldoReal, setSaldoReal] = useState<Record<string, string>>(
@@ -45,8 +51,8 @@ export default function CuentasEditor({ anio, mes, cobranzas, saldos }: {
   async function agregar() {
     const m = Number(monto);
     if (!isFinite(m) || m <= 0) { setError('Ingresá un monto mayor a 0'); return; }
-    if (await llamar({ accion: 'cobranza_nueva', fecha, medio_pago: medio, monto: m, notas })) {
-      setMonto(''); setNotas('');
+    if (await llamar({ accion: 'cobranza_nueva', fecha, medio_pago: medio, monto: m, notas, id_control: cliente })) {
+      setMonto(''); setNotas(''); setCliente('');
     }
   }
 
@@ -83,7 +89,15 @@ export default function CuentasEditor({ anio, mes, cobranzas, saldos }: {
           <input type="number" value={monto} onChange={(e) => setMonto(e.target.value)} min={0} step={1} disabled={ocupado} placeholder="0"
             style={{ width: '130px', textAlign: 'right', fontSize: '13px', fontWeight: 600, padding: '5px 7px', border: '1px solid #e5e7eb', borderRadius: '5px' }} />
         </div>
-        <div style={{ flex: '1 1 160px', minWidth: '140px' }}>
+        <div>
+          <label style={{ display: 'block', fontSize: '10.5px', color: '#6b7280' }}>Cliente <span style={{ color: '#9ca3af' }}>(opcional)</span></label>
+          <select value={cliente} onChange={(e) => setCliente(e.target.value)} disabled={ocupado}
+            style={{ fontSize: '12px', padding: '5px 7px', border: '1px solid #e5e7eb', borderRadius: '5px', maxWidth: '170px' }}>
+            <option value="">— sin detallar —</option>
+            {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+          </select>
+        </div>
+        <div style={{ flex: '1 1 140px', minWidth: '120px' }}>
           <label style={{ display: 'block', fontSize: '10.5px', color: '#6b7280' }}>Notas</label>
           <input type="text" value={notas} onChange={(e) => setNotas(e.target.value)} disabled={ocupado} placeholder="Ej: cobranzas de la semana"
             style={{ width: '100%', fontSize: '12px', padding: '5px 7px', border: '1px solid #e5e7eb', borderRadius: '5px' }} />
@@ -98,6 +112,7 @@ export default function CuentasEditor({ anio, mes, cobranzas, saldos }: {
               <tr key={c.id_cobranza} style={{ borderTop: '1px solid #f3f4f6' }}>
                 <td style={{ ...cel, color: '#6b7280', width: '90px' }}>{String(c.fecha).split('-').reverse().join('/')}</td>
                 <td style={cel}>{c.medio_pago}</td>
+                <td style={cel}>{clientes.find((x) => x.id === String(c.id_control))?.nombre ?? ''}</td>
                 <td style={{ ...cel, color: '#9ca3af' }}>{c.notas}</td>
                 <td style={{ ...celNum, fontWeight: 700 }}>{$(Number(c.monto) || 0)}</td>
                 <td style={{ ...cel, width: '30px', textAlign: 'right' }}>
@@ -107,7 +122,7 @@ export default function CuentasEditor({ anio, mes, cobranzas, saldos }: {
               </tr>
             ))}
             <tr style={{ borderTop: '1px solid #e5e7eb' }}>
-              <td colSpan={3} style={{ ...cel, fontWeight: 700 }}>Total cobrado</td>
+              <td colSpan={4} style={{ ...cel, fontWeight: 700 }}>Total cobrado</td>
               <td style={{ ...celNum, fontWeight: 800 }}>{$(totalCobrado)}</td>
               <td />
             </tr>
@@ -167,6 +182,7 @@ export default function CuentasEditor({ anio, mes, cobranzas, saldos }: {
         El saldo inicial de cada cuenta es el <strong>saldo real que cargaste el mes anterior</strong>, igual que el stock de insumos.
         La diferencia contra el resumen es plata que se movió sin quedar registrada: mientras no dé ✓, falta cargar algo.
         Un movimiento entre cuentas no se cuenta como gasto — sale de una y entra en la otra.
+        El <strong>cliente es opcional</strong>: para los saldos no hace falta, pero cada cobranza que lo lleve acerca a poder calcular deudores por venta acá en vez de en Xubio.
       </p>
     </div>
   );

@@ -10,6 +10,7 @@ import PrevisionesEditor from './PrevisionesEditor';
 import TablaEERR from './TablaEERR';
 import { leerCobranzas, leerSaldos, saldosDelMes, type Cobranza, type SaldoCuenta } from '@/lib/cuentas';
 import CuentasEditor from './CuentasEditor';
+import { nombreClienteVisible } from '@/lib/clientes';
 export const dynamic = 'force-dynamic';
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -37,7 +38,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
 
   if (err) return (
     <>
-      <Header user={user} current="estadisticas" />
+      <Header user={user} current="eerr" />
       <div className="container"><div className="alert-box error">{err}</div></div>
     </>
   );
@@ -63,7 +64,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   const saldos = saldosDelMes(gastos, cobranzas, saldosGuardados, anio, mes);
 
   const esMesActual = anio === hoy.getFullYear() && mes === (hoy.getMonth() + 1);
-  const hrefMes = (a: number, m: number) => `/estadisticas/cierre?anio=${a}&mes=${m}`;
+  const hrefMes = (a: number, m: number) => `/eerr?anio=${a}&mes=${m}`;
   let mesSig = mes + 1, anioSig = anio;
   if (mesSig === 13) { mesSig = 1; anioSig++; }
   const haySiguiente = anioSig < hoy.getFullYear() || (anioSig === hoy.getFullYear() && mesSig <= hoy.getMonth() + 1);
@@ -74,14 +75,13 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   // mes y no en el otro.
   return (
     <>
-      <Header user={user} current="estadisticas" />
+      <Header user={user} current="eerr" />
       <div className="container">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
           <div>
             <h1 className="page-title">Cierre mensual</h1>
             <p className="page-subtitle">Estado de resultados — se calcula solo con lo que está cargado en la app</p>
           </div>
-          <Link href="/estadisticas" className="btn secondary" style={{ fontSize: '12px' }}>← Volver a Estadísticas</Link>
         </div>
 
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', margin: '12px 0 14px', flexWrap: 'wrap' }}>
@@ -128,7 +128,8 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
           <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             Cobranzas y saldos — {nombre}
           </p>
-          <CuentasEditor anio={anio} mes={mes} cobranzas={cobranzasMes} saldos={saldos} />
+          <CuentasEditor anio={anio} mes={mes} cobranzas={cobranzasMes} saldos={saldos}
+            clientes={clientes.filter((c) => c.activo !== 'NO').map((c) => ({ id: String(c.id_control), nombre: nombreClienteVisible(c) })).sort((a, b) => a.nombre.localeCompare(b.nombre))} />
         </div>
 
         <div className="card" style={{ marginTop: '12px', background: '#fafaf9' }}>
