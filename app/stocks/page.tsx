@@ -87,6 +87,8 @@ export default async function StocksPage() {
           clientes={clientes}
           gastosSugeridos={gastosSugeridos}
           usuario={user.email}
+          anioActual={hoy.getFullYear()}
+          mesActual={hoy.getMonth() + 1}
         />
       </div>
     </>

@@ -14,7 +14,6 @@ function copiarTSV(filas: (string | number)[][]) {
 }
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-const HOY = new Date();
 
 // Orden fijo de categorías pedido explícitamente (no alfabético) — lo que no está en esta
 // lista se muestra al final, alfabético. Comparación sin tildes/mayúsculas para no
@@ -29,6 +28,9 @@ interface Props {
   articulos: Articulo[]; stocks: StockMes[]; lotes: Lote[];
   ventas: VentaDia[]; precios: PrecioVenta[]; clientes: ClienteVenta[];
   gastosSugeridos: Gasto[]; usuario: string;
+  // El mes en curso lo calcula el servidor: ver el comentario de arriba.
+  anioActual: number;
+  mesActual: number;
 }
 
 function num(v: any) { const n = Number(v); return isNaN(n) ? 0 : n; }
@@ -64,10 +66,10 @@ function parsearPegado(texto: string, articulos: Articulo[]): FilaPreview[] {
 
 function fmt(n: number, maxFrac = 3) { return n.toLocaleString('es-AR', { maximumFractionDigits: maxFrac }); }
 
-export default function StocksManager({ articulos, stocks, lotes, ventas, precios, clientes, gastosSugeridos, usuario }: Props) {
+export default function StocksManager({ articulos, stocks, lotes, ventas, precios, clientes, gastosSugeridos, usuario, anioActual, mesActual }: Props) {
   const router = useRouter();
-  const [anio, setAnio] = useState(HOY.getFullYear());
-  const [mes, setMes] = useState(HOY.getMonth() + 1);
+  const [anio, setAnio] = useState(anioActual);
+  const [mes, setMes] = useState(mesActual);
   const [vista, setVista] = useState<'carga' | 'informe'>('carga');
   const [saving, setSaving] = useState<string | null>(null);
   const [errorGuardado, setErrorGuardado] = useState<string | null>(null);
