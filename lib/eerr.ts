@@ -33,7 +33,10 @@ const num = (v: any) => { const n = Number(v); return isNaN(n) ? 0 : n; };
 //
 // Las categorías de artículo son texto libre en la planilla ("PACKAGING", "Bolsas"), así que
 // se mapean por palabra clave. Lo que no cae en ninguna va a Varios, igual que en el Excel.
-const LINEAS_VARIABLE: { label: string; claves?: string[]; cat?: CategoriaGasto }[] = [
+// Exportadas para que la grilla de carga rápida use EXACTAMENTE esta misma estructura — las
+// mismas 12 + 8 líneas, mismo orden, mismas etiquetas — en vez de mantener una segunda lista
+// a mano que se puede desalinear con el cálculo real del EERR.
+export const LINEAS_VARIABLE: { label: string; claves?: string[]; cat?: CategoriaGasto }[] = [
   { label: 'Ácido', claves: ['acido'] },
   { label: 'Packaging', claves: ['packaging', 'bolsa'] },
   { label: 'Cajones plásticos', claves: ['cajon'] },
@@ -51,7 +54,7 @@ const LINEAS_VARIABLE: { label: string; claves?: string[]; cat?: CategoriaGasto 
 // Costos fijos: cada línea del EERR y las categorías de gasto que la componen.
 // "Otros ingresos y egresos" va acá adentro, no aparte: en el Excel es una línea más de
 // costos fijos (verificado — las ocho líneas suman exactamente el total del bloque).
-const FIJOS: { label: string; cats: CategoriaGasto[]; esInversion?: boolean }[] = [
+export const FIJOS: { label: string; cats: CategoriaGasto[]; esInversion?: boolean }[] = [
   { label: 'Sueldos equipo', cats: ['sueldos'] },
   { label: 'Mantenimiento', cats: ['mantenimiento'] },
   { label: 'Inversión en equipamiento', cats: ['inversion_equipamiento', 'inversion_nave3'], esInversion: true },

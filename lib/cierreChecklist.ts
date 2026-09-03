@@ -40,17 +40,23 @@ export function pasosDelCierre(args: {
   const gastosMes = gastos.filter((g) => { const f = String(g.fecha || '').split(/[T ]/)[0]; return f >= desde && f <= hasta; });
 
   // Stock final: cuántos artículos activos con movimiento en el mes quedaron sin contar.
+  // Ojo con el mes recién empezado: si todavía no hay NINGÚN registro de Stocks para este
+  // mes, "sinContar" da 0 por ausencia total de datos, no porque se haya contado algo — un
+  // ✓ ahí sería mentira. Se distingue "sin cargar nada" de "cargado y completo".
   const activos = articulos.filter((a) => a.activo === 'SI');
   let sinContar = 0;
+  let hayAlgunStockDelMes = false;
   for (const art of activos) {
     const s = stocks.find((st) => String(st.id_articulo) === String(art.id_articulo)
       && String(st.anio) === String(anio) && String(st.mes) === String(mes));
     if (!s) continue;
+    hayAlgunStockDelMes = true;
     const hayMovimiento = Number(s.stock_inicial) || Number(s.compras) || Number(s.stock_final);
     if (hayMovimiento && String(s.stock_final ?? '').trim() === '') sinContar++;
   }
 
-  const insumosSinAplicar = gastosMes.filter((g) => g.categoria === 'insumos' && g.aplicado_stock !== 'SI').length;
+  const insumosDelMes = gastosMes.filter((g) => g.categoria === 'insumos');
+  const insumosSinAplicar = insumosDelMes.filter((g) => g.aplicado_stock !== 'SI').length;
   const conTarjeta = gastosMes.filter((g) => g.medio_pago === 'VISA' && g.categoria !== 'movimiento_interno').length;
   const sinSaldoReal = saldos.filter((s) => s.real === null).length;
   const conDiferencia = saldos.filter((s) => s.diferencia !== null && Math.abs(s.diferencia) >= 1).length;
@@ -83,19 +89,23 @@ export function pasosDelCierre(args: {
 
   pasos.push({
     titulo: 'Cargar el stock final de todos los artículos',
-    estado: sinContar > 0 ? 'pendiente' : 'listo',
-    detalle: sinContar > 0
-      ? `Faltan ${sinContar} artículo(s) por contar. Sin el recuento no hay costo variable: el consumo daría igual a todo el stock inicial.`
-      : 'Todos los artículos con movimiento tienen su recuento cargado.',
+    estado: !hayAlgunStockDelMes ? 'pendiente' : sinContar > 0 ? 'pendiente' : 'listo',
+    detalle: !hayAlgunStockDelMes
+      ? 'Todavía no cargaste stock de ningún artículo este mes.'
+      : sinContar > 0
+        ? `Faltan ${sinContar} artículo(s) por contar. Sin el recuento no hay costo variable: el consumo daría igual a todo el stock inicial.`
+        : 'Todos los artículos con movimiento tienen su recuento cargado.',
     href: '/stocks',
   });
 
   pasos.push({
     titulo: 'Aplicar a Stocks las compras de insumos',
-    estado: insumosSinAplicar > 0 ? 'pendiente' : 'listo',
-    detalle: insumosSinAplicar > 0
-      ? `${insumosSinAplicar} gasto(s) de insumos sin aplicar: esa compra no está en el costo de ningún lado.`
-      : 'No quedan gastos de insumos sin aplicar.',
+    estado: insumosDelMes.length === 0 ? 'recordatorio' : insumosSinAplicar > 0 ? 'pendiente' : 'listo',
+    detalle: insumosDelMes.length === 0
+      ? 'Ninguna compra de insumos cargada este mes todavía. Cuando cargues una, va a aparecer acá para aplicarla a Stocks.'
+      : insumosSinAplicar > 0
+        ? `${insumosSinAplicar} gasto(s) de insumos sin aplicar: esa compra no está en el costo de ningún lado.`
+        : 'No quedan gastos de insumos sin aplicar.',
     href: '/stocks',
   });
 

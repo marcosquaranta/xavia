@@ -1,4 +1,4 @@
-import { asegurarHoja, asegurarColumna, readSheet, updateRow, appendRowObj } from './sheets';
+import { asegurarHoja, asegurarColumna, readSheet, updateRow, appendRowObj, deleteRow } from './sheets';
 
 // ── Previsiones del mes ───────────────────────────────────────────────────────────────
 //
@@ -63,4 +63,11 @@ export async function guardarPrevision(args: {
   // updateRow devuelve false si el mes todavía no existe: recién ahí se agrega.
   const actualizada = await updateRow(HOJA_PREVISIONES, 'id_prevision', id, fila);
   if (!actualizada) await appendRowObj(HOJA_PREVISIONES, fila);
+}
+
+// Para deshacer un guardado — por ejemplo, una fila de prueba que no representa una
+// decisión real. El checklist del cierre lee "existe la fila" como "guardado este mes", así
+// que dejar una fila de prueba hace aparecer un paso como resuelto sin que nadie lo haya hecho.
+export async function borrarPrevision(anio: number, mes: number): Promise<boolean> {
+  return deleteRow(HOJA_PREVISIONES, 'id_prevision', idPrevision(anio, mes));
 }

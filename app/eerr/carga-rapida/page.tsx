@@ -2,9 +2,18 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import { CATEGORIAS_GASTO, MEDIOS_PAGO, type Gasto } from '@/lib/types';
+import { MEDIOS_PAGO, type Gasto } from '@/lib/types';
+import { LINEAS_VARIABLE, FIJOS } from '@/lib/eerr';
 import Header from '@/components/Header';
 import CargaRapidaForm from './CargaRapidaForm';
+
+// Las mismas 12 + 8 líneas del EERR, en el mismo orden — no una lista aparte que se pueda
+// desalinear. De las 12 de costo variable, 9 se calculan solas desde el consumo de Stocks
+// (no tienen `cat`): esas quedan como fila de referencia, sin celda para tipear. Las de
+// costos fijos con más de una categoría (Inversión, Otros) escriben en la primera — alguien
+// que necesite la segunda puntualmente sigue teniendo el formulario completo en /gastos.
+const FILAS_VARIABLE = LINEAS_VARIABLE.map((l) => ({ label: l.label, categoria: l.cat ?? null }));
+const FILAS_FIJOS = FIJOS.map((l) => ({ label: l.label, categoria: l.cats[0] }));
 
 export const dynamic = 'force-dynamic';
 
@@ -72,7 +81,8 @@ export default async function CargaRapidaPage({ searchParams }: { searchParams: 
 
         <CargaRapidaForm
           fechaSugerida={fechaSugerida}
-          categorias={CATEGORIAS_GASTO.filter((c) => c.value !== 'insumos' && c.value !== 'movimiento_interno')}
+          filasVariable={FILAS_VARIABLE}
+          filasFijos={FILAS_FIJOS}
           medios={MEDIOS_PAGO}
           consumoTarjetaMesPasado={consumoTarjetaMesPasado}
           yaHayPagoTarjeta={yaHayPagoTarjeta}
