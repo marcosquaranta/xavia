@@ -8,16 +8,16 @@ export async function POST(req: NextRequest) {
   if (!(await isAdmin())) return NextResponse.json({ error: 'solo_admin' }, { status: 403 });
 
   try {
-    const { anio, mes, despidos, sac, notas } = await req.json();
+    const { anio, mes, despidos, sac, alquiler, epe, notas } = await req.json();
     const a = Number(anio), m = Number(mes);
     if (!a || !m || m < 1 || m > 12) return NextResponse.json({ error: 'mes_invalido' }, { status: 400 });
 
-    const d = Number(despidos), s = Number(sac);
-    if (!isFinite(d) || !isFinite(s) || d < 0 || s < 0) {
+    const montos = { despidos: Number(despidos), sac: Number(sac), alquiler: Number(alquiler || 0), epe: Number(epe || 0) };
+    if (Object.values(montos).some((v) => !isFinite(v) || v < 0)) {
       return NextResponse.json({ error: 'monto_invalido' }, { status: 400 });
     }
 
-    await guardarPrevision({ anio: a, mes: m, despidos: d, sac: s, notas: String(notas || ''), usuario: user.email });
+    await guardarPrevision({ anio: a, mes: m, ...montos, notas: String(notas || ''), usuario: user.email });
     return NextResponse.json({ ok: true });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'server_error' }, { status: 500 });

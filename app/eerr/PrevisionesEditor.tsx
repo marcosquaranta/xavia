@@ -10,10 +10,13 @@ const $ = (n: number) => `$${Math.round(n).toLocaleString('es-AR')}`;
 export default function PrevisionesEditor({ anio, mes, masaSalarial, sugeridas, guardadas }: {
   anio: number; mes: number; masaSalarial: number;
   sugeridas: { despidos: number; sac: number };
-  guardadas: { despidos: number; sac: number; notas: string; fecha: string } | null;
+  guardadas: { despidos: number; sac: number; alquiler: number; epe: number; notas: string; fecha: string } | null;
 }) {
   const [despidos, setDespidos] = useState(String(Math.round(guardadas?.despidos ?? sugeridas.despidos)));
   const [sac, setSac] = useState(String(Math.round(guardadas?.sac ?? sugeridas.sac)));
+  // Sin fórmula: van a mano, igual que en el Excel.
+  const [alquiler, setAlquiler] = useState(String(Math.round(guardadas?.alquiler ?? 0)));
+  const [epe, setEpe] = useState(String(Math.round(guardadas?.epe ?? 0)));
   const [notas, setNotas] = useState(guardadas?.notas ?? '');
   const [estado, setEstado] = useState<'idle' | 'guardando' | 'ok' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +30,7 @@ export default function PrevisionesEditor({ anio, mes, masaSalarial, sugeridas, 
     try {
       const res = await fetch('/api/previsiones/guardar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ anio, mes, despidos: Number(despidos), sac: Number(sac), notas }),
+        body: JSON.stringify({ anio, mes, despidos: Number(despidos), sac: Number(sac), alquiler: Number(alquiler), epe: Number(epe), notas }),
       });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
@@ -57,6 +60,19 @@ export default function PrevisionesEditor({ anio, mes, masaSalarial, sugeridas, 
     </div>
   );
 
+  // Los que no tienen fórmula: solo se guardan, sin sugerencia que comparar.
+  const libre = (label: string, valor: string, set: (v: string) => void) => (
+    <div style={{ minWidth: '140px' }}>
+      <label style={{ display: 'block', fontSize: '11.5px', color: '#6b7280', marginBottom: '3px' }}>{label}</label>
+      <input
+        type="number" value={valor} min={0} step={1}
+        onChange={(e) => { set(e.target.value); setEstado('idle'); }}
+        style={{ width: '100%', textAlign: 'right', fontSize: '15px', fontWeight: 700, padding: '6px 8px', border: '1px solid #e5e7eb', borderRadius: '6px' }}
+      />
+      <p style={{ margin: '3px 0 0', fontSize: '11px', color: '#9ca3af' }}>Sin fórmula: se carga a mano</p>
+    </div>
+  );
+
   return (
     <div>
       <p style={{ margin: '0 0 10px', fontSize: '12px', color: '#6b7280' }}>
@@ -67,6 +83,8 @@ export default function PrevisionesEditor({ anio, mes, masaSalarial, sugeridas, 
       <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {campo('Previsión despidos', despidos, setDespidos, sugeridas.despidos, difDespidos)}
         {campo('Previsión SAC', sac, setSac, sugeridas.sac, difSac)}
+        {libre('Alquiler', alquiler, setAlquiler)}
+        {libre('EPE', epe, setEpe)}
         <div style={{ flex: '1 1 220px', minWidth: '200px' }}>
           <label style={{ display: 'block', fontSize: '11.5px', color: '#6b7280', marginBottom: '3px' }}>Notas</label>
           <input

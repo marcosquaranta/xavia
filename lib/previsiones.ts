@@ -1,4 +1,4 @@
-import { asegurarHoja, readSheet, updateRow, appendRowObj } from './sheets';
+import { asegurarHoja, asegurarColumna, readSheet, updateRow, appendRowObj } from './sheets';
 
 // ── Previsiones del mes ───────────────────────────────────────────────────────────────
 //
@@ -11,7 +11,7 @@ import { asegurarHoja, readSheet, updateRow, appendRowObj } from './sheets';
 // un sueldo cargado tarde. Un cierre que se mueve solo no sirve para comparar.
 
 export const HOJA_PREVISIONES = 'Previsiones';
-export const HEADERS_PREVISIONES = ['id_prevision', 'anio', 'mes', 'despidos', 'sac', 'notas', 'usuario', 'fecha_carga'];
+export const HEADERS_PREVISIONES = ['id_prevision', 'anio', 'mes', 'despidos', 'sac', 'alquiler', 'epe', 'notas', 'usuario', 'fecha_carga'];
 
 export interface PrevisionMes {
   id_prevision: string;
@@ -19,6 +19,10 @@ export interface PrevisionMes {
   mes: number | string;
   despidos: number | string;
   sac: number | string;
+  // Alquiler y EPE no tienen fórmula: se ponen a mano, como en el Excel. Están acá para que
+  // el bloque de cuenta corriente quede completo en un solo lugar.
+  alquiler: number | string;
+  epe: number | string;
   notas: string;
   usuario: string;
   fecha_carga: string;
@@ -35,9 +39,14 @@ export function previsionDelMes(filas: PrevisionMes[], anio: number, mes: number
 }
 
 export async function guardarPrevision(args: {
-  anio: number; mes: number; despidos: number; sac: number; notas?: string; usuario: string;
+  anio: number; mes: number; despidos: number; sac: number; alquiler: number; epe: number;
+  notas?: string; usuario: string;
 }): Promise<void> {
   await asegurarHoja(HOJA_PREVISIONES, HEADERS_PREVISIONES);
+  // asegurarHoja solo crea la hoja si falta: una planilla que ya venía de antes no tiene
+  // estas dos columnas, y updateRow falla si escribe en una columna que no existe.
+  await asegurarColumna(HOJA_PREVISIONES, 'alquiler');
+  await asegurarColumna(HOJA_PREVISIONES, 'epe');
   const id = idPrevision(args.anio, args.mes);
   const fila = {
     id_prevision: id,
@@ -45,6 +54,8 @@ export async function guardarPrevision(args: {
     mes: args.mes,
     despidos: args.despidos,
     sac: args.sac,
+    alquiler: args.alquiler,
+    epe: args.epe,
     notas: args.notas || '',
     usuario: args.usuario,
     fecha_carga: new Date().toISOString(),

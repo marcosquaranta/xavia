@@ -118,6 +118,8 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
             guardadas={guardada ? {
               despidos: Number(guardada.despidos) || 0,
               sac: Number(guardada.sac) || 0,
+              alquiler: Number(guardada.alquiler) || 0,
+              epe: Number(guardada.epe) || 0,
               notas: String(guardada.notas || ''),
               fecha: String(guardada.fecha_carga || ''),
             } : null}
