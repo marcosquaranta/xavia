@@ -51,10 +51,27 @@ export function pasosDelCierre(args: {
   }
 
   const insumosSinAplicar = gastosMes.filter((g) => g.categoria === 'insumos' && g.aplicado_stock !== 'SI').length;
-  const conTarjeta = gastosMes.filter((g) => g.medio_pago === 'VISA').length;
+  const conTarjeta = gastosMes.filter((g) => g.medio_pago === 'VISA' && g.categoria !== 'movimiento_interno').length;
   const sinSaldoReal = saldos.filter((s) => s.real === null).length;
   const conDiferencia = saldos.filter((s) => s.diferencia !== null && Math.abs(s.diferencia) >= 1).length;
   const sinSaldoInicial = saldos.filter((s) => !s.hayInicial).length;
+  const transferenciasMes = gastosMes.filter((g) => g.categoria === 'movimiento_interno');
+  const pagoTarjetaMes = transferenciasMes.find((g) => g.medio_pago_destino === 'VISA');
+
+  // Cuánto se consumió con la tarjeta el mes pasado: referencia de cuánto debería rondar el
+  // débito del resumen este mes. La app no lee el resumen, así que no puede afirmar el monto
+  // exacto — solo decir "buscá algo parecido a esto".
+  let mesPrevNum = mes - 1, anioPrevNum = anio;
+  if (mesPrevNum === 0) { mesPrevNum = 12; anioPrevNum--; }
+  const mmPrev = String(mesPrevNum).padStart(2, '0');
+  const desdePrev = `${anioPrevNum}-${mmPrev}-01`;
+  const hastaPrev = `${anioPrevNum}-${mmPrev}-${String(new Date(anioPrevNum, mesPrevNum, 0).getDate()).padStart(2, '0')}`;
+  const consumoTarjetaMesPasado = gastos
+    .filter((g) => g.medio_pago === 'VISA' && g.categoria !== 'movimiento_interno')
+    .filter((g) => { const f = String(g.fecha || '').split(/[T ]/)[0]; return f >= desdePrev && f <= hastaPrev; })
+    .reduce((a, g) => a + (Number(g.monto) || 0), 0);
+
+  const hrefCargaRapida = `/eerr/carga-rapida?anio=${anio}&mes=${mes}`;
 
   const pasos: PasoCierre[] = [];
 
@@ -83,36 +100,51 @@ export function pasosDelCierre(args: {
   });
 
   pasos.push({
-    titulo: 'Cargar los sueldos del mes',
+    titulo: 'Conciliación bancaria: cargar sueldos, impuestos y demás',
     estado: eerr.masaSalarial > 0 ? 'listo' : 'pendiente',
     detalle: eerr.masaSalarial > 0
-      ? `Masa salarial del mes: $${Math.round(eerr.masaSalarial).toLocaleString('es-AR')}. Es la base de las previsiones.`
-      : 'Sin sueldos cargados, la línea más grande de costos fijos queda en cero y las previsiones dan cero.',
-    href: '/gastos',
-  });
-
-  pasos.push({
-    titulo: 'Cargar los gastos que solo aparecen en el resumen',
-    estado: 'recordatorio',
-    detalle: 'Nafta, viáticos, impuesto al cheque, comisiones y mantenimiento de cuenta. Los débitos automáticos conviene cargarlos como una línea agregada por concepto y por mes, no de a uno.',
-    href: '/gastos',
+      ? `Masa salarial del mes: $${Math.round(eerr.masaSalarial).toLocaleString('es-AR')} — es la base de las previsiones. Revisá igual que no falte ningún otro débito del resumen (impuestos bancarios, comisiones, nafta).`
+      : 'Hacé la conciliación de Macro y Brubank y sacá de ahí los gastos que todavía no pasaste a la app y que ahí figuran — sueldos, impuestos bancarios, comisiones, nafta. Cargalos todos juntos: una columna por cuenta, una fila por rubro.',
+    href: hrefCargaRapida,
   });
 
   pasos.push({
     titulo: 'Desglosar el resumen de la tarjeta',
     estado: conTarjeta > 0 ? 'listo' : 'recordatorio',
     detalle: conTarjeta > 0
-      ? `${conTarjeta} consumo(s) con VISA cargados este mes. El pago del resumen va aparte, como movimiento entre medios de pago.`
+      ? `${conTarjeta} consumo(s) con VISA cargados este mes. El pago del resumen va aparte, como transferencia entre cuentas.`
       : 'No hay ningún consumo con VISA cargado este mes. Cada línea va con su fecha real de consumo; el pago del resumen no es un gasto nuevo.',
     href: '/gastos',
   });
 
   pasos.push({
-    titulo: 'Cargar el total cobrado por cuenta',
+    titulo: 'Cargar los movimientos entre cuentas',
+    estado: transferenciasMes.length > 0 ? 'listo' : 'pendiente',
+    detalle: transferenciasMes.length > 0
+      ? `${transferenciasMes.length} transferencia(s) cargada(s) este mes entre cuentas propias.`
+      : 'Plata que pasó de un banco a otro, o de un banco a una caja, todavía no está cargada. Sin esto los saldos de las dos puntas no van a cerrar.',
+    href: `${hrefCargaRapida}#transferencias`,
+  });
+
+  pasos.push({
+    titulo: 'Registrar el pago de la tarjeta del mes anterior',
+    // Sin consumo el mes pasado no hay nada que pagar este mes: marcarlo pendiente ahí sería
+    // un falso positivo que nadie puede resolver.
+    estado: pagoTarjetaMes ? 'listo' : consumoTarjetaMesPasado > 0 ? 'pendiente' : 'listo',
+    detalle: pagoTarjetaMes
+      ? `Cargado: $${Math.round(Number(pagoTarjetaMes.monto) || 0).toLocaleString('es-AR')} de ${pagoTarjetaMes.medio_pago} a VISA.`
+      : consumoTarjetaMesPasado > 0
+        ? `El mes pasado se consumieron $${Math.round(consumoTarjetaMesPasado).toLocaleString('es-AR')} con la tarjeta — buscá en el resumen un débito parecido a ese monto y cargalo como transferencia al banco → VISA.`
+        : 'El mes pasado no hubo consumos con tarjeta: no hay resumen que pagar este mes.',
+    href: `${hrefCargaRapida}#transferencias`,
+  });
+
+  pasos.push({
+    titulo: 'Cargar el total cobrado por banco',
     estado: cobranzas.length > 0 ? 'listo' : 'pendiente',
     detalle: cobranzas.length > 0
       ? `${cobranzas.length} cobranza(s) cargadas por $${Math.round(cobranzas.reduce((a, c) => a + (Number(c.monto) || 0), 0)).toLocaleString('es-AR')}.`
-      : 'Sin cobranzas, los saldos de bancos y cajas no pueden dar bien.',
+      : 'Del resumen sacás cuánto entró a cada banco; de las cajas, lo que te pasaron los socios. Sin esto los saldos de bancos y cajas no pueden dar bien.',
   });
 
   pasos.push({
