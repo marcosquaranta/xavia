@@ -268,7 +268,7 @@ export function ocupacionPromedioPorNave(rows: OcupacionHistorialRow[], dias = 3
     .sort((a, b) => a.nave - b.nave);
 }
 
-// ── Mesadas vacías varios días seguidos ──────────────────────────────────────────────
+// ── Mesadas vacías (o sin capacidad) varios días seguidos ────────────────────────────
 //
 // "mesadasBajas" (más arriba, sobre tubosPorMesada) es la FOTO de hoy: qué está por debajo
 // del 90% en este momento. Esto es distinto — es la PELÍCULA de la semana: qué mesada
@@ -277,41 +277,53 @@ export function ocupacionPromedioPorNave(rows: OcupacionHistorialRow[], dias = 3
 //
 // Cuenta días CALENDARIO, no días hábiles ni de trabajo — un fin de semana entero vacío
 // también cuenta, porque la mesada igual no está produciendo esos días.
-export interface MesadaVacia { nombre: string; nave: number; diasSeguidos: number; ultimoDiaVacio: string }
+//
+// Dos problemas distintos, no uno:
+// - 'vacia': la mesada tiene capacidad (tubos_totales > 0) pero nadie la ocupó. Es un
+//   problema de OPERACIÓN — se podría haber trasplantado y no se hizo.
+// - 'sin_capacidad': la fila existe con tubos_totales = 0. El cron que la escribe
+//   (app/api/ocupacion/registrar) solo anota mesadas con `activo = 'SI'` — una mesada
+//   dada de baja ni siquiera genera fila. Que SÍ aparezca y con capacidad en cero es un
+//   problema de CONFIGURACIÓN: a esa Ubicación le falta cargar módulos o perfiles por
+//   módulo en Admin → Naves. Antes esto se descartaba en silencio por parecer una mesada
+//   "apagada a propósito" — no lo es, y tapaba el error en vez de avisarlo.
+export interface MesadaVacia { nombre: string; nave: number; diasSeguidos: number; ultimoDiaVacio: string; tipo: 'vacia' | 'sin_capacidad' }
 
 export function mesadasVaciasEnLaSemana(
   historial: OcupacionHistorialRow[], desde: string, hasta: string, umbralDias = 2,
 ): MesadaVacia[] {
-  // Una fila por mesada+día, ordenada por fecha, para poder recorrer y contar rachas.
-  const porMesada = new Map<string, { nombre: string; nave: number; fecha: string; vacia: boolean }[]>();
+  // Una fila por mesada+día, ordenada por fecha, para poder recorrer y contar las dos
+  // rachas por separado (un día nunca es las dos cosas a la vez).
+  const porMesada = new Map<string, { nombre: string; nave: number; fecha: string; vacia: boolean; sinCapacidad: boolean }[]>();
   for (const r of historial) {
     const f = String(r.fecha || '').slice(0, 10);
     if (!f || f < desde || f > hasta) continue;
     const tot = Number(r.tubos_totales) || 0;
-    if (tot <= 0) continue; // sin tubos activos ese día no es "vacía", es una mesada que no corría
     const ocu = Number(r.tubos_ocupados) || 0;
     const nombre = String(r.mesada || '').replace(/^Nave \d+ - /, '');
     const key = `${nombre}||${r.nave}`;
     if (!porMesada.has(key)) porMesada.set(key, []);
-    porMesada.get(key)!.push({ nombre, nave: Number(r.nave), fecha: f, vacia: ocu === 0 });
+    porMesada.get(key)!.push({ nombre, nave: Number(r.nave), fecha: f, sinCapacidad: tot <= 0, vacia: tot > 0 && ocu === 0 });
+  }
+
+  // La racha más larga de una condición dada, sobre una lista ya ordenada por fecha.
+  function mejorRachaDe(filas: { fecha: string }[], cumple: (f: any) => boolean): { dias: number; ultimoDia: string } {
+    let racha = 0, mejor = 0, ultimoDia = '';
+    for (const f of filas) {
+      if (cumple(f)) { racha++; if (racha >= mejor) { mejor = racha; ultimoDia = f.fecha; } }
+      else racha = 0;
+    }
+    return { dias: mejor, ultimoDia };
   }
 
   const resultado: MesadaVacia[] = [];
   for (const filas of porMesada.values()) {
     filas.sort((a, b) => a.fecha.localeCompare(b.fecha));
-    let racha = 0, mejorRacha = 0, ultimoDiaDeLaMejor = '';
-    for (const f of filas) {
-      if (f.vacia) {
-        racha++;
-        if (racha >= mejorRacha) { mejorRacha = racha; ultimoDiaDeLaMejor = f.fecha; }
-      } else {
-        racha = 0;
-      }
-    }
-    if (mejorRacha > umbralDias) {
-      const { nombre, nave } = filas[0];
-      resultado.push({ nombre, nave, diasSeguidos: mejorRacha, ultimoDiaVacio: ultimoDiaDeLaMejor });
-    }
+    const { nombre, nave } = filas[0];
+    const vacia = mejorRachaDe(filas, (f) => f.vacia);
+    const sinCap = mejorRachaDe(filas, (f) => f.sinCapacidad);
+    if (vacia.dias > umbralDias) resultado.push({ nombre, nave, diasSeguidos: vacia.dias, ultimoDiaVacio: vacia.ultimoDia, tipo: 'vacia' });
+    if (sinCap.dias > umbralDias) resultado.push({ nombre, nave, diasSeguidos: sinCap.dias, ultimoDiaVacio: sinCap.ultimoDia, tipo: 'sin_capacidad' });
   }
   return resultado.sort((a, b) => b.diasSeguidos - a.diasSeguidos);
 }

@@ -617,11 +617,14 @@ export function construirHtml(d: ReporteSemanalData): string {
       ).join('')}</ul>`;
   // La foto de arriba (mesadasBajas) es HOY. Esto es la semana: qué mesada estuvo sin una
   // sola planta varios días seguidos, aunque para el momento del reporte ya se haya vuelto
-  // a sembrar y la foto de hoy no la muestre más.
+  // a sembrar y la foto de hoy no la muestre más. Dos problemas distintos: 'vacia' es
+  // operación (había dónde plantar y no se hizo), 'sin_capacidad' es una Ubicación mal
+  // cargada en Admin → Naves (capacidad en cero, no una mesada dada de baja a propósito).
+  const textoMesadaVacia = (m: MesadaVacia) => m.tipo === 'sin_capacidad'
+    ? `⚠️ <strong>N${m.nave} · ${m.nombre}</strong> figura con <strong>capacidad en cero</strong> hace <strong>${m.diasSeguidos} días seguidos</strong> (hasta el ${fmtDiaCorto(m.ultimoDiaVacio)}) — revisá módulos y perfiles por módulo en Admin → Naves.`
+    : `⏳ <strong>N${m.nave} · ${m.nombre}</strong> estuvo <strong>${m.diasSeguidos} días seguidos</strong> sin una sola planta esta semana (hasta el ${fmtDiaCorto(m.ultimoDiaVacio)}).`;
   const mesadasVaciasHtml = d.mesadasVacias.length === 0 ? '' : `<p style="margin:10px 0 0;font-size:12px;color:#b45309;line-height:1.6">
-    ${d.mesadasVacias.map(m =>
-      `⏳ <strong>N${m.nave} · ${m.nombre}</strong> estuvo <strong>${m.diasSeguidos} días seguidos</strong> sin una sola planta esta semana (hasta el ${fmtDiaCorto(m.ultimoDiaVacio)}).`
-    ).join('<br>')}
+    ${d.mesadasVacias.map(textoMesadaVacia).join('<br>')}
   </p>`;
 
   // Gráfico de líneas SVG anterior no se veía en Gmail (quedaba como texto suelto) — se
@@ -840,7 +843,9 @@ export function construirTexto(d: ReporteSemanalData): string {
     L.push(`✓ Ninguna mesada F2 por debajo del 90%.`);
   }
   for (const m of d.mesadasVacias) {
-    L.push(`⏳ N${m.nave} · ${m.nombre} estuvo ${m.diasSeguidos} días seguidos sin una sola planta esta semana (hasta el ${fmtDiaCorto(m.ultimoDiaVacio)}).`);
+    L.push(m.tipo === 'sin_capacidad'
+      ? `⚠️ N${m.nave} · ${m.nombre} figura con capacidad en cero hace ${m.diasSeguidos} días seguidos (hasta el ${fmtDiaCorto(m.ultimoDiaVacio)}) — revisá Admin → Naves.`
+      : `⏳ N${m.nave} · ${m.nombre} estuvo ${m.diasSeguidos} días seguidos sin una sola planta esta semana (hasta el ${fmtDiaCorto(m.ultimoDiaVacio)}).`);
   }
   if (d.plantasPerdidasSubocupacion.total > 0) {
     L.push(`🌱 ~${fmtN(d.plantasPerdidasSubocupacion.total)} plantas perdidas por subocupación esta semana (Rúcula ${fmtN(d.plantasPerdidasSubocupacion.rucula)} pl = ${fmtN(Math.round(d.plantasPerdidasSubocupacion.rucula / POSPAQ))} paq / Lechuga ${fmtN(d.plantasPerdidasSubocupacion.lechuga)} pl) — ref. ciclo F2 actual`);
