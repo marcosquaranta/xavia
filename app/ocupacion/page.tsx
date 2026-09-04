@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet, appendRows } from '@/lib/sheets';
-import { tubosPorMesada } from '@/lib/ocupacion';
+import { tubosPorMesada, fechaArgentinaHoy, horaArgentinaHoy } from '@/lib/ocupacion';
 import type { Lote, Ubicacion } from '@/lib/types';
 import Header from '@/components/Header';
 import GraficoOcupacionHistorial from '@/app/estadisticas/GraficoOcupacionHistorial';
@@ -27,9 +27,15 @@ export default async function OcupacionPage() {
   // Leer historial de ocupación (hoja puede no existir aún)
   try { ocupHistRows = await readSheet<OcupHistRow>('OcupacionHistorial'); } catch {}
 
-  // Registrar snapshot de hoy si el cron aún no lo hizo (fallback al abrir la página)
-  const hoyStr = new Date().toISOString().split('T')[0];
-  if (!ocupHistRows.some(r => r.fecha === hoyStr) && lotes.length > 0 && ubicaciones.length > 0) {
+  // Registrar snapshot de hoy si el cron todavía no corrió (red de contención, no el
+  // mecanismo principal — ver api/ocupacion/registrar). Recién después de las 20hs ART:
+  // el cron corre a las 21hs para capturar el trabajo YA HECHO del día, y si esta página
+  // registrara a cualquier hora, una visita de la mañana dejaría clavada la foto de antes
+  // de arrancar — exactamente lo que hacía que un sábado con trasplante a la tarde quedara
+  // mal representado.
+  const hoyStr = fechaArgentinaHoy();
+  const yaPasoElCierre = horaArgentinaHoy() >= 20;
+  if (yaPasoElCierre && !ocupHistRows.some(r => r.fecha === hoyStr) && lotes.length > 0 && ubicaciones.length > 0) {
     try {
       const resumen = tubosPorMesada(ubicaciones, lotes);
       const newRows: any[][] = resumen.flatMap(nave =>

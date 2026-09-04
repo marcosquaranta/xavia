@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readSheet, appendRows } from '@/lib/sheets';
-import { tubosPorMesada } from '@/lib/ocupacion';
+import { tubosPorMesada, fechaArgentinaHoy } from '@/lib/ocupacion';
 import type { Lote, Ubicacion } from '@/lib/types';
 
-// Llamado por Vercel Cron diariamente (vercel.json) y también desde /ocupacion al cargar
+// Llamado por Vercel Cron todos los días a las 21hs ART (vercel.json) y también desde
+// /ocupacion al cargar, como red de contención si el cron llegara a fallar un día.
+//
+// El cron se sacó una vez (jul-2026) por parecer redundante con el fallback de la página:
+// si alguien entraba a /ocupacion, quedaba registrado igual. La falla de ese razonamiento
+// es justamente los días en que NADIE entra — típicamente sábados — que quedaban sin
+// ningún registro, y el promedio de ocupación (Estadísticas, reporte semanal) los saltea
+// en silencio en vez de contarlos. Por eso el cron corre al CIERRE del día (21hs) y no a
+// la mañana: para capturar el trabajo ya hecho ese día, trasplantes de sábado incluidos,
+// en vez de la foto de antes de arrancar.
 export async function GET(req: NextRequest) {
   // Verificar token de cron de Vercel
   const authHeader = req.headers.get('authorization');
@@ -13,7 +22,10 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const hoyStr = new Date().toISOString().split('T')[0];
+    // Fecha de ARGENTINA, no de UTC: el cron corre a las 21hs ART, que ya es medianoche
+    // pasada en UTC — un `toISOString()` común etiquetaría la foto de hoy con la fecha de
+    // mañana (ver el comentario de fechaArgentinaHoy en lib/ocupacion.ts).
+    const hoyStr = fechaArgentinaHoy();
 
     const [lotes, ubicaciones, histRows] = await Promise.all([
       readSheet<Lote>('Lotes'),

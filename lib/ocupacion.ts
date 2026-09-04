@@ -1,6 +1,21 @@
 import type { Lote, Ubicacion } from './types';
 import { codigoCultivo, naveRealDeLote, mapaMesadaNave } from './lotes';
 
+// ── Fecha y hora de Argentina ─────────────────────────────────────────────────────────
+// El snapshot diario de ocupación se identifica por fecha calendario, y esa fecha tiene
+// que ser la de Argentina, no la de UTC (donde corre el servidor). Entre las 21:00 y las
+// 23:59 hora argentina, UTC ya pasó la medianoche y está en el día siguiente — el cron
+// que registra este snapshot corre justo a las 21hs ART para capturar el trabajo ya hecho
+// del día (ver app/api/ocupacion/registrar), así que un `new Date().toISOString()` común
+// etiquetaría esa foto con la fecha de MAÑANA. Mismo criterio que la "regla del mediodía"
+// de lib/camara.ts.
+export function fechaArgentinaHoy(momento: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric', month: '2-digit', day: '2-digit' }).format(momento);
+}
+export function horaArgentinaHoy(momento: Date = new Date()): number {
+  return Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Argentina/Buenos_Aires', hour: 'numeric', hour12: false }).format(momento));
+}
+
 export interface OcupacionMesada { id_ubicacion: string; nombre: string; nave: number; capacidad: number; plantas_vivas: number; ocupacion_pct: number; huecos_libres: number; lotes_count: number; }
 export interface OcupacionNave { nave: number; metros_cuadrados: number; capacidad_total: number; tubos_totales: number; tubos_ocupados: number; tubos_libres: number; plantas_vivas: number; densidad_actual: number; densidad_maxima: number; ocupacion_pct: number; }
 
