@@ -15,6 +15,12 @@ import CargaRapidaForm from './CargaRapidaForm';
 const FILAS_VARIABLE = LINEAS_VARIABLE.map((l) => ({ label: l.label, categoria: l.cat ?? null }));
 const FILAS_FIJOS = FIJOS.map((l) => ({ label: l.label, categoria: l.cats[0] }));
 
+// La grilla es solo para los dos bancos: es donde aparecen los débitos y créditos que hay
+// que ir a buscar al resumen. Las cajas no tienen resumen que conciliar — lo que entra ahí
+// es una cobranza (sección aparte) o un gasto puntual que ya se carga en /gastos como
+// siempre. VISA tampoco: sus movimientos van uno por uno, con su fecha real de consumo.
+const MEDIOS_GRILLA = MEDIOS_PAGO.filter((m) => m === 'Brubank' || m === 'Macro');
+
 export const dynamic = 'force-dynamic';
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -68,21 +74,23 @@ export default async function CargaRapidaPage({ searchParams }: { searchParams: 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
           <div>
             <h1 className="page-title">Carga rápida — conciliación bancaria</h1>
-            <p className="page-subtitle">{nombre} · una columna por cuenta, una fila por rubro</p>
+            <p className="page-subtitle">{nombre} · una columna por banco, una fila por rubro</p>
           </div>
           <Link href={`/eerr?anio=${anio}&mes=${mes}`} className="btn secondary" style={{ fontSize: '12px' }}>← Volver al cierre</Link>
         </div>
 
         <div className="alert-box" style={{ margin: '12px 0', background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', fontSize: '12.5px' }}>
-          Pensado para después de bajar los resúmenes de Macro y Brubank. Recorré cada cuenta y cargá lo que encuentres
+          Pensado para después de bajar los resúmenes de Macro y Brubank. Recorré cada uno y cargá lo que encuentres
           sin registrar todavía — sueldos, impuesto al cheque, comisiones, nafta, lo que sea. Una celda vacía no se
-          guarda: solo se cargan las que completes.
+          guarda: solo se cargan las que completes. Las cajas no tienen resumen: lo que entra ahí se carga como
+          cobranza (más abajo) o como gasto puntual en <Link href="/gastos" style={{ color: 'inherit', fontWeight: 700 }}>Gastos</Link>, como siempre.
         </div>
 
         <CargaRapidaForm
           fechaSugerida={fechaSugerida}
           filasVariable={FILAS_VARIABLE}
           filasFijos={FILAS_FIJOS}
+          mediosGrilla={MEDIOS_GRILLA}
           medios={MEDIOS_PAGO}
           consumoTarjetaMesPasado={consumoTarjetaMesPasado}
           yaHayPagoTarjeta={yaHayPagoTarjeta}

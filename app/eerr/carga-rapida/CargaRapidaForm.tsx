@@ -18,12 +18,13 @@ interface Transferencia { id: number; medio_pago: string; medio_pago_destino: st
 interface FilaGrilla { label: string; categoria: string | null }
 
 export default function CargaRapidaForm({
-  fechaSugerida, filasVariable, filasFijos, medios, consumoTarjetaMesPasado, yaHayPagoTarjeta, nombreMesPrev,
+  fechaSugerida, filasVariable, filasFijos, mediosGrilla, medios, consumoTarjetaMesPasado, yaHayPagoTarjeta, nombreMesPrev,
 }: {
   fechaSugerida: string;
   filasVariable: FilaGrilla[];
   filasFijos: FilaGrilla[];
-  medios: readonly string[];
+  mediosGrilla: readonly string[];  // solo los bancos: la grilla es para conciliar resúmenes
+  medios: readonly string[];        // todas las cuentas: las transferencias pueden ir a cualquiera
   consumoTarjetaMesPasado: number;
   yaHayPagoTarjeta: boolean;
   nombreMesPrev: string;
@@ -119,7 +120,7 @@ export default function CargaRapidaForm({
             <thead>
               <tr>
                 <th style={{ position: 'sticky', left: 0, background: '#fafaf9', textAlign: 'left', padding: '6px 10px', fontSize: '10.5px', color: '#6b7280', textTransform: 'uppercase', borderBottom: '1px solid #e5e7eb' }}>Rubro</th>
-                {medios.map((m) => (
+                {mediosGrilla.map((m) => (
                   <th key={m} style={{ padding: '6px 8px', fontSize: '10.5px', color: '#6b7280', textTransform: 'uppercase', borderBottom: '1px solid #e5e7eb', whiteSpace: 'nowrap' }}>{m}</th>
                 ))}
               </tr>
@@ -129,10 +130,10 @@ export default function CargaRapidaForm({
                 <tr key={fila.label}>
                   <td style={{ position: 'sticky', left: 0, background: 'white', padding: '4px 10px', fontSize: '12.5px', fontWeight: 600, whiteSpace: 'nowrap', borderBottom: '1px solid #f3f4f6' }}>{fila.label}</td>
                   {fila.categoria === null ? (
-                    <td colSpan={medios.length} style={{ padding: '4px 10px', fontSize: '11px', color: '#9ca3af', fontStyle: 'italic', borderBottom: '1px solid #f3f4f6' }}>
+                    <td colSpan={mediosGrilla.length} style={{ padding: '4px 10px', fontSize: '11px', color: '#9ca3af', fontStyle: 'italic', borderBottom: '1px solid #f3f4f6' }}>
                       se carga solo desde el consumo de Stocks, no acá
                     </td>
-                  ) : medios.map((m) => (
+                  ) : mediosGrilla.map((m) => (
                     <td key={m} style={{ padding: '2px 4px', borderBottom: '1px solid #f3f4f6' }}>
                       <input type="number" step={1}
                         value={celdas[clave(fila.categoria!, m)] ?? ''}
