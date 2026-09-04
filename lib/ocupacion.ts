@@ -267,3 +267,51 @@ export function ocupacionPromedioPorNave(rows: OcupacionHistorialRow[], dias = 3
     }))
     .sort((a, b) => a.nave - b.nave);
 }
+
+// ── Mesadas vacías varios días seguidos ──────────────────────────────────────────────
+//
+// "mesadasBajas" (más arriba, sobre tubosPorMesada) es la FOTO de hoy: qué está por debajo
+// del 90% en este momento. Esto es distinto — es la PELÍCULA de la semana: qué mesada
+// estuvo sin una sola planta durante varios días seguidos, que el snapshot de hoy no puede
+// mostrar si para cuando se genera el reporte ya se volvió a sembrar.
+//
+// Cuenta días CALENDARIO, no días hábiles ni de trabajo — un fin de semana entero vacío
+// también cuenta, porque la mesada igual no está produciendo esos días.
+export interface MesadaVacia { nombre: string; nave: number; diasSeguidos: number; ultimoDiaVacio: string }
+
+export function mesadasVaciasEnLaSemana(
+  historial: OcupacionHistorialRow[], desde: string, hasta: string, umbralDias = 2,
+): MesadaVacia[] {
+  // Una fila por mesada+día, ordenada por fecha, para poder recorrer y contar rachas.
+  const porMesada = new Map<string, { nombre: string; nave: number; fecha: string; vacia: boolean }[]>();
+  for (const r of historial) {
+    const f = String(r.fecha || '').slice(0, 10);
+    if (!f || f < desde || f > hasta) continue;
+    const tot = Number(r.tubos_totales) || 0;
+    if (tot <= 0) continue; // sin tubos activos ese día no es "vacía", es una mesada que no corría
+    const ocu = Number(r.tubos_ocupados) || 0;
+    const nombre = String(r.mesada || '').replace(/^Nave \d+ - /, '');
+    const key = `${nombre}||${r.nave}`;
+    if (!porMesada.has(key)) porMesada.set(key, []);
+    porMesada.get(key)!.push({ nombre, nave: Number(r.nave), fecha: f, vacia: ocu === 0 });
+  }
+
+  const resultado: MesadaVacia[] = [];
+  for (const filas of porMesada.values()) {
+    filas.sort((a, b) => a.fecha.localeCompare(b.fecha));
+    let racha = 0, mejorRacha = 0, ultimoDiaDeLaMejor = '';
+    for (const f of filas) {
+      if (f.vacia) {
+        racha++;
+        if (racha >= mejorRacha) { mejorRacha = racha; ultimoDiaDeLaMejor = f.fecha; }
+      } else {
+        racha = 0;
+      }
+    }
+    if (mejorRacha > umbralDias) {
+      const { nombre, nave } = filas[0];
+      resultado.push({ nombre, nave, diasSeguidos: mejorRacha, ultimoDiaVacio: ultimoDiaDeLaMejor });
+    }
+  }
+  return resultado.sort((a, b) => b.diasSeguidos - a.diasSeguidos);
+}

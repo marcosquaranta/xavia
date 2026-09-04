@@ -1,6 +1,6 @@
 import { readSheet } from './sheets';
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, PrecioVenta, ClienteVenta, VentaHistorica, StockCamara } from './types';
-import { tubosPorMesada, type OcupacionHistorialRow } from './ocupacion';
+import { tubosPorMesada, mesadasVaciasEnLaSemana, type OcupacionHistorialRow, type MesadaVacia } from './ocupacion';
 import { cosechasEstimadasPorLote, ciclosPorSemana, pesoPromedioRango, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, type PesoPromedioMes } from './estadisticas';
 import { calcularCamara, diferenciaAjustesRango } from './camara';
 import { nombreClienteVisible } from './clientes';
@@ -316,6 +316,7 @@ export interface ReporteSemanalData {
   pesoMesAnterior: PesoPromedioMes;
   ocupacion: { nave: number; pct: number }[];
   mesadasBajas: { nombre: string; nave: number; pct: number }[];
+  mesadasVacias: MesadaVacia[];
   plantasPerdidasSubocupacion: PlantasPerdidasSubocupacion;
   ventasSemanas: PuntoVentaCultivoSemana[];
   stock: { rucula: number; lechuga_crespa: number; lechuga_roble: number; albahaca: number };
@@ -403,6 +404,10 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     .filter((m: any) => m.sector_fase !== 'fase_1' && m.tubos_totales > 10 && m.ocupacion_pct < 90)
     .map((m: any) => ({ nombre: String(m.nombre).replace(/^Nave \d+ - /, ''), nave: n.nave, pct: m.ocupacion_pct })))
     .sort((a: any, b: any) => a.pct - b.pct);
+  // "mesadasBajas" es la foto de HOY; esto es la película de la SEMANA — qué mesada estuvo
+  // sin una sola planta más de 2 días seguidos, aunque para cuando se genera el reporte ya
+  // se haya vuelto a sembrar y el snapshot de arriba no lo muestre más.
+  const mesadasVacias = mesadasVaciasEnLaSemana(ocupacionHistorial, desdeSemana, hastaHoy, 2);
 
   // ── Ventas por cultivo, últimas 4 semanas calendario completas (lunes a domingo) ──
   const ventasSemanas = ventasPorCultivoUltimasSemanas(ventas, precios, clientes, 4);
@@ -445,7 +450,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     proyeccionMesActual, cosechaRealMesAnterior,
     cicloSemana, cicloSemanaAnterior, cicloMesAnterior,
     pesoSemana, pesoMesAnterior,
-    ocupacion, mesadasBajas, plantasPerdidasSubocupacion, ventasSemanas,
+    ocupacion, mesadasBajas, mesadasVacias, plantasPerdidasSubocupacion, ventasSemanas,
     stock, faltanteSemana, faltanteMes, descartePorFase,
   };
   return { ...datosSinDestacados, destacados: destacadosDeLaSemana(datosSinDestacados) };
@@ -455,6 +460,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
 
 const fmtN = (n: number) => Math.round(n).toLocaleString('es-AR');
 const fmtMoneda = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
+const fmtDiaCorto = (iso: string) => { const [, m, dd] = iso.split('-'); return `${dd}/${m}`; };
 function pct(actual: number, ref: number): number | null { return ref ? Math.round(((actual - ref) / ref) * 100) : null; }
 function flechaHtml(p: number | null, mejorSiSube: boolean): string {
   if (p === null) return '<span style="color:#9ca3af">—</span>';
@@ -609,6 +615,14 @@ export function construirHtml(d: ReporteSemanalData): string {
     : `<ul style="margin:10px 0 0;padding-left:18px;font-size:13px;color:#374151">${d.mesadasBajas.map(m =>
         `<li style="margin-bottom:4px">N${m.nave} · ${m.nombre}: <strong style="color:${m.pct < 70 ? '#dc2626' : '#d97706'}">${m.pct}%</strong></li>`
       ).join('')}</ul>`;
+  // La foto de arriba (mesadasBajas) es HOY. Esto es la semana: qué mesada estuvo sin una
+  // sola planta varios días seguidos, aunque para el momento del reporte ya se haya vuelto
+  // a sembrar y la foto de hoy no la muestre más.
+  const mesadasVaciasHtml = d.mesadasVacias.length === 0 ? '' : `<p style="margin:10px 0 0;font-size:12px;color:#b45309;line-height:1.6">
+    ${d.mesadasVacias.map(m =>
+      `⏳ <strong>N${m.nave} · ${m.nombre}</strong> estuvo <strong>${m.diasSeguidos} días seguidos</strong> sin una sola planta esta semana (hasta el ${fmtDiaCorto(m.ultimoDiaVacio)}).`
+    ).join('<br>')}
+  </p>`;
 
   // Gráfico de líneas SVG anterior no se veía en Gmail (quedaba como texto suelto) — se
   // reemplaza por el mismo gráfico de barras "email-safe" (tablas) que ya funcionaba bien
@@ -733,6 +747,7 @@ export function construirHtml(d: ReporteSemanalData): string {
     <div style="margin-bottom:6px">${ocupacionHtml}</div>
     <p style="margin:10px 0 0;font-size:12px;color:#6b7280">Mesadas F2 por debajo del 90%:</p>
     <div style="margin-bottom:10px">${mesadasBajasHtml}</div>
+    ${mesadasVaciasHtml}
     ${d.plantasPerdidasSubocupacion.total > 0 ? `<p style="margin:10px 0 0;font-size:12px;color:#b45309">
       🌱 ~<strong>${fmtN(d.plantasPerdidasSubocupacion.total)}</strong> plantas perdidas por subocupación esta semana
       (Rúcula ${fmtN(d.plantasPerdidasSubocupacion.rucula)} pl <span style="color:#9ca3af">(${enPaq(d.plantasPerdidasSubocupacion.rucula)})</span> · Lechuga ${fmtN(d.plantasPerdidasSubocupacion.lechuga)} pl)
@@ -823,6 +838,9 @@ export function construirTexto(d: ReporteSemanalData): string {
     for (const m of d.mesadasBajas) L.push(`  N${m.nave} · ${m.nombre}: ${m.pct}%`);
   } else {
     L.push(`✓ Ninguna mesada F2 por debajo del 90%.`);
+  }
+  for (const m of d.mesadasVacias) {
+    L.push(`⏳ N${m.nave} · ${m.nombre} estuvo ${m.diasSeguidos} días seguidos sin una sola planta esta semana (hasta el ${fmtDiaCorto(m.ultimoDiaVacio)}).`);
   }
   if (d.plantasPerdidasSubocupacion.total > 0) {
     L.push(`🌱 ~${fmtN(d.plantasPerdidasSubocupacion.total)} plantas perdidas por subocupación esta semana (Rúcula ${fmtN(d.plantasPerdidasSubocupacion.rucula)} pl = ${fmtN(Math.round(d.plantasPerdidasSubocupacion.rucula / POSPAQ))} paq / Lechuga ${fmtN(d.plantasPerdidasSubocupacion.lechuga)} pl) — ref. ciclo F2 actual`);
