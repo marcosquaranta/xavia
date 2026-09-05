@@ -55,12 +55,13 @@ const titleStyle: React.CSSProperties = { margin: '0 0 12px', fontSize: '13px', 
 // Encima de la barra apilada de lo YA vendido, si el mes está en curso, va el faltante
 // hasta la proyección de fin de mes: mismo color de cada producto pero sin relleno (solo
 // contorno punteado), para que se lea como "esto todavía no pasó, es una estimación".
-const labelProyeccion = ({ x, y, width, payload }: any) => {
-  const totalProy = (payload.proyRucula || 0) + (payload.proyLechuga || 0) + (payload.proyAlbahaca || 0);
-  if (totalProy <= 0) return null;
-  const totalEstimado = payload.rucula + payload.lechuga + payload.albahaca + totalProy;
-  return <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={10} fontWeight={700} fill={INK_SECUNDARIA}>≈{fmtEntero(totalEstimado)}</text>;
-};
+//
+// El label de arriba de todo usa `dataKey` (no lee `payload` a mano en `content`): LabelList
+// resuelve el dataKey contra el payload ANTES de armar las props del `content`, pero esas
+// props después pasan por un filtro de atributos SVG que descarta `payload` — un `content`
+// que intentara leer `payload.algo` recibiría `undefined` y rompía toda la página (pasó).
+const labelProyeccion = ({ x, y, width, value }: any) =>
+  value > 0 ? <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={10} fontWeight={700} fill={INK_SECUNDARIA}>≈{fmtEntero(value)}</text> : null;
 
 export function GraficoVentaPorArticulo({ datos }: { datos: PuntoArticulo[] }) {
   return (
@@ -72,7 +73,15 @@ export function GraficoVentaPorArticulo({ datos }: { datos: PuntoArticulo[] }) {
           <XAxis dataKey="label" tick={{ fontSize: 11, fill: INK_MUTED }} axisLine={{ stroke: '#c3c2b7' }} tickLine={false} />
           <YAxis tick={{ fontSize: 11, fill: INK_MUTED }} axisLine={false} tickLine={false} tickFormatter={fmtMiles} width={36} />
           <Tooltip content={<TooltipCard formatter={fmtEntero} />} />
-          <Legend wrapperStyle={{ fontSize: '12px', color: INK_SECUNDARIA }} iconType="circle" iconSize={8} />
+          {/* payload explícito: legendType="none" en las barras de proyección solo saca el
+              ícono, la entrada de todos modos aparece (con el dataKey como texto) — hay que
+              decirle a la leyenda cuáles 3 entradas mostrar en vez de dejar que arme una por
+              cada <Bar>. */}
+          <Legend wrapperStyle={{ fontSize: '12px', color: INK_SECUNDARIA }} payload={[
+            { value: 'Rúcula (paq.)', type: 'circle', color: CATEGORICOS[0] },
+            { value: 'Lechuga (pl.)', type: 'circle', color: CATEGORICOS[1] },
+            { value: 'Albahaca (pl.)', type: 'circle', color: CATEGORICOS[2] },
+          ]} />
           <Bar dataKey="rucula" name="Rúcula (paq.)" stackId="a" fill={CATEGORICOS[0]} stroke="#fff" strokeWidth={2}>
             <LabelList dataKey="rucula" position="inside" fill="#fff" fontSize={10} fontWeight={700} formatter={(v: number) => v > 0 ? fmtEntero(v) : ''} />
           </Bar>
@@ -85,7 +94,7 @@ export function GraficoVentaPorArticulo({ datos }: { datos: PuntoArticulo[] }) {
             <LabelList dataKey="albahaca" position="inside" fill="#111827" fontSize={10} fontWeight={700} formatter={(v: number) => v > 0 ? fmtEntero(v) : ''} />
           </Bar>
           <Bar dataKey="proyAlbahaca" stackId="a" fill={CATEGORICOS[2]} fillOpacity={0.12} stroke={CATEGORICOS[2]} strokeWidth={1.5} strokeDasharray="3 3" legendType="none" radius={[4, 4, 0, 0]}>
-            <LabelList content={labelProyeccion} />
+            <LabelList dataKey="totalConProyeccion" content={labelProyeccion} />
           </Bar>
         </BarChart>
       </ResponsiveContainer>

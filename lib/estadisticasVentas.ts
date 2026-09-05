@@ -101,9 +101,14 @@ export function precioFinal(precios: PrecioVenta[], id_control: string, sucursal
 // proyectado) — así el gráfico lo apila arriba de lo real y queda como el faltante hueco.
 // Siempre 0 salvo en el mes en curso (y no en uno cargado a mano en VentasHistoricas: ese
 // ya es un cierre, no hay nada "por venir").
+// totalConProyeccion viene ya sumado (rucula+lechuga+albahaca+los 3 proy*) y en 0 cuando no
+// hay proyección activa — así el label del gráfico solo necesita leer ESTE campo (via
+// `dataKey`, que Recharts sí resuelve contra el payload) y no tiene que reconstruir la
+// cuenta a mano con un `content` que reciba `payload`, que LabelList filtra antes de
+// pasarlo a `content` (ver comentario en VentasEvolucionCharts.tsx).
 export interface PuntoArticulo {
   mes: string; label: string; rucula: number; lechuga: number; albahaca: number;
-  proyRucula: number; proyLechuga: number; proyAlbahaca: number;
+  proyRucula: number; proyLechuga: number; proyAlbahaca: number; totalConProyeccion: number;
 }
 export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas: VentaHistorica[] = [], fechaRef: Date = new Date()): PuntoArticulo[] {
   const historicasNorm = historicas
@@ -130,7 +135,7 @@ export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas
   return meses.map((mes) => {
     const historica = historicasPorMes.get(mes);
     if (historica) {
-      return { mes, label: mesLabel(mes), rucula: Number(historica.rucula) || 0, lechuga: Number(historica.lechuga) || 0, albahaca: 0, proyRucula: 0, proyLechuga: 0, proyAlbahaca: 0 };
+      return { mes, label: mesLabel(mes), rucula: Number(historica.rucula) || 0, lechuga: Number(historica.lechuga) || 0, albahaca: 0, proyRucula: 0, proyLechuga: 0, proyAlbahaca: 0, totalConProyeccion: 0 };
     }
     const delMes = ventas.filter((v) => mesKey(v.fecha) === mes);
     const ruculaKgEnPaq = delMes.reduce((a, v) => a + (Number(v.rucula_kg) || 0), 0) * 1000 / GR_PAQ_RUCULA;
@@ -139,7 +144,7 @@ export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas
     const lechuga = delMes.reduce((a, v) => a + (Number(v.lechuga_crespa) || 0) + (Number(v.hoja_roble) || 0), 0) + Math.round(lechugaKgEnPaq);
     const albahaca = delMes.reduce((a, v) => a + (Number(v.albahaca) || 0), 0);
 
-    if (mes !== mesActual) return { mes, label: mesLabel(mes), rucula, lechuga, albahaca, proyRucula: 0, proyLechuga: 0, proyAlbahaca: 0 };
+    if (mes !== mesActual) return { mes, label: mesLabel(mes), rucula, lechuga, albahaca, proyRucula: 0, proyLechuga: 0, proyAlbahaca: 0, totalConProyeccion: 0 };
 
     const corte = fechaRef.getDate();
     const diasEnMes = new Date(fechaRef.getFullYear(), fechaRef.getMonth() + 1, 0).getDate();
@@ -151,11 +156,12 @@ export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas
     const transcurridos = cuentaDiasVenta(1, corte);
     const delMesDias = cuentaDiasVenta(1, diasEnMes);
     const factor = transcurridos > 0 && delMesDias > 0 ? delMesDias / transcurridos : (corte > 0 ? diasEnMes / corte : 1);
+    const proyRucula = Math.max(0, Math.round(rucula * factor) - rucula);
+    const proyLechuga = Math.max(0, Math.round(lechuga * factor) - lechuga);
+    const proyAlbahaca = Math.max(0, Math.round(albahaca * factor) - albahaca);
     return {
-      mes, label: mesLabel(mes), rucula, lechuga, albahaca,
-      proyRucula: Math.max(0, Math.round(rucula * factor) - rucula),
-      proyLechuga: Math.max(0, Math.round(lechuga * factor) - lechuga),
-      proyAlbahaca: Math.max(0, Math.round(albahaca * factor) - albahaca),
+      mes, label: mesLabel(mes), rucula, lechuga, albahaca, proyRucula, proyLechuga, proyAlbahaca,
+      totalConProyeccion: rucula + lechuga + albahaca + proyRucula + proyLechuga + proyAlbahaca,
     };
   });
 }
