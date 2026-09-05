@@ -29,15 +29,22 @@ export default function GraficoCiclosSemanas({ datos }: Props) {
     </div>
   );
 
-  const maxDias = Math.max(...datos.flatMap(d => SERIES.map(s => d[s.key])), 1);
+  // El eje arranca en 24 días, no en 0 (a pedido explícito): los ciclos reales van de ~30 a
+  // ~45 días, así que con el 0 abajo toda la variación quedaba aplastada en una banda
+  // finita arriba y las líneas se veían planas. Si alguna semana baja de ese piso, el eje
+  // se estira para abajo — un punto nunca queda fuera del gráfico.
+  const EJE_MIN_DIAS = 24;
+  const valores = datos.flatMap(d => SERIES.map(s => d[s.key])).filter(v => v > 0);
+  const yMin = Math.min(EJE_MIN_DIAS, valores.length ? Math.floor(Math.min(...valores)) - 1 : EJE_MIN_DIAS);
+  const yMax = Math.max(valores.length ? Math.max(...valores) : yMin + 1, yMin + 1);
   const W = 560, H = 260, PL = 36, PR = 12, PT = 16, PB = 28;
   const chartW = W - PL - PR, chartH = H - PT - PB;
   const n = datos.length;
   const xAt = (i: number) => n > 1 ? PL + (i * chartW) / (n - 1) : PL + chartW / 2;
-  const yH = (d: number) => (d / maxDias) * chartH;
+  const yH = (d: number) => ((d - yMin) / (yMax - yMin)) * chartH;
   const baseY = PT + chartH;
 
-  const yRefs = [0, Math.round(maxDias * 0.5), maxDias];
+  const yRefs = [yMin, Math.round((yMin + yMax) / 2), Math.round(yMax)];
 
   // 0 = "sin cosecha esa semana" (no "ciclo de 0 días" — ver el filtro `> 0` que ya usa
   // page.tsx para las tarjetas). Une en línea solo las semanas CONSECUTIVAS con dato: una

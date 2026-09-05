@@ -582,10 +582,12 @@ export default async function PanelPage() {
             )}
         </div>
 
-        {/* ══ FILA 1: VENTAS + INDICADORES ══ */}
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))', gap:'12px', marginBottom:'14px', alignItems:'start' }}>
-          <GraficoVentaPorArticulo datos={evolArticuloPanel} />
-          <div>
+        {/* ══ FILA 1: INDICADORES, banda a todo el ancho ══
+            Antes iban en una columna al lado del gráfico de ventas: la columna de
+            indicadores quedaba el doble de alta que el gráfico y dejaba un hueco blanco
+            enorme abajo a la izquierda. A todo el ancho entran las 5 tarjetas en una fila
+            pareja, y los dos gráficos (que sí tienen alturas parecidas) quedan juntos abajo. */}
+        <div style={{ marginBottom:'14px' }}>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(230px,1fr))', gap:'10px' }}>
               <GrupoIndicadores titulo="Ventas" icono="💰" color="#059669" items={[
                 { label: 'Total mes al día', valor: `${resumenMesPanel.unidadesMes.toLocaleString('es-AR')} u`,
@@ -646,11 +648,13 @@ export default async function PanelPage() {
               )}
             </div>
             <p style={{ margin:'8px 0 0', fontSize:'10px', color:'#9ca3af' }}>% vs. mes pasado (ocupación: sin histórico para comparar · descartes y producción: hasta hoy vs. hasta el mismo día del mes pasado)</p>
-          </div>
         </div>
 
-        {/* ══ FILA 2: CICLOS + ACTIVIDAD ══ */}
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))', gap:'12px', marginBottom:'14px', alignItems:'start' }}>
+        {/* ══ FILA 2: LOS DOS GRÁFICOS, uno al lado del otro ══
+            Sin alignItems:'start' a propósito: las dos tarjetas se estiran a la misma
+            altura (grid stretch) y la fila queda derecha en vez de escalonada. */}
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))', gap:'12px', marginBottom:'14px' }}>
+            <GraficoVentaPorArticulo datos={evolArticuloPanel} />
             <div className="card" style={{ margin:0 }}>
               <p className="card-title">Ciclos en mesadas — 8 semanas</p>
               <p className="card-sub">Días promedio F2 por semana · sin plantinera</p>
@@ -690,23 +694,24 @@ export default async function PanelPage() {
               })()}
             </div>
 
-          {/* Stock en cámara — antes debajo del gráfico de ventas (columna angosta y muy
-              alto, apilado); acá al lado de Ciclos queda más parejo con el resto del panel.
-              compact: 2x2 en vez de apilado, ver detalle/ajuste en la misma línea — el
-              detalle completo (diferencia acumulada del mes, formulario) sigue en /stocks. */}
-          <div id="stock-camara">
-            <AjusteStockCard
-              compact
-              rucula={{ actual: camaraRucula.stockActual, ajusteMes: ajusteMesRucula.acumulado }}
-              lechugaCrespa={{ actual: camaraLechugaCrespa.stockActual, ajusteMes: ajusteMesLechugaCrespa.acumulado }}
-              lechugaRoble={{ actual: camaraLechugaRoble.stockActual, ajusteMes: ajusteMesLechugaRoble.acumulado }}
-              albahaca={{ actual: camaraAlbahaca.stockActual, ajusteMes: ajusteMesAlbahaca.acumulado }}
-              ventasHoyYaDescontadas={ventasDeHoyYaDescontadas()}
-            />
-          </div>
         </div>
 
-        {/* ══ FILA 3: PROYECCIÓN DE COSECHA — gráfico angosto + datos al lado
+        {/* ══ FILA 3: STOCK EN CÁMARA, banda a todo el ancho ══
+            A todo el ancho los 4 cultivos entran en una sola fila y queda una banda baja y
+            pareja, en vez de la columna alta y angosta de antes. El detalle completo
+            (diferencia acumulada del mes, formulario largo) sigue en /stocks. */}
+        <div id="stock-camara" style={{ marginBottom:'14px' }}>
+          <AjusteStockCard
+            compact
+            rucula={{ actual: camaraRucula.stockActual, ajusteMes: ajusteMesRucula.acumulado }}
+            lechugaCrespa={{ actual: camaraLechugaCrespa.stockActual, ajusteMes: ajusteMesLechugaCrespa.acumulado }}
+            lechugaRoble={{ actual: camaraLechugaRoble.stockActual, ajusteMes: ajusteMesLechugaRoble.acumulado }}
+            albahaca={{ actual: camaraAlbahaca.stockActual, ajusteMes: ajusteMesAlbahaca.acumulado }}
+            ventasHoyYaDescontadas={ventasDeHoyYaDescontadas()}
+          />
+        </div>
+
+        {/* ══ FILA 4: PROYECCIÓN DE COSECHA — gráfico angosto + datos al lado
             (antes ocupaba todo el ancho, quedaba enorme) ══ */}
         <div style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:'10px', padding:'14px', marginBottom:'14px' }}>
           <p style={{ margin:'0 0 3px', fontSize:'11px', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.3px' }}>Proyección de cosecha — cada 10 días</p>
