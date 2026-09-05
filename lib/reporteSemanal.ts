@@ -60,6 +60,9 @@ export interface DescarteFaseReporte {
   // sobre eso: un descarte de 1.200 plantas puede ser grave o irrelevante según si por ahí
   // pasaron 3.000 o 300.000, y el número suelto no lo dice.
   basePlantinF1: number; baseF1F2: number; baseF2Cosecha: number;
+  // Lotes con descarte > 0 en esa fase durante la ventana, del que más aportó al que menos
+  // — para que la alerta de "Descarte alto" diga CUÁLES lotes mirar, no solo el % agregado.
+  lotesPlantinF1: string[]; lotesF1F2: string[]; lotesF2Cosecha: string[];
 }
 // Descarte (plantas) de las últimas N semanas, por cultivo (rúcula vs. lechuga
 // combinada, mismo criterio esRuculaV que el resto de este reporte) Y por la etapa donde
@@ -71,8 +74,15 @@ function descartePorFaseUltimasSemanas(lotes: Lote[], movimientos: Movimiento[],
   const inicio = new Date(lunesActual); inicio.setDate(inicio.getDate() - (nSemanas - 1) * 7);
   const fin = new Date(hoy); fin.setHours(23, 59, 59);
   const lotesMap = new Map(lotes.map(l => [l.id_lote, l]));
-  const cero = () => ({ plantinF1: 0, f1F2: 0, f2Cosecha: 0, basePlantinF1: 0, baseF1F2: 0, baseF2Cosecha: 0 });
+  const cero = () => ({
+    plantinF1: 0, f1F2: 0, f2Cosecha: 0, basePlantinF1: 0, baseF1F2: 0, baseF2Cosecha: 0,
+    lotesPlantinF1: new Map<string, number>(), lotesF1F2: new Map<string, number>(), lotesF2Cosecha: new Map<string, number>(),
+  });
   const acc = { rucula: cero(), lechuga: cero() };
+  const sumarLote = (mapa: Map<string, number>, id_lote: string, descarte: number) => {
+    if (descarte <= 0) return;
+    mapa.set(id_lote, (mapa.get(id_lote) || 0) + descarte);
+  };
   for (const m of movimientos) {
     if (!m.fecha) continue;
     const descarte = Number(m.descarte_calculado) || 0;
@@ -85,20 +95,31 @@ function descartePorFaseUltimasSemanas(lotes: Lote[], movimientos: Movimiento[],
       // plantas_estimadas son las que SIGUIERON (el descarte va aparte) -> base = suma.
       const base = plantas + descarte;
       if (base <= 0) continue;
-      if (m.fase_origen === 'plantin' && m.fase_destino === 'fase_1') { acc[key].plantinF1 += descarte; acc[key].basePlantinF1 += base; }
-      else if (m.fase_origen === 'fase_1' && m.fase_destino === 'fase_2') { acc[key].f1F2 += descarte; acc[key].baseF1F2 += base; }
+      if (m.fase_origen === 'plantin' && m.fase_destino === 'fase_1') {
+        acc[key].plantinF1 += descarte; acc[key].basePlantinF1 += base;
+        sumarLote(acc[key].lotesPlantinF1, lote.id_lote, descarte);
+      } else if (m.fase_origen === 'fase_1' && m.fase_destino === 'fase_2') {
+        acc[key].f1F2 += descarte; acc[key].baseF1F2 += base;
+        sumarLote(acc[key].lotesF1F2, lote.id_lote, descarte);
+      }
     } else if (m.tipo === 'cosecha') {
       // En cosecha plantas_estimadas YA incluye el descarte -> es la base directamente.
       const base = plantas > 0 ? plantas : descarte;
       if (base <= 0) continue;
       acc[key].f2Cosecha += descarte; acc[key].baseF2Cosecha += base;
+      sumarLote(acc[key].lotesF2Cosecha, lote.id_lote, descarte);
     }
   }
+  // Del lote que más descartó al que menos — así si hay muchos, los primeros de la lista
+  // son justo los que conviene mirar primero.
+  const topLotes = (mapa: Map<string, number>, max = 6) =>
+    Array.from(mapa.entries()).sort((a, b) => b[1] - a[1]).map(([id]) => id).slice(0, max);
   return (['rucula', 'lechuga'] as const).map((k) => ({
     cultivo: k === 'rucula' ? 'Rúcula' : 'Lechuga',
     plantinF1: Math.round(acc[k].plantinF1), f1F2: Math.round(acc[k].f1F2), f2Cosecha: Math.round(acc[k].f2Cosecha),
     total: Math.round(acc[k].plantinF1 + acc[k].f1F2 + acc[k].f2Cosecha),
     basePlantinF1: Math.round(acc[k].basePlantinF1), baseF1F2: Math.round(acc[k].baseF1F2), baseF2Cosecha: Math.round(acc[k].baseF2Cosecha),
+    lotesPlantinF1: topLotes(acc[k].lotesPlantinF1), lotesF1F2: topLotes(acc[k].lotesF1F2), lotesF2Cosecha: topLotes(acc[k].lotesF2Cosecha),
   }));
 }
 
@@ -257,18 +278,19 @@ function destacadosDeLaSemana(d: Omit<ReporteSemanalData, 'destacados'>): Destac
 
   // ── Descarte alto en alguna fase ──
   for (const f of d.descartePorFase) {
-    for (const [fase, desc, base] of [
-      ['Plantín→F1', f.plantinF1, f.basePlantinF1],
-      ['F1→F2', f.f1F2, f.baseF1F2],
-      ['F2→Cosecha', f.f2Cosecha, f.baseF2Cosecha],
+    for (const [fase, desc, base, lotes] of [
+      ['Plantín→F1', f.plantinF1, f.basePlantinF1, f.lotesPlantinF1],
+      ['F1→F2', f.f1F2, f.baseF1F2, f.lotesF1F2],
+      ['F2→Cosecha', f.f2Cosecha, f.baseF2Cosecha, f.lotesF2Cosecha],
     ] as const) {
       if (base <= 0) continue;
       const p = Math.round((desc / base) * 1000) / 10;
       if (p < UMBRAL_DESCARTE_PCT) continue;
+      const lotesTxt = lotes.length ? ` Lotes: ${lotes.join(', ')}.` : '';
       out.push({
         tono: 'malo',
         titulo: `Descarte alto en ${f.cultivo} — ${fase}: ${p}%`,
-        detalle: `${fmtN(desc)} plantas descartadas de ${fmtN(base)} que pasaron por esa fase (últimas 4 semanas).`,
+        detalle: `${fmtN(desc)} plantas descartadas de ${fmtN(base)} que pasaron por esa fase (últimas 4 semanas).${lotesTxt}`,
       });
     }
   }
