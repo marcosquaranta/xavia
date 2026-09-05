@@ -588,7 +588,10 @@ export default async function PanelPage() {
             enorme abajo a la izquierda. A todo el ancho entran las 5 tarjetas en una fila
             pareja, y los dos gráficos (que sí tienen alturas parecidas) quedan juntos abajo. */}
         <div style={{ marginBottom:'14px' }}>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(230px,1fr))', gap:'10px' }}>
+            {/* minmax(185px): con 230px entraban 4 tarjetas por fila y la quinta quedaba
+                sola abajo, con tres huecos al lado (la banda medía 595px de alto). Con
+                185px las 5 entran en una sola fila y quedan todas de la misma altura. */}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(185px,1fr))', gap:'10px' }}>
               <GrupoIndicadores titulo="Ventas" icono="💰" color="#059669" items={[
                 { label: 'Total mes al día', valor: `${resumenMesPanel.unidadesMes.toLocaleString('es-AR')} u`,
                   pct: pctVs(resumenMesPanel.unidadesMes, ventaEsperadaAlDia), mejorSiSube: true },
