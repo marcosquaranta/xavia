@@ -52,12 +52,22 @@ function TablaToggle({ children }: { children: () => React.ReactNode }) {
 const cardStyle: React.CSSProperties = { background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px' };
 const titleStyle: React.CSSProperties = { margin: '0 0 12px', fontSize: '13px', fontWeight: 700, color: '#111827' };
 
+// Encima de la barra apilada de lo YA vendido, si el mes está en curso, va el faltante
+// hasta la proyección de fin de mes: mismo color de cada producto pero sin relleno (solo
+// contorno punteado), para que se lea como "esto todavía no pasó, es una estimación".
+const labelProyeccion = ({ x, y, width, payload }: any) => {
+  const totalProy = (payload.proyRucula || 0) + (payload.proyLechuga || 0) + (payload.proyAlbahaca || 0);
+  if (totalProy <= 0) return null;
+  const totalEstimado = payload.rucula + payload.lechuga + payload.albahaca + totalProy;
+  return <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={10} fontWeight={700} fill={INK_SECUNDARIA}>≈{fmtEntero(totalEstimado)}</text>;
+};
+
 export function GraficoVentaPorArticulo({ datos }: { datos: PuntoArticulo[] }) {
   return (
     <div style={cardStyle}>
-      <p style={titleStyle}>Evolución de venta por artículo</p>
+      <p style={titleStyle}>Evolución de venta por artículo <span style={{ fontWeight: 400, color: '#9ca3af' }}>· el contorno punteado del mes en curso es la proyección a fin de mes</span></p>
       <ResponsiveContainer width="100%" height={260}>
-        <BarChart data={datos} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barCategoryGap="24%">
+        <BarChart data={datos} margin={{ top: 20, right: 8, left: 0, bottom: 0 }} barCategoryGap="24%">
           <CartesianGrid stroke={GRID} vertical={false} />
           <XAxis dataKey="label" tick={{ fontSize: 11, fill: INK_MUTED }} axisLine={{ stroke: '#c3c2b7' }} tickLine={false} />
           <YAxis tick={{ fontSize: 11, fill: INK_MUTED }} axisLine={false} tickLine={false} tickFormatter={fmtMiles} width={36} />
@@ -66,11 +76,16 @@ export function GraficoVentaPorArticulo({ datos }: { datos: PuntoArticulo[] }) {
           <Bar dataKey="rucula" name="Rúcula (paq.)" stackId="a" fill={CATEGORICOS[0]} stroke="#fff" strokeWidth={2}>
             <LabelList dataKey="rucula" position="inside" fill="#fff" fontSize={10} fontWeight={700} formatter={(v: number) => v > 0 ? fmtEntero(v) : ''} />
           </Bar>
+          <Bar dataKey="proyRucula" stackId="a" fill={CATEGORICOS[0]} fillOpacity={0.12} stroke={CATEGORICOS[0]} strokeWidth={1.5} strokeDasharray="3 3" legendType="none" />
           <Bar dataKey="lechuga" name="Lechuga (pl.)" stackId="a" fill={CATEGORICOS[1]} stroke="#fff" strokeWidth={2}>
             <LabelList dataKey="lechuga" position="inside" fill="#fff" fontSize={10} fontWeight={700} formatter={(v: number) => v > 0 ? fmtEntero(v) : ''} />
           </Bar>
+          <Bar dataKey="proyLechuga" stackId="a" fill={CATEGORICOS[1]} fillOpacity={0.12} stroke={CATEGORICOS[1]} strokeWidth={1.5} strokeDasharray="3 3" legendType="none" />
           <Bar dataKey="albahaca" name="Albahaca (pl.)" stackId="a" fill={CATEGORICOS[2]} stroke="#fff" strokeWidth={2} radius={[4, 4, 0, 0]}>
             <LabelList dataKey="albahaca" position="inside" fill="#111827" fontSize={10} fontWeight={700} formatter={(v: number) => v > 0 ? fmtEntero(v) : ''} />
+          </Bar>
+          <Bar dataKey="proyAlbahaca" stackId="a" fill={CATEGORICOS[2]} fillOpacity={0.12} stroke={CATEGORICOS[2]} strokeWidth={1.5} strokeDasharray="3 3" legendType="none" radius={[4, 4, 0, 0]}>
+            <LabelList content={labelProyeccion} />
           </Bar>
         </BarChart>
       </ResponsiveContainer>

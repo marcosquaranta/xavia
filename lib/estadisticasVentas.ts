@@ -97,8 +97,15 @@ export function precioFinal(precios: PrecioVenta[], id_control: string, sucursal
 }
 
 // ── Evolución de venta por artículo (unidades: paquetes de rúcula, plantas de lechuga/albahaca) ──
-export interface PuntoArticulo { mes: string; label: string; rucula: number; lechuga: number; albahaca: number }
-export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas: VentaHistorica[] = []): PuntoArticulo[] {
+// proy* es SOLO lo que falta para llegar a la proyección de fin de mes (no el total
+// proyectado) — así el gráfico lo apila arriba de lo real y queda como el faltante hueco.
+// Siempre 0 salvo en el mes en curso (y no en uno cargado a mano en VentasHistoricas: ese
+// ya es un cierre, no hay nada "por venir").
+export interface PuntoArticulo {
+  mes: string; label: string; rucula: number; lechuga: number; albahaca: number;
+  proyRucula: number; proyLechuga: number; proyAlbahaca: number;
+}
+export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas: VentaHistorica[] = [], fechaRef: Date = new Date()): PuntoArticulo[] {
   const historicasNorm = historicas
     .map((h) => ({
       mes: normalizarMesHistorico(campo(h as any, 'mes', 'Mes', 'MES')),
@@ -114,10 +121,16 @@ export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas
   const meses = claves.slice(-n);
   const historicasPorMes = new Map(historicasNorm.map((h) => [h.mes, h]));
 
+  // Mismo criterio de prorrateo que resumenMesActual: por días de venta habituales, no por
+  // días de calendario (si no, la proyección se desploma cada fin de semana). Se calcula acá
+  // afuera del .map porque solo hace falta una vez, para el único mes que la usa.
+  const mesActual = mesKey(fechaRef.toISOString().slice(0, 10));
+  const diasVentaSemana = diasDeVentaHabituales(ventas);
+
   return meses.map((mes) => {
     const historica = historicasPorMes.get(mes);
     if (historica) {
-      return { mes, label: mesLabel(mes), rucula: Number(historica.rucula) || 0, lechuga: Number(historica.lechuga) || 0, albahaca: 0 };
+      return { mes, label: mesLabel(mes), rucula: Number(historica.rucula) || 0, lechuga: Number(historica.lechuga) || 0, albahaca: 0, proyRucula: 0, proyLechuga: 0, proyAlbahaca: 0 };
     }
     const delMes = ventas.filter((v) => mesKey(v.fecha) === mes);
     const ruculaKgEnPaq = delMes.reduce((a, v) => a + (Number(v.rucula_kg) || 0), 0) * 1000 / GR_PAQ_RUCULA;
@@ -125,7 +138,25 @@ export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas
     const rucula = delMes.reduce((a, v) => a + (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0), 0) + Math.round(ruculaKgEnPaq);
     const lechuga = delMes.reduce((a, v) => a + (Number(v.lechuga_crespa) || 0) + (Number(v.hoja_roble) || 0), 0) + Math.round(lechugaKgEnPaq);
     const albahaca = delMes.reduce((a, v) => a + (Number(v.albahaca) || 0), 0);
-    return { mes, label: mesLabel(mes), rucula, lechuga, albahaca };
+
+    if (mes !== mesActual) return { mes, label: mesLabel(mes), rucula, lechuga, albahaca, proyRucula: 0, proyLechuga: 0, proyAlbahaca: 0 };
+
+    const corte = fechaRef.getDate();
+    const diasEnMes = new Date(fechaRef.getFullYear(), fechaRef.getMonth() + 1, 0).getDate();
+    const cuentaDiasVenta = (desde: number, hasta: number) => {
+      let cnt = 0;
+      for (let d = desde; d <= hasta; d++) if (diasVentaSemana.has(new Date(fechaRef.getFullYear(), fechaRef.getMonth(), d).getDay())) cnt++;
+      return cnt;
+    };
+    const transcurridos = cuentaDiasVenta(1, corte);
+    const delMesDias = cuentaDiasVenta(1, diasEnMes);
+    const factor = transcurridos > 0 && delMesDias > 0 ? delMesDias / transcurridos : (corte > 0 ? diasEnMes / corte : 1);
+    return {
+      mes, label: mesLabel(mes), rucula, lechuga, albahaca,
+      proyRucula: Math.max(0, Math.round(rucula * factor) - rucula),
+      proyLechuga: Math.max(0, Math.round(lechuga * factor) - lechuga),
+      proyAlbahaca: Math.max(0, Math.round(albahaca * factor) - albahaca),
+    };
   });
 }
 
