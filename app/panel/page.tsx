@@ -34,21 +34,10 @@ export const dynamic = 'force-dynamic';
 // timeout generoso igual, de margen, por si alguna de las hojas de Sheets tarda.
 export const maxDuration = 60;
 
-const TIPO_LABEL: Record<string, { label: string; color: string; bg: string }> = {
-  siembra:    { label: 'Siembra',    color: '#92400e', bg: '#fef9c3' },
-  trasplante: { label: 'Trasplante', color: '#1e40af', bg: '#dbeafe' },
-  cosecha:    { label: 'Cosecha',    color: '#166534', bg: '#dcfce7' },
-  descarte:   { label: 'Descarte',   color: '#6b7280', bg: '#f3f4f6' },
-  division:   { label: 'División',   color: '#7c3aed', bg: '#ede9fe' },
-};
-
 function fmtFecha(s: any) {
   const str = String(s||'').split(/[\sT]/)[0];
   if (!str || str === 'undefined') return '—';
   const [y,m,d] = str.split('-'); return `${d}/${m}`;
-}
-function diasAtras(s: any) {
-  try { const diff = Math.round((Date.now() - new Date(String(s||'').split(/[\sT]/)[0]+'T12:00:00').getTime())/86400000); if (diff===0) return 'Hoy'; if (diff===1) return 'Ayer'; return `Hace ${diff}d`; } catch { return ''; }
 }
 function fmtISODate(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -408,40 +397,6 @@ export default async function PanelPage() {
     .filter((x): x is { mov: Movimiento; motivo: MotivoAlertaCosecha } => x !== null)
     .filter(({ mov }) => { try { const f = new Date(String(mov.fecha)); return (hoy.getTime() - f.getTime()) / 86400000 <= DIAS_ALERTA_COSECHA; } catch { return true; } })
     .sort((a, b) => String(b.mov.fecha || '').localeCompare(String(a.mov.fecha || '')));
-  const movsOrdenados = [...movimientos]
-    .filter(m => m.fecha)
-    .sort((a,b) => String(b.fecha||'').localeCompare(String(a.fecha||'')));
-  const ultimasCosechas = movsOrdenados.filter(m => m.tipo === 'cosecha').slice(0, 4);
-  const ultimosTrasplantes = movsOrdenados.filter(m => m.tipo === 'trasplante').slice(0, 4);
-  const ultimasSiembras = movsOrdenados.filter(m => m.tipo === 'siembra').slice(0, 4);
-
-  function filaMov(m: Movimiento) {
-    const lote = lotesMap.get(String(m.id_lote||''));
-    const t = TIPO_LABEL[String(m.tipo||'')] || TIPO_LABEL.descarte;
-    const varNorm = String(lote?.variedad||'').toLowerCase();
-    const esR = varNorm.includes('rucula')||varNorm.includes('rúcula');
-    const cantU = Number(m.unidades_cosechadas||0);
-    const cantP = Number(m.plantas_estimadas||0);
-    const unidadesStr = m.tipo==='cosecha' && esR && cantU>0
-      ? `${cantU.toLocaleString('es-AR')} paq. (${cantP.toLocaleString('es-AR')} pl)`
-      : m.tipo==='cosecha' && cantU>0 ? `${cantU.toLocaleString('es-AR')} pl`
-      : cantP>0 ? `${cantP.toLocaleString('es-AR')} pl` : '';
-    return (
-      <div key={m.id_movimiento} style={{ display:'flex', alignItems:'center', gap:'7px', padding:'6px 8px', background:'#fafafa', borderRadius:'6px', borderLeft:`3px solid ${t.color}` }}>
-        <span style={{ background:t.bg, color:t.color, fontSize:'9px', fontWeight:700, padding:'1px 5px', borderRadius:'3px', minWidth:'65px', textAlign:'center' }}>{t.label}</span>
-        <Link href={`/cultivos/${encodeURIComponent(String(m.id_lote||''))}`} style={{ textDecoration:'none' }}>
-          <span style={{ fontFamily:'monospace', fontWeight:700, fontSize:'11px', color:'#111827' }}>{m.id_lote}</span>
-        </Link>
-        {lote?.variedad && (
-          <span style={{ fontSize:'11px', color:esR?'#166534':'#4d7c0f', fontWeight:500 }}>
-            {String(lote.variedad).split(' ')[0]}
-          </span>
-        )}
-        {unidadesStr && <span style={{ fontSize:'11px', color:'#6b7280', marginLeft:'auto' }}>{unidadesStr}</span>}
-        <span style={{ fontSize:'10px', color:'#9ca3af', whiteSpace:'nowrap' }}>{diasAtras(m.fecha)}</span>
-      </div>
-    );
-  }
 
   // ── KPIs F2 — rúcula y lechuga desglosada en Crespa/Roble (cada una con su propia
   // última semana con datos, no una sola pareja compartida) ──
@@ -627,20 +582,9 @@ export default async function PanelPage() {
             )}
         </div>
 
-        {/* ══ FILA 1: VENTAS (+ STOCK EN CÁMARA) + INDICADORES ══ */}
+        {/* ══ FILA 1: VENTAS + INDICADORES ══ */}
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))', gap:'12px', marginBottom:'14px', alignItems:'start' }}>
-          <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
-            <GraficoVentaPorArticulo datos={evolArticuloPanel} />
-            <div id="stock-camara">
-              <AjusteStockCard
-                rucula={{ actual: camaraRucula.stockActual, ajusteMes: ajusteMesRucula.acumulado }}
-                lechugaCrespa={{ actual: camaraLechugaCrespa.stockActual, ajusteMes: ajusteMesLechugaCrespa.acumulado }}
-                lechugaRoble={{ actual: camaraLechugaRoble.stockActual, ajusteMes: ajusteMesLechugaRoble.acumulado }}
-                albahaca={{ actual: camaraAlbahaca.stockActual, ajusteMes: ajusteMesAlbahaca.acumulado }}
-                ventasHoyYaDescontadas={ventasDeHoyYaDescontadas()}
-              />
-            </div>
-          </div>
+          <GraficoVentaPorArticulo datos={evolArticuloPanel} />
           <div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(230px,1fr))', gap:'10px' }}>
               <GrupoIndicadores titulo="Ventas" icono="💰" color="#059669" items={[
@@ -746,30 +690,19 @@ export default async function PanelPage() {
               })()}
             </div>
 
-          {/* Últimos movimientos, por tipo */}
-          <div className="card" style={{ margin:0 }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
-              <p className="card-title" style={{ margin:0 }}>Últimos movimientos</p>
-              <Link href="/movimientos" style={{ fontSize:'11px', color:'#6b7280', textDecoration:'none' }}>Ver todos →</Link>
-            </div>
-            {ultimasCosechas.length===0 && ultimosTrasplantes.length===0 && ultimasSiembras.length===0 ? (
-              <p style={{ color:'#9ca3af', fontSize:'12px', textAlign:'center', padding:'20px' }}>Sin movimientos</p>
-            ) : (
-              <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
-                {[
-                  { titulo: '🌾 Últimas cosechas', movs: ultimasCosechas },
-                  { titulo: '🔄 Últimos trasplantes', movs: ultimosTrasplantes },
-                  { titulo: '🌱 Últimas siembras', movs: ultimasSiembras },
-                ].map(({ titulo, movs }) => movs.length > 0 && (
-                  <div key={titulo}>
-                    <p style={{ margin:'0 0 5px', fontSize:'10px', color:'#6b7280', fontWeight:700, textTransform:'uppercase' }}>{titulo}</p>
-                    <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
-                      {movs.map(filaMov)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+          {/* Stock en cámara — antes debajo del gráfico de ventas (columna angosta y muy
+              alto, apilado); acá al lado de Ciclos queda más parejo con el resto del panel.
+              compact: 2x2 en vez de apilado, ver detalle/ajuste en la misma línea — el
+              detalle completo (diferencia acumulada del mes, formulario) sigue en /stocks. */}
+          <div id="stock-camara">
+            <AjusteStockCard
+              compact
+              rucula={{ actual: camaraRucula.stockActual, ajusteMes: ajusteMesRucula.acumulado }}
+              lechugaCrespa={{ actual: camaraLechugaCrespa.stockActual, ajusteMes: ajusteMesLechugaCrespa.acumulado }}
+              lechugaRoble={{ actual: camaraLechugaRoble.stockActual, ajusteMes: ajusteMesLechugaRoble.acumulado }}
+              albahaca={{ actual: camaraAlbahaca.stockActual, ajusteMes: ajusteMesAlbahaca.acumulado }}
+              ventasHoyYaDescontadas={ventasDeHoyYaDescontadas()}
+            />
           </div>
         </div>
 

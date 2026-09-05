@@ -5,8 +5,12 @@ import type { CultivoCamara } from '@/lib/camara';
 
 interface CultivoStock { actual: number; ajusteMes: number }
 
-export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, albahaca, ventasHoyYaDescontadas }: {
+export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, albahaca, ventasHoyYaDescontadas, compact = false }: {
   rucula: CultivoStock; lechugaCrespa: CultivoStock; lechugaRoble: CultivoStock; albahaca: CultivoStock; ventasHoyYaDescontadas: boolean;
+  // Panel: 4 cultivos en 2x2 en vez de apilados, y "Ver detalle"/"Registrar ajuste" en la
+  // misma fila — el Panel ya tiene el detalle a un click en /stocks, acá solo hace falta el
+  // pantallazo. /estadisticas sigue con el layout completo (compact=false, default).
+  compact?: boolean;
 }) {
   const [abierto, setAbierto] = useState<CultivoCamara | null>(null);
   const [cantidad, setCantidad] = useState('');
@@ -68,20 +72,38 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, a
       <p style={{ margin: '0 0 9px', fontSize: '10px', color: ventasHoyYaDescontadas ? '#166534' : '#b45309', fontWeight: 600 }}>
         {ventasHoyYaDescontadas ? 'Ya cuenta las ventas de hoy' : 'No cuenta las ventas de hoy todavía'} <span style={{ color: '#9ca3af', fontWeight: 400 }}>(regla del mediodía)</span>
       </p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+      <div style={compact
+        ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: '6px' }
+        : { display: 'flex', flexDirection: 'column', gap: '7px' }}>
         {cultivos.map(c => (
-          <div key={c.key} style={{ background: '#fafafa', border: '1px solid #f1f0eb', borderRadius: '8px', padding: '9px 11px' }}>
+          <div key={c.key} style={{ background: '#fafafa', border: '1px solid #f1f0eb', borderRadius: '8px', padding: compact ? '7px 9px' : '9px 11px' }}>
             <span style={{ fontSize: '10.5px', color: c.color, fontWeight: 700, textTransform: 'uppercase' }}>{c.label}</span>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap', margin: '2px 0 6px' }}>
-              <strong style={{ fontSize: '18px', color: '#111827', fontWeight: 800, lineHeight: 1 }}>{c.data.actual}</strong>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap', margin: compact ? '2px 0 4px' : '2px 0 6px' }}>
+              <strong style={{ fontSize: compact ? '16px' : '18px', color: '#111827', fontWeight: 800, lineHeight: 1 }}>{c.data.actual}</strong>
               <span style={{ fontSize: '10.5px', color: '#9ca3af' }}>paq</span>
-              <span style={{ fontSize: '10.5px', fontWeight: 700, color: c.data.ajusteMes === 0 ? '#9ca3af' : c.data.ajusteMes > 0 ? '#059669' : '#dc2626' }}>
-                {c.data.ajusteMes > 0 ? '↑' : c.data.ajusteMes < 0 ? '↓' : '·'} {Math.abs(c.data.ajusteMes)} paq <span style={{ fontWeight: 400, color: '#9ca3af' }}>dif. acum. mes</span>
-              </span>
+              {!compact && (
+                <span style={{ fontSize: '10.5px', fontWeight: 700, color: c.data.ajusteMes === 0 ? '#9ca3af' : c.data.ajusteMes > 0 ? '#059669' : '#dc2626' }}>
+                  {c.data.ajusteMes > 0 ? '↑' : c.data.ajusteMes < 0 ? '↓' : '·'} {Math.abs(c.data.ajusteMes)} paq <span style={{ fontWeight: 400, color: '#9ca3af' }}>dif. acum. mes</span>
+                </span>
+              )}
             </div>
-            <Link href={`/stocks/${c.key}`} style={{ display: 'inline-block', marginBottom: '8px', fontSize: '11px', color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}>
-              Ver detalle →
-            </Link>
+            {compact ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Link href={`/stocks/${c.key}`} style={{ fontSize: '10.5px', color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}>
+                  Ver detalle →
+                </Link>
+                {abierto !== c.key && (
+                  <button onClick={() => abrir(c.key)}
+                    style={{ fontSize: '10.5px', padding: '2px 8px', background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer', color: '#374151' }}>
+                    Ajustar
+                  </button>
+                )}
+              </div>
+            ) : (
+              <Link href={`/stocks/${c.key}`} style={{ display: 'inline-block', marginBottom: '8px', fontSize: '11px', color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}>
+                Ver detalle →
+              </Link>
+            )}
 
             {abierto === c.key ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -108,12 +130,12 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, a
                   </button>
                 </div>
               </div>
-            ) : (
+            ) : !compact ? (
               <button onClick={() => abrir(c.key)}
                 style={{ fontSize: '11px', padding: '4px 10px', background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer', color: '#374151' }}>
                 Registrar ajuste
               </button>
-            )}
+            ) : null}
           </div>
         ))}
       </div>
