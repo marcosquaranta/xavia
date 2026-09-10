@@ -86,6 +86,11 @@ export const HEADERS_REGISTROS = [
 export interface TareaProtocolo {
   id: string;
   nombre: string;
+  // Nombre para los cuadritos, donde el largo no entra. Va escrito a mano y no recortado
+  // con replace() sobre `nombre`: recortar dejaba cosas como "del sábado" o "ósmosis
+  // inversa", en minúscula y sin decir que eran foliares. Criterio único para los dos:
+  // mayúscula inicial y el producto como nombre propio (Calborón, no CALBORÓN).
+  nombreCorto: string;
   tipo: TipoTareaProtocolo;
   detalle: string;         // qué es, en una línea, para el operario
   frecuenciaTxt: string;   // cómo se repite, en palabras
@@ -102,7 +107,8 @@ const LUNES = 1, MIERCOLES = 3, SABADO = 6;
 export const TAREAS_PROTOCOLO: TareaProtocolo[] = [
   {
     id: 'foliar_calboron',
-    nombre: 'Foliar CALBORÓN',
+    nombre: 'Foliar Calborón',
+    nombreCorto: 'Foliar Calborón',
     tipo: 'foliar',
     producto: 'Calborón',
     detalle: 'Aplicación foliar de Calborón. Dosis según marbete.',
@@ -112,7 +118,8 @@ export const TAREAS_PROTOCOLO: TareaProtocolo[] = [
   },
   {
     id: 'foliar_afital',
-    nombre: 'Foliar AFITAL',
+    nombre: 'Foliar Afital',
+    nombreCorto: 'Foliar Afital',
     tipo: 'foliar',
     producto: 'Afital',
     detalle: 'Aplicación foliar de Afital. Dosis según marbete.',
@@ -123,6 +130,7 @@ export const TAREAS_PROTOCOLO: TareaProtocolo[] = [
   {
     id: 'foliar_sabado',
     nombre: 'Foliar del sábado (a definir)',
+    nombreCorto: 'Foliar del sábado',
     tipo: 'foliar',
     detalle: 'Aplicación opcional. La define Marcelo según el clima y el estado del cultivo — el operario no aplica sin esa confirmación.',
     frecuenciaTxt: 'Todos los sábados, si Marcelo la define',
@@ -133,10 +141,11 @@ export const TAREAS_PROTOCOLO: TareaProtocolo[] = [
   },
   {
     id: 'riego_serenade',
-    nombre: 'SERENADE en tanque de riego',
+    nombre: 'Serenade en tanque de riego',
+    nombreCorto: 'Serenade en riego',
     tipo: 'riego',
     producto: 'Serenade',
-    detalle: 'Va en el TANQUE DE RIEGO, no es foliar. Dosis según marbete.',
+    detalle: 'Va en el tanque de riego, no es foliar. Dosis según marbete.',
     frecuenciaTxt: 'Cada 30 días (15 en verano)',
     campos: ['dosis'],
     condicionesFoliares: false,
@@ -144,6 +153,7 @@ export const TAREAS_PROTOCOLO: TareaProtocolo[] = [
   {
     id: 'control_instrumental',
     nombre: 'Control de instrumental',
+    nombreCorto: 'Control de instrumental',
     tipo: 'control',
     detalle: 'Verificar calibración y funcionamiento del peachímetro y del conductímetro.',
     frecuenciaTxt: 'Una vez por semana',
@@ -153,6 +163,7 @@ export const TAREAS_PROTOCOLO: TareaProtocolo[] = [
   {
     id: 'control_osmosis',
     nombre: 'Medición de agua de ósmosis inversa',
+    nombreCorto: 'Agua de ósmosis',
     tipo: 'control',
     detalle: 'Medir conductividad y pH del agua de ósmosis inversa.',
     frecuenciaTxt: 'Una vez por semana',

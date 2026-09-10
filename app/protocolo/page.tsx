@@ -118,7 +118,7 @@ export default async function ProtocoloPage() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                     {d.tareas.map((t) => (
                       <span key={t.tarea.id} style={{ fontSize: '10.5px', color: COLOR_ESTADO[t.estado] || '#6b7280', lineHeight: 1.35 }}>
-                        {ICONO_ESTADO[t.estado] || '•'} {t.tarea.nombre.replace('Foliar ', '').replace(' en tanque de riego', '')}
+                        {ICONO_ESTADO[t.estado] || '•'} {t.tarea.nombreCorto}
                       </span>
                     ))}
                   </div>

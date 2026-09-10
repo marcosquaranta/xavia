@@ -37,13 +37,6 @@ function fmtDia(fecha: string) {
   return `${d}/${m}`;
 }
 const icono = (tipo: string) => tipo === 'foliar' ? '🌿' : tipo === 'riego' ? '💧' : '🔬';
-// El nombre completo no entra en un cuadrito angosto y tampoco hace falta: el ícono ya
-// dice de qué tipo es y la frecuencia va abajo.
-const nombreCorto = (nombre: string) => nombre
-  .replace('Foliar ', '')
-  .replace(' en tanque de riego', '')
-  .replace('Medición de agua de ', '')
-  .replace(' (a definir)', '');
 
 // Un bloque por TAREA (no uno por día): si la misma tarea quedó sin registrar varios días,
 // entra una sola vez con sus fechas adentro. Antes cada día era una tarjeta suelta y dos
@@ -111,7 +104,7 @@ function BloqueTarea({ bloque, esAdmin, nombreUsuario }: { bloque: Bloque; esAdm
     }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '13px' }}>{icono(t.tipo)}</span>
-        <strong style={{ fontSize: '12.5px', color: '#111827' }}>{expandido ? t.nombre : nombreCorto(t.nombre)}</strong>
+        <strong style={{ fontSize: '12.5px', color: '#111827' }}>{expandido ? t.nombre : t.nombreCorto}</strong>
         <span style={{ background: est.bg, color: est.color, fontSize: '9.5px', fontWeight: 700, padding: '2px 6px', borderRadius: '9px', whiteSpace: 'nowrap' }}>
           {est.label}
         </span>
