@@ -1,5 +1,5 @@
 import { readSheet } from './sheets';
-import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, PrecioVenta, ClienteVenta, VentaHistorica, StockCamara } from './types';
+import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, PrecioVenta, ClienteVenta, VentaHistorica, StockCamara, RegistroProtocolo } from './types';
 import { tubosPorMesada, mesadasVaciasEnLaSemana, type OcupacionHistorialRow, type MesadaVacia } from './ocupacion';
 import { cosechasEstimadasPorLote, ciclosPorSemana, pesoPromedioRango, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, type PesoPromedioMes } from './estadisticas';
 import { calcularCamara, diferenciaAjustesRango } from './camara';
@@ -7,6 +7,8 @@ import { nombreClienteVisible } from './clientes';
 import { POSPAQ } from './planificacion'; // 3 posiciones (plantas) por paquete de rúcula
 import { ventasPorCultivoUltimasSemanas, resumenMesActual, ventasEnRango, GR_PAQ_RUCULA, GR_PAQ_LECHUGA, type PuntoVentaCultivoSemana, type VentasRango, type ResumenMesActual } from './estadisticasVentas';
 import { plantasPerdidasPorSubocupacion, type PlantasPerdidasSubocupacion } from './kpisOperativos';
+import { leerConfigProtocolo, tareasVencidas, tareasDelDia as tareasProtocoloDelDia, cumplimientoProtocolo, type InstanciaTarea } from './protocoloTareas';
+import { fechaArgentinaHoy } from './ocupacion';
 
 const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
@@ -295,6 +297,23 @@ function destacadosDeLaSemana(d: Omit<ReporteSemanalData, 'destacados'>): Destac
     }
   }
 
+  // ── Protocolo de aplicaciones sin registrar ──
+  // Una aplicación que no se hizo no se recupera: si el lunes no se aplicó Calborón, ese
+  // lunes ya pasó. Por eso va como destacado y no solo como tabla al pie.
+  if (d.protocoloPendientes.length > 0) {
+    const porTarea = new Map<string, string[]>();
+    for (const p of d.protocoloPendientes) {
+      if (!porTarea.has(p.tarea.nombre)) porTarea.set(p.tarea.nombre, []);
+      porTarea.get(p.tarea.nombre)!.push(fmtDiaCorto(p.fecha));
+    }
+    const detalle = [...porTarea.entries()].map(([nombre, dias]) => `${nombre} (${dias.join(', ')})`).join(' · ');
+    out.push({
+      tono: 'malo',
+      titulo: `Protocolo: ${d.protocoloPendientes.length} ${d.protocoloPendientes.length === 1 ? 'tarea sin registrar' : 'tareas sin registrar'} esta semana`,
+      detalle: `${detalle}. Sin registro no se puede verificar si se aplicó ni en qué condiciones.`,
+    });
+  }
+
   // ── Faltante de stock en cámara (lo contado por debajo de lo esperado) ──
   if (d.faltanteSemana.total < -UMBRAL_FALTANTE_PAQ) {
     out.push({
@@ -345,16 +364,24 @@ export interface ReporteSemanalData {
   faltanteSemana: { rucula: number; lechuga_crespa: number; lechuga_roble: number; albahaca: number; total: number };
   faltanteMes: { rucula: number; lechuga_crespa: number; lechuga_roble: number; albahaca: number; total: number };
   descartePorFase: DescarteFaseReporte[];
+  // Protocolo de aplicaciones: lo que quedó sin registrar (la semana pasa y una aplicación
+  // que no se hizo no se recupera, así que el reporte del viernes es el último momento útil
+  // para verlo) y el cumplimiento de las últimas 4 semanas.
+  protocoloPendientes: InstanciaTarea[];
+  protocoloHoy: InstanciaTarea[];
+  protocoloCumplimiento: { nombre: string; correspondian: number; cerradas: number; pendientes: number; fueraDeRango: number; pct: number | null }[];
 }
 
 export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> {
-  const [lotes, movimientos, ubicaciones, variedades, ventas, precios, clientes, historicas, registrosCamara, ocupacionHistorial] = await Promise.all([
+  const [lotes, movimientos, ubicaciones, variedades, ventas, precios, clientes, historicas, registrosCamara, ocupacionHistorial, registrosProtocolo, configRows] = await Promise.all([
     readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'), readSheet<Ubicacion>('Ubicaciones'),
     readSheet<Variedad>('Variedades'), readSheet<VentaDia>('Ventas'), readSheet<PrecioVenta>('Precios'),
     readSheet<ClienteVenta>('Clientes'),
     readSheet<VentaHistorica>('VentasHistoricas').catch(() => []),
     readSheet<StockCamara>('StockCamara').catch(() => []),
     readSheet<OcupacionHistorialRow>('OcupacionHistorial').catch(() => []),
+    readSheet<RegistroProtocolo>('ProtocoloRegistros').catch(() => []),
+    readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
   ]);
   void historicas; // no se usa en la evolución semanal (los históricos son totales mensuales)
 
@@ -389,6 +416,24 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
 
   // ── Descarte por cultivo Y por fase (dónde se pierde), últimas 4 semanas ──
   const descartePorFase = descartePorFaseUltimasSemanas(lotes, movimientos, 4);
+
+  // ── Protocolo de aplicaciones ──
+  const cfgProtocolo = leerConfigProtocolo(configRows);
+  const hoyProtocolo = fechaArgentinaHoy();
+  const protocoloPendientes = tareasVencidas(cfgProtocolo, registrosProtocolo, hoyProtocolo, 7);
+  const protocoloHoy = tareasProtocoloDelDia(hoyProtocolo, cfgProtocolo, registrosProtocolo, hoyProtocolo)
+    .filter((i) => i.estado === 'pendiente' || i.estado === 'sin_decidir');
+  const protocoloCumplimiento = cumplimientoProtocolo(
+    fmtISO(new Date(new Date(hoyProtocolo + 'T12:00:00').getTime() - 27 * 86400000)), hoyProtocolo,
+    cfgProtocolo, registrosProtocolo, hoyProtocolo,
+  ).filter((c) => c.correspondian > 0).map((c) => ({
+    nombre: c.tarea.nombre,
+    correspondian: c.correspondian,
+    cerradas: c.hechas + c.noAplica,
+    pendientes: c.pendientes,
+    fueraDeRango: c.fueraDeRango,
+    pct: c.pct,
+  }));
 
   // ── Ciclos F2: esta semana vs. semana pasada (rolling, mismo criterio que el Panel) y vs. mes pasado ──
   const ciclosSemanas = ciclosPorSemana(lotes, movimientos);
@@ -473,6 +518,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     cicloSemana, cicloSemanaAnterior, cicloMesAnterior,
     pesoSemana, pesoMesAnterior,
     ocupacion, mesadasBajas, mesadasVacias, plantasPerdidasSubocupacion, ventasSemanas,
+    protocoloPendientes, protocoloHoy, protocoloCumplimiento,
     stock, faltanteSemana, faltanteMes, descartePorFase,
   };
   return { ...datosSinDestacados, destacados: destacadosDeLaSemana(datosSinDestacados) };
@@ -682,6 +728,41 @@ export function construirHtml(d: ReporteSemanalData): string {
       <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:800">${fmtN(f.total)}${esRuculaFila(f.cultivo) ? ` <span style="font-weight:400;color:#9ca3af">(${enPaq(f.total)})</span>` : ''}</td>
     </tr>`).join('');
 
+  // ── Protocolo de aplicaciones ──
+  // Primero lo accionable (lo que quedó sin registrar y lo que sigue pendiente hoy) y
+  // después el cumplimiento acumulado, que es el que dice si esto se sostiene o no.
+  const protoPendHtml = d.protocoloPendientes.length === 0 && d.protocoloHoy.length === 0
+    ? `<p style="margin:0 0 10px;font-size:13px;color:#059669">✓ Todas las tareas del protocolo quedaron registradas.</p>`
+    : `<ul style="margin:0 0 10px;padding-left:18px;font-size:13px;color:#111">
+        ${d.protocoloPendientes.map((p) => `<li style="margin-bottom:3px;color:#dc2626">
+          <strong>${p.tarea.nombre}</strong> — sin registrar del ${fmtDiaCorto(p.fecha)}
+        </li>`).join('')}
+        ${d.protocoloHoy.map((p) => `<li style="margin-bottom:3px;color:#92400e">
+          <strong>${p.tarea.nombre}</strong> — ${p.estado === 'sin_decidir' ? 'falta que Marcelo defina qué se aplica' : 'pendiente de hoy'}
+        </li>`).join('')}
+      </ul>`;
+  const protoCumpFilas = d.protocoloCumplimiento.map((c) => `<tr>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">${c.nombre}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${c.cerradas}/${c.correspondian}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;color:${c.pendientes > 0 ? '#dc2626' : '#9ca3af'};font-weight:${c.pendientes > 0 ? '700' : '400'}">${c.pendientes}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;color:${c.fueraDeRango > 0 ? '#b45309' : '#9ca3af'}">${c.fueraDeRango}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:800;color:${c.pct === null ? '#9ca3af' : c.pct >= 90 ? '#059669' : c.pct >= 70 ? '#b45309' : '#dc2626'}">${c.pct === null ? '—' : c.pct + '%'}</td>
+    </tr>`).join('');
+  const protocoloHtml = `
+    <h3 style="margin:0 0 8px;font-size:14px">Protocolo de aplicaciones <span style="font-weight:400;color:#9ca3af">(tareas fijas de la temporada)</span></h3>
+    ${protoPendHtml}
+    ${protoCumpFilas ? `<table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
+      <thead><tr style="background:#f5f5f5">
+        <th style="padding:6px 10px;text-align:left">Tarea</th>
+        <th style="padding:6px 10px;text-align:right">Registradas</th>
+        <th style="padding:6px 10px;text-align:right">Sin registrar</th>
+        <th style="padding:6px 10px;text-align:right">Fuera de rango</th>
+        <th style="padding:6px 10px;text-align:right">Cumplimiento 4 sem.</th>
+      </tr></thead>
+      <tbody>${protoCumpFilas}</tbody>
+    </table>` : ''}
+  `;
+
   // Lo que se salió de lo normal esta semana, arriba de todo: si algo aparece acá es
   // porque superó un umbral explícito (ver destacadosDeLaSemana), no es un resumen.
   // Colores planos y tabla en vez de flex/grid, que es lo único que Gmail renderiza bien.
@@ -768,6 +849,8 @@ export function construirHtml(d: ReporteSemanalData): string {
       <tbody>${descarteFaseFilas}</tbody>
     </table>
 
+    ${protocoloHtml}
+
     <h3 style="margin:0 0 8px;font-size:14px">Ocupación por nave</h3>
     <div style="margin-bottom:6px">${ocupacionHtml}</div>
     <p style="margin:10px 0 0;font-size:12px;color:#6b7280">Mesadas F2 por debajo del 90%:</p>
@@ -847,6 +930,18 @@ export function construirTexto(d: ReporteSemanalData): string {
   L.push(`Rúcula: ${fmtN(d.stock.rucula)} paq · semana ${d.faltanteSemana.rucula >= 0 ? '+' : ''}${d.faltanteSemana.rucula} paq · mes ${d.faltanteMes.rucula >= 0 ? '+' : ''}${d.faltanteMes.rucula} paq`);
   L.push(`Lechuga Crespa: ${fmtN(d.stock.lechuga_crespa)} paq · semana ${d.faltanteSemana.lechuga_crespa >= 0 ? '+' : ''}${d.faltanteSemana.lechuga_crespa} paq · mes ${d.faltanteMes.lechuga_crespa >= 0 ? '+' : ''}${d.faltanteMes.lechuga_crespa} paq`);
   L.push(`Lechuga Roble: ${fmtN(d.stock.lechuga_roble)} paq · semana ${d.faltanteSemana.lechuga_roble >= 0 ? '+' : ''}${d.faltanteSemana.lechuga_roble} paq · mes ${d.faltanteMes.lechuga_roble >= 0 ? '+' : ''}${d.faltanteMes.lechuga_roble} paq`);
+  L.push('');
+
+  L.push(`🧪 *Protocolo de aplicaciones*`);
+  if (d.protocoloPendientes.length === 0 && d.protocoloHoy.length === 0) {
+    L.push(`  ✓ Todas las tareas quedaron registradas.`);
+  } else {
+    for (const p of d.protocoloPendientes) L.push(`  ✕ ${p.tarea.nombre} — sin registrar del ${fmtDiaCorto(p.fecha)}`);
+    for (const p of d.protocoloHoy) L.push(`  • ${p.tarea.nombre} — ${p.estado === 'sin_decidir' ? 'falta que Marcelo defina' : 'pendiente de hoy'}`);
+  }
+  for (const c of d.protocoloCumplimiento) {
+    L.push(`  ${c.nombre}: ${c.cerradas}/${c.correspondian} (${c.pct === null ? '—' : c.pct + '%'})${c.fueraDeRango > 0 ? ` · ${c.fueraDeRango} fuera de rango` : ''}`);
+  }
   L.push('');
 
   L.push(`🗑️ *Descarte por cultivo y por fase* (plantas, últimas 4 semanas — dónde se pierde):`);

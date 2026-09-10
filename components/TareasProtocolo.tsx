@@ -10,8 +10,8 @@ const COLOR_ESTADO: Record<EstadoTarea, { bg: string; color: string; label: stri
   pendiente:    { bg: '#fffbeb', color: '#92400e', label: 'Pendiente' },
   hecha:        { bg: '#f0fdf4', color: '#166534', label: '✓ Hecha' },
   no_aplica:    { bg: '#f3f4f6', color: '#6b7280', label: 'No se aplica' },
-  sin_decidir:  { bg: '#eff6ff', color: '#1d4ed8', label: 'A definir por Marcelo' },
-  vencida:      { bg: '#fef2f2', color: '#dc2626', label: 'Vencida — sin registrar' },
+  sin_decidir:  { bg: '#eff6ff', color: '#1d4ed8', label: 'A definir' },
+  vencida:      { bg: '#fef2f2', color: '#dc2626', label: 'Sin registrar' },
 };
 
 const LABEL_CAMPO: Record<CampoRegistro, string> = {
@@ -32,10 +32,40 @@ function horaAhora() {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
-
 function fmtDia(fecha: string) {
   const [, m, d] = fecha.split('-');
   return `${d}/${m}`;
+}
+const icono = (tipo: string) => tipo === 'foliar' ? '🌿' : tipo === 'riego' ? '💧' : '🔬';
+// El nombre completo no entra en un cuadrito angosto y tampoco hace falta: el ícono ya
+// dice de qué tipo es y la frecuencia va abajo.
+const nombreCorto = (nombre: string) => nombre
+  .replace('Foliar ', '')
+  .replace(' en tanque de riego', '')
+  .replace('Medición de agua de ', '')
+  .replace(' (a definir)', '');
+
+// Un bloque por TAREA (no uno por día): si la misma tarea quedó sin registrar varios días,
+// entra una sola vez con sus fechas adentro. Antes cada día era una tarjeta suelta y dos
+// semanas sin usar el protocolo llenaban la pantalla con 24 tarjetas repetidas.
+interface Bloque {
+  tarea: InstanciaTarea['tarea'];
+  principal: InstanciaTarea;      // la de hoy si corresponde hoy; si no, la más reciente sin registrar
+  otras: InstanciaTarea[];        // el resto de las fechas sin registrar
+}
+
+function armarBloques(tareas: InstanciaTarea[], vencidas: InstanciaTarea[]): Bloque[] {
+  const mapa = new Map<string, InstanciaTarea[]>();
+  for (const i of [...tareas, ...vencidas]) {
+    if (!mapa.has(i.tarea.id)) mapa.set(i.tarea.id, []);
+    mapa.get(i.tarea.id)!.push(i);
+  }
+  const hoyDe = new Set(tareas.map((t) => t.tarea.id + t.fecha));
+  return [...mapa.values()].map((lista) => {
+    const ordenadas = [...lista].sort((a, b) => b.fecha.localeCompare(a.fecha));
+    const principal = ordenadas.find((i) => hoyDe.has(i.tarea.id + i.fecha)) || ordenadas[0];
+    return { tarea: principal.tarea, principal, otras: ordenadas.filter((i) => i !== principal) };
+  });
 }
 
 export default function TareasProtocolo({ tareas, vencidas = [], esAdmin, nombreUsuario, titulo }: {
@@ -45,120 +75,139 @@ export default function TareasProtocolo({ tareas, vencidas = [], esAdmin, nombre
   nombreUsuario: string;
   titulo?: string;
 }) {
-  if (!tareas.length && !vencidas.length) return null;
+  const bloques = armarBloques(tareas, vencidas);
+  if (!bloques.length) return null;
   return (
     <div>
       {titulo && <p style={{ margin: '0 0 8px', fontSize: '13px', fontWeight: 700 }}>{titulo}</p>}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {tareas.map((inst) => (
-          <FilaTarea key={inst.tarea.id + inst.fecha} inst={inst} esAdmin={esAdmin} nombreUsuario={nombreUsuario} />
+      {/* Todos los pendientes como cuadritos, uno al lado del otro. El que se abre para
+          registrar pasa a ocupar el ancho completo: el formulario no entra en una columna. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(215px,1fr))', gap: '8px', alignItems: 'start' }}>
+        {bloques.map((b) => (
+          <BloqueTarea key={b.tarea.id} bloque={b} esAdmin={esAdmin} nombreUsuario={nombreUsuario} />
         ))}
-        {vencidas.length > 0 && (
-          <div style={{ marginTop: '4px' }}>
-            <p style={{ margin: '0 0 6px', fontSize: '11px', fontWeight: 700, color: '#dc2626' }}>
-              Sin registrar de días anteriores ({vencidas.length})
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {vencidas.map((inst) => (
-                <FilaTarea key={inst.tarea.id + inst.fecha} inst={inst} esAdmin={esAdmin} nombreUsuario={nombreUsuario} />
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
-function FilaTarea({ inst, esAdmin, nombreUsuario }: { inst: InstanciaTarea; esAdmin: boolean; nombreUsuario: string }) {
+function BloqueTarea({ bloque, esAdmin, nombreUsuario }: { bloque: Bloque; esAdmin: boolean; nombreUsuario: string }) {
+  const { tarea: t, principal, otras } = bloque;
   const [abierto, setAbierto] = useState<'ejecucion' | 'decision' | null>(null);
-  const t = inst.tarea;
-  const est = COLOR_ESTADO[inst.estado];
-  const esFoliar = t.condicionesFoliares;
-  const reg = inst.registro;
+  const [fechaSel, setFechaSel] = useState(principal.fecha);
+
+  const instSel = [principal, ...otras].find((i) => i.fecha === fechaSel) || principal;
+  const est = COLOR_ESTADO[instSel.estado];
+  const reg = instSel.registro;
+  const expandido = abierto !== null;
+  const sinRegistrar = [principal, ...otras].filter((i) => i.estado === 'vencida').length;
 
   return (
-    <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '10px 12px', background: 'white' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: '14px' }}>{t.tipo === 'foliar' ? '🌿' : t.tipo === 'riego' ? '💧' : '🔬'}</span>
-        <strong style={{ fontSize: '13px', color: '#111827' }}>{t.nombre}</strong>
-        {inst.productoDefinido && t.id === 'foliar_sabado' && (
-          <span style={{ fontSize: '11px', fontWeight: 700, color: '#1d4ed8' }}>→ {inst.productoDefinido}</span>
-        )}
-        <span style={{ background: est.bg, color: est.color, fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px' }}>
-          {est.label}{inst.estado === 'vencida' ? ` · ${fmtDia(inst.fecha)}` : ''}
+    <div style={{
+      border: `1px solid ${principal.estado === 'vencida' ? '#fecaca' : '#e5e7eb'}`,
+      borderRadius: '8px', padding: '9px 10px',
+      background: principal.estado === 'vencida' ? '#fffbfb' : 'white',
+      gridColumn: expandido ? '1 / -1' : undefined,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: '13px' }}>{icono(t.tipo)}</span>
+        <strong style={{ fontSize: '12.5px', color: '#111827' }}>{expandido ? t.nombre : nombreCorto(t.nombre)}</strong>
+        <span style={{ background: est.bg, color: est.color, fontSize: '9.5px', fontWeight: 700, padding: '2px 6px', borderRadius: '9px', whiteSpace: 'nowrap' }}>
+          {est.label}
         </span>
-        <span style={{ marginLeft: 'auto', fontSize: '10.5px', color: '#9ca3af' }}>{t.frecuenciaTxt}</span>
+        {sinRegistrar > 1 && (
+          <span style={{ fontSize: '9.5px', fontWeight: 700, color: '#dc2626' }}>×{sinRegistrar}</span>
+        )}
       </div>
 
-      <p style={{ margin: '5px 0 0', fontSize: '11.5px', color: '#6b7280', lineHeight: 1.45 }}>{t.detalle}</p>
+      <p style={{ margin: '3px 0 0', fontSize: '10px', color: '#9ca3af' }}>
+        {principal.estado === 'vencida' ? `Venció ${fmtDia(principal.fecha)}` : t.frecuenciaTxt}
+        {instSel.venciaEl && principal.estado !== 'vencida' ? ` · vencía ${fmtDia(instSel.venciaEl)}` : ''}
+      </p>
 
-      {inst.aviso && (
-        <p style={{ margin: '5px 0 0', fontSize: '11px', color: '#92400e', background: '#fffbeb', padding: '5px 8px', borderRadius: '5px' }}>
-          ⚠ {inst.aviso}
+      {instSel.productoDefinido && t.id === 'foliar_sabado' && (
+        <p style={{ margin: '3px 0 0', fontSize: '11px', fontWeight: 700, color: '#1d4ed8' }}>→ {instSel.productoDefinido}</p>
+      )}
+
+      {/* Colapsado: el rango va en una línea, para que el aviso esté siempre a la vista sin
+          ocupar media tarjeta. Abierto: el recuadro completo, como en la especificación. */}
+      {t.condicionesFoliares && !expandido && instSel.estado !== 'hecha' && (
+        <p style={{ margin: '4px 0 0', fontSize: '9.5px', color: '#dc2626', fontWeight: 600 }}>
+          ⚠ {COND_TEMP_MIN}-{COND_TEMP_MAX} °C · {COND_HUM_MIN}-{COND_HUM_MAX}% · sin sol fuerte
         </p>
       )}
 
-      {/* El recuadro de condiciones es SOLO un aviso: no se completa, no se tilda. Lo que
-          se verifica después es la temperatura y la humedad reales que carga el operario. */}
-      {esFoliar && (inst.estado === 'pendiente' || inst.estado === 'sin_decidir' || inst.estado === 'vencida') && (
-        <div style={{ margin: '7px 0 0', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '7px 9px' }}>
-          <p style={{ margin: 0, fontSize: '10.5px', fontWeight: 700, color: '#dc2626' }}>⚠ CONDICIONES PARA APLICAR</p>
-          <p style={{ margin: '2px 0 0', fontSize: '10.5px', color: '#991b1b', lineHeight: 1.45 }}>{CONDICIONES_TXT}</p>
-        </div>
+      {reg && !expandido && (
+        <p style={{ margin: '4px 0 0', fontSize: '10px', color: '#166534' }}>
+          {String(reg.estado) === 'no_aplica' ? 'No se aplicó' : `${reg.responsable} · ${reg.hora}`}
+          {String(reg.fuera_de_rango) === 'SI' && <span style={{ color: '#dc2626', fontWeight: 700 }}> · fuera de rango</span>}
+        </p>
       )}
 
-      {reg && (
-        <div style={{ margin: '7px 0 0', background: '#fafafa', borderRadius: '6px', padding: '7px 9px', fontSize: '11px', color: '#374151' }}>
-          {String(reg.estado) === 'no_aplica' ? (
-            <span>No se aplicó · {reg.responsable} · {reg.hora}{reg.notas ? ` · ${reg.notas}` : ''}</span>
-          ) : (
-            <span>
-              {reg.responsable} · {reg.hora}
-              {reg.producto ? ` · ${reg.producto}` : ''}
-              {reg.dosis ? ` · ${reg.dosis}` : ''}
-              {reg.temperatura !== '' && reg.temperatura !== undefined ? ` · ${reg.temperatura} °C` : ''}
-              {reg.humedad !== '' && reg.humedad !== undefined ? ` · ${reg.humedad}%` : ''}
-              {reg.conductividad !== '' && reg.conductividad !== undefined ? ` · ${reg.conductividad} mS/cm` : ''}
-              {reg.ph !== '' && reg.ph !== undefined ? ` · pH ${reg.ph}` : ''}
-            </span>
+      {expandido && (
+        <>
+          <p style={{ margin: '6px 0 0', fontSize: '11.5px', color: '#6b7280', lineHeight: 1.45 }}>{t.detalle}</p>
+          {instSel.aviso && (
+            <p style={{ margin: '5px 0 0', fontSize: '11px', color: '#92400e', background: '#fffbeb', padding: '5px 8px', borderRadius: '5px' }}>
+              ⚠ {instSel.aviso}
+            </p>
           )}
-          {String(reg.fuera_de_rango) === 'SI' && (
-            <span style={{ color: '#dc2626', fontWeight: 700 }}> · fuera del rango recomendado</span>
+          {t.condicionesFoliares && (
+            <div style={{ margin: '7px 0 0', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '7px 9px' }}>
+              <p style={{ margin: 0, fontSize: '10.5px', fontWeight: 700, color: '#dc2626' }}>⚠ CONDICIONES PARA APLICAR</p>
+              <p style={{ margin: '2px 0 0', fontSize: '10.5px', color: '#991b1b', lineHeight: 1.45 }}>{CONDICIONES_TXT}</p>
+            </div>
           )}
-        </div>
+          {otras.length > 0 && (
+            <div style={{ display: 'flex', gap: '5px', marginTop: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ fontSize: '10.5px', color: '#6b7280' }}>Día a registrar:</span>
+              {[principal, ...otras].map((i) => (
+                <button key={i.fecha} onClick={() => setFechaSel(i.fecha)}
+                  style={{
+                    fontSize: '11px', padding: '3px 9px', borderRadius: '5px', cursor: 'pointer', fontWeight: 600,
+                    background: fechaSel === i.fecha ? '#111827' : '#fff',
+                    color: fechaSel === i.fecha ? 'white' : '#374151',
+                    border: '1px solid #e5e7eb',
+                  }}>
+                  {fmtDia(i.fecha)}
+                </button>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
-      <div style={{ display: 'flex', gap: '7px', marginTop: '8px', flexWrap: 'wrap' }}>
-        {inst.estado === 'sin_decidir' && (
+      <div style={{ display: 'flex', gap: '6px', marginTop: '8px', flexWrap: 'wrap' }}>
+        {instSel.estado === 'sin_decidir' && (
           esAdmin ? (
             <button onClick={() => setAbierto(abierto === 'decision' ? null : 'decision')} style={btn('#1d4ed8')}>
-              {abierto === 'decision' ? 'Cancelar' : 'Definir aplicación'}
+              {abierto === 'decision' ? 'Cancelar' : 'Definir'}
             </button>
           ) : (
-            <span style={{ fontSize: '11px', color: '#6b7280' }}>Esperando que Marcelo defina qué se aplica.</span>
+            <span style={{ fontSize: '10px', color: '#6b7280' }}>Espera la definición de Marcelo.</span>
           )
         )}
-        {(inst.estado === 'pendiente' || inst.estado === 'vencida') && (
+        {(instSel.estado === 'pendiente' || instSel.estado === 'vencida') && (
           <button onClick={() => setAbierto(abierto === 'ejecucion' ? null : 'ejecucion')} style={btn('#166534')}>
             {abierto === 'ejecucion' ? 'Cancelar' : 'Registrar'}
           </button>
         )}
-        {(inst.estado === 'hecha' || inst.estado === 'no_aplica') && (
+        {(instSel.estado === 'hecha' || instSel.estado === 'no_aplica') && (
           <button onClick={() => setAbierto(abierto === 'ejecucion' ? null : 'ejecucion')} style={btn('#6b7280', true)}>
             {abierto === 'ejecucion' ? 'Cancelar' : 'Corregir'}
           </button>
         )}
-        {t.id === 'foliar_sabado' && esAdmin && inst.estado !== 'sin_decidir' && inst.estado !== 'hecha' && (
+        {t.id === 'foliar_sabado' && esAdmin && instSel.estado !== 'sin_decidir' && instSel.estado !== 'hecha' && (
           <button onClick={() => setAbierto(abierto === 'decision' ? null : 'decision')} style={btn('#1d4ed8', true)}>
-            {abierto === 'decision' ? 'Cancelar' : 'Cambiar definición'}
+            {abierto === 'decision' ? 'Cancelar' : 'Cambiar'}
           </button>
         )}
       </div>
 
       {abierto && (
         <Formulario
-          inst={inst}
+          key={instSel.fecha}
+          inst={instSel}
           modo={abierto}
           nombreUsuario={nombreUsuario}
           onCancelar={() => setAbierto(null)}
@@ -170,7 +219,7 @@ function FilaTarea({ inst, esAdmin, nombreUsuario }: { inst: InstanciaTarea; esA
 
 function btn(color: string, suave = false): React.CSSProperties {
   return {
-    fontSize: '11px', padding: '4px 11px', borderRadius: '5px', cursor: 'pointer', fontWeight: 600,
+    fontSize: '10.5px', padding: '4px 10px', borderRadius: '5px', cursor: 'pointer', fontWeight: 600,
     background: suave ? '#f3f4f6' : color, color: suave ? color : 'white',
     border: suave ? '1px solid #e5e7eb' : 'none',
   };

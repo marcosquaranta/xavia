@@ -43,9 +43,15 @@ export default async function ProtocoloPage() {
 
   // Semana en curso, lunes a domingo — para ver de un vistazo qué toca cada día.
   const lunes = lunesDeSemana(hoy);
+  // Los controles semanales y Serenade no tienen día fijo: están pendientes toda la semana
+  // y, si se listaran en los siete casilleros, la grilla diría lo mismo siete veces. Se
+  // muestran solo en la columna de hoy, que es donde hay que actuar.
+  const SIN_DIA_FIJO = ['control_instrumental', 'control_osmosis', 'riego_serenade'];
   const semana = Array.from({ length: 7 }, (_, i) => {
     const fecha = sumarDias(lunes, i);
-    return { fecha, dow: DOW[i], tareas: tareasDelDia(fecha, cfg, registros, hoy) };
+    const tareas = tareasDelDia(fecha, cfg, registros, hoy)
+      .filter((t) => fecha === hoy || !SIN_DIA_FIJO.includes(t.tarea.id) || !!t.registro);
+    return { fecha, dow: DOW[i], tareas };
   });
 
   // Cumplimiento de las últimas 4 semanas cerradas + la actual.

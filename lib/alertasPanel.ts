@@ -80,10 +80,10 @@ export function generarAlertas(lotes: Lote[], tubosMesadas: any[], ciclosRealesM
     alertas.push({ tipo: 'warn', msg: 'Sin siembras en los últimos 7 días — posible gap de producción', categoria: 'general' });
   }
 
-  // 🟡 Ocupación total > 95%
-  if (ocGlobal > 95) {
-    alertas.push({ tipo: 'warn', msg: `Ocupación global al ${ocGlobal}% — sin espacio para nuevos trasplantes`, categoria: 'general' });
-  }
+  // La alerta de "ocupación global > 95% — sin espacio para nuevos trasplantes" se sacó a
+  // pedido: estar cerca del 100% es el estado NORMAL y deseado de las naves, así que
+  // saltaba casi todos los días sin que hubiera nada para hacer al respecto. El % de
+  // ocupación sigue a la vista abajo del bloque de alertas y en /ocupacion.
 
   // 🔵 Mesadas F2 con capacidad > 50% libre (oportunidad) — con cantidad de tubos y
   // posiciones (tubos × orificios/tubo = plantas que entran) para que se note el peso

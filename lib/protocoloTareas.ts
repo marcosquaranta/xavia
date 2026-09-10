@@ -164,6 +164,12 @@ export function tareaPorId(id: string): TareaProtocolo | undefined {
 // por día: aparecen todos los días hasta que se hacen, y vencen recién al cerrar la semana.
 const SEMANALES_SIN_DIA = ['control_instrumental', 'control_osmosis'];
 const esSemanalSinDia = (id: string) => SEMANALES_SIN_DIA.includes(id);
+// Tareas "cada N días" (Serenade). No tienen día fijo: tienen un vencimiento que se corre
+// con cada aplicación. Una vez pasado ese vencimiento la tarea sigue pendiente TODOS los
+// días siguientes (que es lo correcto para "¿toca hoy?"), y por eso no se pueden contar
+// día por día: si no, un Serenade atrasado dos semanas figura como catorce incumplimientos
+// en vez de uno solo. Se cuentan por ciclo (ver vencimientosCadencia).
+const esCadencia = (id: string) => id === 'riego_serenade';
 
 // ── Fechas ────────────────────────────────────────────────────────────────────────────
 // Todo se maneja como string YYYY-MM-DD y se opera al mediodía, para que ningún
@@ -208,6 +214,41 @@ export function ultimaEjecucion(idTarea: string, registros: RegistroProtocolo[],
     .pop();
 }
 
+// Desde cuándo se cuentan los N días: la última aplicación registrada, o el ancla si
+// todavía no hubo ninguna. Sin ninguna de las dos no hay ciclo que calcular.
+function baseCadencia(idTarea: string, cfg: ConfigProtocolo, registros: RegistroProtocolo[], hasta?: string): string | null {
+  const ultima = ultimaEjecucion(idTarea, registros, hasta);
+  if (ultima) return fechaDe(ultima);
+  return cfg.serenadeAncla;
+}
+
+// Fechas en que TOCABA una tarea de cadencia dentro de [desde, hasta], una por ciclo (no
+// una por día). Cada aplicación registrada corre el siguiente vencimiento; si un
+// vencimiento pasa sin registrarse, no hay más vencimientos después de ese hasta que se
+// haga (la tarea sigue siendo la misma pendiente, no una nueva cada día).
+export function vencimientosCadencia(
+  idTarea: string, cfg: ConfigProtocolo, registros: RegistroProtocolo[], desde: string, hasta: string,
+): { fecha: string; registro?: RegistroProtocolo }[] {
+  const ejecuciones = registros
+    .filter((r) => r.id_tarea === idTarea && esEjecucion(r) && String(r.estado) !== 'no_aplica' && fechaDe(r))
+    .sort((a, b) => fechaDe(a).localeCompare(fechaDe(b)));
+  // Punto de partida: la última aplicación anterior al rango, o el ancla configurada.
+  const previa = ejecuciones.filter((r) => fechaDe(r) < desde).pop();
+  let cursor = previa ? fechaDe(previa) : cfg.serenadeAncla;
+  if (!cursor) return [];
+
+  const out: { fecha: string; registro?: RegistroProtocolo }[] = [];
+  for (let i = 0; i < 400; i++) { // tope de seguridad, nunca se alcanza en la práctica
+    const vence = sumarDias(cursor, cfg.serenadeDias);
+    if (vence > hasta) break;
+    const hecha = ejecuciones.find((r) => fechaDe(r) >= vence);
+    if (vence >= desde) out.push({ fecha: vence, registro: hecha });
+    if (!hecha) break; // sigue pendiente: no se generan vencimientos nuevos encima
+    cursor = fechaDe(hecha);
+  }
+  return out;
+}
+
 // ── ¿Corresponde esta tarea en esta fecha? ────────────────────────────────────────────
 export function correspondeEnFecha(tarea: TareaProtocolo, fecha: string, cfg: ConfigProtocolo, registros: RegistroProtocolo[]): boolean {
   switch (tarea.id) {
@@ -224,8 +265,7 @@ export function correspondeEnFecha(tarea: TareaProtocolo, fecha: string, cfg: Co
       return dif >= 0 && dif % 14 === 0;
     }
     case 'riego_serenade': {
-      const ultima = ultimaEjecucion('riego_serenade', registros, fecha);
-      const base = ultima ? fechaDe(ultima) : cfg.serenadeAncla;
+      const base = baseCadencia('riego_serenade', cfg, registros, fecha);
       if (!base) return true; // nunca se aplicó y no hay ancla: toca ya
       return diasEntre(base, fecha) >= cfg.serenadeDias;
     }
@@ -247,6 +287,7 @@ export interface InstanciaTarea {
   decision?: RegistroProtocolo;   // el sábado: qué definió Marcelo
   productoDefinido?: string;      // producto a aplicar (fijo, o el que definió Marcelo)
   aviso?: string;                 // algo que falta configurar y hay que decir en pantalla
+  venciaEl?: string;              // tareas cada N días: desde cuándo está vencida
 }
 
 // Estado de una tarea en una fecha puntual. `hoy` separa "todavía se puede hacer" de "el
@@ -254,10 +295,21 @@ export interface InstanciaTarea {
 export function estadoDeTarea(tarea: TareaProtocolo, fecha: string, cfg: ConfigProtocolo, registros: RegistroProtocolo[], hoy: string): InstanciaTarea {
   const registro = registroDelDia(tarea.id, fecha, registros);
   const decision = tarea.requiereDecision ? decisionDelDia(tarea.id, fecha, registros) : undefined;
-  const aviso = tarea.id === 'foliar_afital' && !cfg.afitalAncla
-    ? 'Falta definir el primer miércoles de aplicación para que el ciclo de 14 días se calcule solo.'
-    : undefined;
-  const base: InstanciaTarea = { tarea, fecha, estado: 'pendiente', registro, decision, aviso };
+  let aviso: string | undefined;
+  let venciaEl: string | undefined;
+  if (tarea.id === 'foliar_afital' && !cfg.afitalAncla) {
+    aviso = 'Falta definir el primer miércoles de aplicación para que el ciclo de 14 días se calcule solo.';
+  }
+  if (esCadencia(tarea.id)) {
+    const base = baseCadencia(tarea.id, cfg, registros, fecha);
+    if (!base) {
+      aviso = `Falta cargar la primera aplicación para que el ciclo de ${cfg.serenadeDias} días se calcule solo.`;
+    } else {
+      const vence = sumarDias(base, cfg.serenadeDias);
+      if (vence < fecha) venciaEl = vence;
+    }
+  }
+  const base: InstanciaTarea = { tarea, fecha, estado: 'pendiente', registro, decision, aviso, venciaEl };
 
   if (registro) {
     return {
@@ -302,8 +354,10 @@ export function tareasVencidas(cfg: ConfigProtocolo, registros: RegistroProtocol
     const fecha = sumarDias(hoy, -i);
     for (const t of TAREAS_PROTOCOLO) {
       // Las semanales se evalúan aparte, una vez por semana cerrada, para no repetir la
-      // misma pendiente siete veces.
-      if (esSemanalSinDia(t.id)) continue;
+      // misma pendiente siete veces. Las de cadencia (Serenade) tampoco entran acá: ya
+      // aparecen como pendientes de HOY, con desde cuándo están vencidas (venciaEl) — si
+      // se listaran día por día, un atraso de dos semanas figuraría catorce veces.
+      if (esSemanalSinDia(t.id) || esCadencia(t.id)) continue;
       if (!correspondeEnFecha(t, fecha, cfg, registros)) continue;
       const inst = estadoDeTarea(t, fecha, cfg, registros, hoy);
       if (inst.estado === 'vencida') out.push(inst);
@@ -420,6 +474,23 @@ export function cumplimientoProtocolo(desde: string, hasta: string, cfg: ConfigP
   return TAREAS_PROTOCOLO.map((tarea) => {
     let correspondian = 0, hechas = 0, noAplica = 0, pendientes = 0, fueraDeRango = 0;
     const semanalesVistas = new Set<string>();
+
+    // Cadencia (Serenade): un vencimiento por ciclo, no uno por día.
+    if (esCadencia(tarea.id)) {
+      for (const v of vencimientosCadencia(tarea.id, cfg, registros, desde, hasta)) {
+        correspondian++;
+        if (v.registro) {
+          hechas++;
+          if (String(v.registro.fuera_de_rango) === 'SI') fueraDeRango++;
+        } else if (v.fecha < hoy) pendientes++;
+      }
+      const cerradasCad = hechas + noAplica;
+      return {
+        tarea, correspondian, hechas, noAplica, pendientes, fueraDeRango,
+        pct: correspondian > 0 ? Math.round((cerradasCad / correspondian) * 100) : null,
+      };
+    }
+
     for (let fecha = desde; fecha <= hasta; fecha = sumarDias(fecha, 1)) {
       if (esSemanalSinDia(tarea.id)) {
         const lunes = lunesDeSemana(fecha);
