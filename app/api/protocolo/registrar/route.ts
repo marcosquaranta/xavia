@@ -3,15 +3,16 @@ import { getCurrentUser } from '@/lib/auth';
 import { appendRowObj, asegurarHoja, readSheet, updateRow } from '@/lib/sheets';
 import {
   validarRegistro, calcularFueraDeRango, alarmaOsmosis, tareaPorId,
-  ALARMA_CONDUCTIVIDAD, ALARMA_PH, HOJA_REGISTROS, HEADERS_REGISTROS, type DatosRegistro,
+  ALARMA_CONDUCTIVIDAD, ALARMA_PH, HOJA_REGISTROS, HEADERS_REGISTROS,
+  CONFIG_ALARMA_EMAILS, EMAILS_ALARMA_DEFAULT, type DatosRegistro,
 } from '@/lib/protocoloTareas';
 import type { RegistroProtocolo } from '@/lib/types';
 
 // Destinatarios de la alarma de agua de ósmosis. Editable desde la planilla
 // (Configuracion → protocolo_alarma_emails, separados por coma) para no tener que tocar
 // código cuando cambie quién tiene que enterarse.
-const CONFIG_EMAILS = 'protocolo_alarma_emails';
-const EMAILS_DEFAULT = ['administracion@xavia.com.ar'];
+const CONFIG_EMAILS = CONFIG_ALARMA_EMAILS;
+const EMAILS_DEFAULT = EMAILS_ALARMA_DEFAULT;
 
 async function destinatariosAlarma(): Promise<string[]> {
   try {

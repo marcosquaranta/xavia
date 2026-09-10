@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { appendRowObj, readSheet, updateRow } from '@/lib/sheets';
 import {
-  CONFIG_ACTIVO, CONFIG_AFITAL_ANCLA, CONFIG_SERENADE_DIAS, CONFIG_SERENADE_ANCLA,
+  CONFIG_ACTIVO, CONFIG_AFITAL_ANCLA, CONFIG_SERENADE_DIAS, CONFIG_SERENADE_ANCLA, CONFIG_ALARMA_EMAILS,
 } from '@/lib/protocoloTareas';
 
 // Los dos parámetros que la especificación pide dejar editables (el ancla del ciclo de 14
@@ -14,6 +14,7 @@ const DESCRIPCIONES: Record<string, string> = {
   [CONFIG_AFITAL_ANCLA]: 'Primer miércoles de aplicación de Afital (YYYY-MM-DD) — ancla del ciclo de 14 días',
   [CONFIG_SERENADE_DIAS]: 'Cada cuántos días se aplica Serenade en el tanque de riego (30 primavera / 15 verano)',
   [CONFIG_SERENADE_ANCLA]: 'Primera aplicación de Serenade (YYYY-MM-DD) — desde ahí se cuentan los días',
+  [CONFIG_ALARMA_EMAILS]: 'Mails que reciben la alarma del agua de ósmosis, separados por coma',
 };
 
 const esFecha = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
@@ -39,6 +40,12 @@ export async function POST(req: NextRequest) {
       const n = Number(body[CONFIG_SERENADE_DIAS]);
       if (!(n > 0)) return NextResponse.json({ error: 'La frecuencia de Serenade tiene que ser un número de días mayor a 0.' }, { status: 400 });
       cambios[CONFIG_SERENADE_DIAS] = String(Math.round(n));
+    }
+    if (body[CONFIG_ALARMA_EMAILS] !== undefined) {
+      const lista = String(body[CONFIG_ALARMA_EMAILS] || '').split(',').map((x: string) => x.trim()).filter(Boolean);
+      const invalido = lista.find((x: string) => !x.includes('@'));
+      if (invalido) return NextResponse.json({ error: `"${invalido}" no parece un mail.` }, { status: 400 });
+      cambios[CONFIG_ALARMA_EMAILS] = lista.join(', ');
     }
     if (!Object.keys(cambios).length) return NextResponse.json({ error: 'No hay nada para cambiar.' }, { status: 400 });
 

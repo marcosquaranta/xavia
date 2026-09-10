@@ -39,6 +39,10 @@ export const CONFIG_ACTIVO = 'protocolo_activo';                 // 'SI' | 'NO' 
 export const CONFIG_AFITAL_ANCLA = 'protocolo_afital_ancla';     // YYYY-MM-DD del primer miércoles de aplicación
 export const CONFIG_SERENADE_DIAS = 'protocolo_serenade_dias';   // 30 (primavera) / 15 (verano)
 export const CONFIG_SERENADE_ANCLA = 'protocolo_serenade_ancla'; // YYYY-MM-DD de la primera aplicación
+export const CONFIG_ALARMA_EMAILS = 'protocolo_alarma_emails';   // a quién se le avisa la alarma de ósmosis, separados por coma
+// Si la clave no está cargada en la planilla, la alarma igual llega: quedarse sin avisar
+// por una fila que falta sería justo lo contrario de para qué existe la alarma.
+export const EMAILS_ALARMA_DEFAULT = ['mmacerola@gmail.com', 'marcos.quaranta@gmail.com', 'administracion@xavia.com.ar'];
 
 export interface ConfigProtocolo {
   activo: boolean;

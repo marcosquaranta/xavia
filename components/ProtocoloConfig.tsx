@@ -1,8 +1,8 @@
 'use client';
 import { useState } from 'react';
 import {
-  CONFIG_ACTIVO, CONFIG_AFITAL_ANCLA, CONFIG_SERENADE_DIAS, CONFIG_SERENADE_ANCLA,
-  type ConfigProtocolo,
+  CONFIG_ACTIVO, CONFIG_AFITAL_ANCLA, CONFIG_SERENADE_DIAS, CONFIG_SERENADE_ANCLA, CONFIG_ALARMA_EMAILS,
+  EMAILS_ALARMA_DEFAULT, type ConfigProtocolo,
 } from '@/lib/protocoloTareas';
 
 const inputStyle: React.CSSProperties = {
@@ -13,11 +13,12 @@ const labelStyle: React.CSSProperties = { fontSize: '10.5px', color: '#6b7280', 
 // Los dos parámetros que la especificación de Marcelo pide dejar editables (el ancla del
 // ciclo de 14 días de Afital y la frecuencia de Serenade, que pasa de 30 a 15 días al
 // entrar el verano) más el interruptor para apagar todo fuera de temporada.
-export default function ProtocoloConfig({ cfg }: { cfg: ConfigProtocolo }) {
+export default function ProtocoloConfig({ cfg, emailsAlarma }: { cfg: ConfigProtocolo; emailsAlarma?: string }) {
   const [afitalAncla, setAfitalAncla] = useState(cfg.afitalAncla || '');
   const [serenadeDias, setSerenadeDias] = useState(String(cfg.serenadeDias));
   const [serenadeAncla, setSerenadeAncla] = useState(cfg.serenadeAncla || '');
   const [activo, setActivo] = useState(cfg.activo);
+  const [emails, setEmails] = useState(emailsAlarma || EMAILS_ALARMA_DEFAULT.join(', '));
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; s: string } | null>(null);
 
@@ -31,6 +32,7 @@ export default function ProtocoloConfig({ cfg }: { cfg: ConfigProtocolo }) {
           [CONFIG_SERENADE_DIAS]: serenadeDias,
           [CONFIG_SERENADE_ANCLA]: serenadeAncla,
           [CONFIG_ACTIVO]: activo ? 'SI' : 'NO',
+          [CONFIG_ALARMA_EMAILS]: emails,
           ...extra,
         }),
       });
@@ -67,6 +69,12 @@ export default function ProtocoloConfig({ cfg }: { cfg: ConfigProtocolo }) {
           <label style={labelStyle}>Primera aplicación de Serenade</label>
           <input type="date" value={serenadeAncla} onChange={(e) => setSerenadeAncla(e.target.value)} disabled={loading} style={inputStyle} />
           <span style={{ fontSize: '10px', color: '#9ca3af' }}>Después se recalcula sola desde la última</span>
+        </div>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <label style={labelStyle}>Alarma de ósmosis — a quién se le avisa</label>
+          <input value={emails} onChange={(e) => setEmails(e.target.value)} disabled={loading} style={inputStyle}
+            placeholder="mail1@ejemplo.com, mail2@ejemplo.com" />
+          <span style={{ fontSize: '10px', color: '#9ca3af' }}>Separados por coma. Se avisa cuando la conductividad o el pH se pasan del límite.</span>
         </div>
         <div>
           <label style={labelStyle}>Protocolo</label>

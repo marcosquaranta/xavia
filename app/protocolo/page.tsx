@@ -4,7 +4,7 @@ import { readSheet } from '@/lib/sheets';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 import {
   leerConfigProtocolo, tareasDelDia, tareasVencidas, cumplimientoProtocolo,
-  lunesDeSemana, sumarDias, TAREAS_PROTOCOLO,
+  lunesDeSemana, sumarDias, TAREAS_PROTOCOLO, CONFIG_ALARMA_EMAILS,
 } from '@/lib/protocoloTareas';
 import type { RegistroProtocolo } from '@/lib/types';
 import Header from '@/components/Header';
@@ -212,7 +212,7 @@ export default async function ProtocoloPage() {
           )}
         </div>
 
-        {user.rol === 'admin' && <ProtocoloConfig cfg={cfg} />}
+        {user.rol === 'admin' && <ProtocoloConfig cfg={cfg} emailsAlarma={String(configRows.find((r) => String(r.clave).trim() === CONFIG_ALARMA_EMAILS)?.valor || '')} />}
       </div>
     </>
   );
