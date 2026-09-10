@@ -351,3 +351,28 @@ export interface PersonalQuincena {
   extras: number | string;
   horas_extras: number | string;
 }
+
+// Registro del protocolo de aplicaciones (ver lib/protocoloTareas.ts). Una fila por
+// ejecución de una tarea fija, o por decisión de Marcelo sobre la aplicación del sábado.
+// `fuera_de_rango` se calcula al guardar (condiciones ambientales de las foliares, o los
+// límites de conductividad/pH del agua de ósmosis), para no depender de que alguien lo
+// marque a mano y poder auditarlo después.
+export interface RegistroProtocolo {
+  id_registro: string;
+  id_tarea: string;
+  tipo_registro: 'ejecucion' | 'decision';
+  fecha: string;   // YYYY-MM-DD del día que corresponde la tarea
+  hora: string;    // HH:MM real de la aplicación
+  responsable: string;
+  estado: 'hecha' | 'no_aplica';
+  producto: string;
+  dosis: string;
+  temperatura: number | string;
+  humedad: number | string;
+  ph: number | string;
+  conductividad: number | string;
+  fuera_de_rango: 'SI' | 'NO' | '';
+  notas: string;
+  usuario: string;
+  creado: string;  // ISO — cuándo se cargó la fila
+}

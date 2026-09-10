@@ -14,6 +14,8 @@ export default function Header({ user, current }: { user: UsuarioPublico; curren
   items.push({ href: '/stocks', label: 'Stocks', key: 'stocks' });
   items.push({ href: '/cajones', label: 'Cajones', key: 'cajones' });
   items.push({ href: '/planificacion', label: 'Planificación', key: 'planificacion' });
+  // Protocolo de aplicaciones: lo usa el operario todos los días, va para todos los roles.
+  items.push({ href: '/protocolo', label: 'Protocolo', key: 'protocolo' });
   if (isAdmin) {
     items.push({ href: '/estadisticas', label: 'Estadísticas', key: 'estadisticas' });
     items.push({ href: '/eerr', label: 'EERR', key: 'eerr' });

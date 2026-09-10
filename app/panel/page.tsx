@@ -5,7 +5,7 @@ import { readSheet } from '@/lib/sheets';
 import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
 import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio } from '@/lib/estadisticas';
 import { codigoCultivo } from '@/lib/lotes';
-import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, CajonMovimiento, KilometrajeVehiculo, ProductividadDiaria, Articulo, StockMes } from '@/lib/types';
+import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, CajonMovimiento, KilometrajeVehiculo, ProductividadDiaria, Articulo, StockMes, RegistroProtocolo } from '@/lib/types';
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
 import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
 import { evolucionVentaPorArticulo, resumenMesActual } from '@/lib/estadisticasVentas';
@@ -28,6 +28,9 @@ import AjusteStockCard from '@/components/AjusteStockCard';
 import KilometrajeReminder from '@/components/KilometrajeReminder';
 import TardanzasHoyBanner from '@/components/TardanzasHoyBanner';
 import { GraficoVentaPorArticulo } from '@/app/ventas/VentasEvolucionCharts';
+import TareasProtocolo from '@/components/TareasProtocolo';
+import { leerConfigProtocolo, tareasDelDia as tareasProtocoloDelDia, tareasVencidas as tareasProtocoloVencidas, alarmaOsmosis } from '@/lib/protocoloTareas';
+import { fechaArgentinaHoy } from '@/lib/ocupacion';
 
 export const dynamic = 'force-dynamic';
 // Ya no le pide nada a CrossChex acá adentro (ver TardanzasHoyBanner.tsx) — se deja el
@@ -133,8 +136,9 @@ export default async function PanelPage() {
   let movimientosCajones: CajonMovimiento[] = [];
   let registrosKm: KilometrajeVehiculo[] = [];
   let articulosPanel: Articulo[] = [], stocksPanel: StockMes[] = [];
+  let registrosProtocolo: RegistroProtocolo[] = [];
   try {
-    [lotes, movimientos, ubicaciones, variedades, ventasPanel, clientesPanel, preciosPanel, historicasPanel, configRows, registrosCamara, movimientosCajones, registrosKm, articulosPanel, stocksPanel] = await Promise.all([
+    [lotes, movimientos, ubicaciones, variedades, ventasPanel, clientesPanel, preciosPanel, historicasPanel, configRows, registrosCamara, movimientosCajones, registrosKm, articulosPanel, stocksPanel, registrosProtocolo] = await Promise.all([
       readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'),
       readSheet<Ubicacion>('Ubicaciones'), readSheet<Variedad>('Variedades'),
       readSheet<VentaDia>('Ventas'),
@@ -147,6 +151,7 @@ export default async function PanelPage() {
       readSheet<KilometrajeVehiculo>('Kilometraje').catch(() => []),
       readSheet<Articulo>('Articulos').catch(() => []),
       readSheet<StockMes>('Stocks').catch(() => []),
+      readSheet<RegistroProtocolo>('ProtocoloRegistros').catch(() => []),
     ]);
   } catch {}
 
@@ -247,6 +252,14 @@ export default async function PanelPage() {
       Math.max(1, mesadasF2.reduce((a:number,m:any)=>a+m.tubos_totales,0)) * 100)
     : 0;
 
+  // ── PROTOCOLO DE APLICACIONES (tareas fijas de la temporada) ──
+  // Lo que el operario tiene que hacer HOY, más lo que quedó sin registrar de días
+  // anteriores. La lógica de qué toca cada día vive en lib/protocoloTareas.
+  const cfgProtocolo = leerConfigProtocolo(configRows);
+  const hoyArg = fechaArgentinaHoy();
+  const tareasProtocoloHoy = tareasProtocoloDelDia(hoyArg, cfgProtocolo, registrosProtocolo, hoyArg);
+  const protocoloVencidas = tareasProtocoloVencidas(cfgProtocolo, registrosProtocolo, hoyArg, 14);
+
   // ── ALERTAS ──
   const hoy = new Date();
   // En el home se excluyen las alertas de atraso puntual de trasplante/cosecha — ese
@@ -283,6 +296,27 @@ export default async function PanelPage() {
       ...alertas,
       ...sinDescartadas(alertasStockPanel, descartesPanel, hoy.getFullYear(), hoy.getMonth() + 1).map(a => ({ ...a, href: '/stocks' })),
     ];
+  } catch {}
+
+  // Agua de ósmosis fuera de límite en la última medición cargada: además del mail que se
+  // manda al registrarla (ver /api/protocolo/registrar), queda a la vista en el Panel hasta
+  // que una medición nueva vuelva a estar en rango — un mail se pierde, el tablero no.
+  try {
+    const ultimaOsmosis = [...registrosProtocolo]
+      .filter((r) => r.id_tarea === 'control_osmosis' && String(r.tipo_registro) === 'ejecucion' && String(r.estado) !== 'no_aplica')
+      .sort((a, b) => String(a.fecha || '').localeCompare(String(b.fecha || '')))
+      .pop();
+    if (ultimaOsmosis) {
+      const { alarma, motivos } = alarmaOsmosis(ultimaOsmosis.conductividad, ultimaOsmosis.ph);
+      if (alarma) {
+        alertas = [...alertas, {
+          tipo: 'error' as const,
+          msg: `Agua de ósmosis fuera de límite (${String(ultimaOsmosis.fecha).slice(5)}): ${motivos.join(' · ')}`,
+          categoria: 'general' as const,
+          href: '/protocolo',
+        }];
+      }
+    }
   } catch {}
 
   // Tardanzas de hoy: se movió a TardanzasHoyBanner (cliente, fetch a
@@ -515,6 +549,23 @@ export default async function PanelPage() {
                   {tubosMesadas.map((n:any) => { const f2=(n.mesadas||[]).filter((m:any)=>m.sector_fase!=='fase_1'); const tot=f2.reduce((s:number,m:any)=>s+m.tubos_totales,0); const ocu=f2.reduce((s:number,m:any)=>s+m.tubos_ocupados,0); const pct=tot>0?Math.round(ocu/tot*100):0; return <span key={n.nave}> · N{n.nave}: <strong>{pct}%</strong></span>; })}
                 </div>
             </div>
+            {/* Protocolo de aplicaciones — las tareas fijas de la temporada, con su
+                formulario de registro al lado: el operario las ve donde ya mira todos los
+                días, no en una pantalla aparte a la que habría que acordarse de entrar. */}
+            {(tareasProtocoloHoy.length > 0 || protocoloVencidas.length > 0) && (
+              <div style={{ background:'white', borderRadius:'7px', padding:'10px 12px', border:'1px solid #e5e7eb', marginBottom:'10px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', flexWrap:'wrap', gap:'4px', marginBottom:'8px' }}>
+                  <p style={{ margin:0, fontSize:'13px', fontWeight:700 }}>🧪 Protocolo de aplicaciones</p>
+                  <Link href="/protocolo" style={{ fontSize:'11px', color:'#6b7280', textDecoration:'none' }}>Ver protocolo y cumplimiento →</Link>
+                </div>
+                <TareasProtocolo
+                  tareas={tareasProtocoloHoy}
+                  vencidas={protocoloVencidas}
+                  esAdmin={user.rol === 'admin'}
+                  nombreUsuario={user.nombre}
+                />
+              </div>
+            )}
             {siembraHoy && (
               <div style={{ background:'white', borderRadius:'7px', padding:'10px 12px', border:'1px solid #e5e7eb', marginBottom:'10px' }}>
                 <p style={{ margin:'0 0 8px', fontSize:'13px', fontWeight:700 }}>🌱 Sembrar hoy</p>
