@@ -5,8 +5,9 @@ import type { UsuarioPublico } from '@/lib/types';
 export default function Header({ user, current }: { user: UsuarioPublico; current?: string }) {
   const [open, setOpen] = useState(false);
   const isAdmin = user.rol === 'admin';
+  // Panel no está en el menú: el logo de arriba a la izquierda ya lleva ahí, y es el lugar
+  // donde todo el mundo espera que esté el "volver al inicio".
   const items = [
-    { href: '/panel', label: 'Panel', key: 'panel' },
     { href: '/cultivos', label: 'Mis Cultivos', key: 'cultivos' },
     { href: '/ocupacion', label: 'Ocupación', key: 'ocupacion' },
   ];
@@ -26,7 +27,8 @@ export default function Header({ user, current }: { user: UsuarioPublico; curren
   }
   return (
     <div className="topbar">
-      <Link href="/panel" className="logo" style={{ textDecoration: 'none', color: '#111827' }}>
+      <Link href="/panel" className="logo" title="Ir al Panel"
+        style={{ textDecoration: 'none', color: current === 'panel' ? '#059669' : '#111827' }}>
         <span className="logo-box">X</span><span style={{ fontSize: '15px' }}>XaviaApp</span>
       </Link>
       <button type="button" className="menu-toggle" onClick={() => setOpen(o => !o)} aria-label="Menú">
