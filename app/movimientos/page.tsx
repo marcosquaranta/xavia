@@ -92,10 +92,17 @@ export default async function MovimientosPage({
 
   return (
     <>
-      <Header user={user} current="movimientos" />
+      <Header user={user} current="cultivos" />
       <div className="container">
-        <h1 className="page-title">Últimos movimientos</h1>
-        <p className="page-subtitle">Registro de actividad — siembras, trasplantes y cosechas</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
+          <div>
+            <h1 className="page-title">Últimos movimientos</h1>
+            <p className="page-subtitle">Registro de actividad — siembras, trasplantes y cosechas</p>
+          </div>
+          {/* Esta pantalla ya no está en el menú: el resumen vive arriba de Mis Cultivos y
+              acá se entra para filtrar. El link de vuelta evita el callejón sin salida. */}
+          <Link href="/cultivos" className="btn secondary" style={{ fontSize: '12px' }}>← Mis cultivos</Link>
+        </div>
 
         {/* Filtros */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px', alignItems: 'center' }}>

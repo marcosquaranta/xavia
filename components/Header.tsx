@@ -10,7 +10,9 @@ export default function Header({ user, current }: { user: UsuarioPublico; curren
     { href: '/cultivos', label: 'Mis Cultivos', key: 'cultivos' },
     { href: '/ocupacion', label: 'Ocupación', key: 'ocupacion' },
   ];
-  items.push({ href: '/movimientos', label: 'Actividad', key: 'movimientos' });
+  // Actividad y EERR salieron del menú (quedaba demasiado largo): Actividad ahora abre
+  // comprimida arriba de Mis Cultivos, y EERR entra por un botón grande en Estadísticas.
+  // Las dos páginas siguen existiendo, solo que no ocupan un lugar fijo acá arriba.
   items.push({ href: '/stocks', label: 'Stocks', key: 'stocks' });
   items.push({ href: '/cajones', label: 'Cajones', key: 'cajones' });
   items.push({ href: '/planificacion', label: 'Planificación', key: 'planificacion' });
@@ -18,7 +20,6 @@ export default function Header({ user, current }: { user: UsuarioPublico; curren
   items.push({ href: '/protocolo', label: 'Protocolo', key: 'protocolo' });
   if (isAdmin) {
     items.push({ href: '/estadisticas', label: 'Estadísticas', key: 'estadisticas' });
-    items.push({ href: '/eerr', label: 'EERR', key: 'eerr' });
     items.push({ href: '/ventas', label: 'Ventas', key: 'ventas' });
     items.push({ href: '/gastos', label: 'Gastos', key: 'gastos' });
     items.push({ href: '/admin', label: 'Admin', key: 'admin' });

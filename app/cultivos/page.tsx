@@ -9,6 +9,7 @@ import Header from '@/components/Header';
 import FiltrosLotes from '@/components/FiltrosLotes';
 import LoteCard from '@/components/LoteCard';
 import BuscadorLote from '@/components/BuscadorLote';
+import ActividadReciente, { type MovResumen } from '@/components/ActividadReciente';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,6 +46,49 @@ export default async function CultivosPage({
   );
 
   const conteos = contarPorFiltro(lotes, nave, ubicaciones);
+
+  // ── Actividad de los últimos días (la vieja sección "Actividad" del menú) ──
+  // Se arma acá, en el server, con los lotes que la página ya tenía cargados: el componente
+  // recibe solo lo que muestra, en vez de mandarle Lotes y Movimientos enteros al browser.
+  const DIAS_ACTIVIDAD = 7;
+  const limiteActividad = new Date();
+  limiteActividad.setDate(limiteActividad.getDate() - DIAS_ACTIVIDAD);
+  const lotesPorId = new Map(lotes.map((l) => [l.id_lote, l]));
+  const fmtFase = (f: any) => String(f || '').replace('fase_', 'F').replace('plantin', 'Plant.');
+  const actividad: MovResumen[] = movimientos
+    .filter((m) => {
+      const f = String(m.fecha || '').split(/[\sT]/)[0];
+      if (!f) return false;
+      try { return new Date(f + 'T12:00:00') >= limiteActividad; } catch { return false; }
+    })
+    .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')))
+    .map((m) => {
+      const lote = lotesPorId.get(String(m.id_lote || ''));
+      const varNorm = String(lote?.variedad || '').toLowerCase();
+      const esRucula = varNorm.includes('rucula') || varNorm.includes('rúcula');
+      // Igual que en /movimientos: en una cosecha la cantidad real está en
+      // unidades_cosechadas, no en plantas_estimadas (esa quedó de la siembra).
+      const cosechado = Number(m.unidades_cosechadas || 0);
+      const estimado = Number(m.plantas_estimadas || 0);
+      const cantidad = m.tipo === 'cosecha' && esRucula && cosechado > 0
+        ? `${cosechado.toLocaleString('es-AR')} paq. (${estimado.toLocaleString('es-AR')} pl)`
+        : m.tipo === 'cosecha' && cosechado > 0 ? `${cosechado.toLocaleString('es-AR')} pl`
+        : m.tipo === 'division' && estimado > 0 ? `${estimado.toLocaleString('es-AR')} quedan`
+        : estimado > 0 ? `${estimado.toLocaleString('es-AR')} pl` : '';
+      return {
+        id: String(m.id_movimiento),
+        tipo: String(m.tipo || ''),
+        fecha: String(m.fecha || '').split(/[\sT]/)[0],
+        lote: String(m.id_lote || ''),
+        variedad: String(lote?.variedad || '').split(' ').slice(0, 2).join(' '),
+        esRucula,
+        cantidad,
+        usuario: String(m.usuario || '').split('@')[0] || '—',
+        ubicacion: String(m.ubicacion_destino || '').replace('Nave 1 - ', '').replace('Nave 2 - ', ''),
+        fases: m.tipo === 'trasplante' ? `${fmtFase(m.fase_origen)} → ${fmtFase(m.fase_destino)}` : '',
+        notas: m.tipo === 'division' ? String(m.notas || '') : '',
+      };
+    });
 
   // Si hay búsqueda por ID, buscar en todos los lotes (activos y cosechados)
   // Ciclo real basado en cosechados recientes
@@ -86,6 +130,8 @@ export default async function CultivosPage({
             <Link href="/cultivos/nuevo" className="btn">+ Nuevo lote</Link>
           </div>
         </div>
+
+        <ActividadReciente movimientos={actividad} dias={DIAS_ACTIVIDAD} />
 
         {/* Buscador */}
         <BuscadorLote baseUrl="/cultivos" />

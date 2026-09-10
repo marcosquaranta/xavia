@@ -583,6 +583,24 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
           <Link href="/estadisticas/mensual" className="btn secondary" style={{ fontSize:'12px' }}>📧 Análisis mensual (para mail) →</Link>
         </div>
 
+        {/* EERR salió del menú de arriba (quedaba muy largo) y entra por acá: es lo mismo
+            que se venía mirando junto con Estadísticas, así que va como acceso grande y no
+            como un link más perdido entre el resto. */}
+        <Link href="/eerr" style={{
+          display: 'flex', alignItems: 'center', gap: '14px', textDecoration: 'none',
+          background: 'linear-gradient(135deg,#065f46,#064e3b)', borderRadius: '12px',
+          padding: '16px 20px', marginBottom: '16px',
+        }}>
+          <span style={{ fontSize: '30px', lineHeight: 1 }}>📊</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ margin: 0, fontSize: '18px', fontWeight: 900, color: 'white' }}>EERR · Estado de resultados</p>
+            <p style={{ margin: '2px 0 0', fontSize: '12.5px', color: '#a7f3d0' }}>
+              Ventas, costos variables y fijos del mes · cierre mensual y carga rápida
+            </p>
+          </div>
+          <span style={{ fontSize: '20px', color: 'white' }}>→</span>
+        </Link>
+
         {/* Filtro global de período — aplica a toda la información de abajo */}
         <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'16px', flexWrap:'wrap' }}>
           <span style={{ fontSize:'12px', fontWeight:700, color:'#6b7280' }}>Período:</span>

@@ -20,7 +20,7 @@ export default async function InstruccionesCierrePage() {
 
   return (
     <>
-      <Header user={user} current="eerr" />
+      <Header user={user} current="estadisticas" />
       <div className="container">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
           <div>

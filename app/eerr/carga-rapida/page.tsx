@@ -37,7 +37,7 @@ export default async function CargaRapidaPage({ searchParams }: { searchParams: 
 
   if (err) return (
     <>
-      <Header user={user} current="eerr" />
+      <Header user={user} current="estadisticas" />
       <div className="container"><div className="alert-box error">{err}</div></div>
     </>
   );
@@ -69,7 +69,7 @@ export default async function CargaRapidaPage({ searchParams }: { searchParams: 
 
   return (
     <>
-      <Header user={user} current="eerr" />
+      <Header user={user} current="estadisticas" />
       <div className="container">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
           <div>
