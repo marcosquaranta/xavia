@@ -218,12 +218,17 @@ export function ultimaEjecucion(idTarea: string, registros: RegistroProtocolo[],
     .pop();
 }
 
-// Desde cuándo se cuentan los N días: la última aplicación registrada, o el ancla si
-// todavía no hubo ninguna. Sin ninguna de las dos no hay ciclo que calcular.
-function baseCadencia(idTarea: string, cfg: ConfigProtocolo, registros: RegistroProtocolo[], hasta?: string): string | null {
+// Cuándo TOCA la próxima (o tocó la última que quedó pendiente).
+//
+// Ojo con el ancla: es la fecha de la PRIMERA aplicación programada, no una aplicación ya
+// hecha. Si se configura el 15/9 y hoy es 10/9, la tarea tiene que aparecer el 15/9 —
+// antes esto sumaba los 30 días al ancla y la primera aplicación no aparecía nunca
+// (arrancaba a contar como si ya se hubiera aplicado ese día). Recién desde la primera
+// aplicación REGISTRADA el ciclo se cuenta de aplicación en aplicación.
+function proximoVencimiento(idTarea: string, cfg: ConfigProtocolo, registros: RegistroProtocolo[], hasta?: string): string | null {
   const ultima = ultimaEjecucion(idTarea, registros, hasta);
-  if (ultima) return fechaDe(ultima);
-  return cfg.serenadeAncla;
+  if (ultima) return sumarDias(fechaDe(ultima), cfg.serenadeDias);
+  return cfg.serenadeAncla; // sin aplicaciones todavía: toca el día del ancla
 }
 
 // Fechas en que TOCABA una tarea de cadencia dentro de [desde, hasta], una por ciclo (no
@@ -238,17 +243,19 @@ export function vencimientosCadencia(
     .sort((a, b) => fechaDe(a).localeCompare(fechaDe(b)));
   // Punto de partida: la última aplicación anterior al rango, o el ancla configurada.
   const previa = ejecuciones.filter((r) => fechaDe(r) < desde).pop();
-  let cursor = previa ? fechaDe(previa) : cfg.serenadeAncla;
-  if (!cursor) return [];
+  // Igual que arriba: sin aplicaciones previas, el primer vencimiento ES el ancla (la
+  // primera aplicación programada), no el ancla + N días.
+  const primerVencimiento = previa ? sumarDias(fechaDe(previa), cfg.serenadeDias) : cfg.serenadeAncla;
+  if (!primerVencimiento) return [];
+  let vence: string = primerVencimiento;
 
   const out: { fecha: string; registro?: RegistroProtocolo }[] = [];
   for (let i = 0; i < 400; i++) { // tope de seguridad, nunca se alcanza en la práctica
-    const vence = sumarDias(cursor, cfg.serenadeDias);
     if (vence > hasta) break;
     const hecha = ejecuciones.find((r) => fechaDe(r) >= vence);
     if (vence >= desde) out.push({ fecha: vence, registro: hecha });
     if (!hecha) break; // sigue pendiente: no se generan vencimientos nuevos encima
-    cursor = fechaDe(hecha);
+    vence = sumarDias(fechaDe(hecha), cfg.serenadeDias);
   }
   return out;
 }
@@ -269,9 +276,9 @@ export function correspondeEnFecha(tarea: TareaProtocolo, fecha: string, cfg: Co
       return dif >= 0 && dif % 14 === 0;
     }
     case 'riego_serenade': {
-      const base = baseCadencia('riego_serenade', cfg, registros, fecha);
-      if (!base) return true; // nunca se aplicó y no hay ancla: toca ya
-      return diasEntre(base, fecha) >= cfg.serenadeDias;
+      const vence = proximoVencimiento('riego_serenade', cfg, registros, fecha);
+      if (!vence) return true; // nunca se aplicó y no hay ancla: toca ya
+      return fecha >= vence;
     }
     case 'control_instrumental':
     case 'control_osmosis':
@@ -305,12 +312,11 @@ export function estadoDeTarea(tarea: TareaProtocolo, fecha: string, cfg: ConfigP
     aviso = 'Falta definir el primer miércoles de aplicación para que el ciclo de 14 días se calcule solo.';
   }
   if (esCadencia(tarea.id)) {
-    const base = baseCadencia(tarea.id, cfg, registros, fecha);
-    if (!base) {
-      aviso = `Falta cargar la primera aplicación para que el ciclo de ${cfg.serenadeDias} días se calcule solo.`;
-    } else {
-      const vence = sumarDias(base, cfg.serenadeDias);
-      if (vence < fecha) venciaEl = vence;
+    const vence = proximoVencimiento(tarea.id, cfg, registros, fecha);
+    if (!vence) {
+      aviso = `Falta cargar la fecha de la primera aplicación para que el ciclo de ${cfg.serenadeDias} días se calcule solo.`;
+    } else if (vence < fecha) {
+      venciaEl = vence;
     }
   }
   const base: InstanciaTarea = { tarea, fecha, estado: 'pendiente', registro, decision, aviso, venciaEl };
