@@ -58,6 +58,30 @@ async function comprobantesEnRango(desde: string, hasta: string): Promise<any[]>
   return [...map.values()];
 }
 
+// Comprobantes de venta de un rango (con importe y cliente) — para los recordatorios de
+// cobro. Se expone el wrapper y no comprobantesEnRango directo para no perder el manejo de
+// truncamiento a 100 resultados que hace esa función.
+export async function getComprobantes(desde: string, hasta: string): Promise<any[]> {
+  return comprobantesEnRango(desde, hasta);
+}
+
+// Cobranzas (recibos) de un rango. Xubio NO permite saber si una factura puntual está
+// paga: comprobanteVentaBean no tiene saldo/estado/pagado, y las cobranzas no traen a qué
+// comprobante se imputan (verificado contra la especificación OpenAPI, sept-2026). Lo que
+// sí se puede es sumar lo cobrado por cliente y compararlo con lo facturado: alcanza para
+// NO mandarle un recordatorio a alguien que está al día, que es el error caro acá.
+export async function getCobranzas(desde: string, hasta: string): Promise<any[]> {
+  const cobs = await xubioGet<any[]>(`cobranzaBean?fechaDesde=${desde}&fechaHasta=${hasta}`);
+  return Array.isArray(cobs) ? cobs : [];
+}
+
+// Importe de una cobranza = suma de sus instrumentos de cobro (efectivo, cheque, banco).
+export function importeCobranza(cob: any): number {
+  const items = cob?.transaccionInstrumentoDeCobro;
+  if (!Array.isArray(items)) return 0;
+  return items.reduce((a: number, i: any) => a + (Number(i?.importe) || 0), 0);
+}
+
 export interface UltimoNumeroPV { pv: string; letra: string; numeroCompleto: string; numero: number; }
 
 // Último número emitido por punto de venta (a partir de los comprobantes recientes)

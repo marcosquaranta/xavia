@@ -89,9 +89,16 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
             <h1 className="page-title">Ventas</h1>
             <p className="page-subtitle">Carga diaria · Exportación Xubio</p>
           </div>
-          <Link href="/facturacion" className="btn secondary" style={{ fontSize: '13px', marginTop: '2px' }}>
-            📄 Facturación →
-          </Link>
+          {/* Cobranzas no entra al menú de arriba a propósito — lo acabamos de achicar. Se
+              entra desde acá, que es donde se está cuando uno piensa en facturas. */}
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <Link href="/facturacion" className="btn secondary" style={{ fontSize: '13px', marginTop: '2px' }}>
+              📄 Facturación →
+            </Link>
+            <Link href="/cobranzas" className="btn secondary" style={{ fontSize: '13px', marginTop: '2px' }}>
+              💰 Cobranzas →
+            </Link>
+          </div>
         </div>
         <VentasEvolucionCharts articulo={evolArticulo} clienteSemanal={evolClienteSemanal} clienteMensual={evolClienteMensual} precio={evolPrecio} resumenMes={resumenMes} clientesPrecioVolumen={clientesPrecioVolumen} />
         <div className="card">
