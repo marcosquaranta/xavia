@@ -122,3 +122,20 @@ export function productividadPlantasDeMes(lotes: Lote[], cache: FilaProductivida
     productividad: horas > 0 ? Math.round((plantas / horas) * 100) / 100 : null,
   };
 }
+
+// Plantas cosechadas (reconvertidas — rúcula en paquetes × plantas_por_unidad_real, resto
+// ya en plantas) en un rango de fechas puntual — mismo criterio que productividadPlantasDeMes
+// (lib/productividad.ts) pero por rango en vez de mes calendario completo, para poder
+// comparar "mes en curso hasta hoy" contra "mes pasado hasta el mismo día".
+export function plantasCosechadasEnRango(lotes: Lote[], desde: string, hasta: string): number {
+  let plantas = 0;
+  for (const l of lotes) {
+    if (l.estado !== 'cosechado') continue;
+    const f = String(l.fecha_cosecha || l.fecha_ult_movimiento || '').split(/[T ]/)[0];
+    if (!f || f < desde || f > hasta) continue;
+    const v = String(l.variedad || '').toLowerCase();
+    const esRucula = v.includes('rucula') || v.includes('rúcula');
+    plantas += esRucula ? (Number(l.unidades_cosechadas) || 0) * (Number(l.plantas_por_unidad_real) || 3) : (Number(l.unidades_cosechadas) || 0);
+  }
+  return plantas;
+}

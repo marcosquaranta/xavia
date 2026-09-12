@@ -6,9 +6,11 @@ import {
   DIAS_VENTANA, type RecordatorioCobro,
 } from '@/lib/recordatoriosCobro';
 import { nombreClienteVisible } from '@/lib/clientes';
+import { HOJA_COBROS, type CobroRegistrado } from '@/lib/cobros';
 import type { ClienteVenta } from '@/lib/types';
 import Header from '@/components/Header';
 import { ClientesRecordatorio, DatosPago, ProbarRecordatorios, type ClienteFila } from '@/components/CobranzasConfig';
+import RegistrarCobro from '@/components/RegistrarCobro';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,11 +26,13 @@ export default async function CobranzasPage() {
   if (user.rol !== 'admin') redirect('/panel');
 
   let clientes: ClienteVenta[] = [], enviados: RecordatorioCobro[] = [], configRows: { clave: string; valor: any }[] = [];
+  let cobros: CobroRegistrado[] = [];
   try {
-    [clientes, enviados, configRows] = await Promise.all([
+    [clientes, enviados, configRows, cobros] = await Promise.all([
       readSheet<ClienteVenta>('Clientes').catch(() => []),
       readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => []),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
+      readSheet<CobroRegistrado>(HOJA_COBROS).catch(() => []),
     ]);
   } catch {}
 
@@ -56,9 +60,9 @@ export default async function CobranzasPage() {
     <>
       <Header user={user} current="ventas" />
       <div className="container">
-        <h1 className="page-title">Recordatorios de cobro</h1>
+        <h1 className="page-title">Cobranzas</h1>
         <p className="page-subtitle">
-          Un mail por semana a los clientes elegidos, con las facturas emitidas en la semana · sale los lunes a la mañana
+          Registrar cobros en Xubio · recordatorios semanales a los clientes elegidos (salen los lunes a la mañana)
         </p>
 
         {/* Lo que la app NO puede saber, dicho antes de que alguien lo asuma al revés. */}
@@ -69,6 +73,30 @@ export default async function CobranzasPage() {
             si el cliente está al día, el recordatorio no sale. Y cada comprobante entra en un solo recordatorio,
             así nunca se reclama dos veces lo mismo.
           </p>
+        </div>
+
+        {/* ══ REGISTRAR UN COBRO ══ */}
+        <div className="card" style={{ marginBottom: '14px' }}>
+          <p className="card-title">Registrar un cobro en Xubio</p>
+          <p className="card-sub">
+            Lo que cargues acá se crea en Xubio como cobranza del cliente. Entra a su cuenta corriente
+            como cobro a cuenta: la API de Xubio no permite imputarlo a una factura puntual, eso sigue
+            siendo a mano si hace falta. Un cobro mal cargado se puede anular desde acá.
+          </p>
+          <div style={{ marginTop: '10px' }}>
+            <RegistrarCobro
+              clientes={filas.map((f) => ({ id_control: f.id_control, nombre: f.nombre }))}
+              cobros={[...cobros]
+                .sort((a, b) => String(b.fecha_registro || '').localeCompare(String(a.fecha_registro || '')))
+                .slice(0, 15)
+                .map((c) => ({
+                  id_cobro: c.id_cobro, cliente: c.cliente, fecha: c.fecha,
+                  importe: Number(c.importe) || 0, numero_recibo: String(c.numero_recibo || ''),
+                  transaccionid: String(c.transaccionid || ''), estado: String(c.estado || ''),
+                  observacion: String(c.observacion || ''),
+                }))}
+            />
+          </div>
         </div>
 
         <div className="card" style={{ marginBottom: '14px' }}>

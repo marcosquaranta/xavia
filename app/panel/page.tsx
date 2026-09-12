@@ -18,7 +18,7 @@ import { saldoPorCliente, alertasCajones } from '@/lib/cajones';
 import { descartePorFaseMes } from '@/lib/descarte';
 import { germinacionYSupervivenciaMes } from '@/lib/germinacion';
 import { faltaCargarEstaSemana, ultimaLectura, kmEnRango, VEHICULO_PARTNER } from '@/lib/kilometraje';
-import { productividadDeMes } from '@/lib/productividad';
+import { productividadDeMes, plantasCosechadasEnRango } from '@/lib/productividad';
 import Header from '@/components/Header';
 import GraficoCiclosSemanas from '@/components/GraficoCiclosSemanas';
 import GraficoDistribucionMesadas from '@/components/GraficoDistribucionMesadas';
@@ -62,23 +62,6 @@ function proyeccionPorMes(datos: { semana: string; rucula: number; lechuga: numb
   }
   return [...map.keys()].sort().map((k) => map.get(k)!);
 }
-// Plantas cosechadas (reconvertidas — rúcula en paquetes × plantas_por_unidad_real, resto
-// ya en plantas) en un rango de fechas puntual — mismo criterio que productividadPlantasDeMes
-// (lib/productividad.ts) pero por rango en vez de mes calendario completo, para poder
-// comparar "mes en curso hasta hoy" contra "mes pasado hasta el mismo día".
-function plantasCosechadasEnRango(lotes: Lote[], desde: string, hasta: string): number {
-  let plantas = 0;
-  for (const l of lotes) {
-    if (l.estado !== 'cosechado') continue;
-    const f = String(l.fecha_cosecha || l.fecha_ult_movimiento || '').split(/[T ]/)[0];
-    if (!f || f < desde || f > hasta) continue;
-    const v = String(l.variedad || '').toLowerCase();
-    const esRucula = v.includes('rucula') || v.includes('rúcula');
-    plantas += esRucula ? (Number(l.unidades_cosechadas) || 0) * (Number(l.plantas_por_unidad_real) || 3) : (Number(l.unidades_cosechadas) || 0);
-  }
-  return plantas;
-}
-
 interface ItemIndicador { label: string; valor: string; pct: number | null; mejorSiSube: boolean; detalle?: string }
 
 // Tarjeta chica por métrica: valor grande destacado + delta color-coded (verde/rojo

@@ -82,6 +82,74 @@ export function importeCobranza(cob: any): number {
   return items.reduce((a: number, i: any) => a + (Number(i?.importe) || 0), 0);
 }
 
+// ── Cobranzas: registrar un cobro en Xubio desde la app ──────────────────────────────
+//
+// Xubio SÍ deja crear cobranzas por API (POST /cobranzaBean) y borrarlas
+// (DELETE /cobranzaBean/{id}) — o sea que un error es reversible, que es lo que hace
+// razonable operar esto desde acá.
+//
+// LO QUE NO SE PUEDE, y hay que tener claro: la cobranza NO se imputa a facturas
+// puntuales. El bean no tiene dónde decir "esto cancela la factura A-00002-00000101";
+// entra a la cuenta corriente del cliente como un cobro a cuenta. Para el objetivo de
+// Marcos (dejar de deberle plata en la cuenta corriente y que impacte en Xubio) alcanza;
+// si alguna vez hace falta imputar comprobante por comprobante, eso sigue siendo a mano.
+
+export interface CuentaXubio { id: number; nombre: string; codigo: string }
+
+// Cuentas donde puede entrar la plata (bancos, cajas). `activo=true` filtra las dadas de baja.
+export async function getCuentas(): Promise<CuentaXubio[]> {
+  const cuentas = await xubioGet<any[]>('cuenta?activo=true');
+  return (Array.isArray(cuentas) ? cuentas : []).map((c) => ({
+    id: Number(c?.cuentaId ?? c?.ID ?? c?.id ?? 0),
+    nombre: String(c?.nombre || ''),
+    codigo: String(c?.codigo || ''),
+  })).filter((c) => c.id > 0 && c.nombre);
+}
+
+export interface NuevaCobranza {
+  clienteId: number;
+  fecha: string;        // YYYY-MM-DD
+  importe: number;
+  cuentaId: number;     // dónde entró la plata
+  numeroRecibo?: string;
+  observacion?: string;
+}
+
+export async function crearCobranza(args: NuevaCobranza):
+  Promise<{ ok: boolean; transaccionid?: number; numeroRecibo?: string; error?: string }> {
+  const body: any = {
+    cliente: { ID: args.clienteId },
+    fecha: args.fecha,
+    transaccionInstrumentoDeCobro: [{
+      cuenta: { ID: args.cuentaId },
+      importe: args.importe,
+      descripcion: args.observacion || 'Cobro registrado desde XaviaApp',
+    }],
+  };
+  if (args.numeroRecibo) body.numeroRecibo = args.numeroRecibo;
+  if (args.observacion) body.observacion = args.observacion;
+
+  const res = await xubioPost<any>('cobranzaBean', body);
+  if (!res.ok) {
+    const err = res.data?.description || res.data?.error || res.data?.message || `HTTP ${res.status}`;
+    return { ok: false, error: String(err) };
+  }
+  return { ok: true, transaccionid: res.data?.transaccionid, numeroRecibo: res.data?.numeroRecibo };
+}
+
+// Para deshacer una cobranza cargada por error. Solo se usa sobre las que registró la app
+// (la app guarda el transaccionid), nunca sobre una cargada a mano en Xubio.
+export async function borrarCobranza(transaccionid: number): Promise<{ ok: boolean; error?: string }> {
+  const token = await getToken();
+  const res = await fetch(`${BASE}/cobranzaBean/${transaccionid}`, {
+    method: 'DELETE',
+    headers: { 'Authorization': `Bearer ${token}` },
+    cache: 'no-store',
+  });
+  if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+  return { ok: true };
+}
+
 export interface UltimoNumeroPV { pv: string; letra: string; numeroCompleto: string; numero: number; }
 
 // Último número emitido por punto de venta (a partir de los comprobantes recientes)

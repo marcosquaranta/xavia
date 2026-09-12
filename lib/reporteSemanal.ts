@@ -1,5 +1,5 @@
 import { readSheet } from './sheets';
-import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, PrecioVenta, ClienteVenta, VentaHistorica, StockCamara, RegistroProtocolo } from './types';
+import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, PrecioVenta, ClienteVenta, VentaHistorica, StockCamara, RegistroProtocolo, ProductividadDiaria, KilometrajeVehiculo } from './types';
 import { tubosPorMesada, mesadasVaciasEnLaSemana, type OcupacionHistorialRow, type MesadaVacia } from './ocupacion';
 import { cosechasEstimadasPorLote, ciclosPorSemana, pesoPromedioRango, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, type PesoPromedioMes } from './estadisticas';
 import { calcularCamara, diferenciaAjustesRango } from './camara';
@@ -9,6 +9,9 @@ import { ventasPorCultivoUltimasSemanas, resumenMesActual, ventasEnRango, GR_PAQ
 import { plantasPerdidasPorSubocupacion, type PlantasPerdidasSubocupacion } from './kpisOperativos';
 import { leerConfigProtocolo, tareasVencidas, tareasDelDia as tareasProtocoloDelDia, cumplimientoProtocolo, type InstanciaTarea } from './protocoloTareas';
 import { fechaArgentinaHoy } from './ocupacion';
+import { germinacionYSupervivenciaMes } from './germinacion';
+import { productividadDeMes, plantasCosechadasEnRango } from './productividad';
+import { kmEnRango, VEHICULO_PARTNER } from './kilometraje';
 
 const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
@@ -369,11 +372,15 @@ export interface ReporteSemanalData {
   // para verlo) y el cumplimiento de las últimas 4 semanas.
   protocoloPendientes: InstanciaTarea[];
   protocoloHoy: InstanciaTarea[];
+  // Indicadores de gestión del MES (no de la semana): germinación, supervivencia,
+  // productividad y plantas por km se miden mes contra mes — una semana suelta de estos
+  // números es ruido. Van igual en el reporte semanal porque es lo que se lee cada viernes.
+  indicadoresMes: { label: string; valor: string; pct: number | null; mejorSiSube: boolean; detalle?: string }[];
   protocoloCumplimiento: { nombre: string; correspondian: number; cerradas: number; pendientes: number; fueraDeRango: number; pct: number | null }[];
 }
 
 export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> {
-  const [lotes, movimientos, ubicaciones, variedades, ventas, precios, clientes, historicas, registrosCamara, ocupacionHistorial, registrosProtocolo, configRows] = await Promise.all([
+  const [lotes, movimientos, ubicaciones, variedades, ventas, precios, clientes, historicas, registrosCamara, ocupacionHistorial, registrosProtocolo, configRows, productividadCache, registrosKm] = await Promise.all([
     readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'), readSheet<Ubicacion>('Ubicaciones'),
     readSheet<Variedad>('Variedades'), readSheet<VentaDia>('Ventas'), readSheet<PrecioVenta>('Precios'),
     readSheet<ClienteVenta>('Clientes'),
@@ -382,6 +389,8 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     readSheet<OcupacionHistorialRow>('OcupacionHistorial').catch(() => []),
     readSheet<RegistroProtocolo>('ProtocoloRegistros').catch(() => []),
     readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
+    readSheet<ProductividadDiaria>('ProductividadDiaria').catch(() => []),
+    readSheet<KilometrajeVehiculo>('Kilometraje').catch(() => []),
   ]);
   void historicas; // no se usa en la evolución semanal (los históricos son totales mensuales)
 
@@ -416,6 +425,54 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
 
   // ── Descarte por cultivo Y por fase (dónde se pierde), últimas 4 semanas ──
   const descartePorFase = descartePorFaseUltimasSemanas(lotes, movimientos, 4);
+
+  // ── Indicadores de gestión del mes en curso vs. mes pasado ──
+  // Mismo cálculo que las tarjetas del Panel (se reusan las mismas funciones, no se
+  // recalcula nada aparte): mes en curso HASTA HOY contra el mes pasado hasta el mismo día,
+  // para que la comparación sea de tramos iguales y no de un mes entero contra medio mes.
+  const hoyInd = new Date();
+  const mesAntInd = new Date(hoyInd.getFullYear(), hoyInd.getMonth() - 1, 1);
+  const pctVsInd = (act: number | null, ant: number | null): number | null =>
+    act === null || ant === null || !ant ? null : Math.round(((act - ant) / ant) * 100);
+  const indicadoresMes: ReporteSemanalData['indicadoresMes'] = [];
+  try {
+    const gAct = germinacionYSupervivenciaMes(lotes, movimientos, hoyInd);
+    const gAnt = germinacionYSupervivenciaMes(lotes, movimientos, mesAntInd);
+    if (gAct.pctGerminacion !== null) indicadoresMes.push({
+      label: 'Germinación (proxy)', valor: `${gAct.pctGerminacion}%`,
+      pct: pctVsInd(gAct.pctGerminacion, gAnt.pctGerminacion), mejorSiSube: true,
+      detalle: '% que llega vivo al primer trasplante — mezcla lo que no germinó con lo que se perdió en plantinera',
+    });
+    if (gAct.pctSupervivenciaPostTrasplante !== null) indicadoresMes.push({
+      label: 'Supervivencia post-trasplante', valor: `${gAct.pctSupervivenciaPostTrasplante}%`,
+      pct: pctVsInd(gAct.pctSupervivenciaPostTrasplante, gAnt.pctSupervivenciaPostTrasplante), mejorSiSube: true,
+      detalle: '% que entra a F1 y llega vivo a cosecha',
+    });
+
+    const prodAct = productividadDeMes(lotes, productividadCache, hoyInd.getFullYear(), hoyInd.getMonth() + 1, hoyInd.getDate());
+    const prodAnt = productividadDeMes(lotes, productividadCache, mesAntInd.getFullYear(), mesAntInd.getMonth() + 1);
+    if (prodAct.productividad !== null) indicadoresMes.push({
+      label: 'Mano de obra (paq/hs hombre)', valor: `${prodAct.productividad.toLocaleString('es-AR')} paq/h`,
+      pct: pctVsInd(prodAct.productividad, prodAnt.productividad), mejorSiSube: true,
+      detalle: 'paquetes cosechados ÷ horas-hombre reales · mes pasado completo como referencia',
+    });
+
+    const desdeAct = fmtISO(new Date(hoyInd.getFullYear(), hoyInd.getMonth(), 1));
+    const hastaAct = fmtISO(hoyInd);
+    const desdeAnt = fmtISO(new Date(mesAntInd.getFullYear(), mesAntInd.getMonth(), 1));
+    const hastaAnt = fmtISO(new Date(mesAntInd.getFullYear(), mesAntInd.getMonth(), hoyInd.getDate()));
+    const kmAct = kmEnRango(registrosKm, VEHICULO_PARTNER, desdeAct, hastaAct);
+    const kmAnt = kmEnRango(registrosKm, VEHICULO_PARTNER, desdeAnt, hastaAnt);
+    if (kmAct > 0) {
+      const plkAct = Math.round((plantasCosechadasEnRango(lotes, desdeAct, hastaAct) / kmAct) * 10) / 10;
+      const plkAnt = kmAnt > 0 ? Math.round((plantasCosechadasEnRango(lotes, desdeAnt, hastaAnt) / kmAnt) * 10) / 10 : null;
+      indicadoresMes.push({
+        label: 'Plantas cosechadas / km', valor: `${plkAct.toLocaleString('es-AR')} pl/km`,
+        pct: pctVsInd(plkAct, plkAnt), mejorSiSube: true,
+        detalle: `${fmtN(kmAct)} km recorridos en el mes`,
+      });
+    }
+  } catch { /* un indicador que no se puede calcular no puede tumbar el reporte entero */ }
 
   // ── Protocolo de aplicaciones ──
   const cfgProtocolo = leerConfigProtocolo(configRows);
@@ -518,7 +575,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     cicloSemana, cicloSemanaAnterior, cicloMesAnterior,
     pesoSemana, pesoMesAnterior,
     ocupacion, mesadasBajas, mesadasVacias, plantasPerdidasSubocupacion, ventasSemanas,
-    protocoloPendientes, protocoloHoy, protocoloCumplimiento,
+    protocoloPendientes, protocoloHoy, protocoloCumplimiento, indicadoresMes,
     stock, faltanteSemana, faltanteMes, descartePorFase,
   };
   return { ...datosSinDestacados, destacados: destacadosDeLaSemana(datosSinDestacados) };
@@ -728,6 +785,31 @@ export function construirHtml(d: ReporteSemanalData): string {
       <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:800">${fmtN(f.total)}${esRuculaFila(f.cultivo) ? ` <span style="font-weight:400;color:#9ca3af">(${enPaq(f.total)})</span>` : ''}</td>
     </tr>`).join('');
 
+  // ── Indicadores del mes ──
+  const indicadoresHtml = d.indicadoresMes.length === 0 ? '' : `
+    <h3 style="margin:0 0 8px;font-size:14px">Indicadores del mes <span style="font-weight:400;color:#9ca3af">(mes en curso hasta hoy vs. mes pasado al mismo día)</span></h3>
+    <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
+      <thead><tr style="background:#f5f5f5">
+        <th style="padding:6px 10px;text-align:left">Indicador</th>
+        <th style="padding:6px 10px;text-align:right">Mes en curso</th>
+        <th style="padding:6px 10px;text-align:right">vs. mes pasado</th>
+      </tr></thead>
+      <tbody>${d.indicadoresMes.map((i) => {
+        const bueno = i.pct === null ? null : (i.mejorSiSube ? i.pct > 0 : i.pct < 0);
+        const color = bueno === null ? '#9ca3af' : bueno ? '#059669' : '#dc2626';
+        return `<tr>
+          <td style="padding:6px 10px;border-bottom:1px solid #eee">
+            <strong>${i.label}</strong>
+            ${i.detalle ? `<br><span style="font-size:11px;color:#9ca3af">${i.detalle}</span>` : ''}
+          </td>
+          <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:800">${i.valor}</td>
+          <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;color:${color};font-weight:700">
+            ${i.pct === null ? '—' : `${i.pct > 0 ? '↑' : i.pct < 0 ? '↓' : '·'} ${Math.abs(i.pct)}%`}
+          </td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+
   // ── Protocolo de aplicaciones ──
   // Primero lo accionable (lo que quedó sin registrar y lo que sigue pendiente hoy) y
   // después el cumplimiento acumulado, que es el que dice si esto se sostiene o no.
@@ -849,6 +931,8 @@ export function construirHtml(d: ReporteSemanalData): string {
       <tbody>${descarteFaseFilas}</tbody>
     </table>
 
+    ${indicadoresHtml}
+
     ${protocoloHtml}
 
     <h3 style="margin:0 0 8px;font-size:14px">Ocupación por nave</h3>
@@ -931,6 +1015,15 @@ export function construirTexto(d: ReporteSemanalData): string {
   L.push(`Lechuga Crespa: ${fmtN(d.stock.lechuga_crespa)} paq · semana ${d.faltanteSemana.lechuga_crespa >= 0 ? '+' : ''}${d.faltanteSemana.lechuga_crespa} paq · mes ${d.faltanteMes.lechuga_crespa >= 0 ? '+' : ''}${d.faltanteMes.lechuga_crespa} paq`);
   L.push(`Lechuga Roble: ${fmtN(d.stock.lechuga_roble)} paq · semana ${d.faltanteSemana.lechuga_roble >= 0 ? '+' : ''}${d.faltanteSemana.lechuga_roble} paq · mes ${d.faltanteMes.lechuga_roble >= 0 ? '+' : ''}${d.faltanteMes.lechuga_roble} paq`);
   L.push('');
+
+  if (d.indicadoresMes.length > 0) {
+    L.push(`📈 *Indicadores del mes* (hasta hoy vs. mes pasado al mismo día)`);
+    for (const i of d.indicadoresMes) {
+      const flecha = i.pct === null ? '' : ` (${i.pct > 0 ? '↑' : i.pct < 0 ? '↓' : '·'}${Math.abs(i.pct)}%)`;
+      L.push(`  ${i.label}: ${i.valor}${flecha}`);
+    }
+    L.push('');
+  }
 
   L.push(`🧪 *Protocolo de aplicaciones*`);
   if (d.protocoloPendientes.length === 0 && d.protocoloHoy.length === 0) {

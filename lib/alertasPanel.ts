@@ -125,10 +125,28 @@ function numAP(v: any): number { const n = Number(v); return isNaN(n) ? 0 : n; }
 // el stock ACTUAL (a hoy, no a fin de mes) y compararlo contra el ritmo de consumo diario.
 // Solo se evalúan artículos con fórmula configurada y con algún historial en Stocks — sin eso
 // no hay forma de estimar nada (evita falsos positivos en artículos nunca cargados).
+// Días de stock por debajo de los cuales se avisa. El default son 15 días, pero el
+// packaging (bolsas) va a 60: se compra a fábrica, con lote mínimo y entrega larga, así
+// que enterarse con 15 días de aire es enterarse tarde. A pedido explícito, sept-2026.
+//
+// Se puede pisar artículo por artículo con la columna `dias_stock_seguridad` en la hoja
+// Articulos (si está vacía, manda el default de su categoría).
+export const DIAS_SEGURIDAD_DEFAULT = 15;
+export const DIAS_SEGURIDAD_PACKAGING = 60;
+const ES_PACKAGING = ['packaging', 'bolsa'];
+
+export function diasSeguridadDeArticulo(art: Articulo, porDefecto = DIAS_SEGURIDAD_DEFAULT): number {
+  const propio = Number((art as any).dias_stock_seguridad);
+  if (propio > 0) return propio;
+  const txt = `${art.categoria || ''} ${art.articulo || ''}`.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (ES_PACKAGING.some((k) => txt.includes(k))) return DIAS_SEGURIDAD_PACKAGING;
+  return porDefecto;
+}
+
 export function alertasStockBajo(
   articulos: Articulo[], stocks: StockMes[],
   driversActual: DriversMes, driversMesAnterior: DriversMes,
-  anioActual: number, mesActual: number, diasEnMesAnterior: number, umbralDias = 15
+  anioActual: number, mesActual: number, diasEnMesAnterior: number, umbralDias = DIAS_SEGURIDAD_DEFAULT
 ): Alerta[] {
   const diasTranscurridos = new Date().getDate();
   let mesAnteriorNum = mesActual - 1, anioAnteriorNum = anioActual;
@@ -163,7 +181,8 @@ export function alertasStockBajo(
     if (!usoPorDia || usoPorDia <= 0) continue;
 
     const diasDeUso = stockActual / usoPorDia;
-    if (diasDeUso < umbralDias) {
+    const umbralArticulo = diasSeguridadDeArticulo(art, umbralDias);
+    if (diasDeUso < umbralArticulo) {
       const diasTxt = Math.max(0, Math.round(diasDeUso));
       const fmt = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: 1 });
       const u = art.unidad_medida;
@@ -175,7 +194,7 @@ export function alertasStockBajo(
         : `stock inicial ${fmt(ini)} ${u}${comp > 0 ? ` + compras ${fmt(comp)} ${u}` : ''} − uso teórico al día ${diasTranscurridos} (${fmt(usoTeoricoActual ?? 0)} ${u}) = stock teórico ${fmt(stockActual)} ${u}`;
       alertas.push({
         tipo: 'error',
-        msg: `${art.articulo}: ${cuenta} · ritmo ${fmt(usoPorDia)} ${u}/día → dura ~${diasTxt}d más — reponer`,
+        msg: `${art.articulo}: ${cuenta} · ritmo ${fmt(usoPorDia)} ${u}/día → dura ~${diasTxt}d más (mínimo ${umbralArticulo}d) — reponer`,
         // Por artículo, no por texto: el mensaje lleva números que cambian todos los días y
         // un descarte atado al texto duraría hasta el próximo recálculo.
         clave: `stockbajo__${art.id_articulo}`,
