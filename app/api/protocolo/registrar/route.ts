@@ -3,7 +3,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { appendRowObj, asegurarHoja, asegurarColumna, readSheet, updateRow } from '@/lib/sheets';
 import {
   validarRegistro, calcularFueraDeRango, alarmaOsmosis, tareaPorId,
-  ALARMA_CONDUCTIVIDAD, ALARMA_PH, HOJA_REGISTROS, HEADERS_REGISTROS,
+  ALARMA_CONDUCTIVIDAD, ALARMA_PH, HOJA_REGISTROS, HEADERS_REGISTROS, evaluarInstrumental,
   CONFIG_ALARMA_EMAILS, EMAILS_ALARMA_DEFAULT, type DatosRegistro,
 } from '@/lib/protocoloTareas';
 import type { RegistroProtocolo } from '@/lib/types';
@@ -28,16 +28,35 @@ async function destinatariosAlarma(): Promise<string[]> {
 // La alarma no puede quedar solo en la pantalla del que cargó la medición: el sentido es
 // que Marcelo y Marcos se enteren aunque no estén mirando la app. Si el mail falla, el
 // registro se guarda igual y la respuesta lo dice — perder el dato sería peor.
-async function avisarAlarmaOsmosis(datos: DatosRegistro, motivos: string[], usuario: string): Promise<boolean> {
+type TipoAlarma = 'osmosis' | 'instrumental';
+
+const TEXTO_ALARMA: Record<TipoAlarma, { titulo: string; asunto: string; limites: string; accion: string }> = {
+  osmosis: {
+    titulo: 'Alarma — agua de ósmosis inversa',
+    asunto: 'Agua de ósmosis fuera de rango',
+    limites: `Límites del protocolo: conductividad ${ALARMA_CONDUCTIVIDAD} mS/cm · pH ${ALARMA_PH}.`,
+    accion: 'Hay que revisar el equipo de ósmosis.',
+  },
+  instrumental: {
+    titulo: 'Hay que calibrar el instrumental',
+    asunto: 'Instrumental fuera de tolerancia',
+    limites: 'Tolerancias del protocolo: pH ±0,3 contra cada solución patrón · conductímetro ±3% contra la solución de 12.880 µS/cm.',
+    accion: 'El instrumento quedó fuera de tolerancia en el chequeo semanal: hay que calibrarlo antes de seguir usándolo para medir.',
+  },
+};
+
+async function avisarAlarma(tipo: TipoAlarma, datos: DatosRegistro, motivos: string[], usuario: string): Promise<boolean> {
   if (!process.env.RESEND_API_KEY) return false;
   const to = await destinatariosAlarma();
+  const txt = TEXTO_ALARMA[tipo];
   const detalle = motivos.map((m) => `<li>${m}</li>`).join('');
   const html = `
     <div style="font-family:system-ui,Arial,sans-serif;color:#111;max-width:560px">
-      <h2 style="margin:0 0 6px;color:#dc2626">Alarma — agua de ósmosis inversa</h2>
+      <h2 style="margin:0 0 6px;color:#dc2626">${txt.titulo}</h2>
       <p style="margin:0 0 14px;color:#6b7280;font-size:13px">Medición del ${datos.fecha} a las ${datos.hora} · ${datos.responsable}</p>
       <ul style="font-size:14px;color:#111">${detalle}</ul>
-      <p style="font-size:13px;color:#374151">Límites del protocolo: conductividad ${ALARMA_CONDUCTIVIDAD} mS/cm · pH ${ALARMA_PH}.</p>
+      <p style="font-size:13px;color:#374151">${txt.accion}</p>
+      <p style="font-size:13px;color:#6b7280">${txt.limites}</p>
       ${datos.notas ? `<p style="font-size:13px;color:#374151">Notas: ${datos.notas}</p>` : ''}
       <p style="font-size:12px;color:#9ca3af">Cargado por ${usuario} desde XaviaApp.</p>
     </div>`;
@@ -48,9 +67,9 @@ async function avisarAlarmaOsmosis(datos: DatosRegistro, motivos: string[], usua
       body: JSON.stringify({
         from: 'Xavia App <ventas@xavia.com.ar>',
         to,
-        subject: `⚠ Agua de ósmosis fuera de rango — ${datos.fecha}`,
+        subject: `⚠ ${txt.asunto} — ${datos.fecha}`,
         html,
-        text: `Alarma agua de ósmosis (${datos.fecha} ${datos.hora}, ${datos.responsable}): ${motivos.join(' · ')}. Límites: conductividad ${ALARMA_CONDUCTIVIDAD} mS/cm, pH ${ALARMA_PH}.`,
+        text: `${txt.titulo} (${datos.fecha} ${datos.hora}, ${datos.responsable}): ${motivos.join(' · ')}. ${txt.limites}`,
       }),
     });
     return res.ok;
@@ -80,6 +99,8 @@ export async function POST(req: NextRequest) {
       ph4: body.ph4 ?? '',
       ph7: body.ph7 ?? '',
       calibro: body.calibro ? String(body.calibro).toUpperCase() : '',
+      conductividad_patron: body.conductividad_patron ?? '',
+      litros: body.litros ?? '',
       notas: body.notas ? String(body.notas) : '',
     };
 
@@ -101,7 +122,7 @@ export async function POST(req: NextRequest) {
     // La hoja ya existe en producción sin estas tres columnas: asegurarColumna las agrega
     // sin tocar lo ya cargado (los registros viejos quedan con la celda vacía, que es
     // exactamente lo que corresponde — ese control se hizo con un solo pH).
-    for (const col of ['ph4', 'ph7', 'calibro']) await asegurarColumna(HOJA_REGISTROS, col);
+    for (const col of ['ph4', 'ph7', 'calibro', 'conductividad_patron', 'litros']) await asegurarColumna(HOJA_REGISTROS, col);
     const previos = await readSheet<RegistroProtocolo>(HOJA_REGISTROS).catch(() => [] as RegistroProtocolo[]);
 
     const fueraDeRango = calcularFueraDeRango(datos);
@@ -120,7 +141,13 @@ export async function POST(req: NextRequest) {
       conductividad: datos.conductividad ?? '',
       ph4: datos.ph4 ?? '',
       ph7: datos.ph7 ?? '',
-      calibro: datos.calibro ?? '',
+      // Se guarda calculado, no como lo dice el operario: la tolerancia la define el
+      // protocolo (pH ±0,3 · conductímetro ±3%), no el criterio del que mide.
+      calibro: datos.id_tarea === 'control_instrumental'
+        ? (evaluarInstrumental(datos).hayQueCalibrar ? 'SI' : 'NO')
+        : (datos.calibro ?? ''),
+      conductividad_patron: datos.conductividad_patron ?? '',
+      litros: datos.litros ?? '',
       fuera_de_rango: fueraDeRango ? 'SI' : 'NO',
       notas: datos.notas || '',
       usuario: user.email,
@@ -153,7 +180,17 @@ export async function POST(req: NextRequest) {
       const { alarma, motivos } = alarmaOsmosis(datos.conductividad, datos.ph);
       if (alarma) {
         motivosAlarma = motivos;
-        alarmaEnviada = await avisarAlarmaOsmosis(datos, motivos, user.nombre || user.email);
+        alarmaEnviada = await avisarAlarma('osmosis', datos, motivos, user.nombre || user.email);
+      }
+    }
+
+    // Instrumental fuera de tolerancia: Marcelo pidió explícitamente que se le avise
+    // ("debe avisarme", punto 9). Va por el mismo camino que la alarma del agua.
+    if (datos.id_tarea === 'control_instrumental' && datos.estado !== 'no_aplica') {
+      const { hayQueCalibrar, motivos } = evaluarInstrumental(datos);
+      if (hayQueCalibrar) {
+        motivosAlarma = motivos;
+        alarmaEnviada = await avisarAlarma('instrumental', datos, motivos, user.nombre || user.email);
       }
     }
 

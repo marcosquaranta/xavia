@@ -3,7 +3,8 @@ import { useState } from 'react';
 import {
   CONDICIONES_TXT, COND_TEMP_MIN, COND_TEMP_MAX, COND_HUM_MIN, COND_HUM_MAX,
   ALARMA_CONDUCTIVIDAD, ALARMA_PH, fueraDeRangoFoliar, alarmaOsmosis,
-  PATRON_PH, type InstanciaTarea, type EstadoTarea, type CampoRegistro,
+  PATRON_PH, LITROS_MOCHILA, TANQUES_RIEGO, dosisSugerida, evaluarDosis, evaluarInstrumental,
+  TOLERANCIA_SOBREDOSIS_PCT, type InstanciaTarea, type EstadoTarea, type CampoRegistro,
 } from '@/lib/protocoloTareas';
 
 const COLOR_ESTADO: Record<EstadoTarea, { bg: string; color: string; label: string }> = {
@@ -24,6 +25,8 @@ const LABEL_CAMPO: Record<CampoRegistro, string> = {
   ph4: 'Lectura en solución pH 4',
   ph7: 'Lectura en solución pH 7',
   calibro: '¿Hubo que calibrar?',
+  conductividad_patron: 'Lectura en solución 12.880 µS/cm',
+  litros: 'Litros preparados',
 };
 
 const inputStyle: React.CSSProperties = {
@@ -245,6 +248,7 @@ function Formulario({ inst, modo, nombreUsuario, onCancelar }: {
   const avisoFoliar = t.condicionesFoliares && valores.temperatura !== '' && valores.humedad !== ''
     && fueraDeRangoFoliar(valores.temperatura, valores.humedad);
   const avisoAgua = t.id === 'control_osmosis' && alarmaOsmosis(valores.conductividad, valores.ph).alarma;
+  const chequeoInstr = t.id === 'control_instrumental' ? evaluarInstrumental(valores) : null;
 
   async function guardar(estado: 'hecha' | 'no_aplica') {
     setLoading(true); setMsg(null);
@@ -318,7 +322,14 @@ function Formulario({ inst, modo, nombreUsuario, onCancelar }: {
         {t.campos.map((campo) => (
           <div key={campo}>
             <label style={labelStyle}>{LABEL_CAMPO[campo]} *</label>
-            {campo === 'calibro' ? (
+            {campo === 'litros' ? (
+              <select value={valores[campo] || ''} onChange={(e) => set(campo, e.target.value)} disabled={loading} style={inputStyle}>
+                <option value="">— Elegir —</option>
+                {t.tipo === 'riego'
+                  ? TANQUES_RIEGO.map((tq) => <option key={tq.litros} value={tq.litros}>{tq.label}</option>)
+                  : <option value={LITROS_MOCHILA}>Mochila pulverizadora — {LITROS_MOCHILA} L</option>}
+              </select>
+            ) : campo === 'calibro' ? (
               <select value={valores[campo] || ''} onChange={(e) => set(campo, e.target.value)} disabled={loading} style={inputStyle}>
                 <option value="">— Elegir —</option>
                 <option value="NO">No — las lecturas dieron bien</option>
@@ -343,6 +354,25 @@ function Formulario({ inst, modo, nombreUsuario, onCancelar }: {
             {/* El desvío contra el patrón, calculado al lado de lo que se escribe. No se
                 juzga si está bien o mal: la tolerancia todavía no está definida, así que
                 se muestra el número y decide quien lo está midiendo. */}
+            {campo === 'dosis' && (() => {
+              const prod = (valores.producto || t.producto || '').split(' ')[0];
+              const litros = Number(valores.litros);
+              const sug = dosisSugerida(prod, litros);
+              if (!sug) return null;
+              const ev = evaluarDosis(prod, litros, Number(valores.dosis));
+              return (
+                <span style={{ fontSize: '10px', display: 'block', marginTop: '2px' }}>
+                  <span style={{ color: '#166534', fontWeight: 700 }}>Cargá {sug.texto}</span>
+                  {ev && ev.estado !== 'ok' && (
+                    <span style={{ display: 'block', color: ev.estado === 'sub' ? '#dc2626' : '#b45309', fontWeight: 600 }}>
+                      {ev.estado === 'sub'
+                        ? `⚠ Menos de lo indicado (${ev.desvioPct}%) — con menos dosis el tratamiento puede no ser efectivo`
+                        : `⚠ Más de lo indicado (+${ev.desvioPct}%, se tolera hasta +${TOLERANCIA_SOBREDOSIS_PCT}%)`}
+                    </span>
+                  )}
+                </span>
+              );
+            })()}
             {PATRON_PH[campo] !== undefined && valores[campo] !== '' && !isNaN(Number(valores[campo])) && (
               <span style={{ fontSize: '10px', color: '#6b7280' }}>
                 desvío {(Number(valores[campo]) - PATRON_PH[campo]) >= 0 ? '+' : ''}
@@ -360,6 +390,11 @@ function Formulario({ inst, modo, nombreUsuario, onCancelar }: {
       {avisoFoliar && (
         <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#dc2626', fontWeight: 600, background: '#fef2f2', padding: '6px 8px', borderRadius: '5px' }}>
           ⚠ Fuera del rango recomendado ({COND_TEMP_MIN}-{COND_TEMP_MAX} °C · {COND_HUM_MIN}-{COND_HUM_MAX}%). Si todavía no aplicaste, esperá a que mejoren las condiciones. Si ya aplicaste, registralo igual: queda marcado como fuera de rango.
+        </p>
+      )}
+      {chequeoInstr?.hayQueCalibrar && (
+        <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#dc2626', fontWeight: 600, background: '#fef2f2', padding: '6px 8px', borderRadius: '5px' }}>
+          ⚠ Hay que calibrar: {chequeoInstr.motivos.join(' · ')}. Al guardar se le avisa a Marcelo.
         </p>
       )}
       {avisoAgua && (

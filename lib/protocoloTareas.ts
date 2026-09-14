@@ -25,7 +25,7 @@ export type TipoTareaProtocolo = 'foliar' | 'riego' | 'control';
 // corresponde (corrección pedida por Marcelo, sept-2026). `calibro` es si hubo que
 // calibrar: si las lecturas dan bien no se calibra, así que ese dato es el que importa.
 // `ph` a secas queda para el agua de ósmosis, que sí es una medición sola.
-export type CampoRegistro = 'temperatura' | 'humedad' | 'dosis' | 'producto' | 'ph' | 'conductividad' | 'ph4' | 'ph7' | 'calibro';
+export type CampoRegistro = 'temperatura' | 'humedad' | 'dosis' | 'producto' | 'ph' | 'conductividad' | 'ph4' | 'ph7' | 'calibro' | 'conductividad_patron' | 'litros';
 
 // Valor nominal de cada solución patrón, para mostrar el desvío al lado de lo que se carga.
 export const PATRON_PH: Record<string, number> = { ph4: 4, ph7: 7 };
@@ -41,6 +41,81 @@ export const CONDICIONES_TXT = `Temperatura entre ${COND_TEMP_MIN} y ${COND_TEMP
 // Marcelo y a Marcos (ver app/api/protocolo/registrar).
 export const ALARMA_CONDUCTIVIDAD = 0.15; // mS/cm
 export const ALARMA_PH = 7.8;
+
+// ── Dosis y volúmenes (datos de Marcelo, sept-2026) ──────────────────────────────────
+//
+// Las dosis NO cambian (lo que puede cambiar es la frecuencia), así que viven en código y
+// no en configuración. La app las usa para decirle al operario CUÁNTO tiene que medir en
+// vez de que haga la cuenta cada vez: es donde se cuelan los errores.
+export interface DosisProducto {
+  cantidad: number;   // por `porLitros` litros de agua
+  unidad: 'g' | 'ml';
+  porLitros: number;
+  aplicador: 'mochila' | 'tanque';
+}
+export const DOSIS: Record<string, DosisProducto> = {
+  'Calborón': { cantidad: 1, unidad: 'g', porLitros: 1, aplicador: 'mochila' },
+  'Afital': { cantidad: 2, unidad: 'ml', porLitros: 1, aplicador: 'mochila' },
+  'Tracer': { cantidad: 0.3, unidad: 'ml', porLitros: 1, aplicador: 'mochila' },
+  'Naturamin': { cantidad: 1, unidad: 'g', porLitros: 1, aplicador: 'mochila' },
+  'Serenade': { cantidad: 40, unidad: 'ml', porLitros: 1000, aplicador: 'tanque' },
+};
+
+export const LITROS_MOCHILA = 20;
+// Nave 1: 4 tanques de 3000 L. Nave 2: 4 tanques de 5000 L.
+export const TANQUES_RIEGO = [
+  { label: 'Nave 1 — tanque de 3.000 L', litros: 3000 },
+  { label: 'Nave 2 — tanque de 5.000 L', litros: 5000 },
+];
+
+// Marcelo: "una tolerancia de 10% de sobredosificación no es problema, pero sí una
+// subdosificación: puede que el tratamiento no sea eficiente". O sea que el aviso NO es
+// simétrico — por debajo de la dosis se avisa siempre, por arriba recién pasado el 10%.
+export const TOLERANCIA_SOBREDOSIS_PCT = 10;
+
+// Cantidad exacta a cargar para un volumen dado.
+export function dosisSugerida(producto: string, litros: number): { cantidad: number; unidad: string; texto: string } | null {
+  const d = DOSIS[producto];
+  if (!d || !(litros > 0)) return null;
+  const cantidad = Math.round((d.cantidad * litros / d.porLitros) * 100) / 100;
+  return { cantidad, unidad: d.unidad, texto: `${cantidad} ${d.unidad} para ${litros.toLocaleString('es-AR')} L` };
+}
+
+export type EstadoDosis = 'ok' | 'sub' | 'sobre';
+export function evaluarDosis(producto: string, litros: number, aplicada: number): { estado: EstadoDosis; esperada: number; unidad: string; desvioPct: number } | null {
+  const sug = dosisSugerida(producto, litros);
+  if (!sug || !(aplicada > 0)) return null;
+  const desvioPct = Math.round(((aplicada - sug.cantidad) / sug.cantidad) * 1000) / 10;
+  const estado: EstadoDosis = desvioPct < 0 ? 'sub' : desvioPct > TOLERANCIA_SOBREDOSIS_PCT ? 'sobre' : 'ok';
+  return { estado, esperada: sug.cantidad, unidad: sug.unidad, desvioPct };
+}
+
+// ── Tolerancias del control de instrumental (Marcelo, sept-2026) ─────────────────────
+// pH: ±0,3 contra cada solución patrón. Conductímetro: ±3% contra la solución de 12880.
+// Si algo se sale, hay que calibrar Y avisarle a Marcelo (punto 9 de su respuesta).
+export const TOLERANCIA_PH = 0.3;
+export const PATRON_CONDUCTIVIDAD = 12880; // µS/cm
+export const TOLERANCIA_CONDUCTIVIDAD_PCT = 3;
+
+export interface ChequeoInstrumental {
+  hayQueCalibrar: boolean;
+  motivos: string[];
+}
+export function evaluarInstrumental(datos: { ph4?: any; ph7?: any; conductividad_patron?: any }): ChequeoInstrumental {
+  const motivos: string[] = [];
+  for (const [campo, patron] of [['ph4', 4], ['ph7', 7]] as const) {
+    const v = Number((datos as any)[campo]);
+    if (isNaN(v) || v === 0) continue;
+    const desvio = Math.round(Math.abs(v - patron) * 100) / 100;
+    if (desvio > TOLERANCIA_PH) motivos.push(`pH ${patron}: leyó ${v} (desvío ${desvio}, tolerancia ±${TOLERANCIA_PH})`);
+  }
+  const c = Number(datos.conductividad_patron);
+  if (!isNaN(c) && c > 0) {
+    const pct = Math.round(Math.abs((c - PATRON_CONDUCTIVIDAD) / PATRON_CONDUCTIVIDAD) * 1000) / 10;
+    if (pct > TOLERANCIA_CONDUCTIVIDAD_PCT) motivos.push(`conductímetro: leyó ${c} µS/cm contra ${PATRON_CONDUCTIVIDAD} (desvío ${pct}%, tolerancia ±${TOLERANCIA_CONDUCTIVIDAD_PCT}%)`);
+  }
+  return { hayQueCalibrar: motivos.length > 0, motivos };
+}
 
 // Claves en la hoja Configuracion — editables desde /protocolo (admin).
 export const CONFIG_ACTIVO = 'protocolo_activo';                 // 'SI' | 'NO' — apagar fuera de temporada
@@ -88,6 +163,7 @@ export const HOJA_REGISTROS = 'ProtocoloRegistros';
 export const HEADERS_REGISTROS = [
   'id_registro', 'id_tarea', 'tipo_registro', 'fecha', 'hora', 'responsable', 'estado',
   'producto', 'dosis', 'temperatura', 'humedad', 'ph', 'conductividad', 'ph4', 'ph7', 'calibro',
+  'conductividad_patron', 'litros',
   'fuera_de_rango', 'notas', 'usuario', 'creado',
 ];
 
@@ -121,7 +197,7 @@ export const TAREAS_PROTOCOLO: TareaProtocolo[] = [
     producto: 'Calborón',
     detalle: 'Aplicación foliar de Calborón. Dosis según marbete.',
     frecuenciaTxt: 'Todos los lunes',
-    campos: ['temperatura', 'humedad', 'dosis'],
+    campos: ['litros', 'dosis', 'temperatura', 'humedad'],
     condicionesFoliares: true,
   },
   {
@@ -132,7 +208,7 @@ export const TAREAS_PROTOCOLO: TareaProtocolo[] = [
     producto: 'Afital',
     detalle: 'Aplicación foliar de Afital. Dosis según marbete.',
     frecuenciaTxt: 'Miércoles de por medio (cada 14 días)',
-    campos: ['temperatura', 'humedad', 'dosis'],
+    campos: ['litros', 'dosis', 'temperatura', 'humedad'],
     condicionesFoliares: true,
   },
   {
@@ -142,7 +218,7 @@ export const TAREAS_PROTOCOLO: TareaProtocolo[] = [
     tipo: 'foliar',
     detalle: 'Aplicación opcional. La define Marcelo según el clima y el estado del cultivo — el operario no aplica sin esa confirmación.',
     frecuenciaTxt: 'Todos los sábados, si Marcelo la define',
-    campos: ['producto', 'temperatura', 'humedad', 'dosis'],
+    campos: ['producto', 'litros', 'dosis', 'temperatura', 'humedad'],
     condicionesFoliares: true,
     requiereDecision: true,
     opciones: ['Tracer', 'Naturamin (bioestimulante)', 'Calborón (2da aplicación)', 'Otro'],
@@ -155,7 +231,7 @@ export const TAREAS_PROTOCOLO: TareaProtocolo[] = [
     producto: 'Serenade',
     detalle: 'Va en el tanque de riego, no es foliar. Dosis según marbete.',
     frecuenciaTxt: 'Cada 30 días (15 en verano)',
-    campos: ['dosis'],
+    campos: ['litros', 'dosis'],
     condicionesFoliares: false,
   },
   {
@@ -163,9 +239,9 @@ export const TAREAS_PROTOCOLO: TareaProtocolo[] = [
     nombre: 'Control de instrumental',
     nombreCorto: 'Control de instrumental',
     tipo: 'control',
-    detalle: 'Chequear el peachímetro contra las dos soluciones patrón (pH 4 y pH 7) y el conductímetro. Si las lecturas dan bien no hace falta calibrar.',
+    detalle: 'Sumergir el peachímetro en las soluciones patrón pH 4 y pH 7, y el conductímetro en la solución de 12.880 µS/cm. Anotar lo que marca cada uno: si está dentro de tolerancia no se calibra.',
     frecuenciaTxt: 'Una vez por semana',
-    campos: ['ph4', 'ph7', 'conductividad', 'calibro'],
+    campos: ['ph4', 'ph7', 'conductividad_patron'],
     condicionesFoliares: false,
   },
   {
@@ -421,6 +497,8 @@ export interface DatosRegistro {
   ph4?: number | string;
   ph7?: number | string;
   calibro?: string;
+  conductividad_patron?: number | string;
+  litros?: number | string;
   notas?: string;
 }
 
@@ -434,6 +512,8 @@ const NOMBRE_CAMPO: Record<CampoRegistro, string> = {
   ph4: 'lectura en la solución pH 4',
   ph7: 'lectura en la solución pH 7',
   calibro: 'si hubo que calibrar',
+  conductividad_patron: 'lectura del conductímetro en la solución patrón',
+  litros: 'litros preparados',
 };
 
 // Devuelve la lista de lo que falta. Vacía = se puede guardar. Una tarea no se cierra a
@@ -492,10 +572,9 @@ export function calcularFueraDeRango(datos: DatosRegistro): boolean {
   if (!tarea || datos.tipo_registro !== 'ejecucion' || datos.estado === 'no_aplica') return false;
   if (tarea.condicionesFoliares) return fueraDeRangoFoliar(datos.temperatura, datos.humedad);
   if (datos.id_tarea === 'control_osmosis') return alarmaOsmosis(datos.conductividad, datos.ph).alarma;
-  // Control de instrumental: "fuera de rango" = hubo que calibrar. Es el criterio del
-  // propio Marcelo ("si está OK no se calibra") y no una tolerancia inventada acá — la
-  // tolerancia numérica todavía no está definida, así que no se simula una.
-  if (datos.id_tarea === 'control_instrumental') return String(datos.calibro || '').trim().toUpperCase() === 'SI';
+  // Control de instrumental: lo decide la tolerancia que dio Marcelo (pH ±0,3 y
+  // conductímetro ±3%), no el criterio del que carga. Si se sale, hay que calibrar.
+  if (datos.id_tarea === 'control_instrumental') return evaluarInstrumental(datos).hayQueCalibrar;
   return false;
 }
 
