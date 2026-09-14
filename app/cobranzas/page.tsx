@@ -3,7 +3,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import {
   HOJA_RECORDATORIOS, COL_ACTIVO, COL_EMAIL, CONFIG_DATOS_PAGO, DATOS_PAGO_DEFAULT,
-  MAX_DIAS_ATRAS, ANTIGUEDAD_DEFAULT, COL_ANTIGUEDAD, type RecordatorioCobro,
+  MAX_DIAS_ATRAS, ANTIGUEDAD_DEFAULT, ANTIGUEDAD_HASTA_DEFAULT, COL_ANTIGUEDAD, COL_ANTIGUEDAD_HASTA, type RecordatorioCobro,
 } from '@/lib/recordatoriosCobro';
 import { nombreClienteVisible } from '@/lib/clientes';
 import { HOJA_COBROS, type CobroRegistrado } from '@/lib/cobros';
@@ -53,6 +53,7 @@ export default async function CobranzasPage() {
       email: String((c as any)[COL_EMAIL] || ''),
       emailGeneral: String(c.email || ''),
       antiguedad: Number((c as any)[COL_ANTIGUEDAD]) > 0 ? Number((c as any)[COL_ANTIGUEDAD]) : ANTIGUEDAD_DEFAULT,
+      antiguedadHasta: Number((c as any)[COL_ANTIGUEDAD_HASTA]) > 0 ? Number((c as any)[COL_ANTIGUEDAD_HASTA]) : ANTIGUEDAD_HASTA_DEFAULT,
     }))
     // Los prendidos primero: son los que se miran.
     .sort((a, b) => (a.activo === b.activo ? a.nombre.localeCompare(b.nombre) : a.activo ? -1 : 1));

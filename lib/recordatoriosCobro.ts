@@ -2,6 +2,7 @@ import { asegurarHoja, asegurarColumna, readSheet, appendRowObj } from './sheets
 import { getComprobantes, getCobranzas, importeCobranza } from './xubio';
 import { fechaArgentinaHoy } from './ocupacion';
 import type { ClienteVenta } from './types';
+import { VENTANA_MINIMA_DIAS } from './cobranzasVentana';
 
 // ── Recordatorios de cobro ────────────────────────────────────────────────────────────
 //
@@ -44,12 +45,22 @@ export interface RecordatorioCobro {
 // Columnas nuevas en la hoja Clientes (se agregan solas con asegurarColumna).
 export const COL_ACTIVO = 'recordatorio_cobro';   // 'SI' para prender el recordatorio
 export const COL_EMAIL = 'email_cobranza';        // si está vacío cae al `email` de siempre
-export const COL_ANTIGUEDAD = 'recordatorio_antiguedad_dias'; // cuántos días tiene que tener la factura
+export const COL_ANTIGUEDAD = 'recordatorio_antiguedad_dias';   // desde cuántos días se reclama
+export const COL_ANTIGUEDAD_HASTA = 'recordatorio_antiguedad_hasta'; // hasta cuántos
 
-// Antigüedad mínima de una factura para entrar al recordatorio, por cliente. El sentido es
-// respetar el plazo de pago de cada uno: a un cliente con 30 días de plazo no se le reclama
-// una factura de anteayer. Por defecto 7.
+// VENTANA de antigüedad por cliente, no solo un mínimo. El mínimo respeta el plazo de pago
+// (a un cliente con 30 días no se le reclama una factura de anteayer); el máximo evita el
+// problema real que apareció en la primera corrida: sin información de cobros, una factura
+// de 50 días muy probablemente ya esté paga, y reclamarla queda mal.
+//
+// Mientras la app no sepa qué factura está paga, la ventana es la única defensa: se reclama
+// una vez, en el momento en que tiene sentido, y después se deja de insistir.
 export const ANTIGUEDAD_DEFAULT = 7;
+export const ANTIGUEDAD_HASTA_DEFAULT = 14;
+
+// La ventana mínima vive en lib/cobranzasVentana.ts (sin imports) porque también la usa
+// el formulario de configuración, que es un componente de cliente.
+export { VENTANA_MINIMA_DIAS, ventanaDemasiadoAngosta } from './cobranzasVentana';
 
 // Tope de cuánto para atrás se mira. Una factura entra al recordatorio desde que cumple la
 // antigüedad configurada y hasta este límite; más vieja que eso ya no es un recordatorio de
@@ -87,7 +98,8 @@ export interface ClienteRecordatorio {
   nombre: string;      // para mostrar
   nombreXubio: string; // para matchear contra el comprobante
   email: string;
-  antiguedadDias: number; // días que tiene que tener la factura para que se reclame
+  antiguedadDias: number;  // desde qué antigüedad se reclama
+  antiguedadHasta: number; // hasta qué antigüedad (más vieja que esto ya no se reclama)
 }
 
 // Clientes con el recordatorio prendido Y con mail a dónde mandarlo. Un cliente prendido
@@ -103,9 +115,14 @@ export function clientesConRecordatorio(clientes: ClienteVenta[]): { activos: Cl
     const email = String((c as any)[COL_EMAIL] || c.email || '').trim();
     if (!email.includes('@')) { sinEmail.push(nombre); continue; }
     const ant = Number((c as any)[COL_ANTIGUEDAD]);
+    const antHasta = Number((c as any)[COL_ANTIGUEDAD_HASTA]);
+    const desde = ant > 0 ? ant : ANTIGUEDAD_DEFAULT;
+    // Si el "hasta" quedó mal cargado (vacío, o menor que el desde) se usa desde + 7: una
+    // ventana invertida no reclamaría nada nunca, y eso es peor que un default razonable.
     activos.push({
       id_control: c.id_control, nombre, nombreXubio: c.nombre_xubio || nombre, email,
-      antiguedadDias: ant > 0 ? ant : ANTIGUEDAD_DEFAULT,
+      antiguedadDias: desde,
+      antiguedadHasta: antHasta > desde ? antHasta : desde + VENTANA_MINIMA_DIAS,
     });
   }
   return { activos, sinEmail };
@@ -177,18 +194,18 @@ export function calcularEnvios(
     }
   }
 
-  const masVieja = sumarDias(hoy, -MAX_DIAS_ATRAS);
   for (const cliente of clientes) {
     const k = norm(cliente.nombreXubio);
-    // Solo facturas que YA cumplieron la antigüedad configurada para ese cliente: recién
-    // ahí tiene sentido reclamarlas. Las más nuevas quedan esperando y entran en el
-    // recordatorio de la semana en que les toque.
+    // Ventana de antigüedad: ni tan nuevas que todavía estén en plazo, ni tan viejas que lo
+    // más probable es que ya estén pagas. El tope general (MAX_DIAS_ATRAS) queda de red por
+    // si alguien configura una ventana enorme.
     const hastaFecha = sumarDias(hoy, -cliente.antiguedadDias);
+    const desdeFecha = sumarDias(hoy, -Math.min(cliente.antiguedadHasta, MAX_DIAS_ATRAS));
     const delCliente = comprobantes.filter((c) => {
       if (Number(c?.tipo) !== 1) return false; // solo facturas, no notas de crédito/débito
       if (norm(nombreClienteComprobante(c)) !== k) return false;
       const f = soloFecha(c?.fecha);
-      return f >= masVieja && f <= hastaFecha;
+      return f >= desdeFecha && f <= hastaFecha;
     });
     if (!delCliente.length) continue;
 
@@ -323,7 +340,7 @@ export async function correrRecordatoriosCobro(
   const base: ResultadoCorrida = { ok: true, enviados: 0, omitidos: [], sinEmail: [], errores: [], detalle: [] };
   try {
     await asegurarHoja(HOJA_RECORDATORIOS, HEADERS_RECORDATORIOS);
-    for (const col of [COL_ACTIVO, COL_EMAIL, COL_ANTIGUEDAD]) await asegurarColumna('Clientes', col);
+    for (const col of [COL_ACTIVO, COL_EMAIL, COL_ANTIGUEDAD, COL_ANTIGUEDAD_HASTA]) await asegurarColumna('Clientes', col);
 
     const [clientesRaw, previos, configRows] = await Promise.all([
       readSheet<ClienteVenta>('Clientes'),

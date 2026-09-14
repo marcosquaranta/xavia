@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { ventanaDemasiadoAngosta, VENTANA_MINIMA_DIAS } from '@/lib/cobranzasVentana';
 
 export interface ClienteFila {
   id_control: string;
@@ -8,6 +9,7 @@ export interface ClienteFila {
   email: string;
   emailGeneral: string;
   antiguedad: number;
+  antiguedadHasta: number;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -49,6 +51,18 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
     setGuardando(null);
   }
 
+  async function guardarAntiguedadHasta(c: ClienteFila, valor: string) {
+    const antiguedadHasta = Number(valor);
+    if (!(antiguedadHasta > 0) || antiguedadHasta === c.antiguedadHasta) return;
+    setGuardando(c.id_control); setMsg(null);
+    try {
+      await guardar({ id_control: c.id_control, antiguedadHasta });
+      setFilas((p) => p.map((x) => x.id_control === c.id_control ? { ...x, antiguedadHasta } : x));
+      setMsg({ t: 'ok', s: `✓ ${c.nombre}: se reclaman las facturas de ${c.antiguedad} a ${antiguedadHasta} días` });
+    } catch (e: any) { setMsg({ t: 'err', s: e.message }); }
+    setGuardando(null);
+  }
+
   async function guardarMail(c: ClienteFila, email: string) {
     if (email === c.email) return;
     setGuardando(c.id_control); setMsg(null);
@@ -68,7 +82,7 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
             <tr style={{ background: '#f9fafb', color: '#6b7280' }}>
               <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>Cliente</th>
               <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 600, width: '90px' }}>Recordatorio</th>
-              <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 600, width: '110px' }}>Reclamar desde</th>
+              <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 600, width: '150px' }}>Antigüedad<br /><span style={{ fontWeight: 400, fontSize: '10px' }}>desde / hasta (días)</span></th>
               <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>Mail de cobranzas</th>
             </tr>
           </thead>
@@ -82,9 +96,18 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
                 </td>
                 <td style={{ padding: '6px 8px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                   <input type="number" min={1} defaultValue={c.antiguedad} disabled={guardando !== null}
-                    style={{ ...inputStyle, width: '56px', display: 'inline-block', textAlign: 'right' }}
+                    style={{ ...inputStyle, width: '52px', display: 'inline-block', textAlign: 'right' }}
                     onBlur={(e) => guardarAntiguedad(c, e.target.value)} />
-                  <span style={{ fontSize: '10.5px', color: '#9ca3af', marginLeft: '4px' }}>días</span>
+                  <span style={{ fontSize: '11px', color: '#9ca3af', margin: '0 4px' }}>a</span>
+                  <input type="number" min={1} defaultValue={c.antiguedadHasta} disabled={guardando !== null}
+                    style={{ ...inputStyle, width: '52px', display: 'inline-block', textAlign: 'right' }}
+                    onBlur={(e) => guardarAntiguedadHasta(c, e.target.value)} />
+                  {c.activo && ventanaDemasiadoAngosta(c.antiguedad, c.antiguedadHasta) && (
+                    <span title={`La corrida es semanal: con una ventana de menos de ${VENTANA_MINIMA_DIAS} días hay facturas que ningún lunes van a caer adentro`}
+                      style={{ display: 'block', fontSize: '10px', color: '#b45309', fontWeight: 600 }}>
+                      ⚠ ventana angosta
+                    </span>
+                  )}
                 </td>
                 <td style={{ padding: '6px 8px' }}>
                   <input defaultValue={c.email} disabled={guardando !== null} style={inputStyle}
@@ -98,9 +121,11 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
       </div>
       {msg && <p style={{ margin: '8px 0 0', fontSize: '11.5px', fontWeight: 600, color: msg.t === 'ok' ? '#059669' : '#dc2626' }}>{msg.s}</p>}
       <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#9ca3af' }}>
-        <strong>Reclamar desde</strong>: antigüedad que tiene que tener la factura para entrar al recordatorio — a un cliente con 30 días
-        de plazo no se le reclama una factura de anteayer. Si dejás el mail vacío se usa el mail general del cliente.
-        El recordatorio sale los lunes a la mañana, con copia a administración.
+        <strong>Antigüedad</strong>: la ventana de días en que se reclama una factura. El <em>desde</em> respeta el plazo de pago
+        (a un cliente con 30 días no se le reclama una de anteayer) y el <em>hasta</em> evita reclamar facturas viejas que
+        probablemente ya estén pagas — mientras la app no sepa qué se cobró, esa es la única defensa. Como la corrida es
+        semanal, la ventana tiene que tener al menos {VENTANA_MINIMA_DIAS} días o hay facturas que no van a entrar nunca.
+        Si dejás el mail vacío se usa el mail general del cliente. El recordatorio sale los lunes a la mañana, con copia a administración.
       </p>
     </div>
   );
