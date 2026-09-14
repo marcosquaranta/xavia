@@ -369,8 +369,11 @@ export interface RegistroProtocolo {
   dosis: string;
   temperatura: number | string;
   humedad: number | string;
-  ph: number | string;
+  ph: number | string;            // agua de ósmosis (una sola medición)
   conductividad: number | string;
+  ph4: number | string;           // control de instrumental: lectura en la solución patrón pH 4
+  ph7: number | string;           // ídem en la solución patrón pH 7
+  calibro: 'SI' | 'NO' | '';      // si hubo que calibrar el peachímetro
   fuera_de_rango: 'SI' | 'NO' | '';
   notas: string;
   usuario: string;

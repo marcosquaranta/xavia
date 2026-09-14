@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { appendRowObj, asegurarHoja, readSheet, updateRow } from '@/lib/sheets';
+import { appendRowObj, asegurarHoja, asegurarColumna, readSheet, updateRow } from '@/lib/sheets';
 import {
   validarRegistro, calcularFueraDeRango, alarmaOsmosis, tareaPorId,
   ALARMA_CONDUCTIVIDAD, ALARMA_PH, HOJA_REGISTROS, HEADERS_REGISTROS,
@@ -77,6 +77,9 @@ export async function POST(req: NextRequest) {
       humedad: body.humedad ?? '',
       ph: body.ph ?? '',
       conductividad: body.conductividad ?? '',
+      ph4: body.ph4 ?? '',
+      ph7: body.ph7 ?? '',
+      calibro: body.calibro ? String(body.calibro).toUpperCase() : '',
       notas: body.notas ? String(body.notas) : '',
     };
 
@@ -95,6 +98,10 @@ export async function POST(req: NextRequest) {
     }
 
     await asegurarHoja(HOJA_REGISTROS, HEADERS_REGISTROS);
+    // La hoja ya existe en producción sin estas tres columnas: asegurarColumna las agrega
+    // sin tocar lo ya cargado (los registros viejos quedan con la celda vacía, que es
+    // exactamente lo que corresponde — ese control se hizo con un solo pH).
+    for (const col of ['ph4', 'ph7', 'calibro']) await asegurarColumna(HOJA_REGISTROS, col);
     const previos = await readSheet<RegistroProtocolo>(HOJA_REGISTROS).catch(() => [] as RegistroProtocolo[]);
 
     const fueraDeRango = calcularFueraDeRango(datos);
@@ -111,6 +118,9 @@ export async function POST(req: NextRequest) {
       humedad: datos.humedad ?? '',
       ph: datos.ph ?? '',
       conductividad: datos.conductividad ?? '',
+      ph4: datos.ph4 ?? '',
+      ph7: datos.ph7 ?? '',
+      calibro: datos.calibro ?? '',
       fuera_de_rango: fueraDeRango ? 'SI' : 'NO',
       notas: datos.notas || '',
       usuario: user.email,

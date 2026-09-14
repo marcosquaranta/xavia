@@ -20,7 +20,15 @@ import type { RegistroProtocolo } from './types';
 //    después, y un registro incompleto no sirve para eso.
 
 export type TipoTareaProtocolo = 'foliar' | 'riego' | 'control';
-export type CampoRegistro = 'temperatura' | 'humedad' | 'dosis' | 'producto' | 'ph' | 'conductividad';
+// ph4 / ph7: el peachímetro se chequea contra DOS soluciones patrón (pH 4 y pH 7), que es
+// como se hace de verdad — con un solo campo de pH no se podía registrar el control como
+// corresponde (corrección pedida por Marcelo, sept-2026). `calibro` es si hubo que
+// calibrar: si las lecturas dan bien no se calibra, así que ese dato es el que importa.
+// `ph` a secas queda para el agua de ósmosis, que sí es una medición sola.
+export type CampoRegistro = 'temperatura' | 'humedad' | 'dosis' | 'producto' | 'ph' | 'conductividad' | 'ph4' | 'ph7' | 'calibro';
+
+// Valor nominal de cada solución patrón, para mostrar el desvío al lado de lo que se carga.
+export const PATRON_PH: Record<string, number> = { ph4: 4, ph7: 7 };
 
 // Rango ideal de aplicación foliar — el recuadro rojo de la especificación.
 export const COND_TEMP_MIN = 15;
@@ -79,7 +87,7 @@ export function leerConfigProtocolo(filas: { clave: string; valor: any }[]): Con
 export const HOJA_REGISTROS = 'ProtocoloRegistros';
 export const HEADERS_REGISTROS = [
   'id_registro', 'id_tarea', 'tipo_registro', 'fecha', 'hora', 'responsable', 'estado',
-  'producto', 'dosis', 'temperatura', 'humedad', 'ph', 'conductividad',
+  'producto', 'dosis', 'temperatura', 'humedad', 'ph', 'conductividad', 'ph4', 'ph7', 'calibro',
   'fuera_de_rango', 'notas', 'usuario', 'creado',
 ];
 
@@ -155,9 +163,9 @@ export const TAREAS_PROTOCOLO: TareaProtocolo[] = [
     nombre: 'Control de instrumental',
     nombreCorto: 'Control de instrumental',
     tipo: 'control',
-    detalle: 'Verificar calibración y funcionamiento del peachímetro y del conductímetro.',
+    detalle: 'Chequear el peachímetro contra las dos soluciones patrón (pH 4 y pH 7) y el conductímetro. Si las lecturas dan bien no hace falta calibrar.',
     frecuenciaTxt: 'Una vez por semana',
-    campos: ['ph', 'conductividad'],
+    campos: ['ph4', 'ph7', 'conductividad', 'calibro'],
     condicionesFoliares: false,
   },
   {
@@ -410,6 +418,9 @@ export interface DatosRegistro {
   humedad?: number | string;
   ph?: number | string;
   conductividad?: number | string;
+  ph4?: number | string;
+  ph7?: number | string;
+  calibro?: string;
   notas?: string;
 }
 
@@ -420,6 +431,9 @@ const NOMBRE_CAMPO: Record<CampoRegistro, string> = {
   producto: 'producto',
   ph: 'pH',
   conductividad: 'conductividad (mS/cm)',
+  ph4: 'lectura en la solución pH 4',
+  ph7: 'lectura en la solución pH 7',
+  calibro: 'si hubo que calibrar',
 };
 
 // Devuelve la lista de lo que falta. Vacía = se puede guardar. Una tarea no se cierra a
@@ -445,7 +459,11 @@ export function validarRegistro(datos: DatosRegistro): string[] {
 
   for (const campo of tarea.campos) {
     const v = (datos as any)[campo];
-    if (campo === 'dosis' || campo === 'producto') {
+    if (campo === 'calibro') {
+      // SI/NO, no un número: es la conclusión del control, y sin ella el registro no dice
+      // lo único que importa saber después (si el equipo estaba bien o hubo que tocarlo).
+      if (!['SI', 'NO'].includes(String(v ?? '').trim().toUpperCase())) faltan.push(NOMBRE_CAMPO[campo]);
+    } else if (campo === 'dosis' || campo === 'producto') {
       if (!String(v ?? '').trim()) faltan.push(NOMBRE_CAMPO[campo]);
     } else if (v === '' || v === undefined || v === null || isNaN(Number(v))) {
       faltan.push(NOMBRE_CAMPO[campo]);
@@ -474,6 +492,10 @@ export function calcularFueraDeRango(datos: DatosRegistro): boolean {
   if (!tarea || datos.tipo_registro !== 'ejecucion' || datos.estado === 'no_aplica') return false;
   if (tarea.condicionesFoliares) return fueraDeRangoFoliar(datos.temperatura, datos.humedad);
   if (datos.id_tarea === 'control_osmosis') return alarmaOsmosis(datos.conductividad, datos.ph).alarma;
+  // Control de instrumental: "fuera de rango" = hubo que calibrar. Es el criterio del
+  // propio Marcelo ("si está OK no se calibra") y no una tolerancia inventada acá — la
+  // tolerancia numérica todavía no está definida, así que no se simula una.
+  if (datos.id_tarea === 'control_instrumental') return String(datos.calibro || '').trim().toUpperCase() === 'SI';
   return false;
 }
 

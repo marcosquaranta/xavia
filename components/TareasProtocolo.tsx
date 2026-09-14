@@ -3,7 +3,7 @@ import { useState } from 'react';
 import {
   CONDICIONES_TXT, COND_TEMP_MIN, COND_TEMP_MAX, COND_HUM_MIN, COND_HUM_MAX,
   ALARMA_CONDUCTIVIDAD, ALARMA_PH, fueraDeRangoFoliar, alarmaOsmosis,
-  type InstanciaTarea, type EstadoTarea, type CampoRegistro,
+  PATRON_PH, type InstanciaTarea, type EstadoTarea, type CampoRegistro,
 } from '@/lib/protocoloTareas';
 
 const COLOR_ESTADO: Record<EstadoTarea, { bg: string; color: string; label: string }> = {
@@ -21,6 +21,9 @@ const LABEL_CAMPO: Record<CampoRegistro, string> = {
   producto: 'Producto',
   ph: 'pH',
   conductividad: 'Conductividad (mS/cm)',
+  ph4: 'Lectura en solución pH 4',
+  ph7: 'Lectura en solución pH 7',
+  calibro: '¿Hubo que calibrar?',
 };
 
 const inputStyle: React.CSSProperties = {
@@ -315,7 +318,13 @@ function Formulario({ inst, modo, nombreUsuario, onCancelar }: {
         {t.campos.map((campo) => (
           <div key={campo}>
             <label style={labelStyle}>{LABEL_CAMPO[campo]} *</label>
-            {campo === 'producto' && t.opciones ? (
+            {campo === 'calibro' ? (
+              <select value={valores[campo] || ''} onChange={(e) => set(campo, e.target.value)} disabled={loading} style={inputStyle}>
+                <option value="">— Elegir —</option>
+                <option value="NO">No — las lecturas dieron bien</option>
+                <option value="SI">Sí — hubo que calibrar</option>
+              </select>
+            ) : campo === 'producto' && t.opciones ? (
               <select value={valores[campo] || ''} onChange={(e) => set(campo, e.target.value)} disabled={loading} style={inputStyle}>
                 <option value="">— Elegir —</option>
                 {t.opciones.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -323,13 +332,22 @@ function Formulario({ inst, modo, nombreUsuario, onCancelar }: {
             ) : (
               <input
                 type={campo === 'dosis' || campo === 'producto' ? 'text' : 'number'}
-                step={campo === 'conductividad' ? '0.01' : campo === 'ph' ? '0.1' : '1'}
+                step={campo === 'conductividad' ? '0.01' : campo === 'ph' || campo === 'ph4' || campo === 'ph7' ? '0.01' : '1'}
                 value={valores[campo] || ''}
                 onChange={(e) => set(campo, e.target.value)}
                 disabled={loading}
                 style={inputStyle}
-                placeholder={campo === 'dosis' ? 'según marbete' : ''}
+                placeholder={campo === 'dosis' ? 'según marbete' : PATRON_PH[campo] !== undefined ? `debería dar ${PATRON_PH[campo]}` : ''}
               />
+            )}
+            {/* El desvío contra el patrón, calculado al lado de lo que se escribe. No se
+                juzga si está bien o mal: la tolerancia todavía no está definida, así que
+                se muestra el número y decide quien lo está midiendo. */}
+            {PATRON_PH[campo] !== undefined && valores[campo] !== '' && !isNaN(Number(valores[campo])) && (
+              <span style={{ fontSize: '10px', color: '#6b7280' }}>
+                desvío {(Number(valores[campo]) - PATRON_PH[campo]) >= 0 ? '+' : ''}
+                {(Math.round((Number(valores[campo]) - PATRON_PH[campo]) * 100) / 100).toFixed(2)}
+              </span>
             )}
           </div>
         ))}
