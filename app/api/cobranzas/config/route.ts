@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { appendRowObj, readSheet, updateRow, asegurarColumna } from '@/lib/sheets';
-import { COL_ACTIVO, COL_EMAIL, CONFIG_DATOS_PAGO } from '@/lib/recordatoriosCobro';
+import { COL_ACTIVO, COL_EMAIL, COL_ANTIGUEDAD, CONFIG_DATOS_PAGO } from '@/lib/recordatoriosCobro';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
 
     const idControl = String(body.id_control || '').trim();
     if (!idControl) return NextResponse.json({ error: 'Falta el cliente.' }, { status: 400 });
-    for (const col of [COL_ACTIVO, COL_EMAIL]) await asegurarColumna('Clientes', col);
+    for (const col of [COL_ACTIVO, COL_EMAIL, COL_ANTIGUEDAD]) await asegurarColumna('Clientes', col);
 
     const updates: Record<string, any> = {};
     if (body.activo !== undefined) updates[COL_ACTIVO] = body.activo ? 'SI' : 'NO';
@@ -35,6 +35,11 @@ export async function POST(req: NextRequest) {
       // frenarlo acá que descubrirlo cuando el cliente nunca contesta.
       if (mail && !mail.includes('@')) return NextResponse.json({ error: `"${mail}" no parece un mail.` }, { status: 400 });
       updates[COL_EMAIL] = mail;
+    }
+    if (body.antiguedad !== undefined) {
+      const n = Number(body.antiguedad);
+      if (!(n > 0)) return NextResponse.json({ error: 'La antigüedad tiene que ser un número de días mayor a 0.' }, { status: 400 });
+      updates[COL_ANTIGUEDAD] = String(Math.round(n));
     }
     if (!Object.keys(updates).length) return NextResponse.json({ error: 'No hay nada para cambiar.' }, { status: 400 });
 

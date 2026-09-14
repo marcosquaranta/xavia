@@ -44,11 +44,18 @@ export interface RecordatorioCobro {
 // Columnas nuevas en la hoja Clientes (se agregan solas con asegurarColumna).
 export const COL_ACTIVO = 'recordatorio_cobro';   // 'SI' para prender el recordatorio
 export const COL_EMAIL = 'email_cobranza';        // si está vacío cae al `email` de siempre
-// La corrida es semanal (lunes a la mañana, ver vercel.json). La ventana mira 14 días y no
-// 7 a propósito: si una semana falla el cron, esas facturas siguen sin recordar y entran en
-// la corrida siguiente en vez de perderse para siempre. Como cada comprobante entra en un
-// único recordatorio, mirar de más nunca duplica un reclamo.
-export const DIAS_VENTANA = 14;
+export const COL_ANTIGUEDAD = 'recordatorio_antiguedad_dias'; // cuántos días tiene que tener la factura
+
+// Antigüedad mínima de una factura para entrar al recordatorio, por cliente. El sentido es
+// respetar el plazo de pago de cada uno: a un cliente con 30 días de plazo no se le reclama
+// una factura de anteayer. Por defecto 7.
+export const ANTIGUEDAD_DEFAULT = 7;
+
+// Tope de cuánto para atrás se mira. Una factura entra al recordatorio desde que cumple la
+// antigüedad configurada y hasta este límite; más vieja que eso ya no es un recordatorio de
+// rutina, es una gestión de cobranza aparte. El tope también evita que la primera corrida
+// arrastre un año de comprobantes.
+export const MAX_DIAS_ATRAS = 90;
 
 // Datos bancarios del mail. Van en Configuracion para poder cambiarlos sin tocar código,
 // pero arrancan cargados: un recordatorio de pago sin decir a dónde pagar no sirve.
@@ -80,6 +87,7 @@ export interface ClienteRecordatorio {
   nombre: string;      // para mostrar
   nombreXubio: string; // para matchear contra el comprobante
   email: string;
+  antiguedadDias: number; // días que tiene que tener la factura para que se reclame
 }
 
 // Clientes con el recordatorio prendido Y con mail a dónde mandarlo. Un cliente prendido
@@ -94,7 +102,11 @@ export function clientesConRecordatorio(clientes: ClienteVenta[]): { activos: Cl
     const nombre = c.nombre_display || c.nombre_xubio || c.id_control;
     const email = String((c as any)[COL_EMAIL] || c.email || '').trim();
     if (!email.includes('@')) { sinEmail.push(nombre); continue; }
-    activos.push({ id_control: c.id_control, nombre, nombreXubio: c.nombre_xubio || nombre, email });
+    const ant = Number((c as any)[COL_ANTIGUEDAD]);
+    activos.push({
+      id_control: c.id_control, nombre, nombreXubio: c.nombre_xubio || nombre, email,
+      antiguedadDias: ant > 0 ? ant : ANTIGUEDAD_DEFAULT,
+    });
   }
   return { activos, sinEmail };
 }
@@ -165,14 +177,18 @@ export function calcularEnvios(
     }
   }
 
-  const desdeVentana = sumarDias(hoy, -DIAS_VENTANA);
+  const masVieja = sumarDias(hoy, -MAX_DIAS_ATRAS);
   for (const cliente of clientes) {
     const k = norm(cliente.nombreXubio);
+    // Solo facturas que YA cumplieron la antigüedad configurada para ese cliente: recién
+    // ahí tiene sentido reclamarlas. Las más nuevas quedan esperando y entran en el
+    // recordatorio de la semana en que les toque.
+    const hastaFecha = sumarDias(hoy, -cliente.antiguedadDias);
     const delCliente = comprobantes.filter((c) => {
       if (Number(c?.tipo) !== 1) return false; // solo facturas, no notas de crédito/débito
       if (norm(nombreClienteComprobante(c)) !== k) return false;
       const f = soloFecha(c?.fecha);
-      return f >= desdeVentana && f <= hoy;
+      return f >= masVieja && f <= hastaFecha;
     });
     if (!delCliente.length) continue;
 
@@ -247,7 +263,7 @@ export function cuerpoRecordatorioHtml(envio: EnvioRecordatorio, datosPago: stri
       Si ya realizaron el pago, por favor ignoren este mensaje y, si pueden, envíennos el comprobante así lo registramos.
       Ante cualquier consulta, respondan este mismo correo.
     </p>
-    <p style="font-size:13px;color:#374151">Muchas gracias,<br><strong>Xavia</strong></p>
+    <p style="font-size:13px;color:#374151">Muchas gracias,<br><strong>Administración — Xavia</strong></p>
   </div>`;
 }
 
@@ -258,7 +274,7 @@ export function cuerpoRecordatorioTexto(envio: EnvioRecordatorio, datosPago: str
   L.push(`  TOTAL: ${fmtMoneda(envio.total)}`, '');
   if (datosPago.trim()) { L.push('Datos para transferir:'); for (const l of datosPago.split('\n').filter(Boolean)) L.push('  ' + l); L.push(''); }
   L.push('Si ya realizaron el pago, por favor ignoren este mensaje y, si pueden, envíennos el comprobante así lo registramos.');
-  L.push('Ante cualquier consulta, respondan este mismo correo.', '', 'Muchas gracias,', 'Xavia');
+  L.push('Ante cualquier consulta, respondan este mismo correo.', '', 'Muchas gracias,', 'Administración — Xavia');
   return L.join('\n');
 }
 
@@ -269,7 +285,7 @@ async function enviarMail(args: { to: string[]; cc?: string[]; asunto: string; h
       method: 'POST',
       headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from: 'Xavia <administracion@xavia.com.ar>',
+        from: 'Administración Xavia <administracion@xavia.com.ar>',
         reply_to: 'administracion@xavia.com.ar',
         to: args.to,
         cc: args.cc && args.cc.length ? args.cc : undefined,
@@ -307,7 +323,7 @@ export async function correrRecordatoriosCobro(
   const base: ResultadoCorrida = { ok: true, enviados: 0, omitidos: [], sinEmail: [], errores: [], detalle: [] };
   try {
     await asegurarHoja(HOJA_RECORDATORIOS, HEADERS_RECORDATORIOS);
-    for (const col of [COL_ACTIVO, COL_EMAIL]) await asegurarColumna('Clientes', col);
+    for (const col of [COL_ACTIVO, COL_EMAIL, COL_ANTIGUEDAD]) await asegurarColumna('Clientes', col);
 
     const [clientesRaw, previos, configRows] = await Promise.all([
       readSheet<ClienteVenta>('Clientes'),

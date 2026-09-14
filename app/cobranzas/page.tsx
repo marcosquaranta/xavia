@@ -3,7 +3,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import {
   HOJA_RECORDATORIOS, COL_ACTIVO, COL_EMAIL, CONFIG_DATOS_PAGO, DATOS_PAGO_DEFAULT,
-  DIAS_VENTANA, type RecordatorioCobro,
+  MAX_DIAS_ATRAS, ANTIGUEDAD_DEFAULT, COL_ANTIGUEDAD, type RecordatorioCobro,
 } from '@/lib/recordatoriosCobro';
 import { nombreClienteVisible } from '@/lib/clientes';
 import { HOJA_COBROS, type CobroRegistrado } from '@/lib/cobros';
@@ -44,6 +44,7 @@ export default async function CobranzasPage() {
       activo: String((c as any)[COL_ACTIVO] || '').trim().toUpperCase() === 'SI',
       email: String((c as any)[COL_EMAIL] || ''),
       emailGeneral: String(c.email || ''),
+      antiguedad: Number((c as any)[COL_ANTIGUEDAD]) > 0 ? Number((c as any)[COL_ANTIGUEDAD]) : ANTIGUEDAD_DEFAULT,
     }))
     // Los prendidos primero: son los que se miran.
     .sort((a, b) => (a.activo === b.activo ? a.nombre.localeCompare(b.nombre) : a.activo ? -1 : 1));
@@ -120,7 +121,8 @@ export default async function CobranzasPage() {
             <p className="card-title">Probar</p>
             <p className="card-sub">
               La simulación muestra a quién le llegaría y con qué facturas, sin mandar nada.
-              Mira los últimos {DIAS_VENTANA} días para cubrir una semana en que falle el envío automático.
+              Entran las facturas que ya cumplieron la antigüedad de cada cliente y no se reclamaron todavía,
+              hasta {MAX_DIAS_ATRAS} días para atrás.
             </p>
             <div style={{ marginTop: '10px' }}>
               <ProbarRecordatorios />

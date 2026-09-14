@@ -7,6 +7,7 @@ export interface ClienteFila {
   activo: boolean;
   email: string;
   emailGeneral: string;
+  antiguedad: number;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -36,6 +37,18 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
     setGuardando(null);
   }
 
+  async function guardarAntiguedad(c: ClienteFila, valor: string) {
+    const antiguedad = Number(valor);
+    if (!(antiguedad > 0) || antiguedad === c.antiguedad) return;
+    setGuardando(c.id_control); setMsg(null);
+    try {
+      await guardar({ id_control: c.id_control, antiguedad });
+      setFilas((p) => p.map((x) => x.id_control === c.id_control ? { ...x, antiguedad } : x));
+      setMsg({ t: 'ok', s: `✓ ${c.nombre}: se reclaman las facturas de ${antiguedad} días o más` });
+    } catch (e: any) { setMsg({ t: 'err', s: e.message }); }
+    setGuardando(null);
+  }
+
   async function guardarMail(c: ClienteFila, email: string) {
     if (email === c.email) return;
     setGuardando(c.id_control); setMsg(null);
@@ -55,6 +68,7 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
             <tr style={{ background: '#f9fafb', color: '#6b7280' }}>
               <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>Cliente</th>
               <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 600, width: '90px' }}>Recordatorio</th>
+              <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 600, width: '110px' }}>Reclamar desde</th>
               <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>Mail de cobranzas</th>
             </tr>
           </thead>
@@ -65,6 +79,12 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
                 <td style={{ padding: '6px 8px', textAlign: 'center' }}>
                   <input type="checkbox" checked={c.activo} disabled={guardando !== null}
                     onChange={(e) => togglear(c, e.target.checked)} />
+                </td>
+                <td style={{ padding: '6px 8px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                  <input type="number" min={1} defaultValue={c.antiguedad} disabled={guardando !== null}
+                    style={{ ...inputStyle, width: '56px', display: 'inline-block', textAlign: 'right' }}
+                    onBlur={(e) => guardarAntiguedad(c, e.target.value)} />
+                  <span style={{ fontSize: '10.5px', color: '#9ca3af', marginLeft: '4px' }}>días</span>
                 </td>
                 <td style={{ padding: '6px 8px' }}>
                   <input defaultValue={c.email} disabled={guardando !== null} style={inputStyle}
@@ -78,7 +98,9 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
       </div>
       {msg && <p style={{ margin: '8px 0 0', fontSize: '11.5px', fontWeight: 600, color: msg.t === 'ok' ? '#059669' : '#dc2626' }}>{msg.s}</p>}
       <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#9ca3af' }}>
-        Si dejás el mail vacío se usa el mail general del cliente. El recordatorio sale los lunes a la mañana, con copia a administración.
+        <strong>Reclamar desde</strong>: antigüedad que tiene que tener la factura para entrar al recordatorio — a un cliente con 30 días
+        de plazo no se le reclama una factura de anteayer. Si dejás el mail vacío se usa el mail general del cliente.
+        El recordatorio sale los lunes a la mañana, con copia a administración.
       </p>
     </div>
   );
