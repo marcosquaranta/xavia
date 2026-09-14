@@ -17,7 +17,7 @@ import { calcularCamara, diferenciaAjustesMes, ventasDeHoyYaDescontadas } from '
 import { saldoPorCliente, alertasCajones } from '@/lib/cajones';
 import { descartePorFaseMes } from '@/lib/descarte';
 import { germinacionYSupervivenciaMes } from '@/lib/germinacion';
-import { faltaCargarEstaSemana, ultimaLectura, kmEnRango, VEHICULO_PARTNER } from '@/lib/kilometraje';
+import { faltaCargarEstaSemana, esDiaDeAvisoKm, ultimaLectura, kmEnRango, VEHICULO_PARTNER } from '@/lib/kilometraje';
 import { productividadDeMes, plantasCosechadasEnRango } from '@/lib/productividad';
 import Header from '@/components/Header';
 import GraficoCiclosSemanas from '@/components/GraficoCiclosSemanas';
@@ -452,7 +452,9 @@ export default async function PanelPage() {
 
   // Recordatorio de kilometraje del Partner — se pide los viernes, y queda pendiente
   // (se sigue mostrando) todos los días de la semana hasta que se cargue una lectura.
-  const faltaKm = faltaCargarEstaSemana(registrosKm, VEHICULO_PARTNER, hoy);
+  // Pendiente de cargar, y además día de avisar (viernes o sábado): son dos cosas
+  // distintas. La carga está siempre disponible; el banner grande solo esos dos días.
+  const faltaKm = faltaCargarEstaSemana(registrosKm, VEHICULO_PARTNER, hoy) && esDiaDeAvisoKm(hoy);
   const ultimaLecturaKm = ultimaLectura(registrosKm, VEHICULO_PARTNER);
 
   return (

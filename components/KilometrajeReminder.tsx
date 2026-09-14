@@ -50,29 +50,64 @@ export default function KilometrajeReminder({ ultimoKm, ultimaFecha, ultimoIdKm,
     }
   }
 
-  // Ya se cargó algo esta semana (no falta) — solo mostrar una línea chica con la opción
-  // de corregir por si el número cargado estuvo mal, sin el banner grande de recordatorio.
+  // Formulario de carga — el mismo en el banner y en la línea chica: el kilometraje se
+  // puede cargar cualquier día y a cualquier hora, no solo cuando la app lo reclama.
+  const formulario = (
+    <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+      <div>
+        <label style={{ fontSize: '10px', color: '#6b7280', display: 'block' }}>Kilometraje acumulado actual</label>
+        <input type="number" min={ultimoKm ?? 0} step={1} value={km} onChange={(e) => setKm(e.target.value)}
+          placeholder={ultimoKm !== null ? String(ultimoKm) : 'ej: 45210'} style={{ width: '130px', fontSize: '13px', padding: '6px 8px' }} disabled={loading} autoFocus />
+      </div>
+      <div>
+        <label style={{ fontSize: '10px', color: '#6b7280', display: 'block' }}>Notas (opcional)</label>
+        <input type="text" value={notas} onChange={(e) => setNotas(e.target.value)} style={{ width: '200px', fontSize: '13px', padding: '6px 8px' }} disabled={loading} />
+      </div>
+      <button onClick={registrar} disabled={loading} className="btn" style={{ fontSize: '12px', padding: '7px 14px' }}>
+        {loading ? 'Guardando…' : '✓ Registrar'}
+      </button>
+      <button onClick={() => setAbierto(false)} className="btn secondary" style={{ fontSize: '12px', padding: '7px 14px' }} disabled={loading}>
+        Cancelar
+      </button>
+    </div>
+  );
+
+  // Fuera de los días de aviso (o ya cargado): línea chica, pero SIEMPRE con la opción de
+  // cargar. Antes acá solo se podía "corregir" borrando la última carga, así que cargar un
+  // km un martes era imposible.
   if (!faltaCargar) {
-    if (ultimoKm === null) return null;
     return (
-      <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 14px', marginBottom: '14px', fontSize: '12px', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-        <span>🚗 Última carga de km del Partner: <strong>{ultimoKm.toLocaleString('es-AR')} km</strong>{ultimaFecha ? ` (${ultimaFecha})` : ''}.</span>
-        {!corrigiendo ? (
-          <button onClick={() => setCorrigiendo(true)} style={{ background: 'none', border: 'none', color: '#2563eb', fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: 0 }}>
-            ¿Cargaste mal? Corregir
-          </button>
-        ) : (
-          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>Borrar esta carga y volver a cargar el número correcto:</span>
-            <button onClick={borrarUltima} disabled={loading} className="btn secondary" style={{ fontSize: '11px', padding: '3px 10px', color: '#dc2626', borderColor: '#fecaca' }}>
-              {loading ? 'Borrando…' : 'Borrar última carga'}
-            </button>
-            <button onClick={() => setCorrigiendo(false)} disabled={loading} style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: '12px', cursor: 'pointer', padding: 0 }}>
-              Cancelar
-            </button>
+      <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 14px', marginBottom: '14px', fontSize: '12px', color: '#6b7280' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <span>
+            🚗 {ultimoKm !== null
+              ? <>Última carga de km del Partner: <strong>{ultimoKm.toLocaleString('es-AR')} km</strong>{ultimaFecha ? ` (${ultimaFecha})` : ''}.</>
+              : <>Todavía no hay ninguna carga de kilometraje del Partner.</>}
           </span>
-        )}
-        {msg && <span style={{ fontWeight: 600, color: msg.t === 'ok' ? '#059669' : '#dc2626' }}>{msg.s}</span>}
+          {!abierto && (
+            <button onClick={() => setAbierto(true)} style={{ background: 'none', border: 'none', color: '#2563eb', fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: 0 }}>
+              + Cargar km
+            </button>
+          )}
+          {ultimoKm !== null && !corrigiendo && !abierto && (
+            <button onClick={() => setCorrigiendo(true)} style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: '12px', cursor: 'pointer', padding: 0 }}>
+              ¿Cargaste mal? Corregir
+            </button>
+          )}
+          {corrigiendo && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>Borrar esta carga y volver a cargar el número correcto:</span>
+              <button onClick={borrarUltima} disabled={loading} className="btn secondary" style={{ fontSize: '11px', padding: '3px 10px', color: '#dc2626', borderColor: '#fecaca' }}>
+                {loading ? 'Borrando…' : 'Borrar última carga'}
+              </button>
+              <button onClick={() => setCorrigiendo(false)} disabled={loading} style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: '12px', cursor: 'pointer', padding: 0 }}>
+                Cancelar
+              </button>
+            </span>
+          )}
+          {msg && <span style={{ fontWeight: 600, color: msg.t === 'ok' ? '#059669' : '#dc2626' }}>{msg.s}</span>}
+        </div>
+        {abierto && formulario}
       </div>
     );
   }
@@ -84,7 +119,7 @@ export default function KilometrajeReminder({ ultimoKm, ultimaFecha, ultimoIdKm,
         <div style={{ flex: 1, minWidth: '260px' }}>
           <p style={{ margin: '0 0 4px', fontSize: '15px', fontWeight: 800, color: '#1e3a8a' }}>Falta cargar el kilometraje del Partner esta semana</p>
           <p style={{ margin: 0, fontSize: '12.5px', color: '#1e40af' }}>
-            Se pide todos los viernes, para ver los km recorridos por semana en Estadísticas.
+            Se pide los viernes, para ver los km recorridos por semana en Estadísticas. Lo podés cargar cualquier día.
             {ultimoKm !== null && <> Última carga: <strong>{ultimoKm.toLocaleString('es-AR')} km</strong>{ultimaFecha ? ` (${ultimaFecha})` : ''}.</>}
           </p>
         </div>
@@ -94,25 +129,7 @@ export default function KilometrajeReminder({ ultimoKm, ultimaFecha, ultimoIdKm,
           </button>
         )}
       </div>
-      {abierto && (
-        <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #bfdbfe', display: 'flex', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div>
-            <label style={{ fontSize: '10px', color: '#1e3a8a' }}>Kilometraje acumulado actual</label>
-            <input type="number" min={ultimoKm ?? 0} step={1} value={km} onChange={(e) => setKm(e.target.value)}
-              placeholder={ultimoKm !== null ? String(ultimoKm) : 'ej: 45210'} style={{ width: '130px', fontSize: '13px', padding: '6px 8px' }} disabled={loading} autoFocus />
-          </div>
-          <div>
-            <label style={{ fontSize: '10px', color: '#1e3a8a' }}>Notas (opcional)</label>
-            <input type="text" value={notas} onChange={(e) => setNotas(e.target.value)} style={{ width: '200px', fontSize: '13px', padding: '6px 8px' }} disabled={loading} />
-          </div>
-          <button onClick={registrar} disabled={loading} className="btn" style={{ fontSize: '12px', padding: '7px 14px' }}>
-            {loading ? 'Guardando…' : '✓ Registrar'}
-          </button>
-          <button onClick={() => setAbierto(false)} className="btn secondary" style={{ fontSize: '12px', padding: '7px 14px' }} disabled={loading}>
-            Cancelar
-          </button>
-        </div>
-      )}
+      {abierto && formulario}
       {msg && <p style={{ margin: '8px 0 0', fontSize: '12px', fontWeight: 600, color: msg.t === 'ok' ? '#059669' : '#dc2626' }}>{msg.s}</p>}
     </div>
   );

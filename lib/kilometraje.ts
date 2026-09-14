@@ -23,6 +23,18 @@ function viernesDeReferencia(hoy: Date): Date {
   return d;
 }
 
+// El recordatorio sale SOLO viernes y sábado (a pedido): la carga se puede hacer cualquier
+// día y a cualquier hora, pero el aviso que aparece todos los días deja de leerse. El día
+// se calcula en huso de Argentina — con el del servidor (UTC) el aviso aparecería y
+// desaparecería tres horas antes de tiempo.
+export function esDiaDeAvisoKm(hoy: Date = new Date()): boolean {
+  const fechaArg = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(hoy);
+  const dow = new Date(fechaArg + 'T12:00:00').getDay(); // 0=dom … 5=vie, 6=sáb
+  return dow === 5 || dow === 6;
+}
+
 // True si todavía no se cargó ninguna lectura desde el último viernes — el recordatorio en
 // el Panel se muestra mientras esto sea true, cualquier día de la semana, no solo viernes,
 // y deja de mostrarse apenas se carga una lectura (activo solo si falta cargar).
