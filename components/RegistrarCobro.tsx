@@ -16,10 +16,14 @@ const fmtDia = (f: string) => { const [y, m, d] = String(f || '').split('-'); re
 // Diagnóstico + carga de cobros. El diagnóstico va primero a propósito: hasta no verlo en
 // verde no se sabe si las credenciales y las cuentas están bien, y el primer cobro no es
 // el momento de descubrirlo.
-export default function RegistrarCobro({ clientes, cobros }: { clientes: ClienteOpt[]; cobros: CobroFila[] }) {
+export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = [], errorCuentas = null }: {
+  clientes: ClienteOpt[]; cobros: CobroFila[];
+  cuentasIniciales?: { id: number; nombre: string }[];
+  errorCuentas?: string | null;
+}) {
   const [diag, setDiag] = useState<any>(null);
   const [diagLoading, setDiagLoading] = useState(false);
-  const [cuentas, setCuentas] = useState<{ id: number; nombre: string }[]>([]);
+  const [cuentas, setCuentas] = useState<{ id: number; nombre: string }[]>(cuentasIniciales);
   const [avisoCuentas, setAvisoCuentas] = useState<string | null>(null);
 
   const [cliente, setCliente] = useState('');
@@ -99,7 +103,7 @@ export default function RegistrarCobro({ clientes, cobros }: { clientes: Cliente
           style={{ fontSize: '11.5px', padding: '5px 13px', background: '#f3f4f6', color: '#374151', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer', fontWeight: 600 }}>
           {diagLoading ? 'Probando…' : '🔌 Probar conexión con Xubio'}
         </button>
-        <span style={{ fontSize: '10.5px', color: '#9ca3af' }}>No escribe nada — solo lee. Hay que correrlo antes del primer cobro para traer las cuentas.</span>
+        <span style={{ fontSize: '10.5px', color: '#9ca3af' }}>No escribe nada — solo lee. Sirve para ver dónde falla si algo no anda.</span>
       </div>
 
       {diag && (
@@ -115,6 +119,12 @@ export default function RegistrarCobro({ clientes, cobros }: { clientes: Cliente
             </p>
           )}
         </div>
+      )}
+
+      {cuentas.length === 0 && (
+        <p style={{ margin: '0 0 10px', fontSize: '12px', color: '#dc2626', background: '#fef2f2', padding: '8px 10px', borderRadius: '6px' }}>
+          No se pudieron traer las cuentas de Xubio{errorCuentas ? `: ${errorCuentas}` : ''}. Sin cuentas no se puede imputar un cobro — probá el diagnóstico de arriba para ver dónde falla.
+        </p>
       )}
 
       {cuentas.length > 0 && (

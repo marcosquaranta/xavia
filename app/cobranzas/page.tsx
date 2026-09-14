@@ -7,12 +7,20 @@ import {
 } from '@/lib/recordatoriosCobro';
 import { nombreClienteVisible } from '@/lib/clientes';
 import { HOJA_COBROS, type CobroRegistrado } from '@/lib/cobros';
+import { getCuentas, getCobranzas, type CuentaXubio } from '@/lib/xubio';
+import { fechaArgentinaHoy } from '@/lib/ocupacion';
 import type { ClienteVenta } from '@/lib/types';
 import Header from '@/components/Header';
 import { ClientesRecordatorio, DatosPago, ProbarRecordatorios, type ClienteFila } from '@/components/CobranzasConfig';
 import RegistrarCobro from '@/components/RegistrarCobro';
 
 export const dynamic = 'force-dynamic';
+
+const sumarDiasISO = (fecha: string, dias: number) => {
+  const d = new Date(fecha + 'T12:00:00');
+  d.setDate(d.getDate() + dias);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 const fmtFechaHora = (iso: string) => {
   const [f, h] = String(iso || '').split('T');
@@ -48,6 +56,22 @@ export default async function CobranzasPage() {
     }))
     // Los prendidos primero: son los que se miran.
     .sort((a, b) => (a.activo === b.activo ? a.nombre.localeCompare(b.nombre) : a.activo ? -1 : 1));
+
+  // Las cuentas se traen acá y no cuando el usuario aprieta un botón: el formulario de
+  // cobro las necesita para existir, y esconderlo detrás de "probar conexión" hacía que
+  // pareciera que la función no estaba. Si Xubio no responde, el formulario avisa y el
+  // botón de diagnóstico sigue estando para ver qué pasó.
+  let cuentasXubio: CuentaXubio[] = [];
+  let errorCuentas: string | null = null;
+  try {
+    const hoyC = fechaArgentinaHoy();
+    const desdeC = sumarDiasISO(hoyC, -60);
+    const cobs = await getCobranzas(desdeC, hoyC).catch(() => []);
+    cuentasXubio = (await getCuentas(cobs)).cuentas;
+    if (!cuentasXubio.length) errorCuentas = 'Xubio no devolvió ninguna cuenta donde imputar el cobro.';
+  } catch (e: any) {
+    errorCuentas = e?.message || 'No se pudo conectar con Xubio.';
+  }
 
   const datosPagoFila = configRows.find((r) => String(r.clave).trim() === CONFIG_DATOS_PAGO);
   const datosPago = String(datosPagoFila?.valor || '').trim() || DATOS_PAGO_DEFAULT;
@@ -86,6 +110,8 @@ export default async function CobranzasPage() {
           </p>
           <div style={{ marginTop: '10px' }}>
             <RegistrarCobro
+              cuentasIniciales={cuentasXubio}
+              errorCuentas={errorCuentas}
               clientes={filas.map((f) => ({ id_control: f.id_control, nombre: f.nombre }))}
               cobros={[...cobros]
                 .sort((a, b) => String(b.fecha_registro || '').localeCompare(String(a.fecha_registro || '')))
