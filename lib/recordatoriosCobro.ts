@@ -174,6 +174,26 @@ export function calcularSaldos(comprobantes: any[], cobranzas: any[]): Map<strin
 }
 
 // Qué recordatorios corresponde mandar hoy. Función pura: recibe todo ya leído.
+// Días que hay que estirar el techo de la ventana porque se perdieron corridas. Con la
+// corrida semanal y una ventana de 8 días, si un lunes no corre el cron, el lunes siguiente
+// esas facturas ya tienen 7 días más y se caen del techo: se pierden para siempre
+// (verificado simulando una corrida saltada — se perdían 6 de 60 facturas). Estirando el
+// techo por los días de más que pasaron, entran igual. La primera corrida no estira nada:
+// ahí no hay corrida anterior, y estirar arrastraría meses de comprobantes viejos.
+export function diasDeAtraso(yaEnviados: RecordatorioCobro[], hoy: string, cadenciaDias = 7): number {
+  const fechas = yaEnviados
+    .map((r) => soloFecha(r.fecha_envio))
+    .filter((f) => /^\d{4}-\d{2}-\d{2}$/.test(f))
+    .sort();
+  const ultima = fechas[fechas.length - 1];
+  if (!ultima) return 0;
+  return Math.max(0, diasEntre(ultima, hoy) - cadenciaDias);
+}
+
+export function diasEntre(desde: string, hasta: string): number {
+  return Math.round((d(hasta).getTime() - d(desde).getTime()) / 86400000);
+}
+
 export function calcularEnvios(
   hoy: string,
   clientes: ClienteRecordatorio[],
@@ -181,6 +201,7 @@ export function calcularEnvios(
   yaEnviados: RecordatorioCobro[],
   saldos: Map<string, number>,
 ): { envios: EnvioRecordatorio[]; omitidos: EnvioOmitido[] } {
+  const atraso = diasDeAtraso(yaEnviados, hoy);
   const envios: EnvioRecordatorio[] = [];
   const omitidos: EnvioOmitido[] = [];
 
@@ -200,7 +221,7 @@ export function calcularEnvios(
     // más probable es que ya estén pagas. El tope general (MAX_DIAS_ATRAS) queda de red por
     // si alguien configura una ventana enorme.
     const hastaFecha = sumarDias(hoy, -cliente.antiguedadDias);
-    const desdeFecha = sumarDias(hoy, -Math.min(cliente.antiguedadHasta, MAX_DIAS_ATRAS));
+    const desdeFecha = sumarDias(hoy, -Math.min(cliente.antiguedadHasta + atraso, MAX_DIAS_ATRAS));
     const delCliente = comprobantes.filter((c) => {
       if (Number(c?.tipo) !== 1) return false; // solo facturas, no notas de crédito/débito
       if (norm(nombreClienteComprobante(c)) !== k) return false;
