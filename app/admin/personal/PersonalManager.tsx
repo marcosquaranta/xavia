@@ -42,6 +42,36 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
     setError(null);
   }
 
+  // Eliminar un empleado borra su fila de la hoja Empleados. Los fichajes NO se tocan (son
+  // el registro de lo que pasó), así que si la persona sigue marcando en el reloj va a
+  // volver a aparecer como "sin configurar" — el aviso lo dice, para que no sorprenda.
+  async function eliminar(r: ResumenEmpleado) {
+    const tieneFichajes = r.dias.length > 0;
+    const aviso = `Se va a eliminar a ${r.nombre} (#${r.workno}) de la lista de empleados.
+
+`
+      + (tieneFichajes
+        ? `OJO: tiene ${r.dias.length} día(s) fichados en esta quincena. Los fichajes no se borran, así que si sigue marcando en el reloj va a volver a aparecer acá como "sin configurar".
+
+`
+        : '')
+      + '¿Confirmás?';
+    if (!confirm(aviso)) return;
+    setGuardando(r.workno); setError(null);
+    try {
+      const res = await fetch('/api/admin/empleados', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workno: r.workno }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error === 'no_encontrado' ? 'Ese empleado ya no estaba en la lista.' : (j.error || 'Error al eliminar'));
+      router.refresh();
+    } catch (e: any) {
+      setError(e.message || 'Error al eliminar');
+    }
+    setGuardando(null);
+  }
+
   async function guardar(r: ResumenEmpleado) {
     setGuardando(r.workno); setError(null);
     const emp = empleados.find((e) => String(e.workno) === r.workno);
@@ -90,17 +120,14 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
         <table style={{ fontSize: '13px', width: '100%' }}>
           <thead>
             <tr>
+              {/* 7 columnas en vez de 13: la tabla no entraba en la pantalla. Lo que se
+                  sacó no se perdió — horas de más/de menos, sueldo/hora y el detalle del
+                  presentismo están en el desplegable de cada empleado. */}
               <th>Empleado</th>
-              <th style={{ textAlign: 'right' }}>Hs. reales</th>
-              <th style={{ textAlign: 'right' }}>Hs. teóricas</th>
-              <th style={{ textAlign: 'right' }}>Diferencia</th>
-              <th style={{ textAlign: 'right' }}>Hs. de más<br /><span style={{ fontWeight: 400, fontSize: '10px', color: '#9ca3af' }}>(vs. esperado)</span></th>
-              <th style={{ textAlign: 'right' }}>Hs. de menos<br /><span style={{ fontWeight: 400, fontSize: '10px', color: '#9ca3af' }}>(vs. esperado)</span></th>
-              <th style={{ textAlign: 'right' }}>Sueldo/hora</th>
-              <th style={{ textAlign: 'right' }}>Presentismo</th>
-              <th style={{ textAlign: 'right' }}>Extras</th>
-              <th style={{ textAlign: 'right' }}>Hs. extras</th>
-              <th style={{ textAlign: 'right' }}>Sueldo a pagar</th>
+              <th style={{ textAlign: 'right' }}>Horas<br /><span style={{ fontWeight: 400, fontSize: '10px', color: '#9ca3af' }}>reales / teóricas</span></th>
+              <th style={{ textAlign: 'right' }}>Sueldo teórico<br /><span style={{ fontWeight: 400, fontSize: '10px', color: '#9ca3af' }}>por horas teóricas</span></th>
+              <th style={{ textAlign: 'right' }}>Extras<br /><span style={{ fontWeight: 400, fontSize: '10px', color: '#9ca3af' }}>hs. de más y $</span></th>
+              <th style={{ textAlign: 'right' }}>A pagar</th>
               <th style={{ textAlign: 'center' }}>Tardanzas</th>
               <th></th>
             </tr>
@@ -114,6 +141,14 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
               const horasTeoricasPreview = editandoEsta && (Number(form.horas_lv) || 0) > 0
                 ? horasTeoricasAuto(anio, mes, diasDesde, diasHasta, Number(form.horas_lv) || 0, Number(form.horas_sabado) || 0)
                 : Number(form.horas_teoricas_quincena) || 0;
+              // El teórico de la vista previa: mismas cuentas que el servidor, para que lo que
+              // se ve mientras se edita coincida con lo que va a quedar guardado.
+              const teoricoPreview = editandoEsta
+                ? (() => {
+                    const cumplio = form.presentismo_manual === 'SI' ? true : form.presentismo_manual === 'NO' ? false : (r.tardanzas < 2 && r.faltas === 0);
+                    return horasTeoricasPreview * (Number(form.sueldo_hora) || 0) + (cumplio ? (Number(form.presentismo) || 0) : 0);
+                  })()
+                : r.sueldoTeorico;
               const sueldoPreview = editandoEsta
                 ? (() => {
                     const cumplioPreview = form.presentismo_manual === 'SI' ? true : form.presentismo_manual === 'NO' ? false : (r.tardanzas < 2 && r.faltas === 0);
@@ -141,58 +176,68 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                       )}
                       {emp && <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#9ca3af' }}>Horario esperado: {emp.hora_entrada_esperada || '—'} a {emp.hora_salida_esperada || '—'}{emp.hora_entrada_esperada_sabado ? ' · sáb. desde ' + emp.hora_entrada_esperada_sabado : ''}</p>}
                     </td>
-                    <td style={{ textAlign: 'right' }}>{fmtN(r.horasReales)} hs</td>
-                    <td style={{ textAlign: 'right', color: '#6b7280' }}>{editandoEsta ? (
-                      (Number(form.horas_lv) || 0) > 0 ? (
-                        <span title="Se calcula sola del calendario — configurala en 'Horas por día' más abajo">{fmtN(horasTeoricasPreview)} hs</span>
-                      ) : (
+                    {/* Horas: reales sobre teóricas, con la diferencia como delta chico */}
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontWeight: 600 }}>{fmtN(r.horasReales)}</span>
+                      <span style={{ color: '#9ca3af' }}> / {editandoEsta && !((Number(form.horas_lv) || 0) > 0) ? (
                         <input type="number" min={0} value={form.horas_teoricas_quincena} onChange={(e) => setForm((f) => ({ ...f, horas_teoricas_quincena: e.target.value }))}
-                          style={{ width: '70px', textAlign: 'right', fontSize: '12px' }} />
-                      )
-                    ) : (
-                      <span title={r.horasTeoricasAuto ? 'Calculado solo del calendario (horas por día configuradas)' : 'Número manual — configurá "horas por día" para que se calcule solo'}>
-                        {fmtN(r.horasTeoricas)} hs{r.horasTeoricasAuto && <span style={{ marginLeft: '3px', fontSize: '9px', color: '#a78bfa' }}>(auto)</span>}
+                          style={{ width: '58px', textAlign: 'right', fontSize: '12px' }} />
+                      ) : fmtN(editandoEsta ? horasTeoricasPreview : r.horasTeoricas)} hs</span>
+                      {r.diferenciaHoras !== 0 && (
+                        <span style={{ display: 'block', fontSize: '10px', fontWeight: 600, color: r.diferenciaHoras < 0 ? '#dc2626' : '#059669' }}>
+                          {r.diferenciaHoras > 0 ? '+' : ''}{fmtN(r.diferenciaHoras)} hs
+                        </span>
+                      )}
+                      {r.diasSinDatos > 0 && (
+                        <span title="Días de la quincena que todavía no tienen fichajes cargados — se toma la teoría, no cuentan como falta" style={{ display: 'block', fontSize: '10px', color: '#2563eb' }}>
+                          {r.diasSinDatos} día(s) sin datos aún
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Sueldo teórico: lo que cobra por su horario, con el presentismo adentro */}
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontWeight: 600 }}>{fmt$(editandoEsta ? teoricoPreview : r.sueldoTeorico)}</span>
+                      <span style={{ display: 'block', fontSize: '10px', color: r.presentismoAplicado > 0 ? '#059669' : '#dc2626' }}
+                        title={r.presentismoManual ? `Forzado a mano: ${r.presentismoManual}` : `Automático: se pierde por falta (${r.faltas}) o por 2+ tardanzas (${r.tardanzas})`}>
+                        {r.presentismoAplicado > 0 ? `+ ${fmt$(r.presentismoAplicado)} present.` : 'presentismo perdido'}
                       </span>
-                    )}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 600, color: r.diferenciaHoras < 0 ? '#dc2626' : r.diferenciaHoras > 0 ? '#059669' : '#6b7280' }}>
-                      {r.diferenciaHoras > 0 ? '+' : ''}{fmtN(r.diferenciaHoras)} hs
-                    </td>
-                    <td style={{ textAlign: 'right', color: r.horasDeMasTotal > 0 ? '#d97706' : '#9ca3af' }}>
-                      {r.horasDeMasTotal > 0 ? `${fmtH(r.horasDeMasTotal)} hs` : '—'}
-                    </td>
-                    <td style={{ textAlign: 'right', color: r.horasDeMenosTotal > 0 ? '#dc2626' : '#9ca3af' }}>
-                      {r.horasDeMenosTotal > 0 ? `${fmtH(r.horasDeMenosTotal)} hs` : '—'}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>{editandoEsta ? (
-                      <input type="number" min={0} value={form.sueldo_hora} onChange={(e) => setForm((f) => ({ ...f, sueldo_hora: e.target.value }))}
-                        style={{ width: '80px', textAlign: 'right', fontSize: '12px' }} />
-                    ) : fmt$(r.sueldoHora)}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      {editandoEsta ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-end' }}>
+                      {editandoEsta && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-end', marginTop: '3px' }}>
+                          <input type="number" min={0} value={form.sueldo_hora} onChange={(e) => setForm((f) => ({ ...f, sueldo_hora: e.target.value }))}
+                            style={{ width: '80px', textAlign: 'right', fontSize: '11px' }} placeholder="$/hora" title="Sueldo por hora" />
                           <input type="number" min={0} value={form.presentismo} onChange={(e) => setForm((f) => ({ ...f, presentismo: e.target.value }))}
-                            style={{ width: '80px', textAlign: 'right', fontSize: '12px' }} />
-                          <select value={form.presentismo_manual} onChange={(e) => setForm((f) => ({ ...f, presentismo_manual: e.target.value }))} style={{ fontSize: '11px' }}>
-                            <option value="">Auto (según tardanzas)</option>
+                            style={{ width: '80px', textAlign: 'right', fontSize: '11px' }} placeholder="presentismo" title="Presentismo" />
+                          <select value={form.presentismo_manual} onChange={(e) => setForm((f) => ({ ...f, presentismo_manual: e.target.value }))} style={{ fontSize: '10px' }}>
+                            <option value="">Present. auto</option>
                             <option value="SI">Cumplió (SI)</option>
                             <option value="NO">No cumplió (NO)</option>
                           </select>
                         </div>
-                      ) : (
-                        <span title={r.presentismoManual ? `Forzado a mano: ${r.presentismoManual}` : `Automático: se pierde por falta (${r.faltas}) o por 2+ tardanzas (${r.tardanzas})`} style={{ color: r.presentismoAplicado > 0 ? '#059669' : '#dc2626' }}>
-                          {r.presentismoAplicado > 0 ? fmt$(r.presentismoAplicado) : `${fmt$(r.presentismoConfigurado)} (perdido)`}
-                          {r.presentismoManual && <span style={{ marginLeft: '4px', fontSize: '10px', color: '#9ca3af' }}>(manual)</span>}
-                        </span>
                       )}
                     </td>
-                    <td style={{ textAlign: 'right' }}>{editandoEsta ? (
-                      <input type="number" value={form.extras} onChange={(e) => setForm((f) => ({ ...f, extras: e.target.value }))}
-                        style={{ width: '80px', textAlign: 'right', fontSize: '12px' }} />
-                    ) : (r.extras !== 0 ? fmt$(r.extras) : '—')}</td>
-                    <td style={{ textAlign: 'right' }}>{editandoEsta ? (
-                      <input type="number" min={0} value={form.horas_extras} onChange={(e) => setForm((f) => ({ ...f, horas_extras: e.target.value }))}
-                        style={{ width: '70px', textAlign: 'right', fontSize: '12px' }} />
-                    ) : (r.horasExtras !== 0 ? `${fmtN(r.horasExtras)} hs` : '—')}</td>
+
+                    {/* Extras: las horas por encima de la teoría (calculadas solas) + los $ sueltos */}
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {editandoEsta ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-end' }}>
+                          <input type="number" min={0} value={form.horas_extras} onChange={(e) => setForm((f) => ({ ...f, horas_extras: e.target.value }))}
+                            style={{ width: '70px', textAlign: 'right', fontSize: '11px' }} placeholder="hs extra" title={`Vacío = usa las calculadas (${fmtN(r.horasExtrasCalculadas)} hs)`} />
+                          <input type="number" value={form.extras} onChange={(e) => setForm((f) => ({ ...f, extras: e.target.value }))}
+                            style={{ width: '80px', textAlign: 'right', fontSize: '11px' }} placeholder="extras $" title="Extras en pesos" />
+                        </div>
+                      ) : r.sueldoExtras === 0 ? <span style={{ color: '#9ca3af' }}>—</span> : (
+                        <>
+                          <span style={{ fontWeight: 600, color: '#d97706' }}>{fmt$(r.sueldoExtras)}</span>
+                          <span style={{ display: 'block', fontSize: '10px', color: '#9ca3af' }}>
+                            {r.horasExtras > 0 && `${fmtN(r.horasExtras)} hs${r.horasExtrasManual ? ' (manual)' : ''}`}
+                            {r.horasExtras > 0 && r.extras !== 0 && ' · '}
+                            {r.extras !== 0 && `${fmt$(r.extras)} sueltos`}
+                          </span>
+                        </>
+                      )}
+                    </td>
+
                     <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmt$(sueldoPreview)}</td>
                     <td style={{ textAlign: 'center' }}>
                       {r.tardanzas > 0 ? (
@@ -213,9 +258,17 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                           <button onClick={() => setEditando(null)} style={{ fontSize: '11px', background: 'none', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer' }}>Cancelar</button>
                         </>
                       ) : (
-                        <button onClick={() => empezarEdicion(r)} style={{ fontSize: '11px', background: 'none', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer' }}>
-                          {esNuevo ? 'Configurar' : 'Editar'}
-                        </button>
+                        <>
+                          <button onClick={() => empezarEdicion(r)} style={{ fontSize: '11px', background: 'none', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', marginRight: '4px' }}>
+                            {esNuevo ? 'Configurar' : 'Editar'}
+                          </button>
+                          {!esNuevo && (
+                            <button onClick={() => eliminar(r)} disabled={guardando === r.workno} title="Eliminar de la lista de empleados"
+                              style={{ fontSize: '11px', background: 'none', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer' }}>
+                              Eliminar
+                            </button>
+                          )}
+                        </>
                       )}
                     </td>
                   </tr>

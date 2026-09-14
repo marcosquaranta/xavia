@@ -140,6 +140,11 @@ export interface DiaTrabajado {
   esTardanza: boolean; // ya con el umbral de 15 min aplicado
   horasDeMas: number; // por encima de lo esperado ese día (o de 8hs si no hay horario configurado); solo cuenta si supera 1 hora, redondeado a entero
   horasDeMenos: number; // por debajo de lo esperado ese día; redondeado a entero
+  // Día posterior al último con fichajes cargados: todavía no hay información, no es una
+  // falta. Pasa siempre que se mira la quincena antes de que termine (o cuando se liquida
+  // unos días antes para pagar). Sin esta distinción esos días descontaban horas Y hacían
+  // perder el presentismo, que es lo caro.
+  sinDatosAun: boolean;
 }
 
 // Ajustes manuales por empleado + quincena puntual (no son atributos permanentes del
@@ -164,8 +169,13 @@ export interface ResumenEmpleado {
   presentismoAplicado: number;
   presentismoManual: 'SI' | 'NO' | ''; // '' = automático (según tardanzas)
   extras: number;
-  horasExtras: number;
-  sueldoAPagar: number;
+  horasExtras: number;         // las que se pagan (la manual si se cargó, si no la calculada)
+  horasExtrasCalculadas: number; // horas trabajadas por encima de la teoría de los días CON datos
+  horasExtrasManual: boolean;  // true = el número lo puso alguien a mano y pisa al calculado
+  sueldoTeorico: number;       // horas teóricas × sueldo/hora + presentismo
+  sueldoExtras: number;        // extras $ + horas extra × sueldo/hora
+  sueldoAPagar: number;        // teórico + extras
+  diasSinDatos: number;
   tardanzas: number;
   diasIncompletos: number;
   faltas: number; // días programados (lunes a viernes, o sábado si trabaja) sin ningún fichaje
@@ -197,6 +207,15 @@ export function calcularResumenQuincena(
     nombresCrossChex.set(wn, `${r.employee.first_name || ''} ${r.employee.last_name || ''}`.trim());
   }
 
+  // Último día de la quincena con ALGÚN fichaje cargado, de cualquier empleado. Los días
+  // posteriores a ese todavía no tienen información: no son faltas ni horas perdidas.
+  // Se mira el global y no el del empleado a propósito — si ese día vino gente y él no,
+  // sí es una falta de él.
+  let ultimoDiaConDatos = '';
+  for (const porDia of porEmpleadoDia.values()) {
+    for (const fecha of porDia.keys()) if (fecha > ultimoDiaConDatos) ultimoDiaConDatos = fecha;
+  }
+
   const todosWorknos = new Set<string>([...porEmpleadoDia.keys(), ...empleados.map((e) => String(e.workno))]);
   const resultados: ResumenEmpleado[] = [];
   for (const workno of todosWorknos) {
@@ -218,10 +237,23 @@ export function calcularResumenQuincena(
       // tiene horas_lv cargado — si no, queda null (no se puede comparar ese día).
       const horasEsperadas = esDomingo ? 0 : esAuto ? (dow >= 1 && dow <= 5 ? horasLVEmp : horasSabEmp) : null;
       const checks = (porDia.get(fecha) || []).map((iso) => partesArg(iso).horaMin).sort((a, b) => a - b);
+      const diaProgramado = (dow >= 1 && dow <= 5) || (dow === 6 && horasSabEmp > 0);
+      // Todavía no hay datos de este día (se está mirando la quincena antes de que termine,
+      // o se liquida unos días antes para pagar): no es falta ni horas de menos. Se deja
+      // anotado para poder mostrarlo distinto y para no contarlo al comparar horas.
+      if (!checks.length && ultimoDiaConDatos && fecha > ultimoDiaConDatos) {
+        if (diaProgramado) {
+          dias.push({
+            fecha, diaSemana, esDomingo, entrada: null, salida: null, horas: 0,
+            horasEsperadas, incompleto: false, tardanzaMin: 0, esTardanza: false,
+            horasDeMas: 0, horasDeMenos: 0, sinDatosAun: true,
+          });
+        }
+        continue;
+      }
       if (!checks.length) {
         // Falta = día programado (lunes a viernes siempre; sábado solo si el empleado
         // tiene horas de sábado configuradas) sin ningún fichaje ese día.
-        const diaProgramado = (dow >= 1 && dow <= 5) || (dow === 6 && horasSabEmp > 0);
         if (diaProgramado) faltas++;
         continue;
       }
@@ -251,6 +283,7 @@ export function calcularResumenQuincena(
         esTardanza: tardanzaMin > TOLERANCIA_TARDANZA_MIN,
         horasDeMas: masCruda > 1 ? Math.round(masCruda) : 0,
         horasDeMenos: Math.round(menosCruda),
+        sinDatosAun: false,
       });
     }
     const horasReales = Math.round(dias.reduce((a, d) => a + d.horas, 0) * 100) / 100;
@@ -267,7 +300,19 @@ export function calcularResumenQuincena(
     const cumplioPresentismo = presentismoManual === 'SI' ? true : presentismoManual === 'NO' ? false : (tardanzas < 2 && faltas === 0);
     const presentismoAplicado = cumplioPresentismo ? presentismoConfigurado : 0;
     const extras = Number(ajuste.extras) || 0;
-    const horasExtras = Number(ajuste.horasExtras) || 0;
+
+    // Horas extra: las que se trabajaron POR ENCIMA de la teoría. Se comparan solo contra
+    // los días que ya tienen datos — si no, los días de la quincena que todavía no se
+    // cargaron aparecerían como si el empleado hubiera trabajado de menos y se comerían
+    // las extras reales.
+    const horasTeoricasCubiertas = esAuto
+      ? dias.filter((d) => !d.sinDatosAun).reduce((a, d) => a + (d.horasEsperadas ?? 0), 0)
+      : horasTeoricas;
+    const horasExtrasCalculadas = Math.max(0, Math.round(horasReales - horasTeoricasCubiertas));
+    // El número manual PISA al calculado (no se suman): si alguien se tomó el trabajo de
+    // escribirlo, es porque sabe algo que la cuenta no.
+    const horasExtrasManual = Number(ajuste.horasExtras) > 0;
+    const horasExtras = horasExtrasManual ? Number(ajuste.horasExtras) : horasExtrasCalculadas;
     resultados.push({
       workno, nombre: emp?.nombre || nombresCrossChex.get(workno) || workno,
       dias, horasReales, horasTeoricas,
@@ -275,8 +320,13 @@ export function calcularResumenQuincena(
       horasDeMasTotal: dias.reduce((a, d) => a + d.horasDeMas, 0),
       horasDeMenosTotal: dias.reduce((a, d) => a + d.horasDeMenos, 0),
       sueldoHora, presentismoConfigurado, presentismoAplicado, presentismoManual,
-      extras, horasExtras,
+      extras, horasExtras, horasExtrasCalculadas, horasExtrasManual,
+      // El sueldo se muestra partido: lo teórico (lo que cobra por su horario) y lo extra
+      // (lo que se suma por encima). Antes era un solo número y no se veía de dónde salía.
+      sueldoTeorico: Math.round((horasTeoricas * sueldoHora + presentismoAplicado) * 100) / 100,
+      sueldoExtras: Math.round((extras + horasExtras * sueldoHora) * 100) / 100,
       sueldoAPagar: Math.round((horasTeoricas * sueldoHora + presentismoAplicado + extras + horasExtras * sueldoHora) * 100) / 100,
+      diasSinDatos: dias.filter((d) => d.sinDatosAun).length,
       tardanzas,
       diasIncompletos: dias.filter((d) => d.incompleto).length,
       faltas,
