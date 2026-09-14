@@ -17,6 +17,7 @@ export async function GET() {
   const pasos: { paso: string; ok: boolean; detalle: string }[] = [];
   const push = (paso: string, ok: boolean, detalle: string) => pasos.push({ paso, ok, detalle });
   let cuentas: { id: number; nombre: string; codigo: string }[] = [];
+  let avisoCuentas: string | undefined;
 
   try {
     const cli = await getClientesXubio();
@@ -24,14 +25,6 @@ export async function GET() {
   } catch (e: any) {
     push('Credenciales y token', false, e?.message || 'no se pudo autenticar');
     return NextResponse.json({ ok: false, pasos, cuentas });
-  }
-
-  try {
-    cuentas = await getCuentas();
-    push('Cuentas donde imputar el cobro', cuentas.length > 0,
-      cuentas.length > 0 ? `${cuentas.length} cuentas activas` : 'no devolvió ninguna cuenta activa');
-  } catch (e: any) {
-    push('Cuentas donde imputar el cobro', false, e?.message || 'error');
   }
 
   const hoy = fechaArgentinaHoy();
@@ -44,8 +37,11 @@ export async function GET() {
     push('Comprobantes (últimos 60 días)', false, e?.message || 'error');
   }
 
+  // Las cobranzas van ANTES que las cuentas a propósito: si Xubio no expone el plan de
+  // cuentas (404 en este plan), las cuentas salen justamente de acá.
+  let cobs: any[] = [];
   try {
-    const cobs = await getCobranzas(desde, hoy);
+    cobs = await getCobranzas(desde, hoy);
     const total = cobs.reduce((a: number, c: any) => a + importeCobranza(c), 0);
     push('Cobranzas (últimos 60 días)', true,
       `${cobs.length} cobranzas · $${Math.round(total).toLocaleString('es-AR')}` +
@@ -54,5 +50,17 @@ export async function GET() {
     push('Cobranzas (últimos 60 días)', false, e?.message || 'error');
   }
 
-  return NextResponse.json({ ok: pasos.every((p) => p.ok), pasos, cuentas });
+  try {
+    const r = await getCuentas(cobs);
+    cuentas = r.cuentas;
+    avisoCuentas = r.aviso;
+    push('Cuentas donde imputar el cobro', cuentas.length > 0,
+      cuentas.length > 0
+        ? `${cuentas.length} cuentas · origen: ${r.origen}`
+        : 'no se pudo armar la lista de cuentas — sin plan de cuentas por API y sin cobranzas de las cuales deducirlas');
+  } catch (e: any) {
+    push('Cuentas donde imputar el cobro', false, e?.message || 'error');
+  }
+
+  return NextResponse.json({ ok: pasos.every((p) => p.ok), pasos, cuentas, avisoCuentas });
 }

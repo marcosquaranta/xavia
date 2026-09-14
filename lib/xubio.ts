@@ -96,14 +96,53 @@ export function importeCobranza(cob: any): number {
 
 export interface CuentaXubio { id: number; nombre: string; codigo: string }
 
-// Cuentas donde puede entrar la plata (bancos, cajas). `activo=true` filtra las dadas de baja.
-export async function getCuentas(): Promise<CuentaXubio[]> {
-  const cuentas = await xubioGet<any[]>('cuenta?activo=true');
-  return (Array.isArray(cuentas) ? cuentas : []).map((c) => ({
+function mapCuenta(c: any): CuentaXubio {
+  return {
     id: Number(c?.cuentaId ?? c?.ID ?? c?.id ?? 0),
     nombre: String(c?.nombre || ''),
     codigo: String(c?.codigo || ''),
-  })).filter((c) => c.id > 0 && c.nombre);
+  };
+}
+
+// Cuentas que ya se usaron para cobrar, sacadas de las cobranzas existentes. Es el camino
+// que de verdad funciona en esta cuenta de Xubio (ver getCuentas) y además devuelve algo
+// mejor que el plan de cuentas entero: solo las cuentas donde realmente entra la plata,
+// ordenadas por uso.
+export function cuentasDeCobranzas(cobranzas: any[]): CuentaXubio[] {
+  const uso = new Map<number, { cuenta: CuentaXubio; n: number }>();
+  for (const cob of cobranzas) {
+    for (const inst of (cob?.transaccionInstrumentoDeCobro || [])) {
+      const c = mapCuenta(inst?.cuenta);
+      if (!(c.id > 0) || !c.nombre) continue;
+      const prev = uso.get(c.id);
+      if (prev) prev.n++;
+      else uso.set(c.id, { cuenta: c, n: 1 });
+    }
+  }
+  return [...uso.values()].sort((a, b) => b.n - a.n).map((u) => u.cuenta);
+}
+
+// Cuentas donde puede entrar la plata.
+//
+// OJO: /cuenta está documentado en la especificación de Xubio pero devuelve 404 en esta
+// cuenta (verificado en producción, sept-2026) — probablemente no esté habilitado en este
+// plan. Por eso se intenta y, si no está, se caen las cuentas desde las cobranzas ya
+// cargadas. Se devuelve `origen` para poder decir en pantalla de dónde salieron, en vez de
+// mostrar una lista sin explicar por qué es corta.
+export async function getCuentas(cobranzasFallback: any[] = []): Promise<{ cuentas: CuentaXubio[]; origen: string; aviso?: string }> {
+  for (const path of ['cuenta?activo=true', 'cuenta']) {
+    try {
+      const raw = await xubioGet<any[]>(path);
+      const cuentas = (Array.isArray(raw) ? raw : []).map(mapCuenta).filter((c) => c.id > 0 && c.nombre);
+      if (cuentas.length) return { cuentas, origen: 'plan de cuentas de Xubio' };
+    } catch { /* sigue con la próxima opción */ }
+  }
+  const cuentas = cuentasDeCobranzas(cobranzasFallback);
+  return {
+    cuentas,
+    origen: 'cuentas usadas en cobranzas anteriores',
+    aviso: 'Xubio no expone el plan de cuentas en este plan (GET /cuenta da 404), así que se listan las cuentas donde ya entraron cobros. Si falta alguna, hacé un cobro en esa cuenta desde Xubio una vez y aparece acá.',
+  };
 }
 
 export interface NuevaCobranza {

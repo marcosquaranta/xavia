@@ -20,6 +20,7 @@ export default function RegistrarCobro({ clientes, cobros }: { clientes: Cliente
   const [diag, setDiag] = useState<any>(null);
   const [diagLoading, setDiagLoading] = useState(false);
   const [cuentas, setCuentas] = useState<{ id: number; nombre: string }[]>([]);
+  const [avisoCuentas, setAvisoCuentas] = useState<string | null>(null);
 
   const [cliente, setCliente] = useState('');
   const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
@@ -37,6 +38,7 @@ export default function RegistrarCobro({ clientes, cobros }: { clientes: Cliente
       const j = await r.json();
       setDiag(j);
       if (Array.isArray(j.cuentas)) setCuentas(j.cuentas);
+      setAvisoCuentas(j.avisoCuentas || null);
     } catch (e: any) {
       setDiag({ ok: false, pasos: [{ paso: 'Conexión', ok: false, detalle: e.message || 'error' }] });
     }
@@ -107,6 +109,11 @@ export default function RegistrarCobro({ clientes, cobros }: { clientes: Cliente
               {p.ok ? '✓' : '✕'} <strong>{p.paso}</strong> — {p.detalle}
             </p>
           ))}
+          {avisoCuentas && (
+            <p style={{ margin: '6px 0 0', color: '#92400e', background: '#fffbeb', padding: '6px 8px', borderRadius: '5px', lineHeight: 1.45 }}>
+              ⚠ {avisoCuentas}
+            </p>
+          )}
         </div>
       )}
 
