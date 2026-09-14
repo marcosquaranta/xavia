@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { appendRowObj, asegurarHoja, readSheet, updateRow } from '@/lib/sheets';
+import { appendRowObj, asegurarHoja, asegurarColumna, readSheet, updateRow } from '@/lib/sheets';
 import { crearCobranza, borrarCobranza, getClientesXubio, matchClienteXubio } from '@/lib/xubio';
 import { HOJA_COBROS, HEADERS_COBROS, type CobroRegistrado } from '@/lib/cobros';
 import type { ClienteVenta } from '@/lib/types';
@@ -24,6 +24,9 @@ export async function POST(req: NextRequest) {
     const importe = Number(body.importe);
     const cuentaId = Number(body.cuentaId);
     const observacion = String(body.observacion || '').trim();
+    const comprobantes: string[] = Array.isArray(body.comprobantes)
+      ? body.comprobantes.map((x: any) => String(x).trim()).filter(Boolean)
+      : [];
 
     if (!idControl) return NextResponse.json({ error: 'Falta el cliente.' }, { status: 400 });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return NextResponse.json({ error: 'La fecha tiene que ser válida.' }, { status: 400 });
@@ -38,10 +41,16 @@ export async function POST(req: NextRequest) {
     const clienteId = matchClienteXubio(cli.nombre_xubio || cli.nombre_display, clientesXubio);
     if (!clienteId) return NextResponse.json({ error: `No se pudo encontrar "${cli.nombre_xubio}" en Xubio.` }, { status: 400 });
 
-    const r = await crearCobranza({ clienteId, fecha, importe, cuentaId, observacion });
+    // Xubio no deja imputar por API, así que las facturas van en la observación del recibo:
+    // es lo más cerca de "este cobro cancela estas facturas" que se puede dejar asentado allá.
+    const observacionXubio = comprobantes.length
+      ? `${observacion ? observacion + ' — ' : ''}Cancela: ${comprobantes.join(', ')}`
+      : observacion;
+    const r = await crearCobranza({ clienteId, fecha, importe, cuentaId, observacion: observacionXubio });
     if (!r.ok) return NextResponse.json({ error: `Xubio rechazó el cobro: ${r.error}` }, { status: 502 });
 
     await asegurarHoja(HOJA_COBROS, HEADERS_COBROS);
+    await asegurarColumna(HOJA_COBROS, 'comprobantes'); // la hoja puede existir sin esta columna
     const previos = await readSheet<CobroRegistrado>(HOJA_COBROS).catch(() => []);
     const seq = previos.reduce((a, c) => Math.max(a, parseInt(String(c.id_cobro).replace(/\D/g, ''), 10) || 0), 0) + 1;
     const idCobro = `CO-${String(seq).padStart(5, '0')}`;
@@ -55,6 +64,7 @@ export async function POST(req: NextRequest) {
       cuenta_id: cuentaId,
       transaccionid: r.transaccionid || '',
       numero_recibo: r.numeroRecibo || '',
+      comprobantes: comprobantes.join(', '),
       observacion,
       estado: 'registrado',
       usuario: user.email,

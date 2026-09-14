@@ -12,6 +12,10 @@ const inputStyle: React.CSSProperties = {
 };
 const labelStyle: React.CSSProperties = { fontSize: '10.5px', color: '#6b7280', fontWeight: 600, display: 'block', marginBottom: '2px' };
 const fmtDia = (f: string) => { const [y, m, d] = String(f || '').split('-'); return d ? `${d}/${m}/${y}` : '—'; };
+const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
+const diasDesde = (f: string) => Math.round((Date.now() - new Date(f + 'T12:00:00').getTime()) / 86400000);
+
+interface FacturaCliente { numero: string; fecha: string; importe: number; yaCobrada: boolean }
 
 // Diagnóstico + carga de cobros. El diagnóstico va primero a propósito: hasta no verlo en
 // verde no se sabe si las credenciales y las cuentas están bien, y el primer cobro no es
@@ -34,6 +38,45 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; s: string } | null>(null);
   const [filas, setFilas] = useState(cobros);
+
+  // Facturas del cliente elegido, para tildar cuáles cubre el cobro.
+  const [facturas, setFacturas] = useState<FacturaCliente[]>([]);
+  const [facturasLoading, setFacturasLoading] = useState(false);
+  const [facturasError, setFacturasError] = useState<string | null>(null);
+  const [elegidas, setElegidas] = useState<string[]>([]);
+  const [importeTocado, setImporteTocado] = useState(false);
+
+  async function cambiarCliente(idControl: string) {
+    setCliente(idControl);
+    setFacturas([]); setElegidas([]); setFacturasError(null);
+    setImporte(''); setImporteTocado(false);
+    if (!idControl) return;
+    setFacturasLoading(true);
+    try {
+      const r = await fetch(`/api/cobranzas/facturas?id_control=${encodeURIComponent(idControl)}`);
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'No se pudieron traer las facturas');
+      setFacturas(j.facturas || []);
+      if (!(j.facturas || []).length) setFacturasError('Este cliente no tiene facturas en los últimos 120 días.');
+    } catch (e: any) {
+      setFacturasError(e.message || 'No se pudieron traer las facturas');
+    }
+    setFacturasLoading(false);
+  }
+
+  // Tildar facturas completa el importe solo (la suma de las elegidas), salvo que ya lo
+  // hayan escrito a mano: un cobro puede ser parcial o incluir algo que no está en la lista.
+  function toggleFactura(numero: string) {
+    const nuevas = elegidas.includes(numero) ? elegidas.filter((n) => n !== numero) : [...elegidas, numero];
+    setElegidas(nuevas);
+    if (!importeTocado) {
+      const total = facturas.filter((f) => nuevas.includes(f.numero)).reduce((a, f) => a + f.importe, 0);
+      setImporte(total > 0 ? String(Math.round(total)) : '');
+    }
+  }
+
+  const totalElegido = facturas.filter((f) => elegidas.includes(f.numero)).reduce((a, f) => a + f.importe, 0);
+  const difImporte = Math.round(Number(importe) || 0) - Math.round(totalElegido);
 
   async function correrDiagnostico() {
     setDiagLoading(true); setDiag(null);
@@ -61,7 +104,7 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
     try {
       const r = await fetch('/api/cobranzas/cobro', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_control: cliente, fecha, importe: Number(importe), cuentaId: Number(cuentaId), observacion }),
+        body: JSON.stringify({ id_control: cliente, fecha, importe: Number(importe), cuentaId: Number(cuentaId), observacion, comprobantes: elegidas }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'Error al registrar');
@@ -132,7 +175,7 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: '8px' }}>
             <div>
               <label style={labelStyle}>Cliente *</label>
-              <select value={cliente} onChange={(e) => setCliente(e.target.value)} disabled={loading} style={inputStyle}>
+              <select value={cliente} onChange={(e) => cambiarCliente(e.target.value)} disabled={loading} style={inputStyle}>
                 <option value="">— Elegir —</option>
                 {clientes.map((c) => <option key={c.id_control} value={c.id_control}>{c.nombre}</option>)}
               </select>
@@ -143,7 +186,7 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
             </div>
             <div>
               <label style={labelStyle}>Importe *</label>
-              <input type="number" min={1} value={importe} onChange={(e) => setImporte(e.target.value)} disabled={loading} style={inputStyle} placeholder="0" />
+              <input type="number" min={1} value={importe} onChange={(e) => { setImporte(e.target.value); setImporteTocado(true); }} disabled={loading} style={inputStyle} placeholder="0" />
             </div>
             <div>
               <label style={labelStyle}>¿Dónde entró? *</label>
@@ -155,9 +198,62 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
             <div style={{ gridColumn: '1 / -1' }}>
               <label style={labelStyle}>Observación (opcional)</label>
               <input value={observacion} onChange={(e) => setObservacion(e.target.value)} disabled={loading} style={inputStyle}
-                placeholder="ej: transferencia del 12/09, cancela facturas de agosto" />
+                placeholder="ej: transferencia del 12/09" />
             </div>
           </div>
+
+          {/* Facturas del cliente: de la más reciente a la más vieja. Tildarlas completa el
+              importe y además deja asentado en el recibo de Xubio qué cubre el cobro —
+              imputar de verdad no se puede por API, esto es lo más cerca que llega. */}
+          {cliente && (
+            <div style={{ marginTop: '12px' }}>
+              {facturasLoading && <p style={{ margin: 0, fontSize: '11.5px', color: '#6b7280' }}>Buscando facturas…</p>}
+              {facturasError && <p style={{ margin: 0, fontSize: '11.5px', color: '#b45309' }}>{facturasError}</p>}
+              {facturas.length > 0 && (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap', marginBottom: '5px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#374151' }}>Facturas del cliente</span>
+                    <span style={{ fontSize: '10.5px', color: '#9ca3af' }}>últimos 120 días · tildá las que cubre este cobro</span>
+                    {elegidas.length > 0 && (
+                      <span style={{ marginLeft: 'auto', fontSize: '11.5px', fontWeight: 700, color: '#166534' }}>
+                        {elegidas.length} tildada{elegidas.length > 1 ? 's' : ''} · {fmt$(totalElegido)}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ maxHeight: '210px', overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '6px' }}>
+                    {facturas.map((f) => {
+                      const tildada = elegidas.includes(f.numero);
+                      return (
+                        <label key={f.numero}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 9px',
+                            borderBottom: '1px solid #f3f4f6', cursor: 'pointer', fontSize: '12px',
+                            background: tildada ? '#f0fdf4' : f.yaCobrada ? '#fafafa' : 'white',
+                          }}>
+                          <input type="checkbox" checked={tildada} disabled={loading} onChange={() => toggleFactura(f.numero)} />
+                          <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#1d4ed8', minWidth: '132px' }}>{f.numero}</span>
+                          <span style={{ color: '#6b7280', minWidth: '78px' }}>{fmtDia(f.fecha)}</span>
+                          <span style={{ color: '#9ca3af', fontSize: '10.5px', minWidth: '52px' }}>{diasDesde(f.fecha)}d</span>
+                          <span style={{ marginLeft: 'auto', fontWeight: 600 }}>{fmt$(f.importe)}</span>
+                          {f.yaCobrada && (
+                            <span title="Ya entró en un cobro registrado desde la app" style={{ fontSize: '9.5px', background: '#f3f4f6', color: '#6b7280', padding: '1px 6px', borderRadius: '8px', fontWeight: 700 }}>
+                              ya cobrada
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {elegidas.length > 0 && difImporte !== 0 && (
+                    <p style={{ margin: '5px 0 0', fontSize: '11px', color: '#b45309' }}>
+                      ⚠ El importe no coincide con lo tildado ({fmt$(totalElegido)}): {difImporte > 0 ? `hay ${fmt$(difImporte)} de más` : `faltan ${fmt$(-difImporte)}`}.
+                      Si es un pago parcial o a cuenta está bien, es solo un aviso.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
           <div style={{ display: 'flex', gap: '8px', marginTop: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button onClick={registrar} disabled={loading}
               style={{ fontSize: '11.5px', padding: '6px 14px', background: '#166534', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 700, opacity: loading ? 0.6 : 1 }}>

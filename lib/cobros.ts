@@ -9,7 +9,7 @@
 export const HOJA_COBROS = 'CobrosRegistrados';
 export const HEADERS_COBROS = [
   'id_cobro', 'fecha_registro', 'id_control', 'cliente', 'fecha', 'importe',
-  'cuenta_id', 'transaccionid', 'numero_recibo', 'observacion', 'estado', 'usuario',
+  'cuenta_id', 'transaccionid', 'numero_recibo', 'comprobantes', 'observacion', 'estado', 'usuario',
 ];
 
 export interface CobroRegistrado {
@@ -22,6 +22,10 @@ export interface CobroRegistrado {
   cuenta_id: number | string;
   transaccionid: number | string;
   numero_recibo: string;
+  // Facturas que el cobro cubre, separadas por coma. Xubio NO permite imputar por API, así
+  // que esto no viaja a Xubio como imputación: queda acá para saber qué se cobró y para no
+  // ofrecer dos veces la misma factura. En Xubio se refleja en la observación del recibo.
+  comprobantes: string;
   observacion: string;
   estado: 'registrado' | 'anulado' | string;
   usuario: string;
