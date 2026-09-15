@@ -13,6 +13,7 @@ import type { ClienteVenta } from '@/lib/types';
 import Header from '@/components/Header';
 import { ClientesRecordatorio, DatosPago, ProbarRecordatorios, type ClienteFila } from '@/components/CobranzasConfig';
 import RegistrarCobro from '@/components/RegistrarCobro';
+import ReclamoManual from '@/components/ReclamoManual';
 
 export const dynamic = 'force-dynamic';
 
@@ -124,6 +125,18 @@ export default async function CobranzasPage() {
                   observacion: String(c.observacion || ''),
                 }))}
             />
+          </div>
+        </div>
+
+        {/* ══ RECLAMO PUNTUAL ══ */}
+        <div className="card" style={{ marginBottom: '14px' }}>
+          <p className="card-title">Reclamar facturas a un cliente</p>
+          <p className="card-sub">
+            Para mandar un reclamo puntual sin tocar la configuración del recordatorio automático.
+            Elegís el cliente, marcás desde qué fecha (o tildás las facturas una por una) y se manda.
+          </p>
+          <div style={{ marginTop: '10px' }}>
+            <ReclamoManual clientes={filas.map((f) => ({ id_control: f.id_control, nombre: f.nombre }))} />
           </div>
         </div>
 

@@ -4,6 +4,7 @@ import { readSheet } from '@/lib/sheets';
 import { getComprobantes } from '@/lib/xubio';
 import { nombreClienteComprobante, sumarDias } from '@/lib/recordatoriosCobro';
 import { HOJA_COBROS, type CobroRegistrado } from '@/lib/cobros';
+import { HOJA_RECORDATORIOS, type RecordatorioCobro } from '@/lib/recordatoriosCobro';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 import type { ClienteVenta } from '@/lib/types';
 
@@ -30,9 +31,10 @@ export async function GET(req: NextRequest) {
 
     const hoy = fechaArgentinaHoy();
     const desde = sumarDias(hoy, -dias);
-    const [comps, cobros] = await Promise.all([
+    const [comps, cobros, reclamos] = await Promise.all([
       getComprobantes(desde, hoy),
       readSheet<CobroRegistrado>(HOJA_COBROS).catch(() => [] as CobroRegistrado[]),
+      readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => [] as RecordatorioCobro[]),
     ]);
 
     const k = norm(cli.nombre_xubio || cli.nombre_display);
@@ -61,11 +63,27 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Cuándo se reclamó cada factura (si se reclamó): al armar un reclamo manual es el
+    // dato que evita mandar dos veces lo mismo sin darse cuenta.
+    const reclamadas = new Map<string, string>();
+    for (const r of reclamos) {
+      if (String(r.estado) !== 'enviado') continue;
+      const cuando = soloFecha(r.fecha_envio);
+      for (const n of String(r.comprobantes || '').split(',')) {
+        const t = n.trim();
+        if (t && (!reclamadas.has(t) || cuando > reclamadas.get(t)!)) reclamadas.set(t, cuando);
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       cliente: cli.nombre_display || cli.nombre_xubio,
       dias,
-      facturas: facturas.map((f) => ({ ...f, yaCobrada: yaCobradas.has(f.numero) })),
+      facturas: facturas.map((f) => ({
+        ...f,
+        yaCobrada: yaCobradas.has(f.numero),
+        reclamadaEl: reclamadas.get(f.numero) || '',
+      })),
       notasCredito: Math.round(notasCredito),
     });
   } catch (err: any) {

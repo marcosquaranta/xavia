@@ -271,9 +271,13 @@ export function calcularEnvios(
 const fmtMoneda = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 const fmtFecha = (f: string) => { const [y, m, dd] = f.split('-'); return `${dd}/${m}/${y}`; };
 
+// El nombre del cliente va en el asunto: para el cliente es normal verlo, y para la copia
+// que llega a administración es lo que permite distinguir un recordatorio de otro sin
+// abrirlos (un lunes salen varios).
 export function asuntoRecordatorio(envio: EnvioRecordatorio): string {
   const n = envio.facturas.length;
-  return `Recordatorio de pago — ${n === 1 ? `Factura ${envio.facturas[0].numero}` : `${n} comprobantes`} — Xavia`;
+  const detalle = n === 1 ? `Factura ${envio.facturas[0].numero}` : `${n} comprobantes`;
+  return `Recordatorio de pago — ${envio.cliente.nombre} — ${detalle} — Xavia`;
 }
 
 export function cuerpoRecordatorioHtml(envio: EnvioRecordatorio, datosPago: string): string {
@@ -363,6 +367,78 @@ export interface ResultadoCorrida {
   // Facturas que quedaron afuera por haberse reclamado antes. Permite decir con precisión
   // por qué no sale nada, en vez del ambiguo "o ya se reclamaron todas".
   yaReclamadas: number;
+}
+
+// ── Reclamo manual ────────────────────────────────────────────────────────────────────
+//
+// Reclamo puntual: se eligen el cliente y las facturas a mano y se manda. No pasa por la
+// ventana de antigüedad, ni por el guardián de saldo, ni por el registro de duplicados —
+// y está bien que no pase: esas tres defensas existen para que el envío AUTOMÁTICO no
+// mande cualquier cosa sola. Acá alguien está mirando la lista de facturas y eligiendo
+// cuáles reclamar, que es una garantía mejor que las tres juntas.
+//
+// Igual queda registrado en la misma hoja que los automáticos (con el mail del admin en
+// vez de 'cron'), así el historial es uno solo y estas facturas cuentan como reclamadas
+// para las corridas siguientes.
+export async function enviarReclamoManual(args: {
+  idControl: string;
+  facturas: FacturaPendiente[];
+  usuario: string;
+}): Promise<{ ok: boolean; error?: string; enviadoA?: string; total?: number }> {
+  if (!args.facturas.length) return { ok: false, error: 'No elegiste ninguna factura.' };
+  try {
+    await asegurarHoja(HOJA_RECORDATORIOS, HEADERS_RECORDATORIOS);
+    const [clientesRaw, previos, configRows] = await Promise.all([
+      readSheet<ClienteVenta>('Clientes'),
+      readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => []),
+      readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
+    ]);
+    const cli = clientesRaw.find((c) => String(c.id_control).trim() === String(args.idControl).trim());
+    if (!cli) return { ok: false, error: 'No se encontró el cliente.' };
+
+    const nombre = cli.nombre_display || cli.nombre_xubio || cli.id_control;
+    const email = String((cli as any)[COL_EMAIL] || cli.email || '').trim();
+    if (!email.includes('@')) return { ok: false, error: `${nombre} no tiene mail cargado (ni de cobranzas ni el general).` };
+
+    const datosPagoFila = configRows.find((r) => String(r.clave).trim() === CONFIG_DATOS_PAGO);
+    const datosPago = String(datosPagoFila?.valor || '').trim() || DATOS_PAGO_DEFAULT;
+
+    const facturas = [...args.facturas].sort((a, b) => a.fecha.localeCompare(b.fecha));
+    const envio: EnvioRecordatorio = {
+      cliente: { id_control: String(cli.id_control).trim(), nombre, nombreXubio: cli.nombre_xubio || nombre, email, antiguedadDias: 0, antiguedadHasta: 0 },
+      facturas,
+      total: facturas.reduce((a, f) => a + f.importe, 0),
+      saldoCliente: null,
+    };
+
+    const r = await enviarMail({
+      to: [email],
+      cc: COPIA_INTERNA,
+      asunto: asuntoRecordatorio(envio),
+      html: cuerpoRecordatorioHtml(envio, datosPago),
+      texto: cuerpoRecordatorioTexto(envio, datosPago),
+    });
+
+    const seq = previos.reduce((acc, x) => Math.max(acc, parseInt(String(x.id_recordatorio).replace(/\D/g, ''), 10) || 0), 0) + 1;
+    await appendRowObj(HOJA_RECORDATORIOS, {
+      id_recordatorio: `RC-${String(seq).padStart(5, '0')}`,
+      fecha_envio: new Date().toISOString(),
+      id_control: envio.cliente.id_control,
+      cliente: nombre,
+      comprobantes: facturas.map((f) => f.numero).join(', '),
+      importe: Math.round(envio.total),
+      fecha_factura: facturas[0]?.fecha || '',
+      destinatarios: [email, ...COPIA_INTERNA].join(', '),
+      estado: r.ok ? 'enviado' : 'error',
+      detalle: r.ok ? 'reclamo manual' : String(r.error || ''),
+      usuario: args.usuario,
+    });
+
+    if (!r.ok) return { ok: false, error: r.error };
+    return { ok: true, enviadoA: email, total: envio.total };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || 'error inesperado' };
+  }
 }
 
 // Corrida diaria. `soloSimular` arma todo y no manda nada — para la vista previa de la
