@@ -3,7 +3,7 @@ import { useState } from 'react';
 import {
   CONDICIONES_TXT, COND_TEMP_MIN, COND_TEMP_MAX, COND_HUM_MIN, COND_HUM_MAX,
   ALARMA_CONDUCTIVIDAD, ALARMA_PH, fueraDeRangoFoliar, alarmaOsmosis,
-  PATRON_PH, LITROS_MOCHILA, TANQUES_RIEGO, dosisSugerida, evaluarDosis, evaluarInstrumental,
+  PATRON_PH, PATRON_CONDUCTIVIDAD, LITROS_MOCHILA, TANQUES_RIEGO, dosisSugerida, evaluarDosis, evaluarInstrumental,
   TOLERANCIA_SOBREDOSIS_PCT, type InstanciaTarea, type EstadoTarea, type CampoRegistro,
 } from '@/lib/protocoloTareas';
 
@@ -25,7 +25,7 @@ const LABEL_CAMPO: Record<CampoRegistro, string> = {
   ph4: 'Lectura en solución pH 4',
   ph7: 'Lectura en solución pH 7',
   calibro: '¿Hubo que calibrar?',
-  conductividad_patron: 'Lectura en solución 12.880 µS/cm',
+  conductividad_patron: 'Lectura en el patrón (mS/cm)',
   litros: 'Litros preparados',
 };
 
@@ -151,6 +151,28 @@ function BloqueTarea({ bloque, esAdmin, nombreUsuario }: { bloque: Bloque; esAdm
               ⚠ {instSel.aviso}
             </p>
           )}
+          {(t.pasos?.length || t.avisos?.length) && (
+            <div style={{ margin: '7px 0 0', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '8px 10px' }}>
+              {t.pasos && t.pasos.length > 0 && (
+                <>
+                  <p style={{ margin: '0 0 4px', fontSize: '10.5px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Cómo se hace</p>
+                  <ol style={{ margin: 0, paddingLeft: '18px' }}>
+                    {t.pasos.map((paso, i) => (
+                      <li key={i} style={{ fontSize: '11px', color: '#374151', lineHeight: 1.45, marginBottom: '2px' }}>{paso}</li>
+                    ))}
+                  </ol>
+                </>
+              )}
+              {t.avisos && t.avisos.length > 0 && (
+                <div style={{ marginTop: t.pasos?.length ? '7px' : 0 }}>
+                  {t.avisos.map((aviso, i) => (
+                    <p key={i} style={{ margin: '0 0 3px', fontSize: '10.5px', color: '#92400e' }}>⚠ {aviso}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {t.condicionesFoliares && (
             <div style={{ margin: '7px 0 0', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '7px 9px' }}>
               <p style={{ margin: 0, fontSize: '10.5px', fontWeight: 700, color: '#dc2626' }}>⚠ CONDICIONES PARA APLICAR</p>
@@ -348,7 +370,9 @@ function Formulario({ inst, modo, nombreUsuario, onCancelar }: {
                 onChange={(e) => set(campo, e.target.value)}
                 disabled={loading}
                 style={inputStyle}
-                placeholder={campo === 'dosis' ? 'según marbete' : PATRON_PH[campo] !== undefined ? `debería dar ${PATRON_PH[campo]}` : ''}
+                placeholder={campo === 'dosis' ? 'según marbete'
+                  : PATRON_PH[campo] !== undefined ? `debería dar ${PATRON_PH[campo]}`
+                  : campo === 'conductividad_patron' ? `debería dar ~${PATRON_CONDUCTIVIDAD}` : ''}
               />
             )}
             {/* El desvío contra el patrón, calculado al lado de lo que se escribe. No se

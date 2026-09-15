@@ -94,8 +94,14 @@ export function evaluarDosis(producto: string, litros: number, aplicada: number)
 // pH: ±0,3 contra cada solución patrón. Conductímetro: ±3% contra la solución de 12880.
 // Si algo se sale, hay que calibrar Y avisarle a Marcelo (punto 9 de su respuesta).
 export const TOLERANCIA_PH = 0.3;
-export const PATRON_CONDUCTIVIDAD = 12880; // µS/cm
-export const TOLERANCIA_CONDUCTIVIDAD_PCT = 3;
+// El patrón se vende rotulado en µS/cm (12880), pero NUESTRO equipo mide en mS/cm: en
+// pantalla el operario ve 12,88. Se guarda en mS/cm, la misma unidad que el agua de
+// ósmosis, así toda la app habla en una sola unidad (confirmado por Marcelo, sept-2026 —
+// él mismo se había confundido al tipearlo, así que es un error fácil de cometer y por eso
+// hay una validación explícita más abajo).
+export const PATRON_CONDUCTIVIDAD = 12.88;      // mS/cm (= 12880 µS/cm)
+export const PATRON_CONDUCTIVIDAD_US = 12880;   // como viene rotulado el frasco
+export const TOLERANCIA_CONDUCTIVIDAD_PCT = 5;  // definido por Marcelo
 
 export interface ChequeoInstrumental {
   hayQueCalibrar: boolean;
@@ -112,7 +118,7 @@ export function evaluarInstrumental(datos: { ph4?: any; ph7?: any; conductividad
   const c = Number(datos.conductividad_patron);
   if (!isNaN(c) && c > 0) {
     const pct = Math.round(Math.abs((c - PATRON_CONDUCTIVIDAD) / PATRON_CONDUCTIVIDAD) * 1000) / 10;
-    if (pct > TOLERANCIA_CONDUCTIVIDAD_PCT) motivos.push(`conductímetro: leyó ${c} µS/cm contra ${PATRON_CONDUCTIVIDAD} (desvío ${pct}%, tolerancia ±${TOLERANCIA_CONDUCTIVIDAD_PCT}%)`);
+    if (pct > TOLERANCIA_CONDUCTIVIDAD_PCT) motivos.push(`conductímetro: leyó ${c} mS/cm contra ${PATRON_CONDUCTIVIDAD} (desvío ${pct}%, tolerancia ±${TOLERANCIA_CONDUCTIVIDAD_PCT}%)`);
   }
   return { hayQueCalibrar: motivos.length > 0, motivos };
 }
@@ -183,6 +189,10 @@ export interface TareaProtocolo {
   requiereDecision?: boolean; // el sábado no se ejecuta sin que Marcelo defina qué se aplica
   opciones?: string[];
   producto?: string;
+  // El procedimiento, del instructivo de Marcelo. Va en la pantalla para que el operario
+  // no tenga que ir a buscar el papel justo cuando lo necesita.
+  pasos?: string[];
+  avisos?: string[];
 }
 
 // 1=lunes … 6=sábado, 0=domingo (mismo criterio que Date.getDay()).
@@ -239,9 +249,23 @@ export const TAREAS_PROTOCOLO: TareaProtocolo[] = [
     nombre: 'Control de instrumental',
     nombreCorto: 'Control de instrumental',
     tipo: 'control',
-    detalle: 'Sumergir el peachímetro en las soluciones patrón pH 4 y pH 7, y el conductímetro en la solución de 12.880 µS/cm. Anotar lo que marca cada uno: si está dentro de tolerancia no se calibra.',
+    detalle: 'Sumergir el peachímetro en los buffers pH 7,00 y pH 4,00, y el conductímetro en el patrón (lee ~12,88 mS/cm). Anotar lo que marca cada uno: si está dentro de tolerancia no se calibra.',
     frecuenciaTxt: 'Una vez por semana',
-    campos: ['ph4', 'ph7', 'conductividad_patron'],
+    // Mismo orden que el instructivo de Marcelo: primero el 7,00 (amarillo) y después el
+    // 4,00 (rojo). Pedirlos al revés en pantalla obliga a cargar salteado.
+    campos: ['ph7', 'ph4', 'conductividad_patron'],
+    pasos: [
+      'Encender. Enjuagar con agua destilada y secar suave con papel (sin frotar el bulbo).',
+      'Sumergir en BUFFER pH 7,00 (amarillo). Anotar lo que marca.',
+      'Enjuagar con agua destilada. Sumergir en BUFFER pH 4,00 (rojo). Anotar lo que marca.',
+      'Conductímetro en modo EC (mS/cm): enjuagar la celda, sumergir en el patrón FRESCO y agitar suave para sacar burbujas. El frasco dice 12880 µS/cm; en pantalla tiene que leer cerca de 12,88.',
+      'Enjuagar todo con agua destilada. El pH se guarda HÚMEDO (gotas de solución de almacenamiento en el capuchón); el conductímetro se guarda SECO.',
+    ],
+    avisos: [
+      'La pantalla del pH puede marcar 4,01 y 7,01 con los frascos de 4,00 y 7,00: es normal, está bien calibrado.',
+      'Los buffers y el patrón se usan UNA vez y se descartan. Nunca reutilizarlos.',
+      'La solución de 1413 µS/cm es solo para chequear el rango de trabajo — nunca calibrar con ella.',
+    ],
     condicionesFoliares: false,
   },
   {
@@ -536,6 +560,14 @@ export function validarRegistro(datos: DatosRegistro): string[] {
   if (!String(datos.responsable || '').trim()) faltan.push('responsable');
   if (!/^\d{1,2}:\d{2}$/.test(String(datos.hora || ''))) faltan.push('hora');
   if (datos.estado === 'no_aplica') return faltan;
+
+  // El frasco dice 12880 (µS/cm) pero el equipo lee 12,88 (mS/cm). Cargar 12880 acá sería
+  // mil veces el valor y dispararía una alarma falsa a Marcelo, así que se frena con un
+  // mensaje que explica la diferencia en vez de dejar pasar el número.
+  const condPatron = Number(datos.conductividad_patron);
+  if (!isNaN(condPatron) && condPatron > 100) {
+    faltan.push(`la conductividad va en mS/cm: si el equipo marcó ${condPatron}, cargá ${Math.round((condPatron / 1000) * 100) / 100}`);
+  }
 
   for (const campo of tarea.campos) {
     const v = (datos as any)[campo];
