@@ -200,14 +200,19 @@ export function calcularEnvios(
   comprobantes: any[],
   yaEnviados: RecordatorioCobro[],
   saldos: Map<string, number>,
-): { envios: EnvioRecordatorio[]; omitidos: EnvioOmitido[] } {
+  // Envío manual "insistir": se ignora el registro de lo ya reclamado. Nunca lo usa el
+  // cron — el control de duplicados existe para que el automático no repita solo, no para
+  // frenar a alguien que decide insistir a propósito.
+  opciones: { ignorarYaReclamadas?: boolean } = {},
+): { envios: EnvioRecordatorio[]; omitidos: EnvioOmitido[]; yaReclamadas: number } {
   const atraso = diasDeAtraso(yaEnviados, hoy);
+  let yaReclamadas = 0;
   const envios: EnvioRecordatorio[] = [];
   const omitidos: EnvioOmitido[] = [];
 
   // Un comprobante entra en un único recordatorio, para siempre.
   const yaRecordados = new Set<string>();
-  for (const r of yaEnviados) {
+  if (!opciones.ignorarYaReclamadas) for (const r of yaEnviados) {
     if (String(r.estado) === 'error') continue; // si falló, se puede reintentar
     for (const n of String(r.comprobantes || '').split(',')) {
       const t = n.trim();
@@ -236,7 +241,11 @@ export function calcularEnvios(
         fecha: soloFecha(c?.fecha),
         importe: Number(c?.importetotal) || 0,
       }))
-      .filter((f) => f.numero && !yaRecordados.has(f.numero))
+      .filter((f) => {
+        if (!f.numero) return false;
+        if (yaRecordados.has(f.numero)) { yaReclamadas++; return false; }
+        return true;
+      })
       .sort((a, b) => a.fecha.localeCompare(b.fecha));
     if (!facturas.length) continue;
 
@@ -256,7 +265,7 @@ export function calcularEnvios(
       saldoCliente: saldo,
     });
   }
-  return { envios, omitidos };
+  return { envios, omitidos, yaReclamadas };
 }
 
 const fmtMoneda = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
@@ -351,15 +360,18 @@ export interface ResultadoCorrida {
   sinEmail: string[];
   errores: string[];
   detalle: { cliente: string; comprobantes: string; total: number }[];
+  // Facturas que quedaron afuera por haberse reclamado antes. Permite decir con precisión
+  // por qué no sale nada, en vez del ambiguo "o ya se reclamaron todas".
+  yaReclamadas: number;
 }
 
 // Corrida diaria. `soloSimular` arma todo y no manda nada — para la vista previa de la
 // pantalla, donde hay que poder ver qué saldría sin que le llegue nada al cliente.
 export async function correrRecordatoriosCobro(
-  { soloSimular = false, usuario = 'cron', hoy = fechaArgentinaHoy(), soloCliente = '' }:
-  { soloSimular?: boolean; usuario?: string; hoy?: string; soloCliente?: string } = {},
+  { soloSimular = false, usuario = 'cron', hoy = fechaArgentinaHoy(), soloCliente = '', reclamarDeNuevo = false }:
+  { soloSimular?: boolean; usuario?: string; hoy?: string; soloCliente?: string; reclamarDeNuevo?: boolean } = {},
 ): Promise<ResultadoCorrida> {
-  const base: ResultadoCorrida = { ok: true, enviados: 0, omitidos: [], sinEmail: [], errores: [], detalle: [] };
+  const base: ResultadoCorrida = { ok: true, enviados: 0, omitidos: [], sinEmail: [], errores: [], detalle: [], yaReclamadas: 0 };
   try {
     await asegurarHoja(HOJA_RECORDATORIOS, HEADERS_RECORDATORIOS);
     for (const col of [COL_ACTIVO, COL_EMAIL, COL_ANTIGUEDAD, COL_ANTIGUEDAD_HASTA]) await asegurarColumna('Clientes', col);
@@ -397,8 +409,13 @@ export async function correrRecordatoriosCobro(
       getCobranzas(desde, hoy).catch(() => []),
     ]);
     const saldos = calcularSaldos(comprobantes, cobranzas);
-    const { envios, omitidos } = calcularEnvios(hoy, activos, comprobantes, previos, saldos);
+    // Insistir solo tiene sentido en el envío puntual: en la corrida completa reclamaría
+    // de nuevo todo a todo el mundo.
+    const { envios, omitidos, yaReclamadas } = calcularEnvios(hoy, activos, comprobantes, previos, saldos, {
+      ignorarYaReclamadas: reclamarDeNuevo && !!soloCliente,
+    });
     base.omitidos = omitidos;
+    base.yaReclamadas = yaReclamadas;
 
     let seq = previos.reduce((acc, r) => Math.max(acc, parseInt(String(r.id_recordatorio).replace(/\D/g, ''), 10) || 0), 0);
     for (const envio of envios) {

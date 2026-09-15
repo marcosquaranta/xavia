@@ -21,6 +21,9 @@ export async function GET(req: NextRequest) {
   // Envío puntual a un cliente, sin esperar al lunes. Solo para admin logueado: el cron
   // nunca manda a un cliente suelto, manda la corrida completa.
   const soloCliente = admin ? (params.get('cliente') || '') : '';
-  const r = await correrRecordatoriosCobro({ soloSimular, soloCliente, usuario: admin ? 'admin' : 'cron' });
+  // Insistir: re-reclamar facturas que ya se reclamaron. Solo con cliente puntual y admin —
+  // el cron nunca insiste, si no repetiría todo a todos cada lunes.
+  const reclamarDeNuevo = admin && !!soloCliente && params.get('insistir') === '1';
+  const r = await correrRecordatoriosCobro({ soloSimular, soloCliente, reclamarDeNuevo, usuario: admin ? 'admin' : 'cron' });
   return NextResponse.json(r, { status: r.ok ? 200 : 500 });
 }

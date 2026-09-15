@@ -72,28 +72,48 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
       const js = await sim.json();
       if (!sim.ok) throw new Error((js.errores || []).join(' · ') || 'No se pudo calcular');
 
-      const det = (js.detalle || [])[0];
+      let det = (js.detalle || [])[0];
+      let insistir = false;
+
       if (!det) {
+        if ((js.sinEmail || []).length > 0) {
+          setMsg({ t: 'err', s: `${c.nombre}: falta cargarle el mail de cobranzas.` });
+          setGuardando(null); return;
+        }
         const motivo = (js.omitidos || [])[0]?.motivo;
-        const sinMail = (js.sinEmail || []).length > 0;
-        setMsg({ t: 'err', s: sinMail
-          ? `${c.nombre}: falta cargarle el mail de cobranzas.`
-          : `${c.nombre}: no hay facturas para reclamar${motivo ? ` — ${motivo}` : ' (ninguna dentro de la ventana de antigüedad, o ya se reclamaron todas)'}.` });
-        setGuardando(null); return;
+        if (motivo) {
+          setMsg({ t: 'err', s: `${c.nombre}: no se le manda — ${motivo}.` });
+          setGuardando(null); return;
+        }
+
+        // No hay facturas NUEVAS. Si las que hay ya se reclamaron antes se puede insistir:
+        // el control de duplicados protege al envío automático de repetir solo, no a una
+        // decisión tomada a propósito. Se vuelve a simular ignorándolo, para poder mostrar
+        // exactamente qué se re-reclamaría antes de mandarlo.
+        const sim2 = await fetch(`/api/cron/recordatorios-cobro?simular=1&insistir=1&cliente=${encodeURIComponent(c.id_control)}`);
+        const js2 = await sim2.json();
+        det = (js2.detalle || [])[0];
+        if (!det) {
+          setMsg({ t: 'err', s: `${c.nombre}: no hay ninguna factura entre ${c.antiguedad} y ${c.antiguedadHasta} días de antigüedad. Ampliá la ventana si querés reclamar otras.` });
+          setGuardando(null); return;
+        }
+        insistir = true;
       }
 
       const ok = confirm(
-        `Se le va a mandar el recordatorio a ${c.nombre} AHORA.\n\n`
+        (insistir
+          ? `A ${c.nombre} ya se le reclamaron estas facturas antes. Se le van a reclamar DE NUEVO, ahora.\n\n`
+          : `Se le va a mandar el recordatorio a ${c.nombre} AHORA.\n\n`)
         + `Comprobantes: ${det.comprobantes}\n`
         + `Total: $${Math.round(det.total).toLocaleString('es-AR')}\n\n`
         + 'El mail sale al cliente con copia a administración. ¿Confirmás?'
       );
       if (!ok) { setGuardando(null); return; }
 
-      const env = await fetch(`/api/cron/recordatorios-cobro?cliente=${encodeURIComponent(c.id_control)}`);
+      const env = await fetch(`/api/cron/recordatorios-cobro?cliente=${encodeURIComponent(c.id_control)}${insistir ? '&insistir=1' : ''}`);
       const je = await env.json();
       if (!env.ok || (je.errores || []).length) throw new Error((je.errores || []).join(' · ') || 'Error al enviar');
-      setMsg({ t: 'ok', s: `✓ Enviado a ${c.nombre} — ${det.comprobantes}` });
+      setMsg({ t: 'ok', s: `✓ ${insistir ? 'Re-enviado' : 'Enviado'} a ${c.nombre} — ${det.comprobantes}` });
     } catch (e: any) {
       setMsg({ t: 'err', s: e.message || 'Error al enviar' });
     }
