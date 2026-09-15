@@ -120,7 +120,7 @@ export function clientesConRecordatorio(clientes: ClienteVenta[]): { activos: Cl
     // Si el "hasta" quedó mal cargado (vacío, o menor que el desde) se usa desde + 7: una
     // ventana invertida no reclamaría nada nunca, y eso es peor que un default razonable.
     activos.push({
-      id_control: c.id_control, nombre, nombreXubio: c.nombre_xubio || nombre, email,
+      id_control: String(c.id_control).trim(), nombre, nombreXubio: c.nombre_xubio || nombre, email,
       antiguedadDias: desde,
       antiguedadHasta: antHasta > desde ? antHasta : desde + VENTANA_MINIMA_DIAS,
     });
@@ -374,7 +374,13 @@ export async function correrRecordatoriosCobro(
     // Envío puntual a un cliente: mismas reglas que la corrida semanal (ventana de
     // antigüedad, saldo, sin repetir lo ya reclamado), solo que para uno solo. No se saltea
     // ninguna defensa por ser manual — justamente es cuando más fácil es equivocarse.
-    const activos = soloCliente ? todosActivos.filter((c) => c.id_control === soloCliente) : todosActivos;
+    // Comparación como TEXTO a propósito: readSheet convierte los valores que parecen
+    // número, así que un id_control "4" en la planilla llega como 4 (number) y el de la URL
+    // como "4" (string). Con === estricto nunca coincidían y el envío puntual decía que el
+    // cliente no estaba activo cuando sí lo estaba.
+    const activos = soloCliente
+      ? todosActivos.filter((c) => String(c.id_control).trim() === String(soloCliente).trim())
+      : todosActivos;
     if (!activos.length) {
       if (soloCliente) base.errores.push('Ese cliente no tiene el recordatorio activo o no tiene mail cargado.');
       return { ...base, ok: !soloCliente };

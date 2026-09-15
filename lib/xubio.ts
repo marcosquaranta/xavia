@@ -145,6 +145,18 @@ export async function getCuentas(cobranzasFallback: any[] = []): Promise<{ cuent
   };
 }
 
+// Circuitos contables. Xubio rechaza la cobranza sin este campo ("El campo
+// CircuitoContable esta vacío o es nulo"), y no tiene un default implícito: hay que
+// mandarle uno de los que tiene configurados la empresa.
+export interface CircuitoXubio { id: number; nombre: string }
+export async function getCircuitosContables(): Promise<CircuitoXubio[]> {
+  const raw = await xubioGet<any[]>('circuitoContableBean?activo=true');
+  return (Array.isArray(raw) ? raw : []).map((c) => ({
+    id: Number(c?.circuitoContableId ?? c?.ID ?? c?.id ?? 0),
+    nombre: String(c?.nombre || ''),
+  })).filter((c) => c.id > 0);
+}
+
 export interface NuevaCobranza {
   clienteId: number;
   fecha: string;        // YYYY-MM-DD
@@ -152,6 +164,7 @@ export interface NuevaCobranza {
   cuentaId: number;     // dónde entró la plata
   numeroRecibo?: string;
   observacion?: string;
+  circuitoId?: number;
 }
 
 export async function crearCobranza(args: NuevaCobranza):
@@ -167,6 +180,7 @@ export async function crearCobranza(args: NuevaCobranza):
   };
   if (args.numeroRecibo) body.numeroRecibo = args.numeroRecibo;
   if (args.observacion) body.observacion = args.observacion;
+  if (args.circuitoId) body.circuitoContable = { ID: args.circuitoId };
 
   const res = await xubioPost<any>('cobranzaBean', body);
   if (!res.ok) {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { appendRowObj, asegurarHoja, asegurarColumna, readSheet, updateRow } from '@/lib/sheets';
-import { crearCobranza, borrarCobranza, getClientesXubio, matchClienteXubio } from '@/lib/xubio';
+import { crearCobranza, borrarCobranza, getClientesXubio, matchClienteXubio, getCircuitosContables } from '@/lib/xubio';
 import { HOJA_COBROS, HEADERS_COBROS, type CobroRegistrado } from '@/lib/cobros';
 import type { ClienteVenta } from '@/lib/types';
 
@@ -46,7 +46,17 @@ export async function POST(req: NextRequest) {
     const observacionXubio = comprobantes.length
       ? `${observacion ? observacion + ' — ' : ''}Cancela: ${comprobantes.join(', ')}`
       : observacion;
-    const r = await crearCobranza({ clienteId, fecha, importe, cuentaId, observacion: observacionXubio });
+    // Xubio exige el circuito contable en la cobranza y no asume uno por defecto. Si la
+    // empresa tiene uno solo (el caso normal) se usa ese sin preguntar nada; si tiene
+    // varios, se usa el primero y se devuelve cuál, para que se pueda ver qué eligió.
+    let circuitoId: number | undefined;
+    let circuitoNombre = '';
+    try {
+      const circuitos = await getCircuitosContables();
+      if (circuitos.length) { circuitoId = circuitos[0].id; circuitoNombre = circuitos[0].nombre; }
+    } catch { /* si no se pueden leer, se intenta igual y Xubio dirá qué falta */ }
+
+    const r = await crearCobranza({ clienteId, fecha, importe, cuentaId, observacion: observacionXubio, circuitoId });
     if (!r.ok) return NextResponse.json({ error: `Xubio rechazó el cobro: ${r.error}` }, { status: 502 });
 
     await asegurarHoja(HOJA_COBROS, HEADERS_COBROS);
@@ -69,7 +79,7 @@ export async function POST(req: NextRequest) {
       estado: 'registrado',
       usuario: user.email,
     });
-    return NextResponse.json({ ok: true, id_cobro: idCobro, transaccionid: r.transaccionid, numeroRecibo: r.numeroRecibo });
+    return NextResponse.json({ ok: true, id_cobro: idCobro, transaccionid: r.transaccionid, numeroRecibo: r.numeroRecibo, circuito: circuitoNombre });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'server_error' }, { status: 500 });
   }

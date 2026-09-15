@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
-import { getCuentas, getCobranzas, getComprobantes, importeCobranza, getClientesXubio } from '@/lib/xubio';
+import { getCuentas, getCobranzas, getComprobantes, importeCobranza, getClientesXubio, getCircuitosContables } from '@/lib/xubio';
 import { sumarDias } from '@/lib/recordatoriosCobro';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 
@@ -60,6 +60,18 @@ export async function GET() {
         : 'no se pudo armar la lista de cuentas — sin plan de cuentas por API y sin cobranzas de las cuales deducirlas');
   } catch (e: any) {
     push('Cuentas donde imputar el cobro', false, e?.message || 'error');
+  }
+
+  // Xubio lo exige al crear la cobranza y no asume ninguno por defecto: si falta, el cobro
+  // se rechaza con "El campo CircuitoContable esta vacío o es nulo".
+  try {
+    const circuitos = await getCircuitosContables();
+    push('Circuito contable (lo exige la cobranza)', circuitos.length > 0,
+      circuitos.length > 0
+        ? `${circuitos.length} · se va a usar "${circuitos[0].nombre}"`
+        : 'Xubio no devolvió ningún circuito contable activo — sin eso no se puede crear la cobranza');
+  } catch (e: any) {
+    push('Circuito contable (lo exige la cobranza)', false, e?.message || 'error');
   }
 
   return NextResponse.json({ ok: pasos.every((p) => p.ok), pasos, cuentas, avisoCuentas });
