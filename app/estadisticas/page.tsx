@@ -195,6 +195,8 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   // ── Kilometraje semanal del Partner — diferencia entre lecturas de odómetro
   // consecutivas (se cargan los viernes desde el Panel), no semanas calendario forzadas.
   const puntosKm = kmPorSemana(registrosKm, VEHICULO_PARTNER, 12).filter(p => p.kmSemana !== null);
+  // Solo las lecturas que tienen algo escrito: si no hay comentarios, no se muestra nada.
+  const kmConNotas = kmPorSemana(registrosKm, VEHICULO_PARTNER, 12).filter((k) => k.notas).reverse().slice(0, 8);
   const evoKmSemana = {
     series: [{ nombre: 'Km recorridos', color: '#0891b2', puntos: puntosKm.map((p, i) => [i, p.kmSemana as number] as [number, number]) }],
     labels: puntosKm.map(p => p.label), hoyIdx: puntosKm.length - 1,
@@ -868,6 +870,22 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
             {evoKmSemana.series[0].puntos.length > 0
               ? <GraficoEvolucion series={evoKmSemana.series} labels={evoKmSemana.labels} hoyIdx={evoKmSemana.hoyIdx} unidad=" km" />
               : <p style={{ color:'#9ca3af', fontSize:'13px', textAlign:'center', padding:'20px' }}>Todavía no hay dos lecturas de kilometraje cargadas para calcular la diferencia semanal.</p>}
+            {/* Las notas que se escriben al cargar el kilometraje. Iban a la planilla y no
+                se veían en ningún lado: se pedía un comentario que después nadie leía. */}
+            {kmConNotas.length > 0 && (
+              <div style={{ marginTop:'12px', paddingTop:'10px', borderTop:'1px solid #f3f4f6' }}>
+                <p style={{ margin:'0 0 6px', fontSize:'10.5px', fontWeight:700, color:'#6b7280', textTransform:'uppercase' }}>Comentarios de las cargas</p>
+                <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
+                  {kmConNotas.map((k) => (
+                    <div key={k.fecha} style={{ fontSize:'11.5px', color:'#374151', display:'flex', gap:'8px', flexWrap:'wrap' }}>
+                      <span style={{ color:'#9ca3af', minWidth:'86px' }}>{k.label} · {k.kmAcumulado.toLocaleString('es-AR')} km</span>
+                      <span style={{ flex:1, minWidth:'160px' }}>{k.notas}</span>
+                      {k.usuario && <span style={{ color:'#9ca3af', fontSize:'10.5px' }}>{k.usuario}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

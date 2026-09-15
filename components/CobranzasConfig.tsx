@@ -63,6 +63,43 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
     setGuardando(null);
   }
 
+  // Envío puntual, sin esperar al lunes. Primero simula y muestra qué saldría: un
+  // recordatorio a un cliente no se puede deshacer, así que se ve antes de mandarlo.
+  async function enviarAhora(c: ClienteFila) {
+    setGuardando(c.id_control); setMsg(null);
+    try {
+      const sim = await fetch(`/api/cron/recordatorios-cobro?simular=1&cliente=${encodeURIComponent(c.id_control)}`);
+      const js = await sim.json();
+      if (!sim.ok) throw new Error((js.errores || []).join(' · ') || 'No se pudo calcular');
+
+      const det = (js.detalle || [])[0];
+      if (!det) {
+        const motivo = (js.omitidos || [])[0]?.motivo;
+        const sinMail = (js.sinEmail || []).length > 0;
+        setMsg({ t: 'err', s: sinMail
+          ? `${c.nombre}: falta cargarle el mail de cobranzas.`
+          : `${c.nombre}: no hay facturas para reclamar${motivo ? ` — ${motivo}` : ' (ninguna dentro de la ventana de antigüedad, o ya se reclamaron todas)'}.` });
+        setGuardando(null); return;
+      }
+
+      const ok = confirm(
+        `Se le va a mandar el recordatorio a ${c.nombre} AHORA.\n\n`
+        + `Comprobantes: ${det.comprobantes}\n`
+        + `Total: $${Math.round(det.total).toLocaleString('es-AR')}\n\n`
+        + 'El mail sale al cliente con copia a administración. ¿Confirmás?'
+      );
+      if (!ok) { setGuardando(null); return; }
+
+      const env = await fetch(`/api/cron/recordatorios-cobro?cliente=${encodeURIComponent(c.id_control)}`);
+      const je = await env.json();
+      if (!env.ok || (je.errores || []).length) throw new Error((je.errores || []).join(' · ') || 'Error al enviar');
+      setMsg({ t: 'ok', s: `✓ Enviado a ${c.nombre} — ${det.comprobantes}` });
+    } catch (e: any) {
+      setMsg({ t: 'err', s: e.message || 'Error al enviar' });
+    }
+    setGuardando(null);
+  }
+
   async function guardarMail(c: ClienteFila, email: string) {
     if (email === c.email) return;
     setGuardando(c.id_control); setMsg(null);
@@ -84,6 +121,7 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
               <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 600, width: '90px' }}>Recordatorio</th>
               <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 600, width: '150px' }}>Antigüedad<br /><span style={{ fontWeight: 400, fontSize: '10px' }}>desde / hasta (días)</span></th>
               <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>Mail de cobranzas</th>
+              <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600 }}></th>
             </tr>
           </thead>
           <tbody>
@@ -113,6 +151,15 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
                   <input defaultValue={c.email} disabled={guardando !== null} style={inputStyle}
                     placeholder={c.emailGeneral ? `${c.emailGeneral} (el general)` : 'sin mail cargado'}
                     onBlur={(e) => guardarMail(c, e.target.value.trim())} />
+                </td>
+                <td style={{ padding: '6px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  {c.activo && (
+                    <button onClick={() => enviarAhora(c)} disabled={guardando !== null}
+                      title="Manda el recordatorio a este cliente ahora, sin esperar al lunes. Muestra qué saldría antes de mandarlo."
+                      style={{ fontSize: '10.5px', padding: '3px 9px', background: '#f3f4f6', color: '#374151', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer', fontWeight: 600 }}>
+                      {guardando === c.id_control ? '…' : 'Enviar ahora'}
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

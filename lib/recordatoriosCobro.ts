@@ -356,7 +356,8 @@ export interface ResultadoCorrida {
 // Corrida diaria. `soloSimular` arma todo y no manda nada — para la vista previa de la
 // pantalla, donde hay que poder ver qué saldría sin que le llegue nada al cliente.
 export async function correrRecordatoriosCobro(
-  { soloSimular = false, usuario = 'cron', hoy = fechaArgentinaHoy() }: { soloSimular?: boolean; usuario?: string; hoy?: string } = {},
+  { soloSimular = false, usuario = 'cron', hoy = fechaArgentinaHoy(), soloCliente = '' }:
+  { soloSimular?: boolean; usuario?: string; hoy?: string; soloCliente?: string } = {},
 ): Promise<ResultadoCorrida> {
   const base: ResultadoCorrida = { ok: true, enviados: 0, omitidos: [], sinEmail: [], errores: [], detalle: [] };
   try {
@@ -368,9 +369,16 @@ export async function correrRecordatoriosCobro(
       readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => []),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
     ]);
-    const { activos, sinEmail } = clientesConRecordatorio(clientesRaw);
+    const { activos: todosActivos, sinEmail } = clientesConRecordatorio(clientesRaw);
     base.sinEmail = sinEmail;
-    if (!activos.length) return base;
+    // Envío puntual a un cliente: mismas reglas que la corrida semanal (ventana de
+    // antigüedad, saldo, sin repetir lo ya reclamado), solo que para uno solo. No se saltea
+    // ninguna defensa por ser manual — justamente es cuando más fácil es equivocarse.
+    const activos = soloCliente ? todosActivos.filter((c) => c.id_control === soloCliente) : todosActivos;
+    if (!activos.length) {
+      if (soloCliente) base.errores.push('Ese cliente no tiene el recordatorio activo o no tiene mail cargado.');
+      return { ...base, ok: !soloCliente };
+    }
 
     const datosPagoFila = configRows.find((r) => String(r.clave).trim() === CONFIG_DATOS_PAGO);
     const datosPago = String(datosPagoFila?.valor || '').trim() || DATOS_PAGO_DEFAULT;

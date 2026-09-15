@@ -75,6 +75,10 @@ export interface PuntoKmSemana {
   label: string;   // dd/mm para el eje del gráfico
   kmAcumulado: number;
   kmSemana: number | null; // diferencia vs. la lectura anterior — null en la primera lectura de la serie
+  // La nota que escribió quien cargó la lectura. Se arrastra hasta acá porque si no el
+  // campo era de escritura únicamente: se cargaba y no se veía en ningún lado.
+  notas: string;
+  usuario: string;
 }
 
 // Km recorridos "por semana" = diferencia entre lecturas de odómetro consecutivas — no se
@@ -84,13 +88,16 @@ export interface PuntoKmSemana {
 export function kmPorSemana(registros: KilometrajeVehiculo[], vehiculo: string, ultimasN = 12): PuntoKmSemana[] {
   const ordenados = registros
     .filter((r) => r.vehiculo === vehiculo)
-    .map((r) => ({ fecha: String(r.fecha || '').slice(0, 10), km: num(r.km_acumulado) }))
+    .map((r) => ({
+      fecha: String(r.fecha || '').slice(0, 10), km: num(r.km_acumulado),
+      notas: String(r.notas || '').trim(), usuario: String(r.usuario || '').split('@')[0],
+    }))
     .filter((r) => r.fecha)
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
   const puntos: PuntoKmSemana[] = ordenados.map((r, i) => {
     const [y, m, d] = r.fecha.split('-');
     return {
-      fecha: r.fecha, label: `${d}/${m}`, kmAcumulado: r.km,
+      fecha: r.fecha, label: `${d}/${m}`, kmAcumulado: r.km, notas: r.notas, usuario: r.usuario,
       kmSemana: i === 0 ? null : Math.max(0, r.km - ordenados[i - 1].km),
     };
   });

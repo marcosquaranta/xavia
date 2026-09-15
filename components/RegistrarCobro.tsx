@@ -283,7 +283,16 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
                   <td style={{ padding: '6px 8px', color: '#6b7280' }}>{fmtDia(c.fecha)}</td>
                   <td style={{ padding: '6px 8px', fontWeight: 600, textDecoration: c.estado === 'anulado' ? 'line-through' : 'none' }}>{c.cliente}</td>
                   <td style={{ padding: '6px 8px', textAlign: 'right' }}>${Number(c.importe).toLocaleString('es-AR')}</td>
-                  <td style={{ padding: '6px 8px', fontFamily: 'monospace', fontSize: '11px' }}>{c.numero_recibo || '—'}</td>
+                  <td style={{ padding: '6px 8px', fontFamily: 'monospace', fontSize: '11px' }}>
+                    {c.numero_recibo || '—'}
+                    {/* La observación se escribía y no se veía nunca: iba a la planilla y
+                        al recibo de Xubio, pero no a la pantalla donde se la busca. */}
+                    {c.observacion && (
+                      <span style={{ display: 'block', fontFamily: 'inherit', fontSize: '10.5px', color: '#6b7280', fontStyle: 'italic' }}>
+                        {c.observacion}
+                      </span>
+                    )}
+                  </td>
                   <td style={{ padding: '6px 8px', textAlign: 'right' }}>
                     {c.estado === 'anulado'
                       ? <span style={{ fontSize: '10.5px', color: '#9ca3af' }}>anulado</span>

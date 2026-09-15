@@ -16,7 +16,11 @@ export async function GET(req: NextRequest) {
   if (!esCron && !admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   // Simular es solo para el admin logueado: el cron nunca simula, manda.
-  const soloSimular = admin && new URL(req.url).searchParams.get('simular') === '1';
-  const r = await correrRecordatoriosCobro({ soloSimular, usuario: admin ? 'admin' : 'cron' });
+  const params = new URL(req.url).searchParams;
+  const soloSimular = admin && params.get('simular') === '1';
+  // Envío puntual a un cliente, sin esperar al lunes. Solo para admin logueado: el cron
+  // nunca manda a un cliente suelto, manda la corrida completa.
+  const soloCliente = admin ? (params.get('cliente') || '') : '';
+  const r = await correrRecordatoriosCobro({ soloSimular, soloCliente, usuario: admin ? 'admin' : 'cron' });
   return NextResponse.json(r, { status: r.ok ? 200 : 500 });
 }
