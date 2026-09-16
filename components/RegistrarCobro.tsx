@@ -1,5 +1,6 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { sugerirCombinaciones, toleranciaDe } from '@/lib/conciliacionCobro';
 
 interface ClienteOpt { id_control: string; nombre: string }
 interface CobroFila {
@@ -17,6 +18,21 @@ const diasDesde = (f: string) => Math.round((Date.now() - new Date(f + 'T12:00:0
 
 interface FacturaCliente { numero: string; fecha: string; importe: number; yaCobrada: boolean }
 
+// Orden de las cuentas donde entra la plata. Xubio las devuelve en su propio orden, que no
+// tiene nada que ver con la frecuencia real: casi todo entra por Brubank, después Macro y
+// después la caja. Se ordenan por uso y la primera queda preseleccionada, así el caso normal
+// no obliga a elegir nada. El match es por nombre porque el id de cada cuenta lo pone Xubio.
+const PRIORIDAD_CUENTAS = ['brubank', 'macro', 'caja mq'];
+const sinAcentos = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+function ordenarCuentas(cuentas: { id: number; nombre: string }[]) {
+  const rango = (nombre: string) => {
+    const n = sinAcentos(nombre);
+    const i = PRIORIDAD_CUENTAS.findIndex((p) => n.includes(p));
+    return i === -1 ? PRIORIDAD_CUENTAS.length : i;
+  };
+  return [...cuentas].sort((a, b) => rango(a.nombre) - rango(b.nombre) || a.nombre.localeCompare(b.nombre));
+}
+
 // Diagnóstico + carga de cobros. El diagnóstico va primero a propósito: hasta no verlo en
 // verde no se sabe si las credenciales y las cuentas están bien, y el primer cobro no es
 // el momento de descubrirlo.
@@ -28,6 +44,7 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
   const [diag, setDiag] = useState<any>(null);
   const [diagLoading, setDiagLoading] = useState(false);
   const [cuentas, setCuentas] = useState<{ id: number; nombre: string }[]>(cuentasIniciales);
+  const cuentasOrdenadas = useMemo(() => ordenarCuentas(cuentas), [cuentas]);
   const [avisoCuentas, setAvisoCuentas] = useState<string | null>(null);
 
   const [cliente, setCliente] = useState('');
@@ -73,6 +90,24 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
       const total = facturas.filter((f) => nuevas.includes(f.numero)).reduce((a, f) => a + f.importe, 0);
       setImporte(total > 0 ? String(Math.round(total)) : '');
     }
+  }
+
+  // La cuenta más usada queda elegida de entrada; se puede cambiar, pero el caso normal
+  // (entró por Brubank) no obliga a tocar nada.
+  useEffect(() => {
+    if (!cuentaId && cuentasOrdenadas.length) setCuentaId(String(cuentasOrdenadas[0].id));
+  }, [cuentasOrdenadas, cuentaId]);
+
+  // Combinaciones de facturas que dan ese importe. Se calculan cuando el importe se escribió
+  // a mano — que es el caso real: entró una transferencia y hay que averiguar qué cancela.
+  const sugerencias = useMemo(() => {
+    const monto = Math.round(Number(importe) || 0);
+    if (!importeTocado || !(monto > 0) || !facturas.length) return [];
+    return sugerirCombinaciones(facturas, monto);
+  }, [importe, importeTocado, facturas]);
+
+  function aplicarSugerencia(numeros: string[]) {
+    setElegidas(numeros);
   }
 
   const totalElegido = facturas.filter((f) => elegidas.includes(f.numero)).reduce((a, f) => a + f.importe, 0);
@@ -192,7 +227,7 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
               <label style={labelStyle}>¿Dónde entró? *</label>
               <select value={cuentaId} onChange={(e) => setCuentaId(e.target.value)} disabled={loading} style={inputStyle}>
                 <option value="">— Elegir cuenta —</option>
-                {cuentas.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                {cuentasOrdenadas.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
               </select>
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
@@ -220,6 +255,35 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
                       </span>
                     )}
                   </div>
+                  {sugerencias.length > 0 && (
+                    <div style={{ marginBottom: '8px', background: '#f5f8ff', border: '1px solid #dbe4fb', borderRadius: '6px', padding: '7px 9px' }}>
+                      <p style={{ margin: '0 0 5px', fontSize: '11px', fontWeight: 700, color: '#1e3a8a' }}>
+                        Con {fmt$(Math.round(Number(importe) || 0))} podrían estar pagando:
+                      </p>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {sugerencias.map((sg, i) => (
+                          <button key={i} type="button" onClick={() => aplicarSugerencia(sg.numeros)} disabled={loading}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', width: '100%',
+                              textAlign: 'left', cursor: 'pointer', fontSize: '11.5px', padding: '4px 7px',
+                              background: 'white', border: '1px solid #dbe4fb', borderRadius: '5px', color: '#1f2937',
+                            }}>
+                            <span style={{ fontWeight: 700 }}>{sg.numeros.length === 1 ? '1 factura' : `${sg.numeros.length} facturas`}</span>
+                            <span style={{ fontFamily: 'monospace', fontSize: '10.5px', color: '#1d4ed8' }}>{sg.numeros.join(' + ')}</span>
+                            <span style={{ marginLeft: 'auto', fontWeight: 600 }}>{fmt$(sg.total)}</span>
+                            <span style={{ fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: '8px',
+                              background: sg.exacta ? '#dcfce7' : '#fef3c7', color: sg.exacta ? '#166534' : '#92400e' }}>
+                              {sg.exacta ? 'exacto' : `${sg.diferencia > 0 ? '+' : '−'}${fmt$(Math.abs(sg.diferencia))}`}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                      <p style={{ margin: '5px 0 0', fontSize: '10px', color: '#6b7280', lineHeight: 1.45 }}>
+                        Es una sugerencia: tocá una y quedan tildadas. Se admite hasta {fmt$(toleranciaDe(Math.round(Number(importe) || 0)))} de
+                        diferencia, por retenciones o redondeos. Las que ya entraron en un cobro no se proponen.
+                      </p>
+                    </div>
+                  )}
                   <div style={{ maxHeight: '210px', overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '6px' }}>
                     {facturas.map((f) => {
                       const tildada = elegidas.includes(f.numero);
