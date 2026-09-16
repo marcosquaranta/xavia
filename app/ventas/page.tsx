@@ -77,7 +77,7 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
   const evolArticulo = evolucionVentaPorArticulo(ventas, 12, historicas);
   const evolClienteSemanal = evolucionVentaPorClienteSemanal(ventas, clientes, 6, 5);
   const evolClienteMensual = evolucionVentaPorCliente(ventas, clientes, 6, 5);
-  const evolPrecio = evolucionPrecioPromedio(ventas, precios, clientes, 12);
+  const evolPrecio = evolucionPrecioPromedio(ventas, precios, clientes, 12, lotes);
   const resumenMes = resumenMesActual(ventas, precios, clientes);
   const clientesPrecioVolumen = clientesPrecioVsVolumen(ventas, precios, clientes, lotes);
   const ultimaSuba = await ultimaSubaPorClienteRecord();

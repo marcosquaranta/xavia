@@ -150,11 +150,32 @@ export async function getCuentas(cobranzasFallback: any[] = []): Promise<{ cuent
 // mandarle uno de los que tiene configurados la empresa.
 export interface CircuitoXubio { id: number; nombre: string }
 export async function getCircuitosContables(): Promise<CircuitoXubio[]> {
-  const raw = await xubioGet<any[]>('circuitoContableBean?activo=true');
-  return (Array.isArray(raw) ? raw : []).map((c) => ({
-    id: Number(c?.circuitoContableId ?? c?.ID ?? c?.id ?? 0),
-    nombre: String(c?.nombre || ''),
-  })).filter((c) => c.id > 0);
+  // Dos detalles que hacían que esto volviera vacío y que la cobranza se rechazara con
+  // "El campo CircuitoContable esta vacío o es nulo" (verificado contra la especificación
+  // de Xubio, /API/1.1/swagger.json):
+  //   · el parámetro `activo` es un ENTERO (1 / 0), no un booleano: con activo=true no
+  //     filtra como uno espera.
+  //   · el id del bean se llama `circuitoContable_id`, con guión bajo. Se buscaba
+  //     `circuitoContableId` y por eso TODOS quedaban en id 0 y los descartaba el filtro.
+  // Se piden los dos: si activo=1 no trae nada, se reintenta sin filtro.
+  for (const path of ['circuitoContableBean?activo=1', 'circuitoContableBean']) {
+    try {
+      const raw = await xubioGet<any[]>(path);
+      const out = (Array.isArray(raw) ? raw : []).map((c) => ({
+        id: Number(c?.circuitoContable_id ?? c?.circuitoContableId ?? c?.ID ?? c?.id ?? 0),
+        nombre: String(c?.nombre || c?.codigo || ''),
+      })).filter((c) => c.id > 0);
+      if (out.length) return out;
+    } catch { /* se prueba la variante siguiente */ }
+  }
+  return [];
+}
+
+// Cuál de los circuitos usar. Xubio llama "default" al circuito por defecto de la empresa;
+// si está, es el que corresponde. Si no, el primero — pero es una elección arbitraria, así
+// que la app devuelve el nombre usado para que se vea en pantalla qué se imputó.
+export function circuitoPorDefecto(circuitos: CircuitoXubio[]): CircuitoXubio | undefined {
+  return circuitos.find((c) => c.nombre.trim().toLowerCase() === 'default') || circuitos[0];
 }
 
 export interface NuevaCobranza {

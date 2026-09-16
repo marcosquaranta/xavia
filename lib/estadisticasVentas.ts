@@ -226,16 +226,26 @@ function construirEvolucionCliente(
 const KEYS_RUCULA = ['rucula'] as const;
 const KEYS_LECHUGA = ['lechuga_crespa', 'hoja_roble'] as const;
 // Además del precio por paquete/planta, el precio de las ventas por KG llevado a
-// paquete-equivalente: se divide el importe por las unidades que salen de esos kilos con el
-// mismo gramaje que usa el resto de la app. Así los dos números son comparables y se puede
-// ver la brecha, que es lo que interesa (vender por cajón suele pagar menos por unidad).
+// paquete-equivalente: se divide el importe por las unidades que salen de esos kilos. Así los
+// dos números son comparables y se puede ver la brecha, que es lo que interesa (vender por
+// cajón suele pagar menos por unidad).
+//
+// El gramaje con el que se convierten los kilos es el PESO REAL de lo cosechado en ese mes,
+// no el nominal de 210/330 g. Con el nominal, un mes en el que las plantas salieron más
+// pesadas mostraba una brecha grande sin que nadie hubiera cambiado un precio: el kilo eran
+// menos paquetes de los que realmente eran. Además el mapa de clientes ya usaba el peso real,
+// así que las dos pantallas podían mostrar precios por kg distintos del mismo cliente.
+// Si un mes no tiene cosechas con peso cargado, cae al último mes que sí lo tenga, y recién
+// al final al nominal — `gramosReales` avisa cuál de los dos se usó.
 export interface PuntoPrecio {
   mes: string; label: string;
   precioRucula: number; precioLechuga: number;
   precioRuculaKg: number; precioLechugaKg: number;   // por paquete-equivalente, 0 = no hubo venta por kg
   difRucula: number | null; difLechuga: number | null; // kg − unidad, null si falta alguno de los dos
+  gramosRucula: number; gramosLechuga: number;        // gramaje usado para convertir los kilos
+  gramosReales: boolean;                              // false = se usó el nominal por falta de cosechas
 }
-export function evolucionPrecioPromedio(ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], n = 12): PuntoPrecio[] {
+export function evolucionPrecioPromedio(ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], n = 12, lotes: Lote[] = []): PuntoPrecio[] {
   const meses = ultimosNMeses(ventas, n);
   const clienteMap = new Map(clientes.map((c) => [c.id_control, c]));
 
@@ -271,15 +281,28 @@ export function evolucionPrecioPromedio(ventas: VentaDia[], precios: PrecioVenta
   const KEYS_RUCULA_KG = ['rucula_kg'] as const;
   const KEYS_LECHUGA_KG = ['lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
 
+  // Peso real de cosecha mes a mes. Se recorre en orden para poder arrastrar el último
+  // gramaje conocido a los meses sin cosechas cargadas.
+  let ultimoR = 0, ultimoL = 0;
+
   return meses.map((mes) => {
     const delMes = ventas.filter((v) => mesKey(v.fecha) === mes);
+    const [anio, mm] = mes.split('-').map(Number);
+    const peso = pesoPromedioRango(lotes, new Date(anio, mm - 1, 1), new Date(anio, mm, 0, 23, 59, 59));
+    if (peso.rucula > 0) ultimoR = peso.rucula;
+    if (peso.lechuga > 0) ultimoL = peso.lechuga;
+    const gramosRucula = peso.rucula || ultimoR || GR_PAQ_RUCULA;
+    const gramosLechuga = peso.lechuga || ultimoL || GR_PAQ_LECHUGA;
+    const gramosReales = (peso.rucula > 0 || ultimoR > 0) && (peso.lechuga > 0 || ultimoL > 0);
+
     const precioRucula = promedioPonderado(delMes, KEYS_RUCULA);
     const precioLechuga = promedioPonderado(delMes, KEYS_LECHUGA);
-    const precioRuculaKg = promedioKg(delMes, KEYS_RUCULA_KG, GR_PAQ_RUCULA);
-    const precioLechugaKg = promedioKg(delMes, KEYS_LECHUGA_KG, GR_PAQ_LECHUGA);
+    const precioRuculaKg = promedioKg(delMes, KEYS_RUCULA_KG, gramosRucula);
+    const precioLechugaKg = promedioKg(delMes, KEYS_LECHUGA_KG, gramosLechuga);
     return {
       mes, label: mesLabel(mes),
       precioRucula, precioLechuga, precioRuculaKg, precioLechugaKg,
+      gramosRucula, gramosLechuga, gramosReales,
       // Solo hay diferencia si ese mes hubo venta de las dos formas; si no, comparar
       // contra un cero sería inventar una brecha enorme.
       difRucula: precioRucula > 0 && precioRuculaKg > 0 ? Math.round((precioRuculaKg - precioRucula) * 100) / 100 : null,
@@ -340,6 +363,8 @@ export interface ClientePrecioVolumen {
   unidades: number;       // volumen de la ventana (todas las presentaciones, kg convertido)
   precioPromedio: number; // $ por unidad comparable (IVA incluido)
   monto: number;          // facturado en la ventana
+  ultimaVenta: string;    // YYYY-MM-DD de la última venta dentro de la ventana
+  diasSinVenta: number;   // días desde esa última venta hasta el cierre de la ventana
 }
 export function clientesPrecioVsVolumen(
   ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], lotes: Lote[] = [], hasta: Date = new Date(), dias = 30
@@ -366,15 +391,16 @@ export function clientesPrecioVsVolumen(
     return peso.lechuga > 0 ? peso.lechuga : GR_PAQ_LECHUGA; // lechuga_kg legado, sin split
   };
 
-  const acc = new Map<string, { unidades: number; monto: number; ingComparable: number; uComparable: number }>();
+  const acc = new Map<string, { unidades: number; monto: number; ingComparable: number; uComparable: number; ultima: string }>();
   for (const v of ventas) {
     const f = String(v.fecha || '').split(/[T ]/)[0];
     if (!f || f < desdeStr || f > hastaStr) continue;
     const id = String(v.id_control || '');
     if (!id) continue;
     const cliente = clienteMap.get(v.id_control);
-    if (!acc.has(id)) acc.set(id, { unidades: 0, monto: 0, ingComparable: 0, uComparable: 0 });
+    if (!acc.has(id)) acc.set(id, { unidades: 0, monto: 0, ingComparable: 0, uComparable: 0, ultima: '' });
     const a = acc.get(id)!;
+    if (f > a.ultima) a.ultima = f;
     for (const key of PROD_KEYS) {
       const qty = Number((v as any)[key]) || 0;
       if (qty <= 0) continue;
@@ -404,12 +430,21 @@ export function clientesPrecioVsVolumen(
     // Solo queda afuera un cliente que no tenga NINGUNA venta valorizable (ej. todo en
     // bandeja sin precio cargado): sin eso el punto iría a $0 y rompería la escala del eje.
     if (a.uComparable <= 0 || a.ingComparable <= 0) continue;
+    // Días desde la última venta. La ventana ya deja afuera a quien no compró en `dias`,
+    // pero el dato se expone igual: si en pantalla aparece un cliente que uno daba por
+    // parado, la fecha dice si de verdad compró o si hay una venta cargada con fecha mal.
+    const diasSinVenta = a.ultima
+      ? Math.round((new Date(hastaStr + 'T12:00:00').getTime() - new Date(a.ultima + 'T12:00:00').getTime()) / 86400000)
+      : dias;
+    if (diasSinVenta >= dias) continue;
     out.push({
       id_control: id,
       nombre: nombreMap.get(id) || id,
       unidades,
       precioPromedio: Math.round((a.ingComparable / a.uComparable) * 100) / 100,
       monto: Math.round(a.monto),
+      ultimaVenta: a.ultima,
+      diasSinVenta,
     });
   }
   return out.sort((x, y) => y.unidades - x.unidades);

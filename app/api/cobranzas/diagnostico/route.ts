@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
-import { getCuentas, getCobranzas, getComprobantes, importeCobranza, getClientesXubio, getCircuitosContables } from '@/lib/xubio';
+import { getCuentas, getCobranzas, getComprobantes, importeCobranza, getClientesXubio, getCircuitosContables, circuitoPorDefecto } from '@/lib/xubio';
 import { sumarDias } from '@/lib/recordatoriosCobro';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 
@@ -68,7 +68,7 @@ export async function GET() {
     const circuitos = await getCircuitosContables();
     push('Circuito contable (lo exige la cobranza)', circuitos.length > 0,
       circuitos.length > 0
-        ? `${circuitos.length} · se va a usar "${circuitos[0].nombre}"`
+        ? `${circuitos.length} · se va a usar "${circuitoPorDefecto(circuitos)?.nombre}"`
         : 'Xubio no devolvió ningún circuito contable activo — sin eso no se puede crear la cobranza');
   } catch (e: any) {
     push('Circuito contable (lo exige la cobranza)', false, e?.message || 'error');

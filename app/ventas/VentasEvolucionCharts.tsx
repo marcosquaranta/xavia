@@ -5,6 +5,7 @@ import {
   CartesianGrid, Tooltip, Legend, LabelList,
 } from 'recharts';
 import type { PuntoArticulo, EvolucionClientes, PuntoPrecio, ResumenMesActual, ClientePrecioVolumen } from '@/lib/estadisticasVentas';
+import { GR_PAQ_RUCULA, GR_PAQ_LECHUGA } from '@/lib/estadisticasVentas';
 import GraficoValorComercial from './GraficoValorComercial';
 
 // Paleta categórica (orden fijo, validada — ver skill de dataviz). Los slots aqua/
@@ -189,10 +190,12 @@ export function GraficoPrecioPromedio({ datos }: { datos: PuntoPrecio[] }) {
       <TablaToggle>
         {() => (
           <table style={{ fontSize: '12px', width: '100%' }}>
-            {/* El precio por kg se muestra llevado a paquete-equivalente (con el mismo
-                gramaje que usa el resto de la app), que es lo único que lo hace comparable
-                contra el precio por unidad. La columna "dif." es la brecha: casi siempre
-                negativa, porque el cajón se vende más barato por unidad. */}
+            {/* El precio por kg se muestra llevado a paquete-equivalente usando el peso real
+                de lo cosechado ESE mes, que es lo único que lo hace comparable contra el
+                precio por unidad. La columna "dif." es la brecha: casi siempre negativa,
+                porque el cajón se vende más barato por unidad. El gramaje del mes se muestra
+                al lado, porque parte de la brecha puede venir de plantas más pesadas y no de
+                un cambio de precio. */}
             <thead>
               <tr>
                 <th style={{ textAlign: 'left' }} rowSpan={2}>Mes</th>
@@ -216,7 +219,12 @@ export function GraficoPrecioPromedio({ datos }: { datos: PuntoPrecio[] }) {
                   </td>;
               return (
                 <tr key={d.mes}>
-                  <td>{d.label}</td>
+                  <td>
+                    {d.label}
+                    <span style={{ color: '#b9b7b1', fontSize: '10px', marginLeft: '5px' }}>
+                      {d.gramosRucula} / {d.gramosLechuga} g{d.gramosReales ? '' : '*'}
+                    </span>
+                  </td>
                   <td style={{ textAlign: 'right' }}>{fmtMoneda(d.precioRucula)}</td>
                   <td style={{ textAlign: 'right', color: '#6b7280' }}>{d.precioRuculaKg > 0 ? fmtMoneda(d.precioRuculaKg) : '—'}</td>
                   {celdaDif(d.difRucula)}
@@ -229,6 +237,11 @@ export function GraficoPrecioPromedio({ datos }: { datos: PuntoPrecio[] }) {
           </table>
         )}
       </TablaToggle>
+      <p style={{ margin: '6px 0 0', fontSize: '10.5px', color: INK_MUTED, lineHeight: 1.5 }}>
+        Los kilos se pasan a paquetes con el peso promedio real de las cosechas de cada mes
+        (el gramaje rúcula / lechuga va al lado de cada mes). Un asterisco quiere decir que
+        ese mes no tenía cosechas con peso cargado y se usó el gramaje nominal de {GR_PAQ_RUCULA} / {GR_PAQ_LECHUGA} g.
+      </p>
     </div>
   );
 }

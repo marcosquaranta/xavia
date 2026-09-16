@@ -221,7 +221,7 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
   // ── 1. VENTAS ──
   const evolArticulo = evolucionVentaPorArticulo(ventasRep, 12, historicas);
   const evolClienteMensual = evolucionVentaPorCliente(ventasRep, clientes, 6, 6);
-  const evolPrecio = evolucionPrecioPromedio(ventasRep, precios, clientes, 12);
+  const evolPrecio = evolucionPrecioPromedio(ventasRep, precios, clientes, 12, lotes);
   // Mismo gráfico que en Ventas: ventana móvil de 30 días, pero terminando en el MES DEL
   // INFORME (refDate) y no en hoy — mirando el informe de un mes ya cerrado tiene que
   // mostrar los clientes de ese momento, no los de ahora.

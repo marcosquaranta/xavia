@@ -429,6 +429,7 @@ function TablaDatos({ puntos, precioProm, volumenProm, ultimaSuba }: {
               <th style={{ textAlign: 'right', padding: '3px 6px' }}>Unidades (30d)</th>
               <th style={{ textAlign: 'right', padding: '3px 6px' }}>Facturación</th>
               <th style={{ textAlign: 'right', padding: '3px 6px' }}>vs. prom. (precio / vol.)</th>
+              <th style={{ textAlign: 'right', padding: '3px 6px' }}>Última venta</th>
               <th style={{ textAlign: 'right', padding: '3px 6px' }}>Última suba</th>
               <th style={{ textAlign: 'right', padding: '3px 0' }}>+{fmtMoneda(SUBA_REFERENCIA)} x paq.</th>
             </tr></thead>
@@ -449,6 +450,10 @@ function TablaDatos({ puntos, precioProm, volumenProm, ultimaSuba }: {
                     <td style={{ textAlign: 'right', padding: '3px 6px' }}>{fmtMoneda(p.monto)}</td>
                     <td style={{ textAlign: 'right', padding: '3px 6px', color: INK_MUTED }}>
                       {fmtPct(((p.precioPromedio - precioProm) / precioProm) * 100)} / {fmtPct(((p.unidades - volumenProm) / volumenProm) * 100)}
+                    </td>
+                    <td style={{ textAlign: 'right', padding: '3px 6px', color: INK_MUTED }}>
+                      {p.ultimaVenta ? p.ultimaVenta.slice(8, 10) + '/' + p.ultimaVenta.slice(5, 7) : '—'}
+                      {p.diasSinVenta > 0 ? ` (${p.diasSinVenta}d)` : ''}
                     </td>
                     <td style={{ textAlign: 'right', padding: '3px 6px', color: INK_MUTED }}>
                       {suba ? `hace ${suba.diasDesde}d` : '—'}

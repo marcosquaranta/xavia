@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { appendRowObj, asegurarHoja, asegurarColumna, readSheet, updateRow } from '@/lib/sheets';
-import { crearCobranza, borrarCobranza, getClientesXubio, matchClienteXubio, getCircuitosContables } from '@/lib/xubio';
+import { crearCobranza, borrarCobranza, getClientesXubio, matchClienteXubio, getCircuitosContables, circuitoPorDefecto } from '@/lib/xubio';
 import { HOJA_COBROS, HEADERS_COBROS, type CobroRegistrado } from '@/lib/cobros';
 import type { ClienteVenta } from '@/lib/types';
 
@@ -46,15 +46,25 @@ export async function POST(req: NextRequest) {
     const observacionXubio = comprobantes.length
       ? `${observacion ? observacion + ' — ' : ''}Cancela: ${comprobantes.join(', ')}`
       : observacion;
-    // Xubio exige el circuito contable en la cobranza y no asume uno por defecto. Si la
-    // empresa tiene uno solo (el caso normal) se usa ese sin preguntar nada; si tiene
-    // varios, se usa el primero y se devuelve cuál, para que se pueda ver qué eligió.
+    // Xubio exige el circuito contable en la cobranza y no asume uno por defecto. Si no se
+    // consigue, se corta ACÁ en vez de mandar el POST: total Xubio lo va a rechazar igual y
+    // el error que devuelve ("El campo CircuitoContable esta vacío o es nulo") no dice dónde
+    // está el problema. Mejor avisar que el que falló fue el listado de circuitos.
     let circuitoId: number | undefined;
     let circuitoNombre = '';
+    let circuitoError = '';
     try {
-      const circuitos = await getCircuitosContables();
-      if (circuitos.length) { circuitoId = circuitos[0].id; circuitoNombre = circuitos[0].nombre; }
-    } catch { /* si no se pueden leer, se intenta igual y Xubio dirá qué falta */ }
+      const elegido = circuitoPorDefecto(await getCircuitosContables());
+      if (elegido) { circuitoId = elegido.id; circuitoNombre = elegido.nombre; }
+      else circuitoError = 'Xubio no devolvió ningún circuito contable.';
+    } catch (e: any) {
+      circuitoError = `No se pudo leer el circuito contable de Xubio (${e?.message || 'error'}).`;
+    }
+    if (!circuitoId) {
+      return NextResponse.json({
+        error: `${circuitoError} Sin ese dato Xubio rechaza la cobranza. Revisá en Xubio que haya un circuito contable activo (Configuración → Circuitos contables).`,
+      }, { status: 502 });
+    }
 
     const r = await crearCobranza({ clienteId, fecha, importe, cuentaId, observacion: observacionXubio, circuitoId });
     if (!r.ok) return NextResponse.json({ error: `Xubio rechazó el cobro: ${r.error}` }, { status: 502 });
