@@ -189,8 +189,43 @@ export function GraficoPrecioPromedio({ datos }: { datos: PuntoPrecio[] }) {
       <TablaToggle>
         {() => (
           <table style={{ fontSize: '12px', width: '100%' }}>
-            <thead><tr><th style={{ textAlign: 'left' }}>Mes</th><th style={{ textAlign: 'right' }}>Rúcula</th><th style={{ textAlign: 'right' }}>Lechuga</th></tr></thead>
-            <tbody>{datos.map((d) => <tr key={d.mes}><td>{d.label}</td><td style={{ textAlign: 'right' }}>{fmtMoneda(d.precioRucula)}</td><td style={{ textAlign: 'right' }}>{fmtMoneda(d.precioLechuga)}</td></tr>)}</tbody>
+            {/* El precio por kg se muestra llevado a paquete-equivalente (con el mismo
+                gramaje que usa el resto de la app), que es lo único que lo hace comparable
+                contra el precio por unidad. La columna "dif." es la brecha: casi siempre
+                negativa, porque el cajón se vende más barato por unidad. */}
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left' }} rowSpan={2}>Mes</th>
+                <th style={{ textAlign: 'center' }} colSpan={3}>Rúcula</th>
+                <th style={{ textAlign: 'center' }} colSpan={3}>Lechuga</th>
+              </tr>
+              <tr style={{ fontSize: '10.5px', color: '#9ca3af' }}>
+                <th style={{ textAlign: 'right', fontWeight: 400 }}>x unidad</th>
+                <th style={{ textAlign: 'right', fontWeight: 400 }}>x kg (equiv.)</th>
+                <th style={{ textAlign: 'right', fontWeight: 400 }}>dif.</th>
+                <th style={{ textAlign: 'right', fontWeight: 400 }}>x unidad</th>
+                <th style={{ textAlign: 'right', fontWeight: 400 }}>x kg (equiv.)</th>
+                <th style={{ textAlign: 'right', fontWeight: 400 }}>dif.</th>
+              </tr>
+            </thead>
+            <tbody>{datos.map((d) => {
+              const celdaDif = (dif: number | null) => dif === null
+                ? <td style={{ textAlign: 'right', color: '#d1d5db' }}>—</td>
+                : <td style={{ textAlign: 'right', fontWeight: 700, color: dif < 0 ? '#dc2626' : '#059669' }}>
+                    {dif > 0 ? '+' : ''}{fmtMoneda(dif)}
+                  </td>;
+              return (
+                <tr key={d.mes}>
+                  <td>{d.label}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtMoneda(d.precioRucula)}</td>
+                  <td style={{ textAlign: 'right', color: '#6b7280' }}>{d.precioRuculaKg > 0 ? fmtMoneda(d.precioRuculaKg) : '—'}</td>
+                  {celdaDif(d.difRucula)}
+                  <td style={{ textAlign: 'right' }}>{fmtMoneda(d.precioLechuga)}</td>
+                  <td style={{ textAlign: 'right', color: '#6b7280' }}>{d.precioLechugaKg > 0 ? fmtMoneda(d.precioLechugaKg) : '—'}</td>
+                  {celdaDif(d.difLechuga)}
+                </tr>
+              );
+            })}</tbody>
           </table>
         )}
       </TablaToggle>
@@ -219,9 +254,10 @@ export function TarjetaIndicadores({ datos }: { datos: ResumenMesActual }) {
   );
 }
 
-export default function VentasEvolucionCharts({ articulo, clienteSemanal, clienteMensual, precio, resumenMes, clientesPrecioVolumen }: {
+export default function VentasEvolucionCharts({ articulo, clienteSemanal, clienteMensual, precio, resumenMes, clientesPrecioVolumen, ultimaSuba = {} }: {
   articulo: PuntoArticulo[]; clienteSemanal: EvolucionClientes; clienteMensual: EvolucionClientes; precio: PuntoPrecio[]; resumenMes: ResumenMesActual;
   clientesPrecioVolumen: ClientePrecioVolumen[];
+  ultimaSuba?: Record<string, { fecha: string; diasDesde: number }>;
 }) {
   if (!articulo.length && !clienteSemanal.meses.length && !precio.length) return null;
   return (
@@ -232,7 +268,7 @@ export default function VentasEvolucionCharts({ articulo, clienteSemanal, client
       </div>
       <TarjetaIndicadores datos={resumenMes} />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: '14px' }}>
-        <GraficoValorComercial datos={clientesPrecioVolumen} />
+        <GraficoValorComercial datos={clientesPrecioVolumen} ultimaSuba={ultimaSuba} />
         <GraficoPrecioPromedio datos={precio} />
       </div>
     </div>

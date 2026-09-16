@@ -41,8 +41,13 @@ const X0 = L, X1 = W - R, Y0 = T, Y1 = H - B;
 
 interface Punto extends ClientePrecioVolumen { x: number; y: number }
 
-export default function GraficoValorComercial({ datos, titulo = 'Clientes — precio vs. volumen', subtitulo = 'últimos 30 días' }: {
+export default function GraficoValorComercial({
+  datos, titulo = 'Clientes — precio vs. volumen', subtitulo = 'últimos 30 días', ultimaSuba = {},
+}: {
   datos: ClientePrecioVolumen[]; titulo?: string; subtitulo?: string;
+  // Cuándo fue el último aumento de cada cliente. Viene de la hoja PreciosHistorico, que
+  // recién empieza en sept-2026: vacío no es "nunca subió", es "todavía no hay registro".
+  ultimaSuba?: Record<string, { fecha: string; diasDesde: number }>;
 }) {
   const [hover, setHover] = useState<Punto | null>(null);
 
@@ -160,7 +165,7 @@ export default function GraficoValorComercial({ datos, titulo = 'Clientes — pr
     if (!puesta) continue; // sin lugar: queda para el tooltip
   }
 
-  const insights = calcularInsights(datos, precioProm, volumenProm);
+  const insights = calcularInsights(datos, precioProm, volumenProm, ultimaSuba);
 
   return (
     <div style={card}>
@@ -237,52 +242,23 @@ export default function GraficoValorComercial({ datos, titulo = 'Clientes — pr
       {/* Todo lo que no es el gráfico va detrás de un link: la tarjeta entra al lado de
           otro gráfico sin ocupar media pantalla, y quien quiere el detalle lo abre. */}
       <Desplegable>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: '18px', alignItems: 'start' }}>
-          <div>
-            <p style={subtituloPanel}>Mapa de valor comercial</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
-              {[
-                { c: RAMPA[5], t: 'Mayor valor', d: 'Bien arriba del promedio en los dos ejes', a: 'Defender y hacer crecer' },
-                { c: RAMPA[3], t: 'Arriba del promedio', d: 'Pasa el cruce de las dos líneas punteadas', a: 'Optimizar el eje más flojo' },
-                { c: RAMPA[2], t: 'Abajo del promedio', d: 'No llega al cruce: por precio, por volumen o por los dos', a: 'Hay margen para crecer' },
-                { c: RAMPA[0], t: 'Menor valor relativo', d: 'Bien abajo del promedio en los dos ejes', a: 'Revisar condiciones' },
-              ].map((x) => (
-                <div key={x.t} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
-                  <span style={{ width: 12, height: 12, borderRadius: 3, background: x.c, border: '1px solid #e4e3dd', flexShrink: 0, marginTop: 2 }} />
-                  <div style={{ minWidth: 0 }}>
-                    <p style={{ margin: 0, fontSize: '11.5px', fontWeight: 700, color: INK }}>{x.t}</p>
-                    <p style={{ margin: 0, fontSize: '11px', color: INK_MUTED, lineHeight: 1.35 }}>{x.d} · {x.a}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <p style={{ margin: '8px 0 0', fontSize: '10.5px', color: INK_MUTED, lineHeight: 1.45 }}>
-              El fondo mide qué tan lejos del promedio está cada cliente en los dos ejes, con el mismo peso,
-              así que más precio compensa menos volumen y al revés. El cruce de las líneas punteadas es el
-              centro exacto de la escala: <strong>todo lo que pasa las dos líneas cae del lado verde</strong> y
-              todo lo que no llega a ninguna cae del lado cálido. Cada mitad se mide contra su propio grupo,
-              para que un cliente muy grande no aplaste al resto. El color es <strong>relativo a tus propios
-              clientes</strong>: marca posiciones, no una nota absoluta — siempre va a haber alguien más cerca
-              de cada extremo.
+        {/* La explicación del mapa se sacó a pedido: ya se entiende, y ocupaba más que
+            los datos. Los insights pasan a ocupar todo el ancho. */}
+        <div>
+          <p style={subtituloPanel}>Qué hacer con el precio</p>
+          {insights.length === 0 ? (
+            <p style={{ margin: 0, fontSize: '11.5px', color: INK_MUTED }}>
+              Con un solo cliente en la ventana no hay con qué comparar.
             </p>
-          </div>
-
-          <div>
-            <p style={subtituloPanel}>Insights clave</p>
-            {insights.length === 0 ? (
-              <p style={{ margin: 0, fontSize: '11.5px', color: INK_MUTED }}>
-                Con un solo cliente en la ventana no hay con qué comparar.
-              </p>
-            ) : (
-              <ul style={{ margin: 0, padding: '0 0 0 15px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {insights.map((t, i) => (
-                  <li key={i} style={{ fontSize: '11.5px', color: INK_SEC, lineHeight: 1.45 }}>{t}</li>
-                ))}
-              </ul>
-            )}
-          </div>
+          ) : (
+            <ul style={{ margin: 0, padding: '0 0 0 15px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {insights.map((t, i) => (
+                <li key={i} style={{ fontSize: '11.5px', color: INK_SEC, lineHeight: 1.45 }}>{t}</li>
+              ))}
+            </ul>
+          )}
         </div>
-        <TablaDatos puntos={puntos} precioProm={precioProm} volumenProm={volumenProm} />
+        <TablaDatos puntos={puntos} precioProm={precioProm} volumenProm={volumenProm} ultimaSuba={ultimaSuba} />
       </Desplegable>
     </div>
   );
@@ -295,7 +271,7 @@ function Desplegable({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ marginTop: '10px' }}>
       <button onClick={() => setAbierto((v) => !v)} style={{ background: 'none', border: 'none', color: '#2563eb', fontSize: '11.5px', cursor: 'pointer', padding: 0, fontWeight: 600 }}>
-        {abierto ? '▾ Ocultar mapa de valor e insights' : '▸ Ver mapa de valor, insights y tabla'}
+        {abierto ? '▾ Ocultar análisis de precio' : '▸ Ver análisis de precio y tabla'}
       </button>
       {abierto && <div style={{ marginTop: '12px' }}>{children}</div>}
     </div>
@@ -305,51 +281,72 @@ function Desplegable({ children }: { children: React.ReactNode }) {
 // ── Insights calculados sobre los datos reales ───────────────────────────────────────
 // Solo entra lo que los datos confirman: cada bloque se saltea si no hay clientes en esa
 // situación. Nada genérico ni escrito de antemano.
-function calcularInsights(datos: ClientePrecioVolumen[], precioProm: number, volumenProm: number): string[] {
+// La suba de referencia para dimensionar el impacto. $100 por paquete es lo que preguntó
+// Marcos, y es un número redondo fácil de trasladar a una negociación real.
+export const SUBA_REFERENCIA = 100;
+
+// Insights sobre PRECIO: quién no compra lo suficiente para el precio que tiene, hace
+// cuánto que no se le sube, y cuánta plata hay sobre la mesa. No son observaciones
+// generales: cada una apunta a una decisión de precio concreta.
+function calcularInsights(
+  datos: ClientePrecioVolumen[], precioProm: number, volumenProm: number,
+  ultimaSuba: Record<string, { fecha: string; diasDesde: number }> = {},
+): string[] {
   if (datos.length < 2) return [];
   const out: string[] = [];
   const pctP = (d: ClientePrecioVolumen) => ((d.precioPromedio - precioProm) / precioProm) * 100;
-  const pctV = (d: ClientePrecioVolumen) => ((d.unidades - volumenProm) / volumenProm) * 100;
+  const facturacionTotal = datos.reduce((a, d) => a + d.monto, 0);
+  const unidadesTotal = datos.reduce((a, d) => a + d.unidades, 0);
 
-  const mayorVol = [...datos].sort((a, b) => b.unidades - a.unidades)[0];
-  out.push(`${mayorVol.nombre} es el de mayor volumen: ${fmtEntero(mayorVol.unidades)} u (${fmtPct(pctV(mayorVol))} vs. el promedio), a ${fmtMoneda(mayorVol.precioPromedio)}.`);
-
-  const mayorPrecio = [...datos].sort((a, b) => b.precioPromedio - a.precioPromedio)[0];
-  if (mayorPrecio.id_control !== mayorVol.id_control) {
-    out.push(`${mayorPrecio.nombre} es el que mejor paga: ${fmtMoneda(mayorPrecio.precioPromedio)} (${fmtPct(pctP(mayorPrecio))} vs. el promedio).`);
+  // 1. El número grande: qué pasa si sube el precio en todos.
+  const impactoTotal = unidadesTotal * SUBA_REFERENCIA;
+  if (facturacionTotal > 0) {
+    out.push(`Subir ${fmtMoneda(SUBA_REFERENCIA)} por paquete a TODOS serían ${fmtMoneda(impactoTotal)} más en la ventana — un ${fmtPct((impactoTotal / facturacionTotal) * 100)} sobre lo facturado. Como el costo no cambia, eso va casi entero a resultado.`);
   }
 
-  // Capturar precio: ya tienen volumen, el precio está abajo del promedio
-  const capturar = datos.filter((d) => d.unidades >= volumenProm && d.precioPromedio < precioProm)
+  // 2. Los que no justifican su precio: pagan poco Y compran poco. No hay volumen que
+  //    explique la concesión, así que es donde primero hay que revisar.
+  const noJustifican = datos
+    .filter((d) => d.precioPromedio < precioProm && d.unidades < volumenProm)
+    .sort((a, b) => pctP(a) - pctP(b));
+  for (const d of noJustifican.slice(0, 3)) {
+    const suba = ultimaSuba[d.id_control];
+    const cuando = suba
+      ? ` Última suba hace ${suba.diasDesde} días.`
+      : '';
+    out.push(`${d.nombre} paga ${fmtMoneda(d.precioPromedio)} (${fmtPct(pctP(d))} vs. el promedio) y compra ${fmtEntero(d.unidades)} u, por debajo del promedio: no hay volumen que justifique ese precio.${cuando} Llevarlo al promedio serían ${fmtMoneda((precioProm - d.precioPromedio) * d.unidades)} más.`);
+  }
+
+  // 3. Precio bajo pero volumen alto: la concesión se entiende, pero es donde más plata
+  //    mueve un ajuste chico, justamente por el volumen.
+  const conVolumen = datos
+    .filter((d) => d.precioPromedio < precioProm && d.unidades >= volumenProm)
     .sort((a, b) => b.unidades - a.unidades);
-  if (capturar.length) {
-    const nombres = capturar.slice(0, 3).map((d) => d.nombre).join(', ');
-    out.push(`${nombres} concentra${capturar.length > 1 ? 'n' : ''} volumen por encima del promedio con un precio por debajo: es donde hay margen para trabajar el precio.`);
+  for (const d of conVolumen.slice(0, 3)) {
+    const suba = ultimaSuba[d.id_control];
+    const cuando = suba ? ` Hace ${suba.diasDesde} días que no se le sube.` : '';
+    out.push(`${d.nombre}: ${fmtEntero(d.unidades)} u a ${fmtMoneda(d.precioPromedio)} (${fmtPct(pctP(d))}). Subirle ${fmtMoneda(SUBA_REFERENCIA)} son ${fmtMoneda(d.unidades * SUBA_REFERENCIA)} — el volumen hace que un ajuste chico pese.${cuando}`);
   }
 
-  // Desarrollar volumen: pagan bien pero compran poco
-  const desarrollar = datos.filter((d) => d.precioPromedio >= precioProm && d.unidades < volumenProm)
-    .sort((a, b) => b.precioPromedio - a.precioPromedio);
-  if (desarrollar.length) {
-    const nombres = desarrollar.slice(0, 3).map((d) => d.nombre).join(', ');
-    out.push(`${nombres} paga${desarrollar.length > 1 ? 'n' : ''} por encima del promedio pero compra${desarrollar.length > 1 ? 'n' : ''} poco: conviene ver si hay lugar para crecer en volumen.`);
+  // 4. Hace cuánto que no se sube, para los que más tiempo llevan. Sin historial cargado
+  //    se dice que no se sabe en vez de mostrar un cero que parecería "recién ajustado".
+  const conSuba = datos
+    .map((d) => ({ d, suba: ultimaSuba[d.id_control] }))
+    .filter((x) => x.suba)
+    .sort((a, b) => b.suba!.diasDesde - a.suba!.diasDesde);
+  if (conSuba.length) {
+    const viejos = conSuba.filter((x) => x.suba!.diasDesde >= 60).slice(0, 3);
+    if (viejos.length) {
+      out.push(`Sin aumento hace más de 60 días: ${viejos.map((x) => `${x.d.nombre} (${x.suba!.diasDesde}d)`).join(', ')}.`);
+    }
+  } else {
+    out.push(`Todavía no hay historial de aumentos: la app empezó a registrarlos en septiembre de 2026, así que "hace cuánto no se le sube" va a aparecer recién después del próximo cambio de precios.`);
   }
 
-  // Defender: los dos altos
-  const defender = datos.filter((d) => d.precioPromedio >= precioProm && d.unidades >= volumenProm)
-    .sort((a, b) => b.monto - a.monto);
-  if (defender.length) {
-    const facturan = defender.reduce((a, d) => a + d.monto, 0);
-    const total = datos.reduce((a, d) => a + d.monto, 0);
-    const pct = total > 0 ? Math.round((facturan / total) * 100) : 0;
-    out.push(`${defender.slice(0, 3).map((d) => d.nombre).join(', ')} combina${defender.length > 1 ? 'n' : ''} buen precio y buen volumen: ${pct}% de la facturación de la ventana.`);
-  }
-
-  // Bajo valor
-  const revisar = datos.filter((d) => d.precioPromedio < precioProm && d.unidades < volumenProm)
-    .sort((a, b) => a.monto - b.monto);
-  if (revisar.length) {
-    out.push(`${revisar.length} cliente${revisar.length > 1 ? 's' : ''} con precio y volumen por debajo del promedio (${revisar.slice(0, 3).map((d) => d.nombre).join(', ')}${revisar.length > 3 ? '…' : ''}): revisar condiciones y rentabilidad.`);
+  // 5. El que mejor paga, como referencia de hasta dónde se puede llegar.
+  const mayorPrecio = [...datos].sort((a, b) => b.precioPromedio - a.precioPromedio)[0];
+  if (mayorPrecio && mayorPrecio.precioPromedio > precioProm) {
+    out.push(`El techo hoy lo marca ${mayorPrecio.nombre}: ${fmtMoneda(mayorPrecio.precioPromedio)} (${fmtPct(pctP(mayorPrecio))}). Es la referencia de hasta dónde se puede llegar.`);
   }
 
   return out;
@@ -407,37 +404,76 @@ function Fila({ k, v, color }: { k: string; v: string; color?: string }) {
   );
 }
 
-function TablaDatos({ puntos, precioProm, volumenProm }: { puntos: Punto[]; precioProm: number; volumenProm: number }) {
-  const orden = [...puntos].sort((a, b) => b.monto - a.monto);
+function TablaDatos({ puntos, precioProm, volumenProm, ultimaSuba }: {
+  puntos: Punto[]; precioProm: number; volumenProm: number;
+  ultimaSuba: Record<string, { fecha: string; diasDesde: number }>;
+}) {
+  // Ordenada por precio de menor a mayor: arriba queda lo que hay que mirar. Es al revés
+  // que las otras tablas (que ordenan por facturación) justamente porque acá la pregunta
+  // no es quién compra más, sino a quién le estamos cobrando poco.
+  const orden = [...puntos].sort((a, b) => a.precioPromedio - b.precioPromedio);
+  const alerta = (p: Punto) =>
+    p.precioPromedio < precioProm && p.unidades < volumenProm ? 'rojo'
+    : p.precioPromedio < precioProm ? 'amarillo' : null;
+  const FONDO = { rojo: '#fdeceb', amarillo: '#fdf4e0' } as const;
+  const BORDE = { rojo: '#e34948', amarillo: '#eda100' } as const;
+  const hayAlguna = orden.some((p) => alerta(p));
+
   return (
     <div style={{ marginTop: '16px' }}>
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ fontSize: '11px', width: '100%', borderCollapse: 'collapse', minWidth: '460px' }}>
+          <table style={{ fontSize: '11px', width: '100%', borderCollapse: 'collapse', minWidth: '520px' }}>
             <thead><tr style={{ color: INK_MUTED }}>
               <th style={{ textAlign: 'left', padding: '3px 6px 3px 0' }}>Cliente</th>
               <th style={{ textAlign: 'right', padding: '3px 6px' }}>Precio x paq.</th>
               <th style={{ textAlign: 'right', padding: '3px 6px' }}>Unidades (30d)</th>
               <th style={{ textAlign: 'right', padding: '3px 6px' }}>Facturación</th>
-              <th style={{ textAlign: 'right', padding: '3px 0' }}>vs. prom. (precio / vol.)</th>
+              <th style={{ textAlign: 'right', padding: '3px 6px' }}>vs. prom. (precio / vol.)</th>
+              <th style={{ textAlign: 'right', padding: '3px 6px' }}>Última suba</th>
+              <th style={{ textAlign: 'right', padding: '3px 0' }}>+{fmtMoneda(SUBA_REFERENCIA)} x paq.</th>
             </tr></thead>
             <tbody>
-              {orden.map((p) => (
-                <tr key={p.id_control} style={{ borderTop: '1px solid #f1f0eb' }}>
-                  <td style={{ padding: '3px 6px 3px 0' }}>{p.nombre}</td>
-                  <td style={{ textAlign: 'right', padding: '3px 6px' }}>{fmtMoneda(p.precioPromedio)}</td>
-                  <td style={{ textAlign: 'right', padding: '3px 6px' }}>{fmtEntero(p.unidades)}</td>
-                  <td style={{ textAlign: 'right', padding: '3px 6px' }}>{fmtMoneda(p.monto)}</td>
-                  <td style={{ textAlign: 'right', padding: '3px 0', color: INK_MUTED }}>
-                    {fmtPct(((p.precioPromedio - precioProm) / precioProm) * 100)} / {fmtPct(((p.unidades - volumenProm) / volumenProm) * 100)}
-                  </td>
-                </tr>
-              ))}
+              {orden.map((p) => {
+                const a = alerta(p);
+                const suba = ultimaSuba[p.id_control];
+                return (
+                  <tr key={p.id_control} style={{
+                    borderTop: '1px solid #f1f0eb',
+                    background: a ? FONDO[a] : undefined,
+                  }}>
+                    <td style={{ padding: '3px 6px 3px 0', borderLeft: a ? `3px solid ${BORDE[a]}` : '3px solid transparent', paddingLeft: '6px' }}>
+                      {p.nombre}
+                    </td>
+                    <td style={{ textAlign: 'right', padding: '3px 6px', fontWeight: a ? 700 : 400 }}>{fmtMoneda(p.precioPromedio)}</td>
+                    <td style={{ textAlign: 'right', padding: '3px 6px' }}>{fmtEntero(p.unidades)}</td>
+                    <td style={{ textAlign: 'right', padding: '3px 6px' }}>{fmtMoneda(p.monto)}</td>
+                    <td style={{ textAlign: 'right', padding: '3px 6px', color: INK_MUTED }}>
+                      {fmtPct(((p.precioPromedio - precioProm) / precioProm) * 100)} / {fmtPct(((p.unidades - volumenProm) / volumenProm) * 100)}
+                    </td>
+                    <td style={{ textAlign: 'right', padding: '3px 6px', color: INK_MUTED }}>
+                      {suba ? `hace ${suba.diasDesde}d` : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', padding: '3px 0' }}>{fmtMoneda(p.unidades * SUBA_REFERENCIA)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+          {hayAlguna && (
+            <p style={{ margin: '8px 0 0', fontSize: '10.5px', color: INK_SEC, lineHeight: 1.5 }}>
+              <span style={{ background: FONDO.rojo, borderLeft: `3px solid ${BORDE.rojo}`, padding: '1px 5px' }}>Rojo</span>
+              {' '}paga por debajo del promedio y además compra por debajo del promedio: el precio no está sostenido por volumen.
+              {' '}
+              <span style={{ background: FONDO.amarillo, borderLeft: `3px solid ${BORDE.amarillo}`, padding: '1px 5px' }}>Amarillo</span>
+              {' '}paga por debajo del promedio pero compra bien: la concesión se entiende, igual conviene revisarla.
+            </p>
+          )}
           <p style={{ margin: '8px 0 0', fontSize: '10.5px', color: INK_MUTED, lineHeight: 1.5 }}>
             Ventana móvil de 30 días: un cliente que hace más de un mes que no compra no aparece. El precio es el
             promedio real cobrado a ese cliente. A los que compran por kg se les estiman las unidades con el peso
             real de las plantas cosechadas en la misma ventana, para llegar al precio por paquete equivalente.
+            La columna «última suba» sale del registro de cambios de precio, que arranca en septiembre de 2026:
+            un «—» quiere decir que todavía no se registró ningún aumento, no que nunca se le haya subido.
           </p>
         </div>
     </div>

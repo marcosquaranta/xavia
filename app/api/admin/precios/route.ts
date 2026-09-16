@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
-import { appendRowObj, readRaw, readSheet, setRowByHeader } from '@/lib/sheets';
+import { appendRowObj, asegurarHoja, readRaw, readSheet, setRowByHeader } from '@/lib/sheets';
+import { getCurrentUser } from '@/lib/auth';
+import { HOJA_PRECIOS_HIST, HEADERS_PRECIOS_HIST, detectarCambios, type CambioPrecio } from '@/lib/preciosHistorico';
 import type { PrecioVenta } from '@/lib/types';
 
 // Upsert de precio por id_control + sucursal_obs
@@ -38,6 +40,40 @@ export async function POST(req: NextRequest) {
       if (rowIdx > 0) await setRowByHeader('Precios', rowIdx + 1, headers, camposObj);
     } else {
       await appendRowObj('Precios', camposObj);
+    }
+
+    // Historial: la hoja Precios pisa el valor anterior, así que sin esto no hay forma de
+    // saber cuándo fue el último aumento de cada cliente. Se registra después de guardar y
+    // sin romper la respuesta si falla: perder el precio nuevo por no poder anotar el
+    // cambio sería mucho peor que quedarse sin el dato histórico.
+    try {
+      const cambios = detectarCambios(existe as any, camposObj);
+      if (cambios.length) {
+        await asegurarHoja(HOJA_PRECIOS_HIST, HEADERS_PRECIOS_HIST);
+        const previos = await readSheet<CambioPrecio>(HOJA_PRECIOS_HIST).catch(() => [] as CambioPrecio[]);
+        let seq = previos.reduce((a, c) => Math.max(a, parseInt(String(c.id_cambio).replace(/\D/g, ''), 10) || 0), 0);
+        const user = await getCurrentUser();
+        const hoy = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric', month: '2-digit', day: '2-digit',
+        }).format(new Date());
+        for (const c of cambios) {
+          seq++;
+          await appendRowObj(HOJA_PRECIOS_HIST, {
+            id_cambio: `PH-${String(seq).padStart(5, '0')}`,
+            fecha: hoy,
+            id_control: String(id_control),
+            nombre_cliente: camposObj.nombre_cliente,
+            sucursal_obs,
+            producto: c.producto,
+            precio_anterior: c.anterior,
+            precio_nuevo: c.nuevo,
+            variacion_pct: c.variacionPct,
+            usuario: user?.email || '',
+          });
+        }
+      }
+    } catch (e) {
+      console.error('[precios] no se pudo registrar el historial:', e);
     }
 
     return NextResponse.json({ ok: true, accion: existe ? 'actualizado' : 'creado' });

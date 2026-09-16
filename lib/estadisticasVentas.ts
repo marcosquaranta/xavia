@@ -225,7 +225,16 @@ function construirEvolucionCliente(
 // al de paquete/planta, y mezclarlos en el mismo promedio ponderado lo distorsiona hacia arriba.
 const KEYS_RUCULA = ['rucula'] as const;
 const KEYS_LECHUGA = ['lechuga_crespa', 'hoja_roble'] as const;
-export interface PuntoPrecio { mes: string; label: string; precioRucula: number; precioLechuga: number }
+// Además del precio por paquete/planta, el precio de las ventas por KG llevado a
+// paquete-equivalente: se divide el importe por las unidades que salen de esos kilos con el
+// mismo gramaje que usa el resto de la app. Así los dos números son comparables y se puede
+// ver la brecha, que es lo que interesa (vender por cajón suele pagar menos por unidad).
+export interface PuntoPrecio {
+  mes: string; label: string;
+  precioRucula: number; precioLechuga: number;
+  precioRuculaKg: number; precioLechugaKg: number;   // por paquete-equivalente, 0 = no hubo venta por kg
+  difRucula: number | null; difLechuga: number | null; // kg − unidad, null si falta alguno de los dos
+}
 export function evolucionPrecioPromedio(ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], n = 12): PuntoPrecio[] {
   const meses = ultimosNMeses(ventas, n);
   const clienteMap = new Map(clientes.map((c) => [c.id_control, c]));
@@ -244,12 +253,37 @@ export function evolucionPrecioPromedio(ventas: VentaDia[], precios: PrecioVenta
     return unidades > 0 ? Math.round((ingresos / unidades) * 100) / 100 : 0;
   };
 
+  // Precio por paquete-equivalente de lo vendido por kg: importe total de esas líneas
+  // dividido por las unidades que representan esos kilos.
+  const promedioKg = (delMes: VentaDia[], keysKg: readonly string[], gramosPorUnidad: number) => {
+    let ingresos = 0, unidades = 0;
+    for (const v of delMes) {
+      const cliente = clienteMap.get(v.id_control);
+      for (const key of keysKg) {
+        const kg = Number((v as any)[key]) || 0;
+        if (kg <= 0) continue;
+        ingresos += kg * precioFinal(precios, v.id_control, v.sucursal, key, cliente);
+        unidades += (kg * 1000) / gramosPorUnidad;
+      }
+    }
+    return unidades > 0 ? Math.round((ingresos / unidades) * 100) / 100 : 0;
+  };
+  const KEYS_RUCULA_KG = ['rucula_kg'] as const;
+  const KEYS_LECHUGA_KG = ['lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
+
   return meses.map((mes) => {
     const delMes = ventas.filter((v) => mesKey(v.fecha) === mes);
+    const precioRucula = promedioPonderado(delMes, KEYS_RUCULA);
+    const precioLechuga = promedioPonderado(delMes, KEYS_LECHUGA);
+    const precioRuculaKg = promedioKg(delMes, KEYS_RUCULA_KG, GR_PAQ_RUCULA);
+    const precioLechugaKg = promedioKg(delMes, KEYS_LECHUGA_KG, GR_PAQ_LECHUGA);
     return {
       mes, label: mesLabel(mes),
-      precioRucula: promedioPonderado(delMes, KEYS_RUCULA),
-      precioLechuga: promedioPonderado(delMes, KEYS_LECHUGA),
+      precioRucula, precioLechuga, precioRuculaKg, precioLechugaKg,
+      // Solo hay diferencia si ese mes hubo venta de las dos formas; si no, comparar
+      // contra un cero sería inventar una brecha enorme.
+      difRucula: precioRucula > 0 && precioRuculaKg > 0 ? Math.round((precioRuculaKg - precioRucula) * 100) / 100 : null,
+      difLechuga: precioLechuga > 0 && precioLechugaKg > 0 ? Math.round((precioLechugaKg - precioLechuga) * 100) / 100 : null,
     };
   });
 }
