@@ -269,6 +269,11 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
                               background: 'white', border: '1px solid #dbe4fb', borderRadius: '5px', color: '#1f2937',
                             }}>
                             <span style={{ fontWeight: 700 }}>{sg.numeros.length === 1 ? '1 factura' : `${sg.numeros.length} facturas`}</span>
+                            {sg.consecutivas && (
+                              <span title="Comprobantes seguidos del cliente" style={{ fontSize: '9.5px', fontWeight: 700, padding: '1px 5px', borderRadius: '8px', background: '#ede9fe', color: '#5b21b6' }}>
+                                seguidas
+                              </span>
+                            )}
                             <span style={{ fontFamily: 'monospace', fontSize: '10.5px', color: '#1d4ed8' }}>{sg.numeros.join(' + ')}</span>
                             <span style={{ marginLeft: 'auto', fontWeight: 600 }}>{fmt$(sg.total)}</span>
                             <span style={{ fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: '8px',
@@ -280,7 +285,8 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
                       </div>
                       <p style={{ margin: '5px 0 0', fontSize: '10px', color: '#6b7280', lineHeight: 1.45 }}>
                         Es una sugerencia: tocá una y quedan tildadas. Se admite hasta {fmt$(toleranciaDe(Math.round(Number(importe) || 0)))} de
-                        diferencia, por retenciones o redondeos. Las que ya entraron en un cobro no se proponen.
+                        diferencia, por retenciones o redondeos. Las que ya entraron en un cobro no se proponen, y entre
+                        dos opciones iguales se propone primero la más nueva.
                       </p>
                     </div>
                   )}

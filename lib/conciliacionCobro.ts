@@ -20,6 +20,7 @@ export interface Combinacion {
   total: number;
   diferencia: number;   // total − objetivo (negativo = falta plata para llegar)
   exacta: boolean;
+  consecutivas: boolean; // comprobantes seguidos del cliente (ver corridas más abajo)
 }
 
 // Cuánto se permite que una combinación se aleje del importe cobrado. Existe porque en la
@@ -45,11 +46,32 @@ const MAX_RESULTADOS = 6;
 // abajo en el recorrido.
 const MAX_ACUMULADAS = 60;
 
+// Cuántos comprobantes seguidos se prueban como "corrida". Más de cuatro de una ya no es un
+// pago suelto, es una cuenta corriente al día.
+const MAX_CORRIDA = 4;
+
+// Comprobantes SEGUIDOS del cliente. Es el patrón más común después del pago de una sola
+// factura: se junta lo emitido en un período y se paga todo junto. "Seguidos" se mide sobre
+// la lista del cliente ordenada por fecha —no por número de comprobante— porque entre dos
+// facturas a un mismo cliente hay facturas a todos los demás, así que la numeración salta.
+function corridas(facturas: FacturaCandidata[]): string[][] {
+  const orden = [...facturas].sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+  const out: string[][] = [];
+  for (let largo = 2; largo <= MAX_CORRIDA; largo++) {
+    for (let i = 0; i + largo <= orden.length; i++) {
+      out.push(orden.slice(i, i + largo).map((f) => f.numero));
+    }
+  }
+  return out;
+}
+
 // Combinaciones de facturas que suman `objetivo` (± tolerancia), de la más probable a la
 // menos. Criterio de "más probable", en orden:
 //   1. la que da exacto,
 //   2. la que usa menos facturas — un pago suele cancelar una o dos, no seis,
-//   3. la que incluye las facturas MÁS VIEJAS, porque es lo que hace cualquiera que paga.
+//   3. la de comprobantes seguidos, que es como se paga cuando se junta más de una,
+//   4. la que incluye las facturas MÁS NUEVAS: las viejas, si siguen en la lista, lo más
+//      probable es que ya se hayan pagado y todavía no esté registrado.
 export function sugerirCombinaciones(
   facturas: FacturaCandidata[], objetivo: number, opciones: { incluirYaCobradas?: boolean } = {},
 ): Combinacion[] {
@@ -85,6 +107,7 @@ export function sugerirCombinaciones(
           total: suma,
           diferencia: dif,
           exacta: dif === 0,
+          consecutivas: false, // se marca abajo, cuando están todas juntas
         });
         // Si ya se llegó o se pasó, sumar otra factura solo aleja. Pero si todavía falta
         // plata (dif < 0), puede haber una factura chica que la deje exacta: se sigue.
@@ -101,17 +124,42 @@ export function sugerirCombinaciones(
   };
   dfs(0, 0, []);
 
-  // Antigüedad de cada factura, para el desempate: cuanto más vieja, más probable que sea
-  // la que se está pagando.
+  // Las corridas se agregan aparte de la búsqueda general. La búsqueda recorre las facturas
+  // de mayor a menor importe y tiene tope de pasos: una corrida de tres comprobantes chicos
+  // podía quedar sin explorar. Probarlas explícitamente es barato y garantiza que estén.
+  const impDe = new Map(candidatas.map((f) => [f.numero, Math.round(f.importe)]));
+  const yaEsta = new Set(out.map((c) => [...c.numeros].sort().join('|')));
+  for (const grupo of corridas(candidatas)) {
+    const total = grupo.reduce((a, n) => a + (impDe.get(n) || 0), 0);
+    const dif = total - obj;
+    if (Math.abs(dif) > tol) continue;
+    const clave = [...grupo].sort().join('|');
+    if (yaEsta.has(clave)) continue;
+    yaEsta.add(clave);
+    out.push({ numeros: grupo, total, diferencia: dif, exacta: dif === 0, consecutivas: true });
+  }
+
+  // Marcar como consecutivas las que la búsqueda general ya había encontrado.
+  const clavesCorridas = new Set(corridas(candidatas).map((g) => [...g].sort().join('|')));
+  for (const c of out) {
+    if (c.numeros.length > 1 && clavesCorridas.has([...c.numeros].sort().join('|'))) c.consecutivas = true;
+  }
+
+  // Fecha promedio de cada combinación, para el desempate: se prefiere la MÁS NUEVA.
   const fechaDe = new Map(candidatas.map((f) => [f.numero, f.fecha]));
-  const antiguedad = (c: Combinacion) =>
+  const reciente = (c: Combinacion) =>
     c.numeros.reduce((a, n) => a + (fechaDe.get(n) ? Number(String(fechaDe.get(n)).replace(/-/g, '')) : 0), 0) / c.numeros.length;
+
+  // Dentro de la lista final, las combinaciones quedan ordenadas por fecha descendente para
+  // que al tildarlas se vea primero lo último emitido.
+  for (const c of out) c.numeros.sort((a, b) => String(fechaDe.get(b) || '').localeCompare(String(fechaDe.get(a) || '')));
 
   return out
     .sort((a, b) =>
       (a.exacta === b.exacta ? 0 : a.exacta ? -1 : 1) ||
       a.numeros.length - b.numeros.length ||
+      (a.consecutivas === b.consecutivas ? 0 : a.consecutivas ? -1 : 1) ||
       Math.abs(a.diferencia) - Math.abs(b.diferencia) ||
-      antiguedad(a) - antiguedad(b))
+      reciente(b) - reciente(a))
     .slice(0, MAX_RESULTADOS);
 }
