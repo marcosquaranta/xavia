@@ -224,6 +224,29 @@ export async function borrarCobranza(transaccionid: number): Promise<{ ok: boole
   return { ok: true };
 }
 
+// Fecha del ÚLTIMO comprobante emitido en cada letra (A / B).
+//
+// Hace falta porque la numeración de un punto de venta es correlativa y AFIP no permite que
+// un comprobante con número mayor tenga fecha anterior a uno ya emitido. Si quedaron ventas
+// viejas sin facturar y en el medio se emitió algo con fecha de hoy, facturar esas ventas
+// con su fecha original hace que Xubio rechace la factura entera:
+//   "El documento número A-00002-00000849 tiene fecha mayor a la fecha del documento que
+//    desea emitir".
+export async function ultimaFechaPorLetra(dias = 30): Promise<Record<string, string>> {
+  const hoy = new Date();
+  const desde = fmtDia(new Date(hoy.getTime() - dias * 86_400_000));
+  const comps = await comprobantesEnRango(desde, fmtDia(hoy));
+  const out: Record<string, string> = {};
+  for (const c of comps || []) {
+    const letra = String(c?.numeroDocumento || '').match(/^([A-Z])-/)?.[1];
+    if (!letra) continue;
+    const f = String(c?.fecha || '').split(/[T ]/)[0];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) continue;
+    if (!out[letra] || f > out[letra]) out[letra] = f;
+  }
+  return out;
+}
+
 export interface UltimoNumeroPV { pv: string; letra: string; numeroCompleto: string; numero: number; }
 
 // Último número emitido por punto de venta (a partir de los comprobantes recientes)

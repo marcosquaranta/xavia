@@ -75,6 +75,12 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
                   {e.emailCliente === 'enviado' && <span style={{ fontSize: '11px', color: '#059669' }} title="Detalle enviado al cliente por mail">📧 enviado</span>}
                   {e.emailCliente === 'sin_email' && <span style={{ fontSize: '11px', color: '#d97706' }} title="Este cliente no tiene email cargado">📧 sin email</span>}
                   {e.emailCliente === 'error' && <span style={{ fontSize: '11px', color: '#dc2626' }} title="Falló el envío del mail al cliente">📧 error al enviar</span>}
+                  {e.fechaAjustada && (
+                    <span style={{ fontSize: '11px', color: '#b45309' }}
+                      title={`La venta es del ${e.fechaAjustada.venta}, pero la numeración del punto de venta ya estaba en ${e.fechaAjustada.factura}. AFIP no permite que un comprobante con número mayor tenga fecha anterior, así que la factura salió con esa fecha.`}>
+                      📅 emitida con fecha {e.fechaAjustada.factura}
+                    </span>
+                  )}
                   <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{e.numero}{e.cae ? ` · CAE ${e.cae}` : ''}</span>
                 </span>
               </div>

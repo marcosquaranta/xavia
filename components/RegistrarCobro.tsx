@@ -22,7 +22,7 @@ interface FacturaCliente { numero: string; fecha: string; importe: number; yaCob
 // tiene nada que ver con la frecuencia real: casi todo entra por Brubank, después Macro y
 // después la caja. Se ordenan por uso y la primera queda preseleccionada, así el caso normal
 // no obliga a elegir nada. El match es por nombre porque el id de cada cuenta lo pone Xubio.
-const PRIORIDAD_CUENTAS = ['brubank', 'macro', 'caja mq'];
+const PRIORIDAD_CUENTAS = ['brubank', 'macro', 'caja mq', 'aporte socios'];
 const sinAcentos = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 function ordenarCuentas(cuentas: { id: number; nombre: string }[]) {
   const rango = (nombre: string) => {

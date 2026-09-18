@@ -1,7 +1,7 @@
 import { readSheet, batchUpdateRows } from './sheets';
 import { registrarEmitidas } from './caePendientes';
 import type { ClienteVenta, PrecioVenta, VentaDia } from './types';
-import { getClientesXubio, matchClienteXubio, emitirFactura, PRODUCTO_CODIGO } from './xubio';
+import { getClientesXubio, matchClienteXubio, emitirFactura, ultimaFechaPorLetra, PRODUCTO_CODIGO } from './xubio';
 
 // lechuga_kg queda para no perder ventas por kg cargadas antes del split crespa/roble.
 const PROD_KEYS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
@@ -86,8 +86,29 @@ async function enviarDetalleVentaCliente(
 }
 
 export interface ResultadoEmision {
-  emitidas: { cliente: string; numero?: string; cae?: string; emailCliente?: 'enviado' | 'sin_email' | 'error' }[];
+  emitidas: { cliente: string; numero?: string; cae?: string; emailCliente?: 'enviado' | 'sin_email' | 'error';
+    // Cuando la factura no pudo salir con la fecha de la venta (ver fechaDeFactura).
+    fechaAjustada?: { venta: string; factura: string } }[];
   errores: { cliente: string; error: string }[];
+}
+
+// Con qué fecha se emite la factura.
+//
+// No siempre puede ser la fecha de la venta. La numeración del punto de venta es correlativa
+// y AFIP no acepta que un comprobante con número mayor tenga fecha anterior a uno ya
+// emitido. Con ventas viejas sin facturar —y algo más nuevo ya emitido en el medio— Xubio
+// rechaza la factura entera:
+//   "El documento número A-00002-00000849 tiene fecha mayor a la fecha del documento que
+//    desea emitir".
+// Eso es exactamente lo que dejó sin facturar a La Esperanza Funes (sept-2026).
+//
+// Entonces: se usa la fecha MÁS NUEVA de las ventas que entran en la factura, llevada hacia
+// adelante hasta la del último comprobante ya emitido en esa letra, y sin pasarse de hoy.
+// La fecha de entrega no se pierde: sigue en la hoja Ventas y en el detalle de cada renglón.
+export function fechaDeFactura(fechasVenta: string[], ultimaEmitida: string | undefined, hoy: string): string {
+  const masNueva = [...fechasVenta].filter(Boolean).sort().pop() || hoy;
+  const piso = ultimaEmitida && ultimaEmitida > masNueva ? ultimaEmitida : masNueva;
+  return piso > hoy ? hoy : piso;
 }
 
 // Emite a Xubio las ventas PENDIENTE, una factura por cliente. Si idControls se pasa,
@@ -107,6 +128,15 @@ export async function emitirPendientes(idControls?: string[] | null): Promise<Re
 
   const clientesXubio = await getClientesXubio();
   const clientesMap = new Map(clientes.map(c => [c.id_control, c]));
+  // Una sola consulta para todo el lote: la fecha del último comprobante de cada letra.
+  // Si falla, se sigue igual con la fecha de la venta — que es el comportamiento de antes.
+  const ultimaFecha = await ultimaFechaPorLetra().catch((e) => {
+    console.error('[facturacionEmitir] no se pudo leer la última fecha por letra:', e);
+    return {} as Record<string, string>;
+  });
+  const hoyAR = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
 
   // Agrupa por cliente para armar UNA factura combinada — salvo que el cliente tenga
   // facturar_por_sucursal='SI' (misma razón social, pero pide un comprobante A XUBIO
@@ -164,9 +194,11 @@ export async function emitirPendientes(idControls?: string[] | null): Promise<Re
     }
 
     const esA = cliente.tipo_factura === 'A';
+    const fechaVenta = [...lineas.map(l => String(l.fecha || ''))].filter(Boolean).sort().pop() || hoyAR;
+    const fechaFactura = fechaDeFactura(lineas.map(l => String(l.fecha || '')), ultimaFecha[esA ? 'A' : 'B'], hoyAR);
     let res;
     try {
-      res = await emitirFactura({ clienteId, esA, fecha: lineas[0].fecha, items });
+      res = await emitirFactura({ clienteId, esA, fecha: fechaFactura, items });
     } catch (e: any) {
       console.error(`[facturacionEmitir] excepción emitiendo factura para ${nombre}:`, e);
       errores.push({ cliente: nombre, error: e?.message || 'excepción al emitir' });
@@ -175,6 +207,9 @@ export async function emitirPendientes(idControls?: string[] | null): Promise<Re
 
     if (res.ok) {
       const emitida: ResultadoEmision['emitidas'][number] = { cliente: nombre, numero: res.numeroDocumento, cae: res.cae };
+      if (fechaFactura !== fechaVenta) emitida.fechaAjustada = { venta: fechaVenta, factura: fechaFactura };
+      // La numeración avanzó: la próxima factura de este lote no puede ir más atrás.
+      if (fechaFactura > (ultimaFecha[esA ? 'A' : 'B'] || '')) ultimaFecha[esA ? 'A' : 'B'] = fechaFactura;
 
       // Factura B (sin CAE, no se informa a AFIP): el cliente no recibe nada de Xubio,
       // así que le mandamos nosotros el detalle de la venta por mail.
@@ -184,13 +219,13 @@ export async function emitirPendientes(idControls?: string[] | null): Promise<Re
           emitida.emailCliente = 'sin_email';
         } else {
           const total = detalle.reduce((a, d) => a + d.importe, 0);
-          const ok = await enviarDetalleVentaCliente(email, cliente.nombre_display || cliente.nombre_xubio, lineas[0].fecha, detalle, total);
+          const ok = await enviarDetalleVentaCliente(email, cliente.nombre_display || cliente.nombre_xubio, fechaVenta, detalle, total);
           emitida.emailCliente = ok ? 'enviado' : 'error';
         }
       }
 
       emitidas.push(emitida);
-      paraRegistrar.push({ cliente: nombre, numero: res.numeroDocumento, cae: res.cae, fechaVenta: lineas[0].fecha });
+      paraRegistrar.push({ cliente: nombre, numero: res.numeroDocumento, cae: res.cae, fechaVenta });
       await batchUpdateRows('Ventas', 'id_venta', lineas.map(l => ({
         keyValue: l.id_venta,
         updates: { exportado: res.numeroDocumento || 'FACTURADO' },
