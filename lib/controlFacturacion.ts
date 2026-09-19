@@ -1,15 +1,15 @@
 // ── Control: ventas que no llegaron a la factura ─────────────────────────────────────
 //
-// Una venta cargada puede quedarse en el camino de dos formas, y las dos son silenciosas:
+// Ventas que quedaron en PENDIENTE: están en la cola de facturación pero nadie apretó el
+// botón, o fallaron al emitir (cliente que no matchea en Xubio, fecha rechazada, límite de
+// Sheets). La mercadería salió y la plata no se facturó.
 //
-//   · PENDIENTE — está en la cola de facturación pero nadie apretó el botón, o falló al
-//     emitir (cliente que no matchea en Xubio, fecha rechazada, límite de Sheets).
-//   · BORRADOR (exportado vacío) — se cargó y ni siquiera entró a la cola. Es la peor de
-//     las dos: no aparece en ninguna pantalla de facturación, así que puede quedarse ahí
-//     para siempre sin que nadie la busque.
+// Las ventas en borrador (exportado vacío) NO cuentan: en esta app toda venta nace así y
+// pasa a la cola cuando se la manda a facturar, o sea que "borrador" es un estado normal y
+// listarlo era puro ruido.
 //
-// En los dos casos la mercadería salió y la plata no se facturó. Por eso esto va al reporte
-// semanal: el viernes es el momento en que todavía se puede corregir la semana.
+// Por eso esto va al reporte semanal: el viernes es el momento en que todavía se puede
+// corregir la semana.
 
 import type { VentaDia, PrecioVenta, ClienteVenta } from './types';
 import { nombreClienteVisible } from './clientes';
@@ -36,9 +36,7 @@ export interface ClienteSinFacturar {
 
 export interface ControlFacturacion {
   pendientes: ClienteSinFacturar[];
-  borradores: ClienteSinFacturar[];
   montoPendiente: number;
-  montoBorrador: number;
   atrasoMax: number;
   hayProblema: boolean;
 }
@@ -100,13 +98,139 @@ export function controlFacturacion(
   ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], hoy: string,
 ): ControlFacturacion {
   const pendientes = agrupar(ventas.filter(v => v.exportado === 'PENDIENTE'), precios, clientes, hoy);
-  const borradores = agrupar(ventas.filter(v => !String(v.exportado || '').trim()), precios, clientes, hoy);
   const montoPendiente = pendientes.reduce((a, g) => a + g.monto, 0);
-  const montoBorrador = borradores.reduce((a, g) => a + g.monto, 0);
-  const atrasoMax = Math.max(0, ...pendientes.map(g => g.atraso), ...borradores.map(g => g.atraso));
+  const atrasoMax = Math.max(0, ...pendientes.map(g => g.atraso));
   return {
-    pendientes, borradores, montoPendiente, montoBorrador, atrasoMax,
+    pendientes, montoPendiente, atrasoMax,
     // Que hoy quede algo sin facturar es normal; que tenga días encima, no.
-    hayProblema: atrasoMax >= DIAS_ATRASO_AVISO && (pendientes.length > 0 || borradores.length > 0),
+    hayProblema: atrasoMax >= DIAS_ATRASO_AVISO && pendientes.length > 0,
+  };
+}
+
+// ── Contraste: lo facturado según la app vs. lo que hay en Xubio ─────────────────────
+//
+// La app sabe qué vendió y a qué precio; Xubio sabe qué comprobantes existen. Si los dos
+// números no dan parecido, algo se perdió en el medio: una factura que no salió, una que
+// salió dos veces, un precio distinto al de la lista, o una cargada a mano en Xubio que
+// la app no conoce.
+//
+// Dos cosas que hay que tener en cuenta para leer esto sin asustarse:
+//
+//   · Las fechas no son la misma cosa. La app mide por fecha de ENTREGA y Xubio por fecha
+//     del COMPROBANTE, que puede ser posterior (ver fechaDeFactura). En los bordes del
+//     período siempre va a haber corrimiento.
+//   · Las notas de crédito restan, como corresponde.
+//
+// Por eso no alcanza con el total: la comparación es POR CLIENTE, que es donde una
+// diferencia se puede rastrear.
+
+export interface DiferenciaCliente {
+  cliente: string;
+  app: number;      // valorizado por la app, de lo que ya está marcado como facturado
+  xubio: number;    // comprobantes de Xubio (netos de notas de crédito)
+  diferencia: number; // app − xubio
+  pct: number | null;
+}
+
+export interface ComparacionFacturado {
+  desde: string;
+  hasta: string;
+  totalApp: number;
+  totalXubio: number;
+  diferencia: number;
+  pct: number | null;
+  porCliente: DiferenciaCliente[]; // solo los que se despegan, de mayor a menor
+  disponible: boolean;             // false = no se pudo leer Xubio
+}
+
+// Tolerancia: por debajo de esto no es un problema, es redondeo y corrimiento de fechas.
+export const DIF_MINIMA_PESOS = 50_000;
+export const DIF_MINIMA_PCT = 2;
+
+const norm = (s: any) => String(s || '')
+  .normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .toLowerCase().replace(/[^a-z0-9]/g, '');
+
+function nombreDeComprobante(c: any): string {
+  const cl = c?.cliente;
+  if (!cl) return '';
+  return String(typeof cl === 'string' ? cl : (cl.nombre || cl.name || '')).trim();
+}
+
+export function compararFacturado(
+  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[],
+  comprobantes: any[] | null, desde: string, hasta: string,
+): ComparacionFacturado {
+  const vacio: ComparacionFacturado = {
+    desde, hasta, totalApp: 0, totalXubio: 0, diferencia: 0, pct: null, porCliente: [], disponible: false,
+  };
+  if (!comprobantes) return vacio;
+
+  // Lado app: ventas del período que la app da por facturadas (tienen número de
+  // comprobante en `exportado`). Las PENDIENTE no van: esas ya las cuenta el control de
+  // arriba y contarlas acá las haría aparecer como "diferencia" dos veces.
+  const porClienteApp = new Map<string, { nombre: string; monto: number }>();
+  for (const v of ventas) {
+    const f = soloFecha(v.fecha);
+    if (!f || f < desde || f > hasta) continue;
+    const exp = String(v.exportado || '').trim();
+    if (!exp || exp === 'PENDIENTE') continue;
+    const cliente = clientes.find(c => String(c.id_control) === String(v.id_control));
+    const clave = norm(cliente?.nombre_xubio || v.nombre_cliente || v.id_control);
+    if (!clave) continue;
+    let monto = 0;
+    for (const key of PROD_KEYS) {
+      const qty = Number((v as any)[key]) || 0;
+      if (qty <= 0) continue;
+      monto += qty * precioDe(precios, String(v.id_control), v.sucursal, key, cliente?.sucursales);
+    }
+    if (monto <= 0) continue;
+    const prev = porClienteApp.get(clave);
+    if (prev) prev.monto += monto;
+    else porClienteApp.set(clave, { nombre: nombreClienteVisible(cliente) || String(v.nombre_cliente || clave), monto });
+  }
+
+  // Lado Xubio: comprobantes del período, con las notas de crédito (tipo 3) en negativo.
+  const porClienteXubio = new Map<string, { nombre: string; monto: number }>();
+  for (const c of comprobantes) {
+    const f = soloFecha(c?.fecha);
+    if (!f || f < desde || f > hasta) continue;
+    const nombre = nombreDeComprobante(c);
+    const clave = norm(nombre);
+    if (!clave) continue;
+    const signo = Number(c?.tipo) === 3 ? -1 : 1;
+    const monto = signo * (Number(c?.importetotal) || 0);
+    const prev = porClienteXubio.get(clave);
+    if (prev) prev.monto += monto;
+    else porClienteXubio.set(clave, { nombre, monto });
+  }
+
+  const claves = new Set([...porClienteApp.keys(), ...porClienteXubio.keys()]);
+  const porCliente: DiferenciaCliente[] = [];
+  for (const k of claves) {
+    const app = Math.round(porClienteApp.get(k)?.monto || 0);
+    const xubio = Math.round(porClienteXubio.get(k)?.monto || 0);
+    const diferencia = app - xubio;
+    const base = Math.max(Math.abs(app), Math.abs(xubio));
+    const pct = base > 0 ? Math.round((diferencia / base) * 1000) / 10 : null;
+    // Se listan solo las que importan: en plata Y en proporción. Una diferencia de
+    // $60.000 sobre $8.000.000 es corrimiento de fechas, no un problema.
+    if (Math.abs(diferencia) < DIF_MINIMA_PESOS) continue;
+    if (pct !== null && Math.abs(pct) < DIF_MINIMA_PCT) continue;
+    porCliente.push({
+      cliente: porClienteApp.get(k)?.nombre || porClienteXubio.get(k)?.nombre || k,
+      app, xubio, diferencia, pct,
+    });
+  }
+  porCliente.sort((a, b) => Math.abs(b.diferencia) - Math.abs(a.diferencia));
+
+  const totalApp = Math.round([...porClienteApp.values()].reduce((a, g) => a + g.monto, 0));
+  const totalXubio = Math.round([...porClienteXubio.values()].reduce((a, g) => a + g.monto, 0));
+  const base = Math.max(Math.abs(totalApp), Math.abs(totalXubio));
+  return {
+    desde, hasta, totalApp, totalXubio,
+    diferencia: totalApp - totalXubio,
+    pct: base > 0 ? Math.round(((totalApp - totalXubio) / base) * 1000) / 10 : null,
+    porCliente, disponible: true,
   };
 }

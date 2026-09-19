@@ -73,7 +73,10 @@ export default async function FacturacionPage() {
   const facturas: FacturaPendiente[] = [];
   for (const [key, lineasV] of porControl) {
     const idControl = key.split('||')[0];
-    const cliente = clientes.find(c => c.id_control === idControl);
+    // Comparación por texto: readSheet convierte los valores numéricos, así que
+    // id_control llega como número desde la hoja y como string desde la clave del
+    // grupo. Sin esto no encuentra al cliente y la factura sale sin nombre ni letra.
+    const cliente = clientes.find(c => String(c.id_control) === String(idControl));
     const lineas: FacturaPendiente['lineas'] = [];
     for (const l of lineasV) {
       for (const p of PRODS) {
