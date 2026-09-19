@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet, batchUpdateRows } from '@/lib/sheets';
 import { emitirPendientes } from '@/lib/facturacionEmitir';
-import type { VentaDia } from '@/lib/types';
+import { entregasConCobro, avisarCobroEnEntrega } from '@/lib/avisoCobroEntrega';
+import type { VentaDia, ClienteVenta } from '@/lib/types';
+
+// A quién le llega el aviso de "hay que cobrar en la entrega".
+const DESTINATARIOS_AVISO = ['administracion@xavia.com.ar'];
 
 const QTY_KEYS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'];
 
@@ -53,7 +57,21 @@ export async function POST(req: NextRequest) {
     // de CAEs pendientes, que ahora sale una vez por día. Los errores de emisión se
     // muestran igual en pantalla al terminar la carga, con el detalle por cliente.
     const clientes = idControls.length;
-    return NextResponse.json({ ok: true, lineas: aCargar.length, clientes, emitidas, errores });
+    // Aviso de cobro contra entrega. Va después de emitir y dentro de su propio try: que
+    // falle un mail no puede tirar abajo una carga de ventas que ya se hizo.
+    let avisoCobro: { sucursal: string }[] = [];
+    try {
+      const clientesRows = await readSheet<ClienteVenta>('Clientes');
+      const entregas = entregasConCobro(aCargar, clientesRows, fecha);
+      if (entregas.length) {
+        await avisarCobroEnEntrega(entregas, DESTINATARIOS_AVISO);
+        avisoCobro = entregas.map(e => ({ sucursal: e.sucursal }));
+      }
+    } catch (e) {
+      console.error('[ventas/cargar] no se pudo mandar el aviso de cobro en entrega:', e);
+    }
+
+    return NextResponse.json({ ok: true, lineas: aCargar.length, clientes, emitidas, errores, avisoCobro });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Error' }, { status: 500 });
   }

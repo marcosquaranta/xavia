@@ -4,7 +4,18 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { ClienteVenta, PrecioVenta } from '@/lib/types';
 
-interface Props { clientes: ClienteVenta[]; precios: PrecioVenta[]; }
+// Último cambio de cada precio, por "id_control||sucursal||producto". Viene de la hoja
+// PreciosHistorico, que se empezó a llenar en septiembre de 2026: un producto sin entrada
+// no quiere decir que nunca se le haya tocado el precio, sino que el cambio es anterior a
+// que esto existiera. La pantalla lo dice en vez de mostrar un guion sin explicación.
+interface CambioPrecioUI {
+  fecha: string; anterior: number; nuevo: number; diferencia: number; variacionPct: number; diasDesde: number;
+}
+interface Props {
+  clientes: ClienteVenta[];
+  precios: PrecioVenta[];
+  cambios: Record<string, CambioPrecioUI>;
+}
 
 const PROD_LABELS = [
   { key: 'rucula',         label: 'Rúcula' },
@@ -21,9 +32,13 @@ const KG_LABELS = [
   { key: 'lechuga_kg_roble',  label: 'Lechuga Roble KG' },
 ];
 
-function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, esKg, onSaved }: {
+const fmtDia = (f: string) => { const [y, m, d] = String(f || '').split('-'); return d ? `${d}/${m}/${y.slice(2)}` : f; };
+const fmtPesos = (n: number) => '$' + Math.round(Math.abs(n)).toLocaleString('es-AR');
+
+function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, esKg, onSaved, cambios }: {
   idControl: string; nombreCliente: string; sucursalObs: string;
   precioActual: PrecioVenta | undefined; esKg: boolean; onSaved: () => void;
+  cambios: Record<string, CambioPrecioUI>;
 }) {
   const campos = esKg ? KG_LABELS : PROD_LABELS;
   const [vals, setVals] = useState<Record<string,string>>(() =>
@@ -54,13 +69,29 @@ function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, 
         {sucursalObs}{esKg && <span style={{ marginLeft: '6px', fontWeight: 400, fontSize: '10px' }}>· precios por KG (cajón)</span>}
       </p>
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(campos.length, 5)}, 1fr)`, gap: '6px', marginBottom: '8px' }}>
-        {campos.map(p => (
+        {campos.map(p => {
+          const ult = cambios[`${idControl}||${sucursalObs}||${p.key}`];
+          const subio = ult ? ult.diferencia > 0 : false;
+          return (
           <div key={p.key}>
             <label style={{ fontSize: '10px' }}>{p.label}</label>
             <input type="number" value={vals[p.key]} onChange={e => setVals(v => ({ ...v, [p.key]: e.target.value }))}
               min="0" style={{ padding: '4px 6px', fontSize: '12px' }} disabled={saving} />
+            {/* Último movimiento de ESTE precio, para no tener que acordarse de cuándo fue. */}
+            {ult ? (
+              <p style={{ margin: '2px 0 0', fontSize: '9.5px', lineHeight: 1.35, color: subio ? '#166534' : '#b45309' }}
+                title={`De ${fmtPesos(ult.anterior)} a ${fmtPesos(ult.nuevo)} el ${fmtDia(ult.fecha)}`}>
+                {subio ? '▲' : '▼'} {fmtPesos(ult.diferencia)}
+                {ult.variacionPct ? ` (${ult.variacionPct > 0 ? '+' : ''}${ult.variacionPct}%)` : ''}
+                <br />
+                <span style={{ color: '#9ca3af' }}>{fmtDia(ult.fecha)} · hace {ult.diasDesde}d</span>
+              </p>
+            ) : (
+              <p style={{ margin: '2px 0 0', fontSize: '9.5px', color: '#c7c6c2' }}>sin cambios registrados</p>
+            )}
           </div>
-        ))}
+          );
+        })}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <button className="btn" style={{ fontSize: '11px', padding: '4px 10px' }} onClick={guardar} disabled={saving}>
@@ -73,7 +104,7 @@ function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, 
   );
 }
 
-function ClienteRow({ c, precios, onSaved }: { c: ClienteVenta; precios: PrecioVenta[]; onSaved: () => void }) {
+function ClienteRow({ c, precios, cambios, onSaved }: { c: ClienteVenta; precios: PrecioVenta[]; cambios: Record<string, CambioPrecioUI>; onSaved: () => void }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string|null>(null);
@@ -213,12 +244,12 @@ function ClienteRow({ c, precios, onSaved }: { c: ClienteVenta; precios: PrecioV
                     <PreciosSucursal key={suc}
                       idControl={String(c.id_control)} nombreCliente={c.nombre_xubio} sucursalObs={suc}
                       precioActual={precios.find(p => String(p.id_control) === String(c.id_control) && p.sucursal_obs === suc)}
-                      esKg={c.unidad === 'kg'} onSaved={onSaved} />
+                      esKg={c.unidad === 'kg'} onSaved={onSaved} cambios={cambios} />
                   ))
                 : <PreciosSucursal
                     idControl={String(c.id_control)} nombreCliente={c.nombre_xubio} sucursalObs={c.nombre_xubio}
                     precioActual={precios.find(p => String(p.id_control) === String(c.id_control))}
-                    esKg={c.unidad === 'kg'} onSaved={onSaved} />
+                    esKg={c.unidad === 'kg'} onSaved={onSaved} cambios={cambios} />
               }
             </div>
           </td>
@@ -228,7 +259,7 @@ function ClienteRow({ c, precios, onSaved }: { c: ClienteVenta; precios: PrecioV
   );
 }
 
-export default function ClientesVentaManager({ clientes, precios }: Props) {
+export default function ClientesVentaManager({ clientes, precios, cambios }: Props) {
   const router = useRouter();
   const [mostrarForm, setMostrarForm] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -312,11 +343,11 @@ export default function ClientesVentaManager({ clientes, precios }: Props) {
             </tr>
           </thead>
           <tbody>
-            {activos.map(c => <ClienteRow key={c.id_control} c={c} precios={precios} onSaved={() => router.refresh()} />)}
+            {activos.map(c => <ClienteRow key={c.id_control} c={c} precios={precios} cambios={cambios} onSaved={() => router.refresh()} />)}
             {inactivos.length > 0 && (
               <>
                 <tr><td colSpan={8} style={{ padding: '8px 6px 4px', fontSize: '11px', color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase' }}>Inactivos</td></tr>
-                {inactivos.map(c => <ClienteRow key={c.id_control} c={c} precios={precios} onSaved={() => router.refresh()} />)}
+                {inactivos.map(c => <ClienteRow key={c.id_control} c={c} precios={precios} cambios={cambios} onSaved={() => router.refresh()} />)}
               </>
             )}
           </tbody>

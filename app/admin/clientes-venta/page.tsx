@@ -4,6 +4,8 @@ import { readSheet } from '@/lib/sheets';
 import type { ClienteVenta, PrecioVenta } from '@/lib/types';
 import Header from '@/components/Header';
 import ClientesVentaManager from './ClientesVentaManager';
+import { HOJA_PRECIOS_HIST, cambiosPorProductoRecord, type CambioPrecio } from '@/lib/preciosHistorico';
+import { fechaArgentinaHoy } from '@/lib/ocupacion';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,10 +14,14 @@ export default async function ClientesVentaPage() {
   if (!user) redirect('/login');
   if (user.rol !== 'admin') redirect('/panel');
 
-  const [clientes, precios] = await Promise.all([
+  const [clientes, precios, historial] = await Promise.all([
     readSheet<ClienteVenta>('Clientes'),
     readSheet<PrecioVenta>('Precios'),
+    // La hoja puede no existir todavía: el historial arranca recién con el primer cambio
+    // de precio guardado desde la app.
+    readSheet<CambioPrecio>(HOJA_PRECIOS_HIST).catch(() => [] as CambioPrecio[]),
   ]);
+  const cambios = cambiosPorProductoRecord(historial, fechaArgentinaHoy());
 
   return (
     <>
@@ -23,7 +29,7 @@ export default async function ClientesVentaPage() {
       <div className="container">
         <h1 className="page-title">Clientes de ventas</h1>
         <p className="page-subtitle">Facturación y precios por cliente</p>
-        <ClientesVentaManager clientes={clientes} precios={precios} />
+        <ClientesVentaManager clientes={clientes} precios={precios} cambios={cambios} />
       </div>
     </>
   );

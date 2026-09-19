@@ -85,3 +85,40 @@ export function ultimaSubaPorCliente(historial: CambioPrecio[], hoy: string): Ma
   }
   return out;
 }
+
+export interface UltimoCambioProducto {
+  fecha: string;      // YYYY-MM-DD
+  anterior: number;
+  nuevo: number;
+  diferencia: number; // nuevo − anterior, en $
+  variacionPct: number;
+  diasDesde: number;
+}
+
+// Último cambio de precio de CADA producto de cada cliente. La clave es
+// "id_control||sucursal_obs||producto": un cliente con sucursales puede tener precios
+// distintos por sucursal, y mezclarlos mostraría un aumento que a esa sucursal no le pasó.
+export function ultimoCambioPorProducto(historial: CambioPrecio[], hoy: string): Map<string, UltimoCambioProducto> {
+  const out = new Map<string, UltimoCambioProducto>();
+  for (const c of historial) {
+    const fecha = soloFecha(c.fecha);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) continue;
+    const clave = `${String(c.id_control).trim()}||${String(c.sucursal_obs || '').trim()}||${String(c.producto || '').trim()}`;
+    const prev = out.get(clave);
+    if (prev && prev.fecha >= fecha) continue;
+    const anterior = Number(c.precio_anterior) || 0;
+    const nuevo = Number(c.precio_nuevo) || 0;
+    out.set(clave, {
+      fecha, anterior, nuevo,
+      diferencia: Math.round((nuevo - anterior) * 100) / 100,
+      variacionPct: Number(c.variacion_pct) || 0,
+      diasDesde: Math.round((new Date(hoy + 'T12:00:00').getTime() - new Date(fecha + 'T12:00:00').getTime()) / 86400000),
+    });
+  }
+  return out;
+}
+
+// La misma información, lista para mandarle a un componente de cliente.
+export function cambiosPorProductoRecord(historial: CambioPrecio[], hoy: string): Record<string, UltimoCambioProducto> {
+  return Object.fromEntries(ultimoCambioPorProducto(historial, hoy));
+}

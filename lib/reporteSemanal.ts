@@ -914,8 +914,15 @@ export function construirHtml(d: ReporteSemanalData): string {
   // ── Protocolo de aplicaciones ──
   // Primero lo accionable (lo que quedó sin registrar y lo que sigue pendiente hoy) y
   // después el cumplimiento acumulado, que es el que dice si esto se sostiene o no.
+  // Lo que falta en las 4 semanas de la tabla, que es una ventana distinta a la de
+  // arriba (7 días). Sin esto, el reporte decía "todo registrado" al lado de una tabla
+  // que mostraba tareas sin registrar.
+  const pendientes4Sem = d.protocoloCumplimiento.reduce((a, c) => a + c.pendientes, 0);
   const protoPendHtml = d.protocoloPendientes.length === 0 && d.protocoloHoy.length === 0
-    ? `<p style="margin:0 0 10px;font-size:13px;color:#059669">✓ Todas las tareas del protocolo quedaron registradas.</p>`
+    ? `<p style="margin:0 0 10px;font-size:13px;color:#059669">✓ Todas las tareas de ESTA SEMANA quedaron registradas.${
+        pendientes4Sem > 0
+          ? ` <span style="color:#b45309">Hacia atrás no: en las últimas 4 semanas quedaron ${pendientes4Sem} sin registrar (ver la tabla).</span>`
+          : ''}</p>`
     : `<ul style="margin:0 0 10px;padding-left:18px;font-size:13px;color:#111">
         ${d.protocoloPendientes.map((p) => `<li style="margin-bottom:3px;color:#dc2626">
           <strong>${p.tarea.nombre}</strong> — sin registrar del ${fmtDiaCorto(p.fecha)}
@@ -937,8 +944,8 @@ export function construirHtml(d: ReporteSemanalData): string {
     ${protoCumpFilas ? `<table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
       <thead><tr style="background:#f5f5f5">
         <th style="padding:6px 10px;text-align:left">Tarea</th>
-        <th style="padding:6px 10px;text-align:right">Registradas</th>
-        <th style="padding:6px 10px;text-align:right">Sin registrar</th>
+        <th style="padding:6px 10px;text-align:right">Registradas (4 sem.)</th>
+        <th style="padding:6px 10px;text-align:right">Sin registrar (4 sem.)</th>
         <th style="padding:6px 10px;text-align:right">Fuera de rango</th>
         <th style="padding:6px 10px;text-align:right">Cumplimiento 4 sem.</th>
       </tr></thead>
@@ -1148,7 +1155,9 @@ export function construirTexto(d: ReporteSemanalData): string {
   L.push('');
   L.push(`🧪 *Protocolo de aplicaciones*`);
   if (d.protocoloPendientes.length === 0 && d.protocoloHoy.length === 0) {
-    L.push(`  ✓ Todas las tareas quedaron registradas.`);
+    L.push(`  ✓ Todas las tareas de esta semana quedaron registradas.`);
+    const pend4 = d.protocoloCumplimiento.reduce((a, c) => a + c.pendientes, 0);
+    if (pend4 > 0) L.push(`  ⚠ Hacia atrás no: ${pend4} sin registrar en las últimas 4 semanas.`);
   } else {
     for (const p of d.protocoloPendientes) L.push(`  ✕ ${p.tarea.nombre} — sin registrar del ${fmtDiaCorto(p.fecha)}`);
     for (const p of d.protocoloHoy) L.push(`  • ${p.tarea.nombre} — ${p.estado === 'sin_decidir' ? 'falta que Marcelo defina' : 'pendiente de hoy'}`);
