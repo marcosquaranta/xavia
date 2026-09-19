@@ -30,3 +30,110 @@ export interface CobroRegistrado {
   estado: 'registrado' | 'anulado' | string;
   usuario: string;
 }
+
+// ── Registrar un cobro ───────────────────────────────────────────────────────────────
+//
+// Vive acá y no en el route porque lo usan dos pantallas: la carga manual de un cobro y la
+// bandeja de cobranzas. Una copia en cada lado se desincroniza al primer cambio, y este es
+// el camino que toca la contabilidad.
+//
+// El orden importa: primero Xubio, después el registro local. Si Xubio falla no queda una
+// fila mintiendo que se registró; si falla el registro local, el cobro igual está en Xubio
+// y se ve allá (mucho menos malo que al revés).
+
+import { appendRowObj, asegurarHoja, asegurarColumna, readSheet } from './sheets';
+import { crearCobranza, getClientesXubio, matchClienteXubio, getCircuitosContables, circuitoPorDefecto } from './xubio';
+import type { ClienteVenta } from './types';
+
+export interface PedidoCobro {
+  idControl: string;
+  fecha: string;          // YYYY-MM-DD
+  importe: number;
+  cuentaId: number;
+  observacion?: string;
+  comprobantes?: string[];
+  usuario: string;
+}
+
+export interface ResultadoCobro {
+  ok: boolean;
+  idCobro?: string;
+  transaccionid?: number;
+  numeroRecibo?: string;
+  circuito?: string;
+  error?: string;
+  status?: number;
+}
+
+export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
+  const idControl = String(p.idControl || '').trim();
+  const fecha = String(p.fecha || '').trim();
+  const importe = Number(p.importe);
+  const cuentaId = Number(p.cuentaId);
+  const observacion = String(p.observacion || '').trim();
+  const comprobantes = (p.comprobantes || []).map(x => String(x).trim()).filter(Boolean);
+
+  if (!idControl) return { ok: false, error: 'Falta el cliente.', status: 400 };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return { ok: false, error: 'La fecha tiene que ser válida.', status: 400 };
+  if (!(importe > 0)) return { ok: false, error: 'El importe tiene que ser mayor a 0.', status: 400 };
+  if (!(cuentaId > 0)) return { ok: false, error: 'Elegí en qué cuenta entró la plata.', status: 400 };
+
+  const clientes = await readSheet<ClienteVenta>('Clientes');
+  const cli = clientes.find((c) => String(c.id_control) === idControl);
+  if (!cli) return { ok: false, error: 'No se encontró el cliente.', status: 404 };
+
+  const clientesXubio = await getClientesXubio();
+  const clienteId = matchClienteXubio(cli.nombre_xubio || cli.nombre_display, clientesXubio);
+  if (!clienteId) return { ok: false, error: `No se pudo encontrar "${cli.nombre_xubio}" en Xubio.`, status: 400 };
+
+  // Xubio no deja imputar por API, así que las facturas van en la observación del recibo:
+  // es lo más cerca de "este cobro cancela estas facturas" que se puede dejar asentado allá.
+  const observacionXubio = comprobantes.length
+    ? `${observacion ? observacion + ' — ' : ''}Cancela: ${comprobantes.join(', ')}`
+    : observacion;
+
+  // Xubio exige el circuito contable y no asume uno por defecto. Si no se consigue se corta
+  // acá: Xubio lo va a rechazar igual, y su error ("El campo CircuitoContable esta vacío o
+  // es nulo") no dice dónde está el problema.
+  let circuitoId: number | undefined;
+  let circuitoNombre = '';
+  let circuitoError = '';
+  try {
+    const elegido = circuitoPorDefecto(await getCircuitosContables());
+    if (elegido) { circuitoId = elegido.id; circuitoNombre = elegido.nombre; }
+    else circuitoError = 'Xubio no devolvió ningún circuito contable.';
+  } catch (e: any) {
+    circuitoError = `No se pudo leer el circuito contable de Xubio (${e?.message || 'error'}).`;
+  }
+  if (!circuitoId) {
+    return {
+      ok: false, status: 502,
+      error: `${circuitoError} Sin ese dato Xubio rechaza la cobranza. Revisá en Xubio que haya un circuito contable activo (Configuración → Circuitos contables).`,
+    };
+  }
+
+  const r = await crearCobranza({ clienteId, fecha, importe, cuentaId, observacion: observacionXubio, circuitoId });
+  if (!r.ok) return { ok: false, error: `Xubio rechazó el cobro: ${r.error}`, status: 502 };
+
+  await asegurarHoja(HOJA_COBROS, HEADERS_COBROS);
+  await asegurarColumna(HOJA_COBROS, 'comprobantes'); // la hoja puede existir sin esta columna
+  const previos = await readSheet<CobroRegistrado>(HOJA_COBROS).catch(() => []);
+  const seq = previos.reduce((a, c) => Math.max(a, parseInt(String(c.id_cobro).replace(/\D/g, ''), 10) || 0), 0) + 1;
+  const idCobro = `CO-${String(seq).padStart(5, '0')}`;
+  await appendRowObj(HOJA_COBROS, {
+    id_cobro: idCobro,
+    fecha_registro: new Date().toISOString(),
+    id_control: idControl,
+    cliente: cli.nombre_display || cli.nombre_xubio,
+    fecha,
+    importe: Math.round(importe),
+    cuenta_id: cuentaId,
+    transaccionid: r.transaccionid || '',
+    numero_recibo: r.numeroRecibo || '',
+    comprobantes: comprobantes.join(', '),
+    observacion,
+    estado: 'registrado',
+    usuario: p.usuario,
+  });
+  return { ok: true, idCobro, transaccionid: r.transaccionid, numeroRecibo: r.numeroRecibo, circuito: circuitoNombre };
+}

@@ -1,95 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { appendRowObj, asegurarHoja, asegurarColumna, readSheet, updateRow } from '@/lib/sheets';
-import { crearCobranza, borrarCobranza, getClientesXubio, matchClienteXubio, getCircuitosContables, circuitoPorDefecto } from '@/lib/xubio';
-import { HOJA_COBROS, HEADERS_COBROS, type CobroRegistrado } from '@/lib/cobros';
-import type { ClienteVenta } from '@/lib/types';
+import { readSheet, updateRow } from '@/lib/sheets';
+import { borrarCobranza } from '@/lib/xubio';
+import { HOJA_COBROS, registrarCobro, type CobroRegistrado } from '@/lib/cobros';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// Registra un cobro en Xubio (POST cobranzaBean) y lo deja anotado acá con el
-// transaccionid que devolvió, que es lo que permite deshacerlo después. El orden importa:
-// primero Xubio, después el registro local. Si Xubio falla no queda una fila mintiendo que
-// se registró; si falla el registro local, el cobro igual está en Xubio y se ve en el
-// listado de Xubio (peor sería al revés).
+// Carga manual de un cobro. La lógica está en lib/cobros.ts porque la bandeja de cobranzas
+// registra por el mismo camino.
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
   if (user.rol !== 'admin') return NextResponse.json({ error: 'Solo un administrador puede registrar cobros.' }, { status: 403 });
   try {
     const body = await req.json();
-    const idControl = String(body.id_control || '').trim();
-    const fecha = String(body.fecha || '').trim();
-    const importe = Number(body.importe);
-    const cuentaId = Number(body.cuentaId);
-    const observacion = String(body.observacion || '').trim();
-    const comprobantes: string[] = Array.isArray(body.comprobantes)
-      ? body.comprobantes.map((x: any) => String(x).trim()).filter(Boolean)
-      : [];
-
-    if (!idControl) return NextResponse.json({ error: 'Falta el cliente.' }, { status: 400 });
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return NextResponse.json({ error: 'La fecha tiene que ser válida.' }, { status: 400 });
-    if (!(importe > 0)) return NextResponse.json({ error: 'El importe tiene que ser mayor a 0.' }, { status: 400 });
-    if (!(cuentaId > 0)) return NextResponse.json({ error: 'Elegí en qué cuenta entró la plata.' }, { status: 400 });
-
-    const clientes = await readSheet<ClienteVenta>('Clientes');
-    const cli = clientes.find((c) => String(c.id_control) === idControl);
-    if (!cli) return NextResponse.json({ error: 'No se encontró el cliente.' }, { status: 404 });
-
-    const clientesXubio = await getClientesXubio();
-    const clienteId = matchClienteXubio(cli.nombre_xubio || cli.nombre_display, clientesXubio);
-    if (!clienteId) return NextResponse.json({ error: `No se pudo encontrar "${cli.nombre_xubio}" en Xubio.` }, { status: 400 });
-
-    // Xubio no deja imputar por API, así que las facturas van en la observación del recibo:
-    // es lo más cerca de "este cobro cancela estas facturas" que se puede dejar asentado allá.
-    const observacionXubio = comprobantes.length
-      ? `${observacion ? observacion + ' — ' : ''}Cancela: ${comprobantes.join(', ')}`
-      : observacion;
-    // Xubio exige el circuito contable en la cobranza y no asume uno por defecto. Si no se
-    // consigue, se corta ACÁ en vez de mandar el POST: total Xubio lo va a rechazar igual y
-    // el error que devuelve ("El campo CircuitoContable esta vacío o es nulo") no dice dónde
-    // está el problema. Mejor avisar que el que falló fue el listado de circuitos.
-    let circuitoId: number | undefined;
-    let circuitoNombre = '';
-    let circuitoError = '';
-    try {
-      const elegido = circuitoPorDefecto(await getCircuitosContables());
-      if (elegido) { circuitoId = elegido.id; circuitoNombre = elegido.nombre; }
-      else circuitoError = 'Xubio no devolvió ningún circuito contable.';
-    } catch (e: any) {
-      circuitoError = `No se pudo leer el circuito contable de Xubio (${e?.message || 'error'}).`;
-    }
-    if (!circuitoId) {
-      return NextResponse.json({
-        error: `${circuitoError} Sin ese dato Xubio rechaza la cobranza. Revisá en Xubio que haya un circuito contable activo (Configuración → Circuitos contables).`,
-      }, { status: 502 });
-    }
-
-    const r = await crearCobranza({ clienteId, fecha, importe, cuentaId, observacion: observacionXubio, circuitoId });
-    if (!r.ok) return NextResponse.json({ error: `Xubio rechazó el cobro: ${r.error}` }, { status: 502 });
-
-    await asegurarHoja(HOJA_COBROS, HEADERS_COBROS);
-    await asegurarColumna(HOJA_COBROS, 'comprobantes'); // la hoja puede existir sin esta columna
-    const previos = await readSheet<CobroRegistrado>(HOJA_COBROS).catch(() => []);
-    const seq = previos.reduce((a, c) => Math.max(a, parseInt(String(c.id_cobro).replace(/\D/g, ''), 10) || 0), 0) + 1;
-    const idCobro = `CO-${String(seq).padStart(5, '0')}`;
-    await appendRowObj(HOJA_COBROS, {
-      id_cobro: idCobro,
-      fecha_registro: new Date().toISOString(),
-      id_control: idControl,
-      cliente: cli.nombre_display || cli.nombre_xubio,
-      fecha: fecha,
-      importe: Math.round(importe),
-      cuenta_id: cuentaId,
-      transaccionid: r.transaccionid || '',
-      numero_recibo: r.numeroRecibo || '',
-      comprobantes: comprobantes.join(', '),
-      observacion,
-      estado: 'registrado',
+    const r = await registrarCobro({
+      idControl: String(body.id_control || ''),
+      fecha: String(body.fecha || ''),
+      importe: Number(body.importe),
+      cuentaId: Number(body.cuentaId),
+      observacion: String(body.observacion || ''),
+      comprobantes: Array.isArray(body.comprobantes) ? body.comprobantes : [],
       usuario: user.email,
     });
-    return NextResponse.json({ ok: true, id_cobro: idCobro, transaccionid: r.transaccionid, numeroRecibo: r.numeroRecibo, circuito: circuitoNombre });
+    if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status || 500 });
+    return NextResponse.json({ ok: true, id_cobro: r.idCobro, transaccionid: r.transaccionid, numeroRecibo: r.numeroRecibo, circuito: r.circuito });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'server_error' }, { status: 500 });
   }

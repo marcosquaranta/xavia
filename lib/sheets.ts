@@ -153,6 +153,22 @@ export async function appendRow(sheetName: string, values: any[]): Promise<void>
 
 // Append por NOMBRE de columna: lee el header y ubica cada campo en su columna.
 // Inmune a cambios de orden o columnas nuevas en la planilla (a diferencia de appendRow posicional).
+// Varias filas de una sola vez. Importa cuando se cargan muchas juntas —un resumen
+// bancario son decenas de movimientos—: una llamada por fila se come la cuota de Sheets por
+// minuto y tarda una eternidad.
+export async function appendRowsObj(sheetName: string, objs: Record<string, any>[]): Promise<void> {
+  if (!objs.length) return;
+  const sheets = getClient();
+  const resp = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!1:1` });
+  const headers: string[] = (resp.data.values?.[0] as string[]) || [];
+  if (!headers.length) throw new Error(`No se pudo leer el header de ${sheetName}`);
+  const values = objs.map(obj => headers.map(h => (obj[h] !== undefined && obj[h] !== null ? obj[h] : '')));
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`,
+    valueInputOption: 'USER_ENTERED', requestBody: { values },
+  });
+}
+
 export async function appendRowObj(sheetName: string, obj: Record<string, any>): Promise<void> {
   const sheets = getClient();
   const resp = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!1:1` });

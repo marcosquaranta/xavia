@@ -13,6 +13,8 @@ import type { ClienteVenta } from '@/lib/types';
 import Header from '@/components/Header';
 import { ClientesRecordatorio, DatosPago, ProbarRecordatorios, type ClienteFila } from '@/components/CobranzasConfig';
 import RegistrarCobro from '@/components/RegistrarCobro';
+import BandejaCobranzas from '@/components/BandejaCobranzas';
+import { HOJA_BANDEJA, type ItemBandeja } from '@/lib/bandejaCobranzas';
 import ReclamoManual from '@/components/ReclamoManual';
 
 export const dynamic = 'force-dynamic';
@@ -36,14 +38,31 @@ export default async function CobranzasPage() {
 
   let clientes: ClienteVenta[] = [], enviados: RecordatorioCobro[] = [], configRows: { clave: string; valor: any }[] = [];
   let cobros: CobroRegistrado[] = [];
+  let bandeja: ItemBandeja[] = [];
   try {
-    [clientes, enviados, configRows, cobros] = await Promise.all([
+    [clientes, enviados, configRows, cobros, bandeja] = await Promise.all([
       readSheet<ClienteVenta>('Clientes').catch(() => []),
       readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => []),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
       readSheet<CobroRegistrado>(HOJA_COBROS).catch(() => []),
+      // La hoja no existe hasta la primera importación del resumen bancario.
+      readSheet<ItemBandeja>(HOJA_BANDEJA).catch(() => []),
     ]);
   } catch {}
+
+  // Lo pendiente de imputar, de lo más nuevo a lo más viejo.
+  const itemsBandeja = bandeja
+    .filter((i) => String(i.estado || '').trim() === 'pendiente')
+    .map((i) => ({
+      id_item: String(i.id_item),
+      fecha: String(i.fecha || '').split('T')[0],
+      importe: Number(i.importe) || 0,
+      descripcion: String(i.descripcion || ''),
+      id_control: String(i.id_control || '').trim(),
+      cliente: String(i.cliente || ''),
+      nota: String(i.nota || ''),
+    }))
+    .sort((a, b) => b.fecha.localeCompare(a.fecha) || b.importe - a.importe);
 
   const filas: ClienteFila[] = clientes
     .filter((c) => String(c.activo || '').toUpperCase() !== 'NO')
@@ -100,6 +119,24 @@ export default async function CobranzasPage() {
             si el cliente está al día, el recordatorio no sale. Y cada comprobante entra en un solo recordatorio,
             así nunca se reclama dos veces lo mismo.
           </p>
+        </div>
+
+        {/* ══ BANDEJA ══ */}
+        <div className="card" style={{ marginBottom: '14px' }}>
+          <p className="card-title">Bandeja — cobros por imputar</p>
+          <p className="card-sub">
+            Subís el resumen del banco y acá quedan los movimientos de entrada, uno por uno, con el cliente
+            propuesto y qué facturas podrían ser. Nada se registra en Xubio hasta que lo confirmás.
+            Cuando elegís el cliente a mano, la app se guarda cómo aparece ese pagador en el resumen y la
+            próxima vez lo reconoce sola.
+          </p>
+          <div style={{ marginTop: '10px' }}>
+            <BandejaCobranzas
+              items={itemsBandeja}
+              clientes={filas.map((f) => ({ id_control: f.id_control, nombre: f.nombre }))}
+              cuentas={cuentasXubio.map((c) => ({ id: c.id, nombre: c.nombre }))}
+            />
+          </div>
         </div>
 
         {/* ══ REGISTRAR UN COBRO ══ */}
