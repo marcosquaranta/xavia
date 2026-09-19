@@ -1,5 +1,6 @@
 import { readSheet, batchUpdateRows } from './sheets';
 import { registrarEmitidas } from './caePendientes';
+import { nombreClienteVisible } from './clientes';
 import type { ClienteVenta, PrecioVenta, VentaDia } from './types';
 import { getClientesXubio, matchClienteXubio, emitirFactura, ultimaFechaPorLetra, PRODUCTO_CODIGO } from './xubio';
 
@@ -182,11 +183,32 @@ export async function enviarPendientePorDia(email: string, nombreCliente: string
   }
 }
 
+// Cada factura del resultado viene con sus datos SEPARADOS —cliente, sucursal, fecha— y no
+// armados en una sola línea de texto: después de emitir un lote hay que poder revisar de un
+// vistazo qué salió y qué no, cliente por cliente y sucursal por sucursal.
+export interface FacturaEmitida {
+  cliente: string;          // nombre del cliente, sin adornos
+  sucursal?: string;        // cuando la factura salió separada por sucursal
+  fechaVenta: string;       // la fecha de la entrega
+  numero?: string;
+  cae?: string;
+  total: number;
+  emailCliente?: 'enviado' | 'sin_email' | 'error';
+  // Cuando la factura no pudo salir con la fecha de la venta (ver fechaDeFactura).
+  fechaAjustada?: { venta: string; factura: string };
+}
+
+export interface FacturaConError {
+  cliente: string;
+  sucursal?: string;
+  fechaVenta: string;
+  total: number;
+  error: string;
+}
+
 export interface ResultadoEmision {
-  emitidas: { cliente: string; numero?: string; cae?: string; emailCliente?: 'enviado' | 'sin_email' | 'error';
-    // Cuando la factura no pudo salir con la fecha de la venta (ver fechaDeFactura).
-    fechaAjustada?: { venta: string; factura: string } }[];
-  errores: { cliente: string; error: string }[];
+  emitidas: FacturaEmitida[];
+  errores: FacturaConError[];
 }
 
 // Con qué fecha se emite la factura.
@@ -276,7 +298,7 @@ export async function emitirPendientes(
     String(a.lineas[0]?.fecha || '').localeCompare(String(b.lineas[0]?.fecha || '')));
 
   const emitidas: ResultadoEmision['emitidas'] = [];
-  const errores: { cliente: string; error: string }[] = [];
+  const errores: FacturaConError[] = [];
   const paraRegistrar: { cliente: string; numero?: string; cae?: string; fechaVenta: string }[] = [];
 
   for (const { idControl, sucursal, fecha, lineas } of ordenados) {
@@ -284,10 +306,12 @@ export async function emitirPendientes(
     // Nombre que se muestra en emitidas/errores — con la sucursal entre paréntesis
     // cuando la factura salió separada, para poder distinguir cuál es cuál de un vistazo.
     const nombre = (cliente?.nombre_xubio || idControl) + (sucursal ? ` (${sucursal})` : '') + (fecha ? ` — ${fecha}` : '');
-    if (!cliente) { errores.push({ cliente: nombre, error: 'cliente no encontrado en la base local' }); continue; }
+    const fechaLinea = String(lineas[0]?.fecha || '').split(/[T ]/)[0];
+    const datos = { cliente: cliente?.nombre_xubio || nombreClienteVisible(cliente) || idControl, sucursal: sucursal || undefined, fechaVenta: fechaLinea, total: 0 };
+    if (!cliente) { errores.push({ ...datos, error: 'cliente no encontrado en la base local' }); continue; }
 
     const clienteId = matchClienteXubio(cliente.nombre_xubio, clientesXubio);
-    if (!clienteId) { errores.push({ cliente: nombre, error: 'no se encontró el cliente en Xubio (revisá que el nombre coincida)' }); continue; }
+    if (!clienteId) { errores.push({ ...datos, error: 'no se encontró el cliente en Xubio (revisá que el nombre coincida)' }); continue; }
 
     // Se calcula antes de armar los renglones porque la descripción de cada uno lleva la
     // fecha de entrega cuando la factura no puede salir con esa fecha (ver fechaDeFactura):
@@ -326,22 +350,23 @@ export async function emitirPendientes(
       // No debería pasar (ya se filtró por cantidad>0 antes de marcar PENDIENTE), pero
       // si pasa no lo dejamos en silencio: sin esto, el cliente quedaba PENDIENTE para
       // siempre sin ningún rastro de error ni de éxito.
-      errores.push({ cliente: nombre, error: 'sin productos con cantidad > 0 (revisar la carga de esta venta)' });
+      errores.push({ ...datos, error: 'sin productos con cantidad > 0 (revisar la carga de esta venta)' });
       continue;
     }
 
+    const totalFactura = Math.round(detalle.reduce((a, d) => a + d.importe, 0));
     const esA = esA_;
     let res;
     try {
       res = await emitirFactura({ clienteId, esA, fecha: fechaFactura, items });
     } catch (e: any) {
       console.error(`[facturacionEmitir] excepción emitiendo factura para ${nombre}:`, e);
-      errores.push({ cliente: nombre, error: e?.message || 'excepción al emitir' });
+      errores.push({ ...datos, total: totalFactura, error: e?.message || 'excepción al emitir' });
       continue;
     }
 
     if (res.ok) {
-      const emitida: ResultadoEmision['emitidas'][number] = { cliente: nombre, numero: res.numeroDocumento, cae: res.cae };
+      const emitida: FacturaEmitida = { ...datos, total: totalFactura, numero: res.numeroDocumento, cae: res.cae };
       if (fechaFactura !== fechaVenta) emitida.fechaAjustada = { venta: fechaVenta, factura: fechaFactura };
       // La numeración avanzó: la próxima factura de este lote no puede ir más atrás.
       if (fechaFactura > (ultimaFecha[esA ? 'A' : 'B'] || '')) ultimaFecha[esA ? 'A' : 'B'] = fechaFactura;
@@ -367,7 +392,7 @@ export async function emitirPendientes(
       })));
     } else {
       console.error(`[facturacionEmitir] Xubio rechazó la factura de ${nombre}:`, res.error);
-      errores.push({ cliente: nombre, error: res.error || 'Error desconocido' });
+      errores.push({ ...datos, total: totalFactura, error: res.error || 'Error desconocido' });
     }
   }
 

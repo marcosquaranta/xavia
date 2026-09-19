@@ -174,50 +174,113 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
   }
 
   if (result) {
+    const nOk = result.emitidas.length;
+    const nErr = result.errores.length;
+    const totalOk = result.emitidas.reduce((a: number, e: any) => a + (Number(e.total) || 0), 0);
+    const totalErr = result.errores.reduce((a: number, e: any) => a + (Number(e.total) || 0), 0);
+    const ajustadas = result.emitidas.filter((e: any) => e.fechaAjustada);
+
     return (
       <div>
-        <p className="card-title">Resultado de la facturación</p>
-        {result.emitidas.length > 0 && (
-          <div style={{ background: '#eff6ff', border: '1px solid #93c5fd', borderRadius: '8px', padding: '12px 14px', marginBottom: '14px' }}>
-            <p style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: '#1e40af' }}>📌 Último paso en Xubio (manual)</p>
-            <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: '#1e40af' }}>
-              Las facturas ya están importadas. Entrá a <strong>Xubio → Comprobantes de venta</strong>, seleccionalas y apretá <strong>"Obtener CAE"</strong> (las A), y después <strong>"Enviar por correo"</strong>. La API de Xubio no permite hacer esos dos pasos automáticamente.
+        {/* Encabezado: lo primero que se tiene que ver es si salió todo o no. En rojo
+            cuando algo falló, porque eso es lo que hay que ir a arreglar. */}
+        <div style={{
+          borderRadius: '10px', padding: '14px 16px', marginBottom: '14px',
+          background: nErr > 0 ? '#fef2f2' : '#f0fdf4',
+          border: `2px solid ${nErr > 0 ? '#dc2626' : '#16a34a'}`,
+        }}>
+          <p style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: nErr > 0 ? '#991b1b' : '#166534' }}>
+            {nErr === 0
+              ? `✓ Salió todo: ${nOk} ${nOk === 1 ? 'factura emitida' : 'facturas emitidas'}`
+              : `⚠ ${nErr} ${nErr === 1 ? 'factura NO se emitió' : 'facturas NO se emitieron'}${nOk > 0 ? ` · ${nOk} sí` : ''}`}
+          </p>
+          <p style={{ margin: '4px 0 0', fontSize: '13px', color: nErr > 0 ? '#991b1b' : '#166534' }}>
+            {nOk > 0 && <>Emitido: <strong>{fmt(totalOk)}</strong>. </>}
+            {nErr > 0 && <>Sin emitir: <strong>{fmt(totalErr)}</strong> — esas ventas quedaron pendientes, se pueden corregir y reintentar.</>}
+          </p>
+        </div>
+
+        {/* Los errores van ARRIBA: es lo único que pide una acción. */}
+        {nErr > 0 && (
+          <div style={{ marginBottom: '16px' }}>
+            <p style={{ fontSize: '13px', fontWeight: 800, color: '#991b1b', margin: '0 0 6px' }}>
+              Qué falló y por qué
             </p>
-          </div>
-        )}
-        {result.emitidas.length > 0 && (
-          <div style={{ marginBottom: '14px' }}>
-            <p style={{ fontSize: '12px', fontWeight: 700, color: '#166534', margin: '0 0 6px' }}>✓ Importadas a Xubio ({result.emitidas.length})</p>
-            {result.emitidas.map((e, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', padding: '5px 10px', background: '#f0fdf4', borderRadius: '6px', marginBottom: '4px' }}>
-                <span>{e.cliente}</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {e.emailCliente === 'enviado' && <span style={{ fontSize: '11px', color: '#059669' }} title="Detalle enviado al cliente por mail">📧 enviado</span>}
-                  {e.emailCliente === 'sin_email' && <span style={{ fontSize: '11px', color: '#d97706' }} title="Este cliente no tiene email cargado">📧 sin email</span>}
-                  {e.emailCliente === 'error' && <span style={{ fontSize: '11px', color: '#dc2626' }} title="Falló el envío del mail al cliente">📧 error al enviar</span>}
-                  {e.fechaAjustada && (
-                    <span style={{ fontSize: '11px', color: '#b45309' }}
-                      title={`La venta es del ${e.fechaAjustada.venta}, pero la numeración del punto de venta ya estaba en ${e.fechaAjustada.factura}. AFIP no permite que un comprobante con número mayor tenga fecha anterior, así que la factura salió con esa fecha.`}>
-                      📅 emitida con fecha {e.fechaAjustada.factura}
-                    </span>
-                  )}
-                  <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{e.numero}{e.cae ? ` · CAE ${e.cae}` : ''}</span>
-                </span>
+            {result.errores.map((e: any, i: number) => (
+              <div key={i} style={{ fontSize: '13px', padding: '9px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderLeft: '4px solid #dc2626', borderRadius: '6px', marginBottom: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                  <strong style={{ color: '#111827' }}>
+                    {e.cliente}
+                    {e.sucursal && <span style={{ color: '#6b7280', fontWeight: 600 }}> — {e.sucursal}</span>}
+                    {e.fechaVenta && <span style={{ color: '#9ca3af', fontWeight: 400 }}> · entrega {fmtDia(e.fechaVenta)}</span>}
+                  </strong>
+                  {Number(e.total) > 0 && <span style={{ fontWeight: 700 }}>{fmt(e.total)}</span>}
+                </div>
+                <div style={{ marginTop: '3px', color: '#991b1b' }}>{e.error}</div>
               </div>
             ))}
           </div>
         )}
-        {result.errores.length > 0 && (
-          <div>
-            <p style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', margin: '0 0 6px' }}>✗ Con error ({result.errores.length}) — quedan pendientes</p>
-            {result.errores.map((e, i) => (
-              <div key={i} style={{ fontSize: '13px', padding: '5px 10px', background: '#fef2f2', borderRadius: '6px', marginBottom: '4px' }}>
-                <strong>{e.cliente}:</strong> {e.error}
-              </div>
-            ))}
-          </div>
+
+        {nOk > 0 && (
+          <>
+            <p style={{ fontSize: '13px', fontWeight: 800, color: '#166534', margin: '0 0 6px' }}>
+              Emitidas correctamente ({nOk})
+            </p>
+            <div style={{ overflowX: 'auto', marginBottom: '14px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', minWidth: '560px' }}>
+                <thead><tr style={{ background: '#f9fafb', color: '#6b7280' }}>
+                  <th style={{ textAlign: 'left', padding: '5px 8px' }}>Cliente</th>
+                  <th style={{ textAlign: 'left', padding: '5px 8px' }}>Sucursal</th>
+                  <th style={{ textAlign: 'left', padding: '5px 8px' }}>Entrega</th>
+                  <th style={{ textAlign: 'left', padding: '5px 8px' }}>Comprobante</th>
+                  <th style={{ textAlign: 'right', padding: '5px 8px' }}>Importe</th>
+                  <th style={{ textAlign: 'left', padding: '5px 8px' }}>Avisos</th>
+                </tr></thead>
+                <tbody>
+                  {result.emitidas.map((e: any, i: number) => (
+                    <tr key={i} style={{ borderTop: '1px solid #f3f4f6', background: '#f0fdf4' }}>
+                      <td style={{ padding: '6px 8px', fontWeight: 600 }}>{e.cliente}</td>
+                      <td style={{ padding: '6px 8px', color: '#6b7280' }}>{e.sucursal || '—'}</td>
+                      <td style={{ padding: '6px 8px', color: '#6b7280' }}>{e.fechaVenta ? fmtDia(e.fechaVenta) : '—'}</td>
+                      <td style={{ padding: '6px 8px', fontFamily: 'monospace', fontWeight: 700 }}>
+                        {e.numero || '—'}
+                        {e.cae && <span style={{ color: '#6b7280', fontWeight: 400 }}> · CAE {e.cae}</span>}
+                      </td>
+                      <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700 }}>{fmt(e.total || 0)}</td>
+                      <td style={{ padding: '6px 8px', fontSize: '11px' }}>
+                        {e.emailCliente === 'enviado' && <span style={{ color: '#059669' }}>📧 detalle enviado</span>}
+                        {e.emailCliente === 'sin_email' && <span style={{ color: '#d97706' }}>📧 sin mail cargado</span>}
+                        {e.emailCliente === 'error' && <span style={{ color: '#dc2626' }}>📧 falló el envío</span>}
+                        {e.fechaAjustada && (
+                          <span style={{ color: '#b45309', display: 'block' }}
+                            title="AFIP no permite que un comprobante con número mayor tenga fecha anterior a uno ya emitido, así que la factura salió con la fecha del último comprobante.">
+                            📅 emitida {fmtDia(e.fechaAjustada.factura)}, no {fmtDia(e.fechaAjustada.venta)}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {ajustadas.length > 0 && (
+              <p style={{ fontSize: '12px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '8px 11px', margin: '0 0 12px', lineHeight: 1.5 }}>
+                {ajustadas.length === 1 ? 'Una factura salió' : `${ajustadas.length} facturas salieron`} con una fecha posterior a la de la entrega, porque la numeración del punto de venta ya estaba más adelante y AFIP no permite ir para atrás. La fecha real de cada entrega va en la descripción de cada renglón del comprobante.
+              </p>
+            )}
+
+            <div style={{ background: '#eff6ff', border: '1px solid #93c5fd', borderRadius: '8px', padding: '12px 14px', marginBottom: '14px' }}>
+              <p style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: '#1e40af' }}>📌 Último paso en Xubio (manual)</p>
+              <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: '#1e40af' }}>
+                Las facturas ya están importadas. Entrá a <strong>Xubio → Comprobantes de venta</strong>, seleccionalas y apretá <strong>"Obtener CAE"</strong> (las A), y después <strong>"Enviar por correo"</strong>. La API de Xubio no permite hacer esos dos pasos automáticamente.
+              </p>
+            </div>
+          </>
         )}
-        <button className="btn secondary" style={{ marginTop: '12px' }} onClick={() => { setResult(null); router.refresh(); }}>Volver</button>
+
+        <button className="btn secondary" onClick={() => { setResult(null); router.refresh(); }}>Volver</button>
       </div>
     );
   }
