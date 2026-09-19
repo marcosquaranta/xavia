@@ -152,9 +152,38 @@ function clientesMesConVariacion(ventas: VentaDia[], clientes: ClienteVenta[], a
   return { filas, totalMes };
 }
 
+// Conclusión de una o dos líneas abajo de cada gráfico. Está en el informe porque el que
+// lo lee por mail no tiene el gráfico a mano para sacar la tendencia solo: el texto dice
+// qué pasó, el gráfico lo muestra.
+function Conclusion({ children }: { children: React.ReactNode }) {
+  if (!children) return null;
+  return (
+    <p style={{ margin: '8px 0 0', fontSize: '12.5px', color: '#374151', lineHeight: 1.5, borderLeft: '3px solid #d1d5db', paddingLeft: '9px' }}>
+      {children}
+    </p>
+  );
+}
+
+// Primer y último valor de cada serie, para poder decir "de X a Y". Se ignoran los buckets
+// vacíos: un mes sin datos no es un cero, es un mes sin datos.
+function tendenciaSeries(series: { nombre: string; puntos: [number, number][] }[], unidad: string, decimales = 0): string {
+  const partes: string[] = [];
+  for (const serie of series) {
+    const pts = [...serie.puntos].sort((a, b) => a[0] - b[0]);
+    if (pts.length < 2) continue;
+    const ini = pts[0][1], fin = pts[pts.length - 1][1];
+    const delta = fin - ini;
+    const n = (v: number) => v.toFixed(decimales).replace('.', ',');
+    const signo = delta > 0 ? '+' : delta < 0 ? '\u2212' : '';
+    partes.push(`${serie.nombre} ${n(ini)} \u2192 ${n(fin)}${unidad}${delta !== 0 ? ` (${signo}${n(Math.abs(delta))})` : ' (sin cambio)'}`);
+  }
+  return partes.join(' \u00b7 ');
+}
+
 const cardStyle: React.CSSProperties = { background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px', marginBottom: '14px' };
 const tituloSeccion: React.CSSProperties = { fontSize: '16px', fontWeight: 800, margin: '28px 0 12px', color: '#111827', borderBottom: '2px solid #e5e7eb', paddingBottom: '6px' };
 const fmt = (n: number) => Math.round(n).toLocaleString('es-AR');
+const fmtMoneda = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 
 export default async function AnalisisMensualPage({ searchParams }: { searchParams: { anio?: string; mes?: string } }) {
   const user = await getCurrentUser();
@@ -216,7 +245,7 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
     return isNaN(f.getTime()) || f <= refDate;
   });
 
-  const b30 = buckets30(refDate), b180 = buckets180(refDate);
+  const b180 = buckets180(refDate);
 
   // ── 1. VENTAS ──
   const evolArticulo = evolucionVentaPorArticulo(ventasRep, 12, historicas);
@@ -227,13 +256,17 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
   // mostrar los clientes de ese momento, no los de ahora.
   const clientesPrecioVolumen = clientesPrecioVsVolumen(ventasRep, precios, clientes, lotes, refDate, 30);
   const ultimaSuba = await ultimaSubaPorClienteRecord();
-  const clientesMes = clientesMesConVariacion(ventas, clientes, anioSel, mesSel, 8);
+  // Solo los principales: la lista completa de clientes chicos no se decide nada con
+  // ella y hace que el informe sea el doble de largo. El resto se resume en una fila.
+  const clientesMes = clientesMesConVariacion(ventas, clientes, anioSel, mesSel, 6);
 
   // ── 2. PRODUCCIÓN ──
-  const evoCiclos30 = evolucionCiclos(lotesRep, movimientos, b30);
+  // Todo por MES. Las series diarias se sacaron del informe: un informe mensual que
+  // muestra el zigzag de cada día obliga a leer ruido para encontrar la tendencia, que es
+  // lo único que se decide una vez por mes.
   const evoCiclos180 = evolucionCiclos(lotesRep, movimientos, b180);
-  const evoPlantasPaq30 = evolucionPlantasPorPaquete(lotesRep, b30);
-  const evoDescartes30 = evolucionDescartes(lotesRep, b30);
+  const evoPlantasPaqMes = evolucionPlantasPorPaquete(lotesRep, b180);
+  const evoDescartesMes = evolucionDescartes(lotesRep, b180);
 
   // Pesaje testigo — últimos 180 días hasta el cierre del mes elegido, agregado POR MES
   // (b180 arma 6 buckets mensuales) — antes era un punto por cosecha individual, que con
@@ -369,6 +402,9 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
   // Stocks (anio/mes elegidos), no siempre el mes en curso.
   const driversMesSel = calcularDriversMes(lotes, ventas, precios, clientes, anioSel, mesSel);
   const catMatch = (cat: string, kw: string) => String(cat || '').toLowerCase().includes(kw);
+  // Cuánto se tiene que despegar el uso real del teórico para que valga la pena
+  // mirarlo. Por debajo de esto es merma normal y error de conteo del stock.
+  const UMBRAL_DIF_USO_PCT = 10;
   const gruposUso = [
     { titulo: 'Bolsas (Packaging)', kw: 'packaging' },
     { titulo: 'Semillas', kw: 'semilla' },
@@ -380,13 +416,18 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
       const usoReal = stockRow ? Number(stockRow.uso_calculado) || 0 : null;
       const usoTeorico = art.formula_uso ? calcularUsoTeorico(art.formula_uso, Number(art.factor_uso) || 0, driversMesSel) : null;
       const diff = usoReal !== null && usoTeorico !== null ? usoReal - usoTeorico : null;
+      const pct = diff !== null && usoTeorico ? Math.round((diff / usoTeorico) * 1000) / 10 : null;
       return {
-        articulo: art.articulo, unidad: art.unidad_medida, usoReal, usoTeorico, diff,
+        articulo: art.articulo, unidad: art.unidad_medida, usoReal, usoTeorico, diff, pct,
         detalle: stockRow ? `ini ${fmt(Number(stockRow.stock_inicial) || 0)} + compras ${fmt(Number(stockRow.compras) || 0)} − final ${fmt(Number(stockRow.stock_final) || 0)}` : null,
       };
     }).filter(f => f.usoReal !== null || f.usoTeorico !== null);
-    return { titulo, filas };
-  }).filter(g => g.filas.length > 0);
+    // Se muestran SOLO los que se despegan de la teoría. Un artículo que usa lo que tiene
+    // que usar no necesita revisión, y listarlos todos hacía que las tres o cuatro
+    // diferencias que importan se perdieran entre veinte filas correctas.
+    const grandes = filas.filter(f => f.pct !== null && Math.abs(f.pct) >= UMBRAL_DIF_USO_PCT);
+    return { titulo, filas: grandes, revisados: filas.length, sinDatos: filas.filter(f => f.pct === null).length };
+  }).filter(g => g.revisados > 0);
 
   return (
     <>
@@ -420,18 +461,21 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
 
         {/* ══ INDICADORES OPERATIVOS MARCE — mismos 3 KPIs que en Estadísticas, acá
             recalculados hasta el cierre del mes elegido ══ */}
-        <div style={{ background: 'linear-gradient(135deg, #1e293b, #0f172a)', borderRadius: '14px', padding: '20px 20px 22px', margin: '14px 0 18px' }}>
+        {/* Fondo blanco y sin degradados: este bloque se copia y se pega en un mail, y los
+            degradados no sobreviven al pegado — quedaba un rectángulo gris con texto
+            blanco encima, ilegible. */}
+        <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px 16px 18px', margin: '14px 0 18px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px', marginBottom: '16px' }}>
             <div>
-              <p style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.6px' }}>KPIs de gestión — {nombre}</p>
-              <h2 style={{ margin: '2px 0 0', fontSize: '22px', fontWeight: 900, color: 'white' }}>Indicadores Operativos Marce</h2>
+              <p style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.6px' }}>KPIs de gestión — {nombre}</p>
+              <h2 style={{ margin: '2px 0 0', fontSize: '20px', fontWeight: 800, color: '#111827' }}>Indicadores Operativos Marce</h2>
             </div>
-            <Link href="/produccion/puesto" style={{ fontSize: '12px', color: '#e2e8f0', textDecoration: 'underline', fontWeight: 600, whiteSpace: 'nowrap' }}>
+            <Link href="/produccion/puesto" style={{ fontSize: '12px', color: '#1d4ed8', textDecoration: 'underline', fontWeight: 600, whiteSpace: 'nowrap' }}>
               Ver descripción completa del puesto →
             </Link>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
-            <div style={{ ...cardStyle, margin: 0 }}>
+            <div style={{ ...cardStyle, margin: 0, border: '1px solid #f3f4f6' }}>
               <p style={{ margin: '0 0 2px', fontSize: '12.5px', fontWeight: 700 }}>1. Ocupación de posiciones</p>
               <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#9ca3af' }}>Objetivo: 95% promedio mensual, por cultivo</p>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '6px' }}>
@@ -456,7 +500,7 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
               <Link href="/ocupacion" style={{ fontSize: '11px', color: '#2563eb', textDecoration: 'none', fontWeight: 600, display: 'inline-block', marginTop: '8px' }}>Ver detalle en Ocupación →</Link>
             </div>
 
-            <div style={{ ...cardStyle, margin: 0 }}>
+            <div style={{ ...cardStyle, margin: 0, border: '1px solid #f3f4f6' }}>
               <p style={{ margin: '0 0 2px', fontSize: '12.5px', fontWeight: 700 }}>2. Eficiencia Siembra → Cosecha</p>
               <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#9ca3af' }}>% que llega vivo a cosecha, según descarte de las 3 etapas — sin ventas ni cámara. Sin objetivo fijado aún</p>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '6px' }}>
@@ -474,7 +518,7 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
               <Link href="/estadisticas#descarte-por-fase" style={{ fontSize: '11px', color: '#2563eb', textDecoration: 'none', fontWeight: 600, display: 'inline-block', marginTop: '8px' }}>Ver desglose de descarte por fase →</Link>
             </div>
 
-            <div style={{ ...cardStyle, margin: 0 }}>
+            <div style={{ ...cardStyle, margin: 0, border: '1px solid #f3f4f6' }}>
               <p style={{ margin: '0 0 2px', fontSize: '12.5px', fontWeight: 700 }}>3. Productividad de empleados</p>
               <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#9ca3af' }}>Plantas cosechadas al mes por hora-persona total. En medición — sin objetivo aún</p>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '10px' }}>
@@ -492,15 +536,48 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
         {/* ══ 1. VENTAS ══ */}
         <h2 style={tituloSeccion}>1. Ventas</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '14px', marginBottom: '14px' }}>
-          <GraficoVentaPorArticulo datos={evolArticulo} />
-          <GraficoVentaPorCliente mensual={evolClienteMensual} ocultarToggle />
+          <div>
+            <GraficoVentaPorArticulo datos={evolArticulo} />
+            <Conclusion>
+              {(() => {
+                const conDatos = evolArticulo.filter(m => (m.rucula + m.lechuga + m.albahaca) > 0);
+                if (conDatos.length < 2) return '';
+                const ult = conDatos[conDatos.length - 1], ant = conDatos[conDatos.length - 2];
+                const t = (m: typeof ult) => m.rucula + m.lechuga + m.albahaca;
+                const d = t(ult) - t(ant);
+                const pct = t(ant) > 0 ? Math.round((d / t(ant)) * 100) : 0;
+                return `${ult.label}: ${fmt(t(ult))} unidades, ${d >= 0 ? '+' : '−'}${fmt(Math.abs(d))} (${pct >= 0 ? '+' : ''}${pct}%) contra ${ant.label}.`;
+              })()}
+            </Conclusion>
+          </div>
+          <div>
+            <GraficoVentaPorCliente mensual={evolClienteMensual} ocultarToggle />
+            <Conclusion>
+              Cada línea es un cliente: lo que importa acá no es el nivel sino el quiebre — un cliente que cae dos meses seguidos se está yendo, aunque el total no se mueva.
+            </Conclusion>
+          </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '14px', marginBottom: '14px' }}>
-          <GraficoValorComercial datos={clientesPrecioVolumen} subtitulo={`30 días hasta ${nombre}`} ultimaSuba={ultimaSuba} />
-          <GraficoPrecioPromedio datos={evolPrecio} />
+          <div>
+            <GraficoValorComercial datos={clientesPrecioVolumen} subtitulo={`30 días hasta ${nombre}`} ultimaSuba={ultimaSuba} />
+          </div>
+          <div>
+            <GraficoPrecioPromedio datos={evolPrecio} />
+            <Conclusion>
+              {(() => {
+                const conDatos = evolPrecio.filter(m => m.precioRucula > 0 || m.precioLechuga > 0);
+                if (conDatos.length < 2) return '';
+                const ult = conDatos[conDatos.length - 1], pri = conDatos[0];
+                const parte = (nom: string, a: number, b: number) =>
+                  a > 0 && b > 0 ? `${nom} ${fmtMoneda(a)} → ${fmtMoneda(b)} (${Math.round(((b - a) / a) * 100)}%)` : '';
+                const partes = [parte('Rúcula', pri.precioRucula, ult.precioRucula), parte('Lechuga', pri.precioLechuga, ult.precioLechuga)].filter(Boolean);
+                return partes.length ? `${partes.join(' · ')} entre ${pri.label} y ${ult.label}. Comparalo contra la inflación del mismo período: si quedó abajo, el precio bajó en términos reales.` : '';
+              })()}
+            </Conclusion>
+          </div>
           <div style={cardStyle}>
             <p className="card-title" style={{ margin: '0 0 2px' }}>Venta por cliente — {nombre}</p>
-            <p className="card-sub" style={{ margin: '0 0 10px' }}>Unidades del mes · variación vs. mes anterior · % del total</p>
+            <p className="card-sub" style={{ margin: '0 0 10px' }}>Principales clientes · unidades del mes · variación vs. mes anterior · % del total</p>
             {clientesMes.filas.length === 0 ? (
               <p style={{ color: '#9ca3af', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin ventas cargadas este mes.</p>
             ) : (
@@ -522,6 +599,22 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
                       <td style={{ textAlign: 'right', color: '#6b7280' }}>{c.pctTotal}%</td>
                     </tr>
                   ))}
+                  {(() => {
+                    // Lo que queda afuera del top no se esconde: se muestra junto, para que
+                    // el total siga cerrando y se vea cuánto pesa la cola de clientes chicos.
+                    const listado = clientesMes.filas.reduce((a: number, c: any) => a + c.total, 0);
+                    const resto = clientesMes.totalMes - listado;
+                    if (resto <= 0) return null;
+                    const pctResto = clientesMes.totalMes > 0 ? Math.round((resto / clientesMes.totalMes) * 100) : 0;
+                    return (
+                      <tr style={{ borderBottom: '1px solid #f3f4f6', color: '#6b7280' }}>
+                        <td>Resto de clientes</td>
+                        <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(resto)}</td>
+                        <td></td>
+                        <td style={{ textAlign: 'right' }}>{pctResto}%</td>
+                      </tr>
+                    );
+                  })()}
                   <tr style={{ fontWeight: 700, background: '#f8fafc' }}>
                     <td>Total</td>
                     <td style={{ textAlign: 'right' }}>{fmt(clientesMes.totalMes)}</td>
@@ -530,6 +623,15 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
                 </tbody>
               </table>
             )}
+            <Conclusion>
+              {(() => {
+                if (!clientesMes.filas.length) return '';
+                const top = clientesMes.filas[0];
+                const suben = clientesMes.filas.filter((c: any) => c.variacionPct !== null && c.variacionPct > 0).length;
+                const bajan = clientesMes.filas.filter((c: any) => c.variacionPct !== null && c.variacionPct < 0).length;
+                return `${top.nombre} concentra el ${top.pctTotal}% del mes. De los principales, ${suben} ${suben === 1 ? 'creció' : 'crecieron'} y ${bajan} ${bajan === 1 ? 'bajó' : 'bajaron'} contra el mes anterior.`;
+              })()}
+            </Conclusion>
           </div>
         </div>
 
@@ -537,36 +639,65 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
         <h2 style={tituloSeccion}>2. Producción</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '14px', marginBottom: '14px' }}>
           <div style={cardStyle}>
-            <p className="card-title" style={{ margin: '0 0 2px' }}>Evolución de ciclo — últimos 30 días</p>
-            <p className="card-sub" style={{ margin: '0 0 10px' }}>Días F2 promedio, por día</p>
-            <GraficoEvolucion series={evoCiclos30.series} labels={evoCiclos30.labels} hoyIdx={evoCiclos30.hoyIdx} />
-          </div>
-          <div style={cardStyle}>
-            <p className="card-title" style={{ margin: '0 0 2px' }}>Evolución de ciclo — últimos 180 días</p>
-            <p className="card-sub" style={{ margin: '0 0 10px' }}>Días F2 promedio, por mes</p>
+            <p className="card-title" style={{ margin: '0 0 2px' }}>Evolución de ciclo</p>
+            <p className="card-sub" style={{ margin: '0 0 10px' }}>Días de fase 2 promedio, por mes · últimos 6 meses</p>
             <GraficoEvolucion series={evoCiclos180.series} labels={evoCiclos180.labels} hoyIdx={evoCiclos180.hoyIdx} />
+            <Conclusion>
+              {tendenciaSeries(evoCiclos180.series, ' d')}
+              {'. '}
+              Menos días de fase 2 es más vueltas de mesada por año, que es lo que multiplica todo lo demás.
+            </Conclusion>
           </div>
           <div id="productividad-paq" style={{ ...cardStyle, scrollMarginTop: '16px' }}>
             <p className="card-title" style={{ margin: '0 0 2px' }}>Productividad — paquetes / hora-hombre</p>
             <p className="card-sub" style={{ margin: '0 0 10px' }}>Por mes · últimos 12 meses</p>
             {evoProductividad.series[0].puntos.length > 0
-              ? <GraficoEvolucion series={evoProductividad.series} labels={evoProductividad.labels} hoyIdx={evoProductividad.hoyIdx} unidad=" paq/h" />
+              ? <>
+                  <GraficoEvolucion series={evoProductividad.series} labels={evoProductividad.labels} hoyIdx={evoProductividad.hoyIdx} unidad=" paq/h" />
+                  <Conclusion>
+                    {tendenciaSeries(evoProductividad.series, ' paq/h', 1)}
+                    {'. '}
+                    Es cuántos paquetes sale cada hora pagada: sube con mejor organización del trabajo, no con más gente.
+                  </Conclusion>
+                </>
               : <p style={{ color: '#9ca3af', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin datos de CrossChex disponibles para este período.</p>}
           </div>
           <div style={cardStyle}>
             <p className="card-title" style={{ margin: '0 0 2px' }}>Evolución de pesaje testigo — últimos 180 días</p>
             <p className="card-sub" style={{ margin: '0 0 10px' }}>Gramos por paquete, por mes</p>
             <GraficoPesaje puntos={puntosPesaje180} escala="mes" />
+            <Conclusion>
+              {(() => {
+                const porCultivo = new Map<string, { primero: number; ultimo: number; mes: string }>();
+                for (const p of [...puntosPesaje180].sort((a, b) => a.fecha.localeCompare(b.fecha))) {
+                  const prev = porCultivo.get(p.variedad);
+                  if (!prev) porCultivo.set(p.variedad, { primero: p.peso_gr, ultimo: p.peso_gr, mes: p.fecha });
+                  else { prev.ultimo = p.peso_gr; prev.mes = p.fecha; }
+                }
+                const partes = [...porCultivo.entries()].map(([v, d]) => `${v} ${Math.round(d.primero)} → ${Math.round(d.ultimo)} g`);
+                return partes.length ? `${partes.join(' · ')}. El peso del paquete es lo que el cliente recibe de más o de menos por el mismo precio.` : '';
+              })()}
+            </Conclusion>
           </div>
           <div style={cardStyle}>
-            <p className="card-title" style={{ margin: '0 0 2px' }}>Plantas por paquete — últimos 30 días</p>
-            <p className="card-sub" style={{ margin: '0 0 10px' }}>Rúcula · promedio</p>
-            <GraficoEvolucion series={evoPlantasPaq30.series} labels={evoPlantasPaq30.labels} hoyIdx={evoPlantasPaq30.hoyIdx} unidad=" pl/paq" yMin={1} yMax={4} />
+            <p className="card-title" style={{ margin: '0 0 2px' }}>Plantas por paquete</p>
+            <p className="card-sub" style={{ margin: '0 0 10px' }}>Rúcula · promedio por mes · últimos 6 meses</p>
+            <GraficoEvolucion series={evoPlantasPaqMes.series} labels={evoPlantasPaqMes.labels} hoyIdx={evoPlantasPaqMes.hoyIdx} unidad=" pl/paq" yMin={1} yMax={4} />
+            <Conclusion>
+              {tendenciaSeries(evoPlantasPaqMes.series, ' pl/paq', 2)}
+              {'. '}
+              Cuantas menos plantas entran en un paquete, más pesada viene cada una: es el mismo paquete con menos material.
+            </Conclusion>
           </div>
           <div style={cardStyle}>
-            <p className="card-title" style={{ margin: '0 0 2px' }}>Descartes Lechuga — últimos 30 días</p>
-            <p className="card-sub" style={{ margin: '0 0 10px' }}>Plantas de diferencia entre lo estimado y lo cosechado</p>
-            <GraficoEvolucion series={evoDescartes30.series} labels={evoDescartes30.labels} hoyIdx={evoDescartes30.hoyIdx} unidad=" pl" />
+            <p className="card-title" style={{ margin: '0 0 2px' }}>Descartes de lechuga</p>
+            <p className="card-sub" style={{ margin: '0 0 10px' }}>Plantas de diferencia entre lo estimado y lo cosechado, por mes</p>
+            <GraficoEvolucion series={evoDescartesMes.series} labels={evoDescartesMes.labels} hoyIdx={evoDescartesMes.hoyIdx} unidad=" pl" />
+            <Conclusion>
+              {tendenciaSeries(evoDescartesMes.series, ' pl')}
+              {'. '}
+              Es la brecha entre lo que se plantó y lo que llegó a venderse: cada planta de esa diferencia se pagó y no se cobró.
+            </Conclusion>
           </div>
         </div>
 
@@ -610,8 +741,49 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
                     <td style={{ textAlign: 'right', color: '#ea580c' }}>{rc.total.peso > 0 ? rc.total.peso + 'g' : '—'}</td>
                     <td style={{ textAlign: 'right', color: '#9ca3af' }}>{rc.total.n}</td>
                   </tr>
+                  {/* La diferencia entre naves es lo único de esta tabla sobre lo que se
+                      puede hacer algo: si una nave tarda más con el mismo cultivo, hay un
+                      motivo físico que se puede ir a buscar. Por eso va como fila propia. */}
+                  {(() => {
+                    const n1 = rc.porNave.find((x: any) => x.nave === 1);
+                    const n2 = rc.porNave.find((x: any) => x.nave === 2);
+                    if (!n1 || !n2) return null;
+                    const dif = (a: number, b: number) => (a > 0 && b > 0 ? a - b : null);
+                    const celda = (d: number | null, suf: string, umbral: number) => {
+                      if (d === null) return <td style={{ textAlign: 'right', color: '#9ca3af' }}>—</td>;
+                      const fuerte = Math.abs(d) >= umbral;
+                      return (
+                        <td style={{ textAlign: 'right', fontWeight: fuerte ? 800 : 600, color: fuerte ? '#b91c1c' : '#6b7280' }}>
+                          {d > 0 ? '+' : d < 0 ? '−' : ''}{Math.abs(d)}{suf}
+                        </td>
+                      );
+                    };
+                    const dF2 = dif(n1.f2, n2.f2);
+                    return (
+                      <tr style={{ borderTop: '2px solid #e5e7eb' }}>
+                        <td style={{ fontWeight: 700, color: '#374151' }}>Diferencia N1 − N2</td>
+                        {rc.cultivo === 'Lechuga' && celda(dif(n1.f1, n2.f1), 'd', 2)}
+                        {celda(dF2, 'd', 2)}
+                        {celda(dif(n1.total, n2.total), 'd', 2)}
+                        {celda(dif(n1.plantasPorPaq, n2.plantasPorPaq), '', 1)}
+                        {celda(dif(n1.peso, n2.peso), 'g', 15)}
+                        <td></td>
+                      </tr>
+                    );
+                  })()}
                 </tbody>
               </table>
+              <Conclusion>
+                {(() => {
+                  const n1 = rc.porNave.find((x: any) => x.nave === 1);
+                  const n2 = rc.porNave.find((x: any) => x.nave === 2);
+                  if (!n1 || !n2 || !(n1.f2 > 0) || !(n2.f2 > 0)) return `${rc.cultivo}: no hay cosechas suficientes en las dos naves para comparar.`;
+                  const d = n1.f2 - n2.f2;
+                  if (Math.abs(d) < 2) return `${rc.cultivo}: las dos naves van parejas en ciclo (${n1.f2}d y ${n2.f2}d). No hay nada que perseguir acá.`;
+                  const lenta = d > 0 ? 1 : 2, rapida = d > 0 ? 2 : 1;
+                  return `${rc.cultivo}: la nave ${lenta} tarda ${Math.abs(d)} días más que la nave ${rapida} (${n1.f2}d vs ${n2.f2}d). Con el mismo cultivo esa diferencia es física —luz, temperatura o solución—, y son vueltas de mesada que se pierden todos los meses.`;
+                })()}
+              </Conclusion>
             </div>
           ))}
         </div>
@@ -657,13 +829,24 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
             <p style={{ color: '#9ca3af', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin artículos con datos cargados este mes en estas categorías.</p>
           ) : gruposUso.map(g => (
             <div key={g.titulo} style={{ marginBottom: '14px' }}>
-              <p style={{ margin: '0 0 6px', fontSize: '13px', fontWeight: 700, color: '#374151' }}>{g.titulo}</p>
+              <p style={{ margin: '0 0 6px', fontSize: '13px', fontWeight: 700, color: '#374151' }}>
+                {g.titulo}
+                <span style={{ fontWeight: 400, color: '#9ca3af', fontSize: '11px' }}>
+                  {' '}— {g.filas.length} de {g.revisados} con diferencia mayor al {UMBRAL_DIF_USO_PCT}%
+                </span>
+              </p>
+              {g.filas.length === 0 && (
+                <p style={{ margin: '0 0 6px', fontSize: '12.5px', color: '#059669' }}>
+                  ✓ Todo el grupo usó lo que tenía que usar (diferencias menores al {UMBRAL_DIF_USO_PCT}%).
+                </p>
+              )}
               <table style={{ fontSize: '12px', width: '100%', maxWidth: '640px' }}>
                 <thead><tr>
                   <th style={{ textAlign: 'left' }}>Artículo</th>
                   <th style={{ textAlign: 'right' }}>Uso real</th>
                   <th style={{ textAlign: 'right' }}>Uso teórico</th>
                   <th style={{ textAlign: 'right' }}>Diferencia</th>
+                  <th style={{ textAlign: 'right' }}>%</th>
                 </tr></thead>
                 <tbody>
                   {g.filas.map(f => (
@@ -676,10 +859,22 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
                       <td style={{ textAlign: 'right', fontWeight: 700, color: f.diff === null ? '#9ca3af' : f.diff > 0 ? '#dc2626' : '#059669' }}>
                         {f.diff !== null ? `${f.diff > 0 ? '+' : ''}${fmt(f.diff)}` : '—'}
                       </td>
+                      <td style={{ textAlign: 'right', fontWeight: 800, color: f.pct === null ? '#9ca3af' : f.pct > 0 ? '#dc2626' : '#059669' }}>
+                        {f.pct !== null ? `${f.pct > 0 ? '+' : ''}${f.pct}%` : '—'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              {g.filas.length > 0 && (
+                <Conclusion>
+                  {(() => {
+                    const peor = [...g.filas].sort((a, b) => Math.abs(b.pct || 0) - Math.abs(a.pct || 0))[0];
+                    const demas = (peor.pct || 0) > 0;
+                    return `${peor.articulo}: se usó ${Math.abs(peor.pct || 0)}% ${demas ? 'más' : 'menos'} de lo que la fórmula dice para la producción del mes. ${demas ? 'O se está desperdiciando, o el stock final quedó mal contado.' : 'O se rindió mejor de lo previsto, o falta cargar consumo.'}`;
+                  })()}
+                </Conclusion>
+              )}
             </div>
           ))}
         </div>
