@@ -186,10 +186,19 @@ export async function enviarPendientePorDia(email: string, nombreCliente: string
 // Cada factura del resultado viene con sus datos SEPARADOS —cliente, sucursal, fecha— y no
 // armados en una sola línea de texto: después de emitir un lote hay que poder revisar de un
 // vistazo qué salió y qué no, cliente por cliente y sucursal por sucursal.
+// Lo que el que carga necesita verificar: qué producto, cuánto y para qué sucursal. El
+// número de comprobante y el importe son para administración, no para él.
+export interface ItemFacturado {
+  producto: string;
+  sucursal: string;   // vacío en clientes sin sucursales
+  cantidad: number;
+}
+
 export interface FacturaEmitida {
   cliente: string;          // nombre del cliente, sin adornos
   sucursal?: string;        // cuando la factura salió separada por sucursal
   fechaVenta: string;       // la fecha de la entrega
+  items: ItemFacturado[];
   numero?: string;
   cae?: string;
   total: number;
@@ -202,6 +211,9 @@ export interface FacturaConError {
   cliente: string;
   sucursal?: string;
   fechaVenta: string;
+  // Lo que NO salió. Va igual que en las emitidas: si hay que reclamar o rehacer algo,
+  // lo primero que se necesita es saber qué mercadería quedó sin facturar.
+  items: ItemFacturado[];
   total: number;
   error: string;
 }
@@ -307,11 +319,12 @@ export async function emitirPendientes(
     // cuando la factura salió separada, para poder distinguir cuál es cuál de un vistazo.
     const nombre = (cliente?.nombre_xubio || idControl) + (sucursal ? ` (${sucursal})` : '') + (fecha ? ` — ${fecha}` : '');
     const fechaLinea = String(lineas[0]?.fecha || '').split(/[T ]/)[0];
-    const datos = { cliente: cliente?.nombre_xubio || nombreClienteVisible(cliente) || idControl, sucursal: sucursal || undefined, fechaVenta: fechaLinea, total: 0 };
+    const datos: { cliente: string; sucursal?: string; fechaVenta: string; items: ItemFacturado[]; total: number } = {
+      cliente: cliente?.nombre_xubio || nombreClienteVisible(cliente) || idControl,
+      sucursal: sucursal || undefined, fechaVenta: fechaLinea, items: [], total: 0,
+    };
     if (!cliente) { errores.push({ ...datos, error: 'cliente no encontrado en la base local' }); continue; }
 
-    const clienteId = matchClienteXubio(cliente.nombre_xubio, clientesXubio);
-    if (!clienteId) { errores.push({ ...datos, error: 'no se encontró el cliente en Xubio (revisá que el nombre coincida)' }); continue; }
 
     // Se calcula antes de armar los renglones porque la descripción de cada uno lleva la
     // fecha de entrega cuando la factura no puede salir con esa fecha (ver fechaDeFactura):
@@ -324,6 +337,7 @@ export async function emitirPendientes(
 
     const items: { codigo: string; cantidad: number; precio: number; descripcion?: string }[] = [];
     const detalle: { nombre: string; cantidad: number; precio: number; importe: number }[] = [];
+    const itemsVerificacion: ItemFacturado[] = [];
     for (const l of lineas) {
       for (const key of PROD_KEYS) {
         const qty = Number((l as any)[key]) || 0;
@@ -344,6 +358,11 @@ export async function emitirPendientes(
         const descripcion = prefijo ? `${prefijo} — ${nombreProd}` : nombreProd;
         items.push({ codigo: PRODUCTO_CODIGO[key], cantidad: qty, precio, descripcion });
         detalle.push({ nombre: l.sucursal ? `${nombreProd} (${l.sucursal})` : nombreProd, cantidad: qty, precio, importe: qty * precio });
+        // Se acumula por producto+sucursal: dos renglones del mismo producto a la misma
+        // sucursal son una sola cosa para el que controló la carga del camión.
+        const ya = itemsVerificacion.find(it => it.producto === nombreProd && it.sucursal === (l.sucursal || ''));
+        if (ya) ya.cantidad += qty;
+        else itemsVerificacion.push({ producto: nombreProd, sucursal: l.sucursal || '', cantidad: qty });
       }
     }
     if (!items.length) {
@@ -355,6 +374,14 @@ export async function emitirPendientes(
     }
 
     const totalFactura = Math.round(detalle.reduce((a, d) => a + d.importe, 0));
+    datos.items = itemsVerificacion;
+    datos.total = totalFactura;
+
+    // El cliente de Xubio se busca recién acá, con los renglones ya armados: es el error
+    // más común de todos, y sin los items el aviso no diría qué mercadería quedó sin
+    // facturar, que es lo primero que hay que saber para resolverlo.
+    const clienteId = matchClienteXubio(cliente.nombre_xubio, clientesXubio);
+    if (!clienteId) { errores.push({ ...datos, error: 'no se encontró el cliente en Xubio (revisá que el nombre coincida)' }); continue; }
     const esA = esA_;
     let res;
     try {
