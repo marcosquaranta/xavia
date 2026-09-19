@@ -39,7 +39,9 @@ export interface FacturaPendiente {
   cliente: string;
   letra: string;
   fecha: string;
-  lineas: { producto: string; sucursal: string; cantidad: number; precio: number; importe: number }[];
+  // id_venta + campo identifican la celda exacta de la hoja Ventas, que es lo que hace
+  // falta para poder corregir o borrar un renglon antes de facturarlo.
+  lineas: { id_venta: string; campo: string; producto: string; sucursal: string; cantidad: number; precio: number; importe: number }[];
   unidades: number;
   total: number;
 }
@@ -78,7 +80,7 @@ export default async function FacturacionPage() {
         const qty = Number((l as any)[p.key]) || 0;
         if (qty <= 0) continue;
         const precio = getPrecio(precios, idControl, l.sucursal, p.key, cliente?.sucursales);
-        lineas.push({ producto: p.label, sucursal: l.sucursal, cantidad: qty, precio, importe: qty * precio });
+        lineas.push({ id_venta: String(l.id_venta), campo: p.key, producto: p.label, sucursal: l.sucursal, cantidad: qty, precio, importe: qty * precio });
       }
     }
     if (!lineas.length) continue;

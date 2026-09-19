@@ -7,6 +7,7 @@ import { nombreClienteVisible } from './clientes';
 import { POSPAQ } from './planificacion'; // 3 posiciones (plantas) por paquete de rúcula
 import { ventasPorCultivoUltimasSemanas, resumenMesActual, ventasEnRango, GR_PAQ_RUCULA, GR_PAQ_LECHUGA, type PuntoVentaCultivoSemana, type VentasRango, type ResumenMesActual } from './estadisticasVentas';
 import { plantasPerdidasPorSubocupacion, type PlantasPerdidasSubocupacion } from './kpisOperativos';
+import { controlFacturacion, DIAS_ATRASO_AVISO, type ControlFacturacion } from './controlFacturacion';
 import { leerConfigProtocolo, tareasVencidas, tareasDelDia as tareasProtocoloDelDia, cumplimientoProtocolo, type InstanciaTarea } from './protocoloTareas';
 import { fechaArgentinaHoy } from './ocupacion';
 import { germinacionYSupervivenciaMes } from './germinacion';
@@ -300,6 +301,22 @@ function destacadosDeLaSemana(d: Omit<ReporteSemanalData, 'destacados'>): Destac
     }
   }
 
+  // ── Ventas que no llegaron a la factura ──
+  // Mercadería que salió y no se facturó. Va como destacado porque no aparece en ningún
+  // otro lado: una venta en borrador no figura ni en la pantalla de Facturación.
+  if (d.facturacion.hayProblema) {
+    const f = d.facturacion;
+    const partes: string[] = [];
+    if (f.pendientes.length) partes.push(`${f.pendientes.length} ${f.pendientes.length === 1 ? 'cliente' : 'clientes'} en la cola de facturación por ${fmtMoneda(f.montoPendiente)}`);
+    if (f.borradores.length) partes.push(`${f.borradores.length} ${f.borradores.length === 1 ? 'cliente' : 'clientes'} en borrador (ni siquiera entraron a la cola) por ${fmtMoneda(f.montoBorrador)}`);
+    const masViejo = [...f.pendientes, ...f.borradores].sort((a, b) => b.atraso - a.atraso)[0];
+    out.push({
+      tono: 'malo',
+      titulo: `Sin facturar: ${fmtMoneda(f.montoPendiente + f.montoBorrador)} — lo más viejo tiene ${f.atrasoMax} días`,
+      detalle: `${partes.join(' y ')}. El atraso más viejo es de ${masViejo?.cliente || ''} (${fmtDiaCorto(masViejo?.diaMasViejo || '')}). La mercadería salió: mientras no se facture, no se puede ni cobrar ni reclamar.`,
+    });
+  }
+
   // ── Protocolo de aplicaciones sin registrar ──
   // Una aplicación que no se hizo no se recupera: si el lunes no se aplicó Calborón, ese
   // lunes ya pasó. Por eso va como destacado y no solo como tabla al pie.
@@ -377,6 +394,9 @@ export interface ReporteSemanalData {
   // números es ruido. Van igual en el reporte semanal porque es lo que se lee cada viernes.
   indicadoresMes: { label: string; valor: string; pct: number | null; mejorSiSube: boolean; detalle?: string }[];
   protocoloCumplimiento: { nombre: string; correspondian: number; cerradas: number; pendientes: number; fueraDeRango: number; pct: number | null }[];
+  // Ventas cargadas que no llegaron a la factura. Va en el reporte del viernes porque es
+  // el último momento en que todavía se puede corregir la semana.
+  facturacion: ControlFacturacion;
 }
 
 export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> {
@@ -576,6 +596,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     pesoSemana, pesoMesAnterior,
     ocupacion, mesadasBajas, mesadasVacias, plantasPerdidasSubocupacion, ventasSemanas,
     protocoloPendientes, protocoloHoy, protocoloCumplimiento, indicadoresMes,
+    facturacion: controlFacturacion(ventas, precios, clientes, hastaHoy),
     stock, faltanteSemana, faltanteMes, descartePorFase,
   };
   return { ...datosSinDestacados, destacados: destacadosDeLaSemana(datosSinDestacados) };
@@ -810,6 +831,41 @@ export function construirHtml(d: ReporteSemanalData): string {
       }).join('')}</tbody>
     </table>`;
 
+  // ── Control de facturación ──
+  // Lo que se cargó y no se facturó, separado en los dos estados posibles: la cola de
+  // facturación y el borrador. El borrador va primero porque es el que no se ve en
+  // ninguna pantalla.
+  const filaSinFacturar = (g: { cliente: string; ventas: number; dias: number; diaMasViejo: string; atraso: number; unidades: number; monto: number }) => `<tr>
+    <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6">${g.cliente}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:right">${g.dias}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:right;color:${g.atraso >= DIAS_ATRASO_AVISO ? '#dc2626' : '#6b7280'};font-weight:${g.atraso >= DIAS_ATRASO_AVISO ? 700 : 400}">${g.atraso}d</td>
+    <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:right;color:#6b7280">${fmtDiaCorto(g.diaMasViejo)}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:right">${fmtN(g.unidades)}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:right;font-weight:600">${fmtMoneda(g.monto)}</td>
+  </tr>`;
+  const tablaSinFacturar = (titulo: string, nota: string, filas: any[]) => !filas.length ? '' : `
+    <p style="margin:8px 0 4px;font-size:13px;font-weight:600;color:#111">${titulo} <span style="font-weight:400;color:#9ca3af">${nota}</span></p>
+    <table style="border-collapse:collapse;width:100%;font-size:12.5px">
+      <thead><tr style="background:#f9fafb;color:#6b7280">
+        <th style="padding:4px 8px;text-align:left">Cliente</th>
+        <th style="padding:4px 8px;text-align:right">Días</th>
+        <th style="padding:4px 8px;text-align:right">Atraso</th>
+        <th style="padding:4px 8px;text-align:right">Más viejo</th>
+        <th style="padding:4px 8px;text-align:right">Unid.</th>
+        <th style="padding:4px 8px;text-align:right">Monto</th>
+      </tr></thead>
+      <tbody>${filas.map(filaSinFacturar).join('')}</tbody>
+    </table>`;
+  const controlFactHtml = `
+    <div style="margin:18px 0 0;padding:12px 14px;border:1px solid ${d.facturacion.hayProblema ? '#fecaca' : '#e5e7eb'};border-radius:8px;background:${d.facturacion.hayProblema ? '#fef2f2' : '#fafafa'}">
+      <h3 style="margin:0 0 6px;font-size:14px">Control de facturación <span style="font-weight:400;color:#9ca3af">(ventas cargadas que todavía no se facturaron)</span></h3>
+      ${!d.facturacion.pendientes.length && !d.facturacion.borradores.length
+        ? `<p style="margin:0;font-size:13px;color:#059669">✓ No quedó ninguna venta sin facturar.</p>`
+        : `<p style="margin:0 0 6px;font-size:13px;color:#111">Sin facturar: <strong>${fmtMoneda(d.facturacion.montoPendiente + d.facturacion.montoBorrador)}</strong>. La mercadería ya salió: mientras no se facture no se puede cobrar ni reclamar.</p>
+           ${tablaSinFacturar('En borrador', '— ni siquiera entraron a la cola de facturación, no aparecen en la pantalla de Facturación', d.facturacion.borradores)}
+           ${tablaSinFacturar('En la cola', '— esperando que se emitan, o fallaron al emitir', d.facturacion.pendientes)}`}
+    </div>`;
+
   // ── Protocolo de aplicaciones ──
   // Primero lo accionable (lo que quedó sin registrar y lo que sigue pendiente hoy) y
   // después el cumplimiento acumulado, que es el que dice si esto se sostiene o no.
@@ -933,6 +989,7 @@ export function construirHtml(d: ReporteSemanalData): string {
 
     ${indicadoresHtml}
 
+    ${controlFactHtml}
     ${protocoloHtml}
 
     <h3 style="margin:0 0 8px;font-size:14px">Ocupación por nave</h3>
@@ -1024,6 +1081,20 @@ export function construirTexto(d: ReporteSemanalData): string {
     }
     L.push('');
   }
+
+  L.push(`🧾 *Control de facturación*`);
+  if (!d.facturacion.pendientes.length && !d.facturacion.borradores.length) {
+    L.push(`  ✓ No quedó ninguna venta sin facturar.`);
+  } else {
+    L.push(`  Sin facturar: ${fmtMoneda(d.facturacion.montoPendiente + d.facturacion.montoBorrador)} — lo más viejo tiene ${d.facturacion.atrasoMax} días.`);
+    for (const g of d.facturacion.borradores) {
+      L.push(`  ✕ ${g.cliente} — EN BORRADOR, ${g.dias} ${g.dias === 1 ? 'día' : 'días'} (desde ${fmtDiaCorto(g.diaMasViejo)}) · ${fmtMoneda(g.monto)}`);
+    }
+    for (const g of d.facturacion.pendientes) {
+      L.push(`  • ${g.cliente} — en la cola, ${g.dias} ${g.dias === 1 ? 'día' : 'días'} (desde ${fmtDiaCorto(g.diaMasViejo)}) · ${fmtMoneda(g.monto)}`);
+    }
+  }
+  L.push('');
 
   L.push(`🧪 *Protocolo de aplicaciones*`);
   if (d.protocoloPendientes.length === 0 && d.protocoloHoy.length === 0) {

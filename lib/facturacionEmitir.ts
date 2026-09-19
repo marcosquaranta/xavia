@@ -311,8 +311,13 @@ export async function emitirPendientes(
         // sin sucursales (l.sucursal vacío) mantienen la descripción simple de siempre —
         // no tiene sentido inventarles una "sucursal" con su propio nombre.
         const nombreProd = NOMBRE_PROD[key] || key;
-        const base = l.sucursal ? `Sucursal ${l.sucursal} — ${nombreProd}` : nombreProd;
-        const descripcion = mostrarFecha ? `${ddmm(String(l.fecha || ''))} · ${base}` : base;
+        // La descripción ARRANCA por lo que distingue al renglón — la sucursal, y si hace
+        // falta la fecha de entrega. En la grilla de Xubio se ve solo el principio del
+        // campo: con "Sucursal Funes — Rúcula" todos los renglones empezaban igual
+        // ("Sucursal…") y no se podía distinguir nada al momento de facturar.
+        const prefijo = [l.sucursal || '', mostrarFecha ? ddmm(String(l.fecha || '')) : '']
+          .filter(Boolean).join(' ');
+        const descripcion = prefijo ? `${prefijo} — ${nombreProd}` : nombreProd;
         items.push({ codigo: PRODUCTO_CODIGO[key], cantidad: qty, precio, descripcion });
         detalle.push({ nombre: l.sucursal ? `${nombreProd} (${l.sucursal})` : nombreProd, cantidad: qty, precio, importe: qty * precio });
       }

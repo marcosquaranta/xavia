@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-interface Linea { producto: string; sucursal: string; cantidad: number; precio: number; importe: number; }
+interface Linea { id_venta: string; campo: string; producto: string; sucursal: string; cantidad: number; precio: number; importe: number; }
 interface FacturaPendiente { id_control: string; cliente: string; letra: string; fecha: string; lineas: Linea[]; unidades: number; total: number; }
 
 const fmt = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
@@ -23,6 +23,10 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
 
   const [emitiendoUna, setEmitiendoUna] = useState<string | null>(null);
   const [informe, setInforme] = useState<string | null>(null);
+  // Renglon que se esta corrigiendo (id_venta + producto) y el valor tipeado.
+  const [editando, setEditando] = useState<string | null>(null);
+  const [valorEdit, setValorEdit] = useState('');
+  const [guardando, setGuardando] = useState<string | null>(null);
   const [enviando, setEnviando] = useState<string | null>(null);
   const incluidas = facturas.filter(f => !excluidas.has(clave(f)));
 
@@ -66,6 +70,34 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
       router.refresh();
     } catch (e: any) { setErr(e.message); }
     finally { setQuitando(null); }
+  }
+
+  const claveLinea = (l: Linea) => `${l.id_venta}||${l.campo}`;
+
+  // Corrige la cantidad de un renglon, o lo borra con 0. Toca la celda de la hoja Ventas,
+  // asi que lo que se factura despues es exactamente lo corregido.
+  async function guardarLinea(l: Linea, cantidad: number) {
+    const k = claveLinea(l);
+    setGuardando(k); setErr(null); setInforme(null);
+    try {
+      const r = await fetch('/api/facturacion/linea', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_venta: l.id_venta, campo: l.campo, cantidad }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Error');
+      setEditando(null);
+      setInforme(cantidad > 0
+        ? `✓ ${l.producto} quedó en ${fmtU(cantidad)}.`
+        : `✓ Se borró el renglón de ${l.producto}${j.vaciaYQuitada ? ' — esa venta quedó sin productos y volvió a borrador.' : '.'}`);
+      router.refresh();
+    } catch (e: any) { setErr(e.message); }
+    finally { setGuardando(null); }
+  }
+
+  async function borrarLinea(l: Linea) {
+    if (!window.confirm(`Se va a borrar el renglón de ${l.producto}${l.sucursal ? ` (${l.sucursal})` : ''} — ${fmtU(l.cantidad)} unidades. ¿Confirmás?`)) return;
+    await guardarLinea(l, 0);
   }
 
   // Informe para el cliente: lo pendiente día por día CON LA FECHA DE LA ENTREGA. Se arma
@@ -291,15 +323,57 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
                     <th style={{ textAlign: 'right', padding: '6px 14px' }}>Importe</th>
                   </tr></thead>
                   <tbody>
-                    {f.lineas.map((l, i) => (
+                    {f.lineas.map((l, i) => {
+                      const kl = claveLinea(l);
+                      const enEdicion = editando === kl;
+                      return (
                       <tr key={i} style={{ borderTop: '1px solid #f9fafb' }}>
                         <td style={{ padding: '5px 14px' }}>{l.producto}</td>
                         <td style={{ padding: '5px', color: '#6b7280' }}>{l.sucursal}</td>
-                        <td style={{ padding: '5px', textAlign: 'right' }}>{l.cantidad}</td>
+                        <td style={{ padding: '5px', textAlign: 'right' }}>
+                          {enEdicion ? (
+                            <input type="number" min={0} step="any" autoFocus value={valorEdit}
+                              onChange={e => setValorEdit(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') guardarLinea(l, Number(valorEdit) || 0);
+                                if (e.key === 'Escape') setEditando(null);
+                              }}
+                              style={{ width: '72px', textAlign: 'right', fontSize: '12px', padding: '2px 5px', border: '1px solid #93c5fd', borderRadius: '4px' }} />
+                          ) : (
+                            <span onClick={() => { setEditando(kl); setValorEdit(String(l.cantidad)); }}
+                              title="Tocá para corregir la cantidad"
+                              style={{ cursor: 'pointer', borderBottom: '1px dashed #cbd5e1', padding: '0 2px' }}>
+                              {l.cantidad}
+                            </span>
+                          )}
+                        </td>
                         <td style={{ padding: '5px', textAlign: 'right', color: '#6b7280' }}>{fmt(l.precio)}</td>
-                        <td style={{ padding: '5px 14px', textAlign: 'right', fontWeight: 600 }}>{fmt(l.importe)}</td>
+                        <td style={{ padding: '5px 14px', textAlign: 'right', fontWeight: 600 }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-end' }}>
+                            {fmt(l.importe)}
+                            {enEdicion ? (
+                              <>
+                                <button onClick={() => guardarLinea(l, Number(valorEdit) || 0)} disabled={guardando === kl}
+                                  style={{ background: '#166534', color: 'white', border: 'none', borderRadius: '4px', padding: '2px 8px', fontSize: '10.5px', fontWeight: 700, cursor: 'pointer' }}>
+                                  {guardando === kl ? '…' : 'Guardar'}
+                                </button>
+                                <button onClick={() => setEditando(null)} disabled={guardando === kl}
+                                  style={{ background: 'none', border: '1px solid #e5e7eb', color: '#6b7280', borderRadius: '4px', padding: '2px 7px', fontSize: '10.5px', cursor: 'pointer' }}>
+                                  Cancelar
+                                </button>
+                              </>
+                            ) : (
+                              <button onClick={() => borrarLinea(l)} disabled={guardando === kl}
+                                title="Borrar este renglón de la venta"
+                                style={{ background: 'none', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '4px', padding: '1px 6px', fontSize: '10.5px', cursor: 'pointer' }}>
+                                ✕
+                              </button>
+                            )}
+                          </span>
+                        </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
