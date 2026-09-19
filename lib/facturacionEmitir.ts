@@ -85,6 +85,103 @@ async function enviarDetalleVentaCliente(
   }
 }
 
+// ── Informe de lo pendiente, día por día ─────────────────────────────────────────────
+//
+// Cuando se acumula atraso, la factura sale con fecha de hoy (AFIP no deja ponerle una
+// fecha anterior a la del último comprobante emitido). El cliente necesita igual saber de
+// qué DÍAS es cada entrega: eso es lo que arma esto, con la fecha original de cada venta.
+export interface DiaPendiente {
+  fecha: string; // YYYY-MM-DD, la de la venta
+  lineas: { nombre: string; sucursal: string; cantidad: number; precio: number; importe: number }[];
+  unidades: number;
+  total: number;
+}
+
+export function detallePendientePorDia(ventas: VentaDia[], precios: PrecioVenta[], cliente: ClienteVenta): DiaPendiente[] {
+  const soloFecha = (v: any) => String(v || '').split(/[T ]/)[0];
+  const porDia = new Map<string, DiaPendiente>();
+  for (const v of ventas) {
+    if (v.exportado !== 'PENDIENTE') continue;
+    if (String(v.id_control) !== String(cliente.id_control)) continue;
+    const fecha = soloFecha(v.fecha);
+    if (!porDia.has(fecha)) porDia.set(fecha, { fecha, lineas: [], unidades: 0, total: 0 });
+    const dia = porDia.get(fecha)!;
+    for (const key of PROD_KEYS) {
+      const cantidad = Number((v as any)[key]) || 0;
+      if (cantidad <= 0) continue;
+      const precio = getPrecio(precios, String(cliente.id_control), v.sucursal, key, cliente.sucursales);
+      dia.lineas.push({ nombre: NOMBRE_PROD[key] || key, sucursal: v.sucursal || '', cantidad, precio, importe: cantidad * precio });
+      dia.unidades += cantidad;
+      dia.total += cantidad * precio;
+    }
+  }
+  return [...porDia.values()].filter(d => d.lineas.length).sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+
+// El mismo informe, por mail al cliente.
+export async function enviarPendientePorDia(email: string, nombreCliente: string, dias: DiaPendiente[]): Promise<boolean> {
+  if (!process.env.RESEND_API_KEY) { console.error('[facturacionEmitir] RESEND_API_KEY no configurada'); return false; }
+  const fmt = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
+  const fmtDia = (f: string) => { const [y, m, d] = f.split('-'); return d ? `${d}/${m}/${y}` : f; };
+  const total = dias.reduce((a, d) => a + d.total, 0);
+  const unidades = dias.reduce((a, d) => a + d.unidades, 0);
+
+  const bloques = dias.map(d => `
+    <h3 style="margin:18px 0 6px;font-size:15px;color:#111">${fmtDia(d.fecha)}</h3>
+    <table style="border-collapse:collapse;width:100%;font-size:14px">
+      <thead><tr style="background:#f5f5f5">
+        <th style="padding:5px 9px;text-align:left">Producto</th>
+        <th style="padding:5px 9px;text-align:left">Sucursal</th>
+        <th style="padding:5px 9px;text-align:right">Cant.</th>
+        <th style="padding:5px 9px;text-align:right">Precio</th>
+        <th style="padding:5px 9px;text-align:right">Importe</th>
+      </tr></thead>
+      <tbody>${d.lineas.map(l => `
+        <tr>
+          <td style="padding:5px 9px;border-bottom:1px solid #eee">${l.nombre}</td>
+          <td style="padding:5px 9px;border-bottom:1px solid #eee;color:#666">${l.sucursal}</td>
+          <td style="padding:5px 9px;border-bottom:1px solid #eee;text-align:right">${l.cantidad.toLocaleString('es-AR')}</td>
+          <td style="padding:5px 9px;border-bottom:1px solid #eee;text-align:right;color:#666">${fmt(l.precio)}</td>
+          <td style="padding:5px 9px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${fmt(l.importe)}</td>
+        </tr>`).join('')}
+      </tbody>
+      <tfoot><tr>
+        <td colspan="4" style="padding:6px 9px;font-weight:600;text-align:right">Total del día</td>
+        <td style="padding:6px 9px;text-align:right;font-weight:700">${fmt(d.total)}</td>
+      </tr></tfoot>
+    </table>`).join('');
+
+  const html = `
+    <div style="font-family:system-ui,Arial,sans-serif;color:#111;max-width:640px">
+      <h2 style="margin:0 0 4px">Detalle de entregas pendientes de facturar</h2>
+      <p style="margin:0 0 6px;color:#555">Hola${nombreCliente ? ' ' + nombreCliente : ''}, te pasamos el detalle de las entregas que todavía no están facturadas, día por día.</p>
+      <p style="margin:0 0 14px;color:#555;font-size:13px">Son ${dias.length} ${dias.length === 1 ? 'día' : 'días'} · ${unidades.toLocaleString('es-AR')} unidades · <strong>${fmt(total)}</strong>.</p>
+      ${bloques}
+      <p style="margin:20px 0 0;padding-top:12px;border-top:2px solid #ddd;font-size:15px">
+        <strong>Total general: ${fmt(total)}</strong>
+      </p>
+      <p style="margin:14px 0 0;color:#555;font-size:13px">Cualquier diferencia con tus remitos, avisanos antes de que emitamos las facturas.</p>
+    </div>`;
+
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'Xavia <ventas@xavia.com.ar>',
+        to: [email],
+        subject: `Entregas pendientes de facturar — Xavia`,
+        html,
+      }),
+    });
+    if (!res.ok) { console.error('[facturacionEmitir] Resend rechazó el detalle pendiente:', await res.json().catch(() => ({}))); }
+    return res.ok;
+  } catch (e) {
+    console.error('[facturacionEmitir] excepción enviando detalle pendiente:', e);
+    return false;
+  }
+}
+
 export interface ResultadoEmision {
   emitidas: { cliente: string; numero?: string; cae?: string; emailCliente?: 'enviado' | 'sin_email' | 'error';
     // Cuando la factura no pudo salir con la fecha de la venta (ver fechaDeFactura).
@@ -111,19 +208,37 @@ export function fechaDeFactura(fechasVenta: string[], ultimaEmitida: string | un
   return piso > hoy ? hoy : piso;
 }
 
+// Un día suelto de un cliente. Sirve para facturar el atraso día por día en vez de juntar
+// todo en un comprobante: cuando quedaron ventas de varias fechas sin facturar, una factura
+// por día es lo que después se puede conciliar contra los remitos del cliente.
+export interface ParFechaCliente { id_control: string; fecha: string }
+
 // Emite a Xubio las ventas PENDIENTE, una factura por cliente. Si idControls se pasa,
 // solo emite esos clientes (los demás PENDIENTE quedan intactos). Las que fallan (ej.
 // cliente no encontrado en Xubio) quedan como PENDIENTE para reintentar/arreglar desde
 // la sección Facturación. Reutilizado por /api/facturacion/emitir y por la carga
 // directa de ventas (/api/ventas/cargar).
-export async function emitirPendientes(idControls?: string[] | null): Promise<ResultadoEmision> {
+//
+// Con `pares` se factura día por día: solo esas combinaciones cliente+fecha, y cada fecha
+// sale como su propia factura.
+export async function emitirPendientes(
+  idControls?: string[] | null, opciones: { pares?: ParFechaCliente[]; porFecha?: boolean } = {},
+): Promise<ResultadoEmision> {
   const [clientes, precios, ventas] = await Promise.all([
     readSheet<ClienteVenta>('Clientes'),
     readSheet<PrecioVenta>('Precios'),
     readSheet<VentaDia>('Ventas'),
   ]);
   const idSet = idControls ? new Set(idControls) : null;
-  const pendientes = ventas.filter(v => v.exportado === 'PENDIENTE' && (!idSet || idSet.has(String(v.id_control))));
+  // Una factura por FECHA de venta, no una sola con todo junto. En el día a día no cambia
+  // nada (hay una sola fecha pendiente por cliente), pero cuando se acumuló atraso cada día
+  // sale en su propio comprobante y se puede conciliar contra los remitos del cliente.
+  const porFecha = opciones.porFecha !== false;
+  const parSet = porFecha ? new Set(opciones.pares!.map(p => `${p.id_control}||${p.fecha}`)) : null;
+  const pendientes = ventas.filter(v =>
+    v.exportado === 'PENDIENTE'
+    && (!idSet || idSet.has(String(v.id_control)))
+    && (!parSet || parSet.has(`${String(v.id_control)}||${String(v.fecha || '').split(/[T ]/)[0]}`)));
   if (!pendientes.length) return { emitidas: [], errores: [] };
 
   const clientesXubio = await getClientesXubio();
@@ -142,30 +257,46 @@ export async function emitirPendientes(idControls?: string[] | null): Promise<Re
   // facturar_por_sucursal='SI' (misma razón social, pero pide un comprobante A XUBIO
   // SEPARADO por cada sucursal, ej. "La Esperanza"): ahí la clave de agrupación suma la
   // sucursal, así cada una sale como su propia factura en vez de mezclarse en una sola.
-  interface Grupo { idControl: string; sucursal: string | null; lineas: VentaDia[] }
+  interface Grupo { idControl: string; sucursal: string | null; fecha: string | null; lineas: VentaDia[] }
   const grupos = new Map<string, Grupo>();
   for (const v of pendientes) {
     const cliente = clientesMap.get(v.id_control);
     const porSucursal = cliente?.facturar_por_sucursal === 'SI';
     const sucursal = porSucursal ? (v.sucursal || '(sin sucursal)') : null;
-    const key = porSucursal ? `${v.id_control}||${sucursal}` : v.id_control;
-    if (!grupos.has(key)) grupos.set(key, { idControl: v.id_control, sucursal, lineas: [] });
+    const fecha = porFecha ? String(v.fecha || '').split(/[T ]/)[0] : null;
+    const key = [v.id_control, sucursal ?? '', fecha ?? ''].join('||');
+    if (!grupos.has(key)) grupos.set(key, { idControl: v.id_control, sucursal, fecha, lineas: [] });
     grupos.get(key)!.lineas.push(v);
   }
+  // De la fecha más vieja a la más nueva: la numeración del punto de venta avanza con las
+  // fechas, así que emitir al revés obligaría a empujar todo a la fecha más nueva (ver
+  // fechaDeFactura). Sin esto, facturar el atraso día por día terminaría con todos los
+  // comprobantes en la misma fecha.
+  const ordenados = [...grupos.values()].sort((a, b) =>
+    String(a.lineas[0]?.fecha || '').localeCompare(String(b.lineas[0]?.fecha || '')));
 
   const emitidas: ResultadoEmision['emitidas'] = [];
   const errores: { cliente: string; error: string }[] = [];
   const paraRegistrar: { cliente: string; numero?: string; cae?: string; fechaVenta: string }[] = [];
 
-  for (const { idControl, sucursal, lineas } of grupos.values()) {
+  for (const { idControl, sucursal, fecha, lineas } of ordenados) {
     const cliente = clientesMap.get(idControl);
     // Nombre que se muestra en emitidas/errores — con la sucursal entre paréntesis
     // cuando la factura salió separada, para poder distinguir cuál es cuál de un vistazo.
-    const nombre = (cliente?.nombre_xubio || idControl) + (sucursal ? ` (${sucursal})` : '');
+    const nombre = (cliente?.nombre_xubio || idControl) + (sucursal ? ` (${sucursal})` : '') + (fecha ? ` — ${fecha}` : '');
     if (!cliente) { errores.push({ cliente: nombre, error: 'cliente no encontrado en la base local' }); continue; }
 
     const clienteId = matchClienteXubio(cliente.nombre_xubio, clientesXubio);
     if (!clienteId) { errores.push({ cliente: nombre, error: 'no se encontró el cliente en Xubio (revisá que el nombre coincida)' }); continue; }
+
+    // Se calcula antes de armar los renglones porque la descripción de cada uno lleva la
+    // fecha de entrega cuando la factura no puede salir con esa fecha (ver fechaDeFactura):
+    // el comprobante dice hoy, pero el cliente tiene que poder ver de qué día es cada cosa.
+    const esA_ = cliente.tipo_factura === 'A';
+    const fechaVenta = [...lineas.map(l => String(l.fecha || ''))].filter(Boolean).sort().pop() || hoyAR;
+    const fechaFactura = fechaDeFactura(lineas.map(l => String(l.fecha || '')), ultimaFecha[esA_ ? 'A' : 'B'], hoyAR);
+    const mostrarFecha = fechaFactura !== fechaVenta;
+    const ddmm = (f: string) => { const [, m, d] = String(f).split('-'); return d ? `${d}/${m}` : f; };
 
     const items: { codigo: string; cantidad: number; precio: number; descripcion?: string }[] = [];
     const detalle: { nombre: string; cantidad: number; precio: number; importe: number }[] = [];
@@ -180,7 +311,8 @@ export async function emitirPendientes(idControls?: string[] | null): Promise<Re
         // sin sucursales (l.sucursal vacío) mantienen la descripción simple de siempre —
         // no tiene sentido inventarles una "sucursal" con su propio nombre.
         const nombreProd = NOMBRE_PROD[key] || key;
-        const descripcion = l.sucursal ? `Sucursal ${l.sucursal} — ${nombreProd}` : nombreProd;
+        const base = l.sucursal ? `Sucursal ${l.sucursal} — ${nombreProd}` : nombreProd;
+        const descripcion = mostrarFecha ? `${ddmm(String(l.fecha || ''))} · ${base}` : base;
         items.push({ codigo: PRODUCTO_CODIGO[key], cantidad: qty, precio, descripcion });
         detalle.push({ nombre: l.sucursal ? `${nombreProd} (${l.sucursal})` : nombreProd, cantidad: qty, precio, importe: qty * precio });
       }
@@ -193,9 +325,7 @@ export async function emitirPendientes(idControls?: string[] | null): Promise<Re
       continue;
     }
 
-    const esA = cliente.tipo_factura === 'A';
-    const fechaVenta = [...lineas.map(l => String(l.fecha || ''))].filter(Boolean).sort().pop() || hoyAR;
-    const fechaFactura = fechaDeFactura(lineas.map(l => String(l.fecha || '')), ultimaFecha[esA ? 'A' : 'B'], hoyAR);
+    const esA = esA_;
     let res;
     try {
       res = await emitirFactura({ clienteId, esA, fecha: fechaFactura, items });

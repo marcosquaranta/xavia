@@ -6,13 +6,65 @@ const PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
 
 let _client: sheets_v4.Sheets | null = null;
 
+// ── Reintento por límite de consultas ────────────────────────────────────────────────
+//
+// Google limita las lecturas de Sheets por minuto y por usuario. Cuando se pasa, contesta
+// 429 "Quota exceeded for quota metric 'Read requests'" y la operación falla entera —
+// facturar, por ejemplo, terminaba en "no se pudo emitir ninguna" por un límite que se
+// libera solo en unos segundos.
+//
+// Es un error transitorio por definición, así que se reintenta con espera creciente
+// (0,7s → 1,4s → 2,8s) más un pedacito al azar, para que dos pedidos que chocaron al mismo
+// tiempo no vuelvan a chocar juntos. Si después de eso sigue fallando, el mensaje que sale
+// explica qué pasó, en vez del texto de Google.
+const ESPERA_INICIAL_MS = 700;
+const MAX_INTENTOS = 4;
+
+function esErrorDeCuota(e: any): boolean {
+  const code = Number(e?.code ?? e?.response?.status ?? 0);
+  const msg = String(e?.message || '');
+  return code === 429 || /quota exceeded|rate limit|RESOURCE_EXHAUSTED/i.test(msg);
+}
+
+async function reintentando<T>(fn: () => Promise<T>): Promise<T> {
+  let espera = ESPERA_INICIAL_MS;
+  for (let intento = 1; ; intento++) {
+    try {
+      return await fn();
+    } catch (e: any) {
+      if (!esErrorDeCuota(e)) throw e;
+      if (intento >= MAX_INTENTOS) {
+        throw new Error('Google Sheets cortó por límite de consultas por minuto. Esperá un minuto y volvé a intentar — no se perdió nada de lo que ya se hizo.');
+      }
+      console.warn(`[sheets] límite de consultas, reintento ${intento} en ${espera} ms`);
+      await new Promise((r) => setTimeout(r, espera + Math.floor(Math.random() * 300)));
+      espera *= 2;
+    }
+  }
+}
+
+// Envuelve los métodos de la API que usa la app para que TODOS reintenten. Se hace acá y no
+// en cada llamada porque hay una veintena de puntos de acceso y alcanza con que uno quede
+// afuera para que vuelva el error.
+function conReintentos(s: sheets_v4.Sheets): sheets_v4.Sheets {
+  const envolver = (obj: any, metodos: string[]) => {
+    for (const m of metodos) {
+      const original = obj[m].bind(obj);
+      obj[m] = (...args: any[]) => reintentando(() => original(...args));
+    }
+  };
+  envolver(s.spreadsheets, ['get', 'batchUpdate']);
+  envolver(s.spreadsheets.values, ['get', 'update', 'append', 'batchUpdate']);
+  return s;
+}
+
 function getClient(): sheets_v4.Sheets {
   if (_client) return _client;
   const auth = new google.auth.JWT({
     email: SA_EMAIL, key: PRIVATE_KEY,
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
-  _client = google.sheets({ version: 'v4', auth });
+  _client = conReintentos(google.sheets({ version: 'v4', auth }));
   return _client;
 }
 
@@ -154,12 +206,18 @@ export async function updateRow(sheetName: string, keyColumn: string, keyValue: 
 export async function batchUpdateRows(
   sheetName: string,
   keyColumn: string,
-  updates: Array<{ keyValue: string; updates: Record<string, any> }>
+  updates: Array<{ keyValue: string; updates: Record<string, any> }>,
+  // Filas ya leídas, para no releer la hoja entera en cada llamada cuando se hacen varias
+  // seguidas (facturar emite de a una y marca de a una). Solo se usa para ubicar filas
+  // existentes por clave: como acá nunca se insertan ni se borran filas, los índices de
+  // una lectura previa siguen valiendo.
+  filasPrecargadas?: string[][],
 ): Promise<void> {
   if (!updates.length) return;
   const sheets = getClient();
-  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`, valueRenderOption: 'UNFORMATTED_VALUE' });
-  const rows = response.data.values;
+  const rows = filasPrecargadas ?? (await sheets.spreadsheets.values.get({
+    spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`, valueRenderOption: 'UNFORMATTED_VALUE',
+  })).data.values;
   if (!rows || rows.length < 2) return;
   const headers = rows[0];
   const keyIndex = headers.indexOf(keyColumn);

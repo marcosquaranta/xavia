@@ -7,6 +7,9 @@ interface FacturaPendiente { id_control: string; cliente: string; letra: string;
 
 const fmt = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 const fmtU = (n: number) => Math.round(n).toLocaleString('es-AR');
+const fmtDia = (f: string) => { const [y, m, d] = String(f || '').split('-'); return d ? `${d}/${m}` : (f || 's/fecha'); };
+// Cada pendiente es un cliente + un día. Esa es la unidad que se factura.
+const clave = (f: FacturaPendiente) => `${f.id_control}||${f.fecha}`;
 
 export default function FacturacionManager({ facturas }: { facturas: FacturaPendiente[] }) {
   const router = useRouter();
@@ -18,14 +21,40 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
   const [excluidas, setExcluidas] = useState<Set<string>>(new Set());
   const [quitando, setQuitando] = useState<string | null>(null);
 
-  const incluidas = facturas.filter(f => !excluidas.has(f.id_control));
+  const [emitiendoUna, setEmitiendoUna] = useState<string | null>(null);
+  const [informe, setInforme] = useState<string | null>(null);
+  const [enviando, setEnviando] = useState<string | null>(null);
+  const incluidas = facturas.filter(f => !excluidas.has(clave(f)));
+
+  // Las fechas de un mismo cliente, juntas y de la más vieja a la más nueva: así se ve de
+  // un vistazo el atraso acumulado de cada uno.
+  const porCliente = (() => {
+    const m = new Map<string, { id_control: string; cliente: string; letra: string; dias: FacturaPendiente[] }>();
+    for (const f of facturas) {
+      if (!m.has(f.id_control)) m.set(f.id_control, { id_control: f.id_control, cliente: f.cliente, letra: f.letra, dias: [] });
+      m.get(f.id_control)!.dias.push(f);
+    }
+    for (const g of m.values()) g.dias.sort((a, b) => a.fecha.localeCompare(b.fecha));
+    return [...m.values()].sort((a, b) => a.cliente.localeCompare(b.cliente));
+  })();
   const totalGeneral = incluidas.reduce((a, f) => a + f.total, 0);
   const totalUnidades = incluidas.reduce((a, f) => a + f.unidades, 0);
   const nA = incluidas.filter(f => f.letra === 'A').length;
   const nB = incluidas.filter(f => f.letra === 'B').length;
 
-  function toggle(id: string) {
-    setExcluidas(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  function toggle(k: string) {
+    setExcluidas(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  }
+
+  // Todos los días de un cliente de una vez.
+  function toggleCliente(idControl: string, prender: boolean) {
+    setExcluidas(prev => {
+      const n = new Set(prev);
+      for (const f of facturas.filter(x => x.id_control === idControl)) {
+        if (prender) n.delete(clave(f)); else n.add(clave(f));
+      }
+      return n;
+    });
   }
 
   async function quitar(id: string) {
@@ -39,13 +68,72 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
     finally { setQuitando(null); }
   }
 
+  // Informe para el cliente: lo pendiente día por día CON LA FECHA DE LA ENTREGA. Se arma
+  // acá con los mismos datos que muestra la pantalla, así lo que copia es lo que ve.
+  function textoDetalle(g: { cliente: string; dias: FacturaPendiente[] }): string {
+    const l: string[] = [`Entregas pendientes de facturar — ${g.cliente}`, ''];
+    for (const d of g.dias) {
+      l.push(`${fmtDia(d.fecha)}`);
+      for (const li of d.lineas) {
+        l.push(`  ${li.producto}${li.sucursal ? ` (${li.sucursal})` : ''} — ${fmtU(li.cantidad)} x ${fmt(li.precio)} = ${fmt(li.importe)}`);
+      }
+      l.push(`  Total del día: ${fmt(d.total)}`, '');
+    }
+    l.push(`TOTAL: ${fmt(g.dias.reduce((a, d) => a + d.total, 0))} · ${fmtU(g.dias.reduce((a, d) => a + d.unidades, 0))} unidades`);
+    return l.join('\n');
+  }
+
+  async function copiarDetalle(g: { id_control: string; cliente: string; dias: FacturaPendiente[] }) {
+    try {
+      await navigator.clipboard.writeText(textoDetalle(g));
+      setInforme(`Detalle de ${g.cliente} copiado — pegalo donde lo necesites.`);
+      setTimeout(() => setInforme(null), 4000);
+    } catch { setErr('No se pudo copiar al portapapeles.'); }
+  }
+
+  async function enviarDetalle(g: { id_control: string; cliente: string }) {
+    if (!window.confirm(`Se le va a mandar a ${g.cliente} un mail con el detalle de todo lo pendiente de facturar, día por día. ¿Confirmás?`)) return;
+    setEnviando(g.id_control); setErr(null); setInforme(null);
+    try {
+      const r = await fetch('/api/facturacion/detalle', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_control: g.id_control, enviar: true }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Error');
+      setInforme(`✓ Detalle enviado a ${j.enviadoA}.`);
+    } catch (e: any) { setErr(e.message); }
+    finally { setEnviando(null); }
+  }
+
+  // Emite exactamente los días elegidos: una factura por cada uno.
+  async function emitirPares(pares: { id_control: string; fecha: string }[]) {
+    setErr(null); setResult(null);
+    const r = await fetch('/api/facturacion/emitir', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pares }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'Error');
+    return j;
+  }
+
+  // Un solo día, sin tocar nada más. Es la forma de ir sacando el atraso de a poco y ver
+  // qué pasa con cada comprobante antes de mandar el siguiente.
+  async function facturarUna(f: FacturaPendiente) {
+    setEmitiendoUna(clave(f));
+    try {
+      const j = await emitirPares([{ id_control: f.id_control, fecha: f.fecha }]);
+      setResult({ emitidas: j.emitidas || [], errores: j.errores || [] });
+      router.refresh();
+    } catch (e: any) { setErr(e.message); }
+    finally { setEmitiendoUna(null); }
+  }
+
   async function facturar() {
     setLoading(true); setErr(null); setResult(null);
     try {
-      const idControls = incluidas.map(f => f.id_control);
-      const r = await fetch('/api/facturacion/emitir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idControls }) });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || 'Error');
+      const j = await emitirPares(incluidas.map(f => ({ id_control: f.id_control, fecha: f.fecha })));
       setResult({ emitidas: j.emitidas || [], errores: j.errores || [] });
       setConfirm(false);
       router.refresh();
@@ -128,54 +216,96 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
           )}
       </div>
       {err && <div className="alert-box error" style={{ marginBottom: '12px' }}>{err}</div>}
+      {informe && <div className="alert-box" style={{ marginBottom: '12px', background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#166534' }}>{informe}</div>}
 
-      {/* Lista de facturas pendientes */}
-      {facturas.map(f => {
-        const incluida = !excluidas.has(f.id_control);
+      {/* Lista: un bloque por cliente, una fila por día pendiente. El día es la unidad
+          que se factura — cada uno sale como su propio comprobante. */}
+      {porCliente.map(g => {
+        const diasIncluidos = g.dias.filter(d => !excluidas.has(clave(d)));
+        const totalCliente = diasIncluidos.reduce((a, d) => a + d.total, 0);
+        const uCliente = diasIncluidos.reduce((a, d) => a + d.unidades, 0);
+        const todos = diasIncluidos.length === g.dias.length;
         return (
-        <div key={f.id_control} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', marginBottom: '8px', overflow: 'hidden', opacity: incluida ? 1 : 0.5 }}>
-          <div onClick={() => setOpen(o => ({ ...o, [f.id_control]: !o[f.id_control] }))}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', cursor: 'pointer', background: 'white' }}>
+        <div key={g.id_control} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', marginBottom: '10px', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: '#fafafa', borderBottom: '1px solid #f3f4f6', flexWrap: 'wrap', gap: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input type="checkbox" checked={incluida} onClick={e => e.stopPropagation()} onChange={() => toggle(f.id_control)}
-                title="Incluir en la facturación" style={{ width: '17px', height: '17px', cursor: 'pointer' }} />
-              <span style={{ fontSize: '11px', background: f.letra === 'A' ? '#dbeafe' : '#f3f4f6', color: f.letra === 'A' ? '#1e40af' : '#374151', padding: '1px 7px', borderRadius: '4px', fontWeight: 700 }}>Factura {f.letra}</span>
-              <span style={{ fontWeight: 600, fontSize: '14px' }}>{f.cliente}</span>
-              <span style={{ fontSize: '11px', color: '#9ca3af' }}>{f.lineas.length} ítems</span>
+              <input type="checkbox" checked={todos} onChange={() => toggleCliente(g.id_control, !todos)}
+                title="Incluir todos los días de este cliente" style={{ width: '17px', height: '17px', cursor: 'pointer' }} />
+              <span style={{ fontSize: '11px', background: g.letra === 'A' ? '#dbeafe' : '#f3f4f6', color: g.letra === 'A' ? '#1e40af' : '#374151', padding: '1px 7px', borderRadius: '4px', fontWeight: 700 }}>Factura {g.letra}</span>
+              <span style={{ fontWeight: 700, fontSize: '14px' }}>{g.cliente}</span>
+              <span style={{ fontSize: '11px', color: g.dias.length > 1 ? '#b45309' : '#9ca3af', fontWeight: g.dias.length > 1 ? 700 : 400 }}>
+                {g.dias.length === 1 ? '1 día' : `${g.dias.length} días pendientes`}
+              </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 700, color: '#374151' }}>{fmtU(f.unidades)} u</span>
-              <span style={{ fontSize: '15px', fontWeight: 800, color: '#111827' }}>{fmt(f.total)}</span>
-              <button onClick={e => { e.stopPropagation(); quitar(f.id_control); }} disabled={quitando === f.id_control}
-                title="Quitar de facturación (vuelve a borrador)"
-                style={{ background: 'none', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '5px', padding: '2px 7px', fontSize: '11px', cursor: 'pointer' }}>
-                {quitando === f.id_control ? '…' : '✕'}
+              <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#374151' }}>{fmtU(uCliente)} u</span>
+              <span style={{ fontSize: '15px', fontWeight: 800, color: '#111827' }}>{fmt(totalCliente)}</span>
+              <button onClick={() => copiarDetalle(g)} title="Copiar el detalle día por día, con la fecha de cada entrega"
+                style={{ background: 'white', border: '1px solid #d1d5db', color: '#374151', borderRadius: '5px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: 600 }}>
+                📋 Copiar detalle
               </button>
-              <span style={{ fontSize: '11px', color: '#9ca3af' }}>{open[f.id_control] ? '▲' : '▼'}</span>
+              <button onClick={() => enviarDetalle(g)} disabled={enviando === g.id_control}
+                title="Mandarle al cliente por mail el detalle de lo pendiente, día por día"
+                style={{ background: 'white', border: '1px solid #bfdbfe', color: '#1d4ed8', borderRadius: '5px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: 600 }}>
+                {enviando === g.id_control ? 'Enviando…' : '✉️ Enviar al cliente'}
+              </button>
+              <button onClick={() => quitar(g.id_control)} disabled={quitando === g.id_control}
+                title="Sacar de facturación TODOS los días de este cliente (vuelven a borrador)"
+                style={{ background: 'none', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '5px', padding: '2px 7px', fontSize: '11px', cursor: 'pointer' }}>
+                {quitando === g.id_control ? '…' : '✕'}
+              </button>
             </div>
           </div>
-          {open[f.id_control] && (
-            <table style={{ width: '100%', fontSize: '12px', borderTop: '1px solid #f3f4f6' }}>
-              <thead><tr style={{ background: '#fafafa', color: '#6b7280' }}>
-                <th style={{ textAlign: 'left', padding: '6px 14px' }}>Producto</th>
-                <th style={{ textAlign: 'left', padding: '6px' }}>Sucursal</th>
-                <th style={{ textAlign: 'right', padding: '6px' }}>Cant.</th>
-                <th style={{ textAlign: 'right', padding: '6px' }}>Precio</th>
-                <th style={{ textAlign: 'right', padding: '6px 14px' }}>Importe</th>
-              </tr></thead>
-              <tbody>
-                {f.lineas.map((l, i) => (
-                  <tr key={i} style={{ borderTop: '1px solid #f9fafb' }}>
-                    <td style={{ padding: '5px 14px' }}>{l.producto}</td>
-                    <td style={{ padding: '5px', color: '#6b7280' }}>{l.sucursal}</td>
-                    <td style={{ padding: '5px', textAlign: 'right' }}>{l.cantidad}</td>
-                    <td style={{ padding: '5px', textAlign: 'right', color: '#6b7280' }}>{fmt(l.precio)}</td>
-                    <td style={{ padding: '5px 14px', textAlign: 'right', fontWeight: 600 }}>{fmt(l.importe)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+
+          {g.dias.map(f => {
+            const k = clave(f);
+            const incluida = !excluidas.has(k);
+            return (
+            <div key={k} style={{ borderTop: '1px solid #f3f4f6', opacity: incluida ? 1 : 0.5 }}>
+              <div onClick={() => setOpen(o => ({ ...o, [k]: !o[k] }))}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', cursor: 'pointer', background: 'white', gap: '8px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input type="checkbox" checked={incluida} onClick={e => e.stopPropagation()} onChange={() => toggle(k)}
+                    title="Incluir este día" style={{ width: '15px', height: '15px', cursor: 'pointer' }} />
+                  <span style={{ fontWeight: 700, fontSize: '13px', fontVariantNumeric: 'tabular-nums' }}>{fmtDia(f.fecha)}</span>
+                  <span style={{ fontSize: '11px', color: '#9ca3af' }}>{f.lineas.length} ítems</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '12px', color: '#6b7280' }}>{fmtU(f.unidades)} u</span>
+                  <span style={{ fontSize: '13.5px', fontWeight: 700, color: '#111827' }}>{fmt(f.total)}</span>
+                  <button onClick={e => { e.stopPropagation(); facturarUna(f); }} disabled={!!emitiendoUna || loading}
+                    title="Emitir SOLO este día como una factura"
+                    style={{ background: '#166534', color: 'white', border: 'none', borderRadius: '5px', padding: '3px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', opacity: emitiendoUna ? 0.6 : 1 }}>
+                    {emitiendoUna === k ? 'Emitiendo…' : 'Facturar este día'}
+                  </button>
+                  <span style={{ fontSize: '11px', color: '#9ca3af' }}>{open[k] ? '▲' : '▼'}</span>
+                </div>
+              </div>
+              {open[k] && (
+                <table style={{ width: '100%', fontSize: '12px', borderTop: '1px solid #f3f4f6' }}>
+                  <thead><tr style={{ background: '#fafafa', color: '#6b7280' }}>
+                    <th style={{ textAlign: 'left', padding: '6px 14px' }}>Producto</th>
+                    <th style={{ textAlign: 'left', padding: '6px' }}>Sucursal</th>
+                    <th style={{ textAlign: 'right', padding: '6px' }}>Cant.</th>
+                    <th style={{ textAlign: 'right', padding: '6px' }}>Precio</th>
+                    <th style={{ textAlign: 'right', padding: '6px 14px' }}>Importe</th>
+                  </tr></thead>
+                  <tbody>
+                    {f.lineas.map((l, i) => (
+                      <tr key={i} style={{ borderTop: '1px solid #f9fafb' }}>
+                        <td style={{ padding: '5px 14px' }}>{l.producto}</td>
+                        <td style={{ padding: '5px', color: '#6b7280' }}>{l.sucursal}</td>
+                        <td style={{ padding: '5px', textAlign: 'right' }}>{l.cantidad}</td>
+                        <td style={{ padding: '5px', textAlign: 'right', color: '#6b7280' }}>{fmt(l.precio)}</td>
+                        <td style={{ padding: '5px 14px', textAlign: 'right', fontWeight: 600 }}>{fmt(l.importe)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            );
+          })}
         </div>
         );
       })}

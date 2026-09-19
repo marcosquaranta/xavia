@@ -58,12 +58,19 @@ export default async function FacturacionPage() {
 
   if (err) return (<><Header user={user} current="ventas" /><div className="container"><div className="alert-box error">{err}</div></div></>);
 
+  // Se agrupa por cliente Y FECHA, que es el grano más fino que se puede facturar. La
+  // pantalla junta las fechas de un mismo cliente cuando se factura todo junto; al revés
+  // (mandar todo junto y querer separarlo en el navegador) no se podría.
   const pendientes = ventas.filter(v => v.exportado === 'PENDIENTE');
   const porControl = new Map<string, VentaDia[]>();
-  for (const v of pendientes) { const a = porControl.get(v.id_control) || []; a.push(v); porControl.set(v.id_control, a); }
+  for (const v of pendientes) {
+    const key = `${v.id_control}||${String(v.fecha || '').split(/[T ]/)[0]}`;
+    const a = porControl.get(key) || []; a.push(v); porControl.set(key, a);
+  }
 
   const facturas: FacturaPendiente[] = [];
-  for (const [idControl, lineasV] of porControl) {
+  for (const [key, lineasV] of porControl) {
+    const idControl = key.split('||')[0];
     const cliente = clientes.find(c => c.id_control === idControl);
     const lineas: FacturaPendiente['lineas'] = [];
     for (const l of lineasV) {
@@ -79,13 +86,13 @@ export default async function FacturacionPage() {
       id_control: idControl,
       cliente: nombreClienteVisible(cliente) || idControl,
       letra: cliente?.tipo_factura || '?',
-      fecha: lineasV[0].fecha,
+      fecha: String(lineasV[0].fecha || '').split(/[T ]/)[0],
       lineas,
       unidades: lineas.reduce((a, l) => a + l.cantidad, 0),
       total: lineas.reduce((a, l) => a + l.importe, 0),
     });
   }
-  facturas.sort((a, b) => a.cliente.localeCompare(b.cliente));
+  facturas.sort((a, b) => a.cliente.localeCompare(b.cliente) || a.fecha.localeCompare(b.fecha));
 
   return (
     <>
