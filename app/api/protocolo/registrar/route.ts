@@ -50,11 +50,30 @@ async function avisarAlarma(tipo: TipoAlarma, datos: DatosRegistro, motivos: str
   const to = await destinatariosAlarma();
   const txt = TEXTO_ALARMA[tipo];
   const detalle = motivos.map((m) => `<li>${m}</li>`).join('');
+
+  // TODO lo que se cargó, no solo lo que se pasó de rango. Cuando salta una alarma la
+  // primera pregunta es "¿qué número cargó?" —para saber si el agua está mal o si se le
+  // fue un decimal— y con solo el valor fuera de rango esa pregunta no se puede contestar
+  // sin entrar a la app. Pasó en septiembre de 2026 con el agua de ósmosis.
+  const valor = (etiqueta: string, v: any, unidad = '') =>
+    v === undefined || v === null || String(v).trim() === '' ? '' : `<li>${etiqueta}: <strong>${v}</strong>${unidad}</li>`;
+  const cargado = [
+    valor('Conductividad', datos.conductividad, ' mS/cm'),
+    valor('pH', datos.ph),
+    valor('pH 4 (patrón 4,00)', datos.ph4),
+    valor('pH 7 (patrón 7,00)', datos.ph7),
+    valor('Conductividad patrón (12,88 mS/cm)', datos.conductividad_patron, ' mS/cm'),
+    valor('¿Calibró?', datos.calibro),
+    valor('Temperatura', datos.temperatura, ' °C'),
+    valor('Humedad', datos.humedad, '%'),
+  ].filter(Boolean).join('');
   const html = `
     <div style="font-family:system-ui,Arial,sans-serif;color:#111;max-width:560px">
       <h2 style="margin:0 0 6px;color:#dc2626">${txt.titulo}</h2>
       <p style="margin:0 0 14px;color:#6b7280;font-size:13px">Medición del ${datos.fecha} a las ${datos.hora} · ${datos.responsable}</p>
       <ul style="font-size:14px;color:#111">${detalle}</ul>
+      <p style="margin:14px 0 4px;font-size:13px;font-weight:700;color:#111">Lo que se cargó</p>
+      <ul style="font-size:13px;color:#374151;margin:0">${cargado || '<li>(sin valores numéricos)</li>'}</ul>
       <p style="font-size:13px;color:#374151">${txt.accion}</p>
       <p style="font-size:13px;color:#6b7280">${txt.limites}</p>
       ${datos.notas ? `<p style="font-size:13px;color:#374151">Notas: ${datos.notas}</p>` : ''}
@@ -69,7 +88,7 @@ async function avisarAlarma(tipo: TipoAlarma, datos: DatosRegistro, motivos: str
         to,
         subject: `⚠ ${txt.asunto} — ${datos.fecha}`,
         html,
-        text: `${txt.titulo} (${datos.fecha} ${datos.hora}, ${datos.responsable}): ${motivos.join(' · ')}. ${txt.limites}`,
+        text: `${txt.titulo} (${datos.fecha} ${datos.hora}, ${datos.responsable}): ${motivos.join(' · ')}. Cargado: ${cargado.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()}. ${txt.limites}`,
       }),
     });
     return res.ok;

@@ -41,6 +41,9 @@ export const CONDICIONES_TXT = `Temperatura entre ${COND_TEMP_MIN} y ${COND_TEMP
 // Marcelo y a Marcos (ver app/api/protocolo/registrar).
 export const ALARMA_CONDUCTIVIDAD = 0.15; // mS/cm
 export const ALARMA_PH = 7.8;
+// A partir de acá ya no es "agua fuera de rango", es un error de unidad: el agua de
+// ósmosis nunca da 10 mS/cm, eso serían 10.000 µS/cm (agua de mar está en 50).
+export const LIMITE_UNIDAD_OSMOSIS = 10;
 
 // ── Dosis y volúmenes (datos de Marcelo, sept-2026) ──────────────────────────────────
 //
@@ -567,6 +570,17 @@ export function validarRegistro(datos: DatosRegistro): string[] {
   const condPatron = Number(datos.conductividad_patron);
   if (!isNaN(condPatron) && condPatron > 100) {
     faltan.push(`la conductividad va en mS/cm: si el equipo marcó ${condPatron}, cargá ${Math.round((condPatron / 1000) * 100) / 100}`);
+  }
+
+  // El agua de ósmosis tiene el mismo problema de unidad, y encima con números chicos: el
+  // equipo puede estar en µS/cm (ej. 120) y el protocolo pide mS/cm (0,12). Cargar 120
+  // dispara una alarma falsa por un factor de mil. Se frena antes de guardar y se dice cuál
+  // sería el número, en vez de mandarle a Marcelo una alarma que no existe.
+  if (datos.id_tarea === 'control_osmosis') {
+    const cond = Number(datos.conductividad);
+    if (!isNaN(cond) && cond >= LIMITE_UNIDAD_OSMOSIS) {
+      faltan.push(`la conductividad del agua de ósmosis va en mS/cm y tiene que dar bastante menos de ${ALARMA_CONDUCTIVIDAD}: si el equipo marcó ${cond} µS/cm, cargá ${Math.round((cond / 1000) * 1000) / 1000}`);
+    }
   }
 
   for (const campo of tarea.campos) {

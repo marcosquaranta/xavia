@@ -373,6 +373,11 @@ export interface RegistroProtocolo {
   conductividad: number | string;
   ph4: number | string;           // control de instrumental: lectura en la solución patrón pH 4
   ph7: number | string;           // ídem en la solución patrón pH 7
+  // Lectura del conductímetro contra la solución patrón de 12,88 mS/cm, y litros de la
+  // aplicación. Estaban en la hoja desde el principio pero faltaban acá, así que ninguna
+  // pantalla los podía mostrar: quedaban cargados y sin poder consultarse.
+  conductividad_patron: number | string;
+  litros: number | string;
   calibro: 'SI' | 'NO' | '';      // si hubo que calibrar el peachímetro
   fuera_de_rango: 'SI' | 'NO' | '';
   notas: string;

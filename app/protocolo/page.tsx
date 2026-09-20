@@ -61,7 +61,7 @@ export default async function ProtocoloPage() {
   const ultimos = [...registros]
     .filter((r) => String(r.tipo_registro) === 'ejecucion')
     .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')))
-    .slice(0, 20);
+    .slice(0, 40);
   const nombreTarea = (id: string) => TAREAS_PROTOCOLO.find((t) => t.id === id)?.nombre || id;
 
   return (
@@ -185,16 +185,29 @@ export default async function ProtocoloPage() {
                 </thead>
                 <tbody>
                   {ultimos.map((r) => {
+                    // TODOS los valores cargados, incluidos los del control de instrumental
+                    // —pH 4, pH 7, patrón, si calibró—, que antes no se mostraban en ningún
+                    // lado. Cuando salta una alarma lo primero que se pregunta es qué número
+                    // se cargó, para saber si el agua está mal o si se fue un decimal.
+                    const val = (v: any) => v !== '' && v !== undefined && v !== null;
                     const datos = [
                       r.producto ? String(r.producto) : '',
                       r.dosis ? String(r.dosis) : '',
-                      r.temperatura !== '' && r.temperatura !== undefined ? `${r.temperatura} °C` : '',
-                      r.humedad !== '' && r.humedad !== undefined ? `${r.humedad}%` : '',
-                      r.conductividad !== '' && r.conductividad !== undefined ? `${r.conductividad} mS/cm` : '',
-                      r.ph !== '' && r.ph !== undefined ? `pH ${r.ph}` : '',
+                      val(r.temperatura) ? `${r.temperatura} °C` : '',
+                      val(r.humedad) ? `${r.humedad}%` : '',
+                      val(r.conductividad) ? `conductividad ${r.conductividad} mS/cm` : '',
+                      val(r.ph) ? `pH ${r.ph}` : '',
+                      val(r.ph4) ? `pH4 → ${r.ph4}` : '',
+                      val(r.ph7) ? `pH7 → ${r.ph7}` : '',
+                      val(r.conductividad_patron) ? `patrón → ${r.conductividad_patron} mS/cm` : '',
+                      val(r.calibro) ? `calibró: ${r.calibro}` : '',
+                      val(r.litros) ? `${r.litros} L` : '',
                     ].filter(Boolean).join(' · ');
                     return (
-                      <tr key={String(r.id_registro)} style={{ borderTop: '1px solid #f3f4f6' }}>
+                      <tr key={String(r.id_registro)} style={{
+                        borderTop: '1px solid #f3f4f6',
+                        background: String(r.fuera_de_rango) === 'SI' ? '#fef2f2' : undefined,
+                      }}>
                         <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }}>{fmtDia(String(r.fecha))}</td>
                         <td style={{ padding: '5px 8px' }}>{nombreTarea(String(r.id_tarea))}</td>
                         <td style={{ padding: '5px 8px' }}>{String(r.responsable || '')}</td>
@@ -202,6 +215,7 @@ export default async function ProtocoloPage() {
                         <td style={{ padding: '5px 8px', color: '#6b7280' }}>
                           {String(r.estado) === 'no_aplica' ? <em>no se aplicó</em> : datos || '—'}
                           {String(r.fuera_de_rango) === 'SI' && <span style={{ color: '#dc2626', fontWeight: 700 }}> · fuera de rango</span>}
+                          {r.notas ? <div style={{ fontSize: '10.5px', color: '#9ca3af', marginTop: '2px' }}>{String(r.notas)}</div> : null}
                         </td>
                       </tr>
                     );
