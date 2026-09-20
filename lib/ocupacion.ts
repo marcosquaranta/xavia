@@ -342,3 +342,99 @@ export function mesadasVaciasEnLaSemana(
   }
   return resultado.sort((a, b) => b.diasSeguidos - a.diasSeguidos);
 }
+
+// ── Ocupación de la SEMANA, no la foto de un día ─────────────────────────────────────
+//
+// El reporte semanal mostraba la ocupación del momento en que se genera. Eso convierte a
+// todo el informe en rehén del día que le tocó: si el viernes se cosechó una mesada
+// grande, la semana entera aparece con mala ocupación aunque haya estado llena de lunes a
+// jueves. Y al revés, un viernes recién trasplantado tapa una semana floja.
+//
+// Acá se promedia sobre el historial diario, ponderando por tubos (una mesada grande pesa
+// más que una chica, como corresponde).
+//
+// Y se perdona el hueco de recambio: entre que se cosecha una mesada y se vuelve a
+// trasplantar pasa un día en que queda vacía. Ese día es parte de la operación normal, no
+// subocupación, y contarlo castiga justamente a la mesada que se está usando bien. Se
+// perdona solo el hueco CORTO — dos días o más seguidos vacía ya es tiempo perdido de
+// verdad y tiene que pesar.
+export const DIAS_HUECO_PERDONADOS = 1;
+
+export interface OcupacionSemanaNave { nave: number; pct: number; diasConDato: number }
+export interface MesadaBajaSemana { nombre: string; nave: number; pct: number; diasVacia: number }
+
+interface DiaMesada { fecha: string; tot: number; ocu: number }
+
+// Agrupa el historial por mesada y devuelve, para cada una, los días que SÍ cuentan para
+// el promedio (los huecos cortos de recambio quedan afuera).
+function diasQueCuentan(
+  historial: OcupacionHistorialRow[], desde: string, hasta: string,
+): Map<string, { nombre: string; nave: number; dias: DiaMesada[]; diasVacia: number }> {
+  const porMesada = new Map<string, { nombre: string; nave: number; dias: DiaMesada[]; diasVacia: number }>();
+  for (const r of historial) {
+    const f = String(r.fecha || '').slice(0, 10);
+    if (!f || f < desde || f > hasta) continue;
+    const tot = Number(r.tubos_totales) || 0;
+    if (tot <= 0) continue; // mesada sin capacidad cargada: no dice nada
+    const nombre = String(r.mesada || '').replace(/^Nave \d+ - /, '');
+    const nave = Number(r.nave);
+    const key = `${nombre}||${nave}`;
+    if (!porMesada.has(key)) porMesada.set(key, { nombre, nave, dias: [], diasVacia: 0 });
+    porMesada.get(key)!.dias.push({ fecha: f, tot, ocu: Number(r.tubos_ocupados) || 0 });
+  }
+
+  for (const m of porMesada.values()) {
+    m.dias.sort((a, b) => a.fecha.localeCompare(b.fecha));
+    m.diasVacia = m.dias.filter(d => d.ocu === 0).length;
+    // Se recorren las rachas de días vacíos: las cortas se descartan del promedio, las
+    // largas se dejan para que pesen.
+    const cuentan: DiaMesada[] = [];
+    let i = 0;
+    while (i < m.dias.length) {
+      if (m.dias[i].ocu > 0) { cuentan.push(m.dias[i]); i++; continue; }
+      let j = i;
+      while (j < m.dias.length && m.dias[j].ocu === 0) j++;
+      const largo = j - i;
+      if (largo > DIAS_HUECO_PERDONADOS) cuentan.push(...m.dias.slice(i, j));
+      i = j;
+    }
+    m.dias = cuentan;
+  }
+  return porMesada;
+}
+
+// Ocupación promedio de cada nave en el período, ponderada por tubos.
+export function ocupacionSemanalPorNave(
+  historial: OcupacionHistorialRow[], desde: string, hasta: string,
+): OcupacionSemanaNave[] {
+  const porMesada = diasQueCuentan(historial, desde, hasta);
+  const porNave = new Map<number, { ocu: number; tot: number; fechas: Set<string> }>();
+  for (const m of porMesada.values()) {
+    if (!porNave.has(m.nave)) porNave.set(m.nave, { ocu: 0, tot: 0, fechas: new Set() });
+    const acc = porNave.get(m.nave)!;
+    for (const d of m.dias) { acc.ocu += d.ocu; acc.tot += d.tot; acc.fechas.add(d.fecha); }
+  }
+  return [...porNave.entries()]
+    .map(([nave, a]) => ({ nave, pct: a.tot > 0 ? Math.round((a.ocu / a.tot) * 100) : 0, diasConDato: a.fechas.size }))
+    .sort((a, b) => a.nave - b.nave);
+}
+
+// Mesadas que estuvieron por debajo del umbral EN PROMEDIO durante el período. No es "las
+// que están bajas hoy": una mesada puede estar al 100% el viernes y haber estado al 40%
+// toda la semana, y es esa la que hay que mirar.
+export function mesadasBajasSemana(
+  historial: OcupacionHistorialRow[], desde: string, hasta: string, umbralPct = 90, minTubos = 10,
+): MesadaBajaSemana[] {
+  const porMesada = diasQueCuentan(historial, desde, hasta);
+  const out: MesadaBajaSemana[] = [];
+  for (const m of porMesada.values()) {
+    if (!m.dias.length) continue;
+    const tot = m.dias.reduce((s, d) => s + d.tot, 0);
+    const ocu = m.dias.reduce((s, d) => s + d.ocu, 0);
+    const tubosProm = tot / m.dias.length;
+    if (tubosProm <= minTubos) continue; // mesadas chicas: el % se mueve demasiado
+    const pct = tot > 0 ? Math.round((ocu / tot) * 100) : 0;
+    if (pct < umbralPct) out.push({ nombre: m.nombre, nave: m.nave, pct, diasVacia: m.diasVacia });
+  }
+  return out.sort((a, b) => a.pct - b.pct);
+}

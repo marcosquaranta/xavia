@@ -1,6 +1,6 @@
 import { readSheet } from './sheets';
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, PrecioVenta, ClienteVenta, VentaHistorica, StockCamara, RegistroProtocolo, ProductividadDiaria, KilometrajeVehiculo } from './types';
-import { tubosPorMesada, mesadasVaciasEnLaSemana, type OcupacionHistorialRow, type MesadaVacia } from './ocupacion';
+import { tubosPorMesada, mesadasVaciasEnLaSemana, ocupacionSemanalPorNave, mesadasBajasSemana, DIAS_HUECO_PERDONADOS, type OcupacionHistorialRow, type MesadaVacia } from './ocupacion';
 import { cosechasEstimadasPorLote, ciclosPorSemana, pesoPromedioRango, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, type PesoPromedioMes } from './estadisticas';
 import { calcularCamara, diferenciaAjustesRango } from './camara';
 import { nombreClienteVisible } from './clientes';
@@ -385,7 +385,9 @@ export interface ReporteSemanalData {
   cicloMesAnterior: { rucula: number; lechuga: number };
   pesoSemana: PesoPromedioMes;
   pesoMesAnterior: PesoPromedioMes;
+  // Promedio de la SEMANA, no la foto del día que se genera el reporte.
   ocupacion: { nave: number; pct: number }[];
+  diasOcupacion: number;  // sobre cuántos días se promedió (0 = es la foto de hoy)
   mesadasBajas: { nombre: string; nave: number; pct: number }[];
   mesadasVacias: MesadaVacia[];
   plantasPerdidasSubocupacion: PlantasPerdidasSubocupacion;
@@ -557,18 +559,32 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const pesoSemana = pesoPromedioRango(lotes, desde7, hoy);
   const pesoMesAnterior = pesoPromedioMes(lotes, mesPasadoRef);
 
-  // ── Ocupación por nave (F2) + mesadas puntuales por debajo del 90% ──
+  // ── Ocupación de la SEMANA por nave + mesadas por debajo del 90% en promedio ──
+  //
+  // Antes esto era la foto del momento en que se genera el reporte, y eso hacía que todo
+  // el informe dependiera del día que le tocó: cosechar una mesada grande un viernes
+  // mostraba la semana entera con mala ocupación aunque hubiera estado llena de lunes a
+  // jueves. Ahora se promedia sobre el historial diario, ponderado por tubos, perdonando
+  // el hueco de un día del recambio entre cosecha y trasplante (ver DIAS_HUECO_PERDONADOS).
   const tubosMesadas = tubosPorMesada(ubicaciones, lotes);
-  const ocupacion = tubosMesadas.map((n: any) => {
+  const ocupacionSemana = ocupacionSemanalPorNave(ocupacionHistorial, desdeSemana, hastaHoy);
+  const mesadasBajasSem = mesadasBajasSemana(ocupacionHistorial, desdeSemana, hastaHoy, 90);
+  // Si el historial diario todavía no tiene datos de la semana, se cae a la foto de hoy —
+  // es peor no mostrar nada que mostrar un número de un solo día, aclarándolo.
+  const hayHistorialSemana = ocupacionSemana.length > 0;
+  const ocupacion = hayHistorialSemana ? ocupacionSemana.map(o => ({ nave: o.nave, pct: o.pct })) : tubosMesadas.map((n: any) => {
     const f2 = (n.mesadas || []).filter((m: any) => m.sector_fase !== 'fase_1');
     const tot = f2.reduce((s: number, m: any) => s + m.tubos_totales, 0);
     const ocu = f2.reduce((s: number, m: any) => s + m.tubos_ocupados, 0);
     return { nave: n.nave, pct: tot > 0 ? Math.round((ocu / tot) * 100) : 0 };
   });
-  const mesadasBajas = tubosMesadas.flatMap((n: any) => (n.mesadas || [])
-    .filter((m: any) => m.sector_fase !== 'fase_1' && m.tubos_totales > 10 && m.ocupacion_pct < 90)
-    .map((m: any) => ({ nombre: String(m.nombre).replace(/^Nave \d+ - /, ''), nave: n.nave, pct: m.ocupacion_pct })))
-    .sort((a: any, b: any) => a.pct - b.pct);
+  const mesadasBajas = hayHistorialSemana
+    ? mesadasBajasSem.map(m => ({ nombre: m.nombre, nave: m.nave, pct: m.pct }))
+    : tubosMesadas.flatMap((n: any) => (n.mesadas || [])
+        .filter((m: any) => m.sector_fase !== 'fase_1' && m.tubos_totales > 10 && m.ocupacion_pct < 90)
+        .map((m: any) => ({ nombre: String(m.nombre).replace(/^Nave \d+ - /, ''), nave: n.nave, pct: m.ocupacion_pct })))
+        .sort((a: any, b: any) => a.pct - b.pct);
+  const diasOcupacion = hayHistorialSemana ? Math.max(...ocupacionSemana.map(o => o.diasConDato)) : 0;
   // "mesadasBajas" es la foto de HOY; esto es la película de la SEMANA — qué mesada estuvo
   // sin una sola planta más de 2 días seguidos, aunque para cuando se genera el reporte ya
   // se haya vuelto a sembrar y el snapshot de arriba no lo muestre más.
@@ -615,7 +631,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     proyeccionMesActual, cosechaRealMesAnterior,
     cicloSemana, cicloSemanaAnterior, cicloMesAnterior,
     pesoSemana, pesoMesAnterior,
-    ocupacion, mesadasBajas, mesadasVacias, plantasPerdidasSubocupacion, ventasSemanas,
+    ocupacion, diasOcupacion, mesadasBajas, mesadasVacias, plantasPerdidasSubocupacion, ventasSemanas,
     protocoloPendientes, protocoloHoy, protocoloCumplimiento, indicadoresMes,
     facturacion: controlFacturacion(ventas, precios, clientes, hastaHoy),
     comparacion: compararFacturado(ventas, precios, clientes, comprobantesXubio, desde30, hastaHoy),
@@ -1044,9 +1060,14 @@ export function construirHtml(d: ReporteSemanalData): string {
     ${controlFactHtml}
     ${protocoloHtml}
 
-    <h3 style="margin:0 0 8px;font-size:14px">Ocupación por nave</h3>
+    <h3 style="margin:0 0 4px;font-size:14px">Ocupación por nave
+      <span style="font-weight:400;color:#9ca3af;font-size:12px">${d.diasOcupacion > 0
+        ? `— promedio de los últimos ${d.diasOcupacion} días`
+        : '— foto de hoy (todavía no hay historial diario de la semana)'}</span>
+    </h3>
+    ${d.diasOcupacion > 0 ? `<p style="margin:0 0 8px;font-size:11px;color:#9ca3af">Ponderado por tubos. No cuenta el día suelto que una mesada queda vacía entre la cosecha y el trasplante: ese hueco es parte del recambio, no subocupación.</p>` : ''}
     <div style="margin-bottom:6px">${ocupacionHtml}</div>
-    <p style="margin:10px 0 0;font-size:12px;color:#6b7280">Mesadas F2 por debajo del 90%:</p>
+    <p style="margin:10px 0 0;font-size:12px;color:#6b7280">Mesadas F2 por debajo del 90%${d.diasOcupacion > 0 ? ' en promedio esta semana' : ''}:</p>
     <div style="margin-bottom:10px">${mesadasBajasHtml}</div>
     ${mesadasVaciasHtml}
     ${d.plantasPerdidasSubocupacion.total > 0 ? `<p style="margin:10px 0 0;font-size:12px;color:#b45309">
@@ -1174,10 +1195,10 @@ export function construirTexto(d: ReporteSemanalData): string {
   }
   L.push('');
 
-  L.push(`🏭 *Ocupación por nave*`);
+  L.push(`🏭 *Ocupación por nave*${d.diasOcupacion > 0 ? ` (promedio de ${d.diasOcupacion} días)` : ' (foto de hoy)'}`);
   for (const o of d.ocupacion) L.push(`  Nave ${o.nave}: ${o.pct}%`);
   if (d.mesadasBajas.length > 0) {
-    L.push(`Mesadas F2 por debajo del 90%:`);
+    L.push(`Mesadas F2 por debajo del 90%${d.diasOcupacion > 0 ? ' en promedio' : ''}:`);
     for (const m of d.mesadasBajas) L.push(`  N${m.nave} · ${m.nombre}: ${m.pct}%`);
   } else {
     L.push(`✓ Ninguna mesada F2 por debajo del 90%.`);
