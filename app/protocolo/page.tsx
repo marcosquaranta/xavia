@@ -5,6 +5,7 @@ import { fechaArgentinaHoy } from '@/lib/ocupacion';
 import {
   leerConfigProtocolo, tareasDelDia, tareasVencidas, cumplimientoProtocolo,
   lunesDeSemana, sumarDias, TAREAS_PROTOCOLO, CONFIG_ALARMA_EMAILS,
+  ALARMA_CONDUCTIVIDAD, ALARMA_PH, PATRON_CONDUCTIVIDAD,
 } from '@/lib/protocoloTareas';
 import type { RegistroProtocolo } from '@/lib/types';
 import Header from '@/components/Header';
@@ -62,6 +63,17 @@ export default async function ProtocoloPage() {
     .filter((r) => String(r.tipo_registro) === 'ejecucion')
     .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')))
     .slice(0, 40);
+  // Las MEDICIONES aparte de las aplicaciones. Mezcladas en una sola lista no se puede
+  // seguir una serie: entre dos mediciones de ósmosis hay media docena de foliares, y la
+  // pregunta que se hace siempre —"¿este número viene subiendo?"— necesita verlas juntas.
+  const medicionesDe = (idTarea: string, n = 12) => registros
+    .filter((r) => String(r.id_tarea) === idTarea && String(r.tipo_registro) === 'ejecucion' && String(r.estado) !== 'no_aplica')
+    .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')))
+    .slice(0, n);
+  const medOsmosis = medicionesDe('control_osmosis');
+  const medInstrumental = medicionesDe('control_instrumental');
+  const num = (v: any) => { const n = Number(v); return isNaN(n) ? null : n; };
+
   const nombreTarea = (id: string) => TAREAS_PROTOCOLO.find((t) => t.id === id)?.nombre || id;
 
   return (
@@ -165,6 +177,91 @@ export default async function ProtocoloPage() {
             </table>
           </div>
         </div>
+
+        {/* ══ MEDICIONES ══ */}
+        {(medOsmosis.length > 0 || medInstrumental.length > 0) && (
+          <div className="card" style={{ marginBottom: '14px' }}>
+            <p className="card-title">Mediciones</p>
+            <p className="card-sub">
+              Los valores cargados, uno al lado del otro. En rojo los que se pasaron del límite del protocolo.
+            </p>
+
+            {medOsmosis.length > 0 && (
+              <div style={{ marginTop: '10px' }}>
+                <p style={{ margin: '0 0 5px', fontSize: '12.5px', fontWeight: 700, color: '#374151' }}>
+                  Agua de ósmosis inversa
+                  <span style={{ fontWeight: 400, color: '#9ca3af', fontSize: '11px' }}>
+                    {' '}— límites: conductividad hasta {ALARMA_CONDUCTIVIDAD} mS/cm · pH hasta {ALARMA_PH}
+                  </span>
+                </p>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '420px' }}>
+                    <thead><tr style={{ background: '#f9fafb', color: '#6b7280' }}>
+                      <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 600 }}>Fecha</th>
+                      <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 600 }}>Quién midió</th>
+                      <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600 }}>Conductividad</th>
+                      <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600 }}>pH</th>
+                    </tr></thead>
+                    <tbody>
+                      {medOsmosis.map((r) => {
+                        const c = num(r.conductividad), ph = num(r.ph);
+                        const malC = c !== null && c > ALARMA_CONDUCTIVIDAD;
+                        const malPh = ph !== null && ph > ALARMA_PH;
+                        return (
+                          <tr key={String(r.id_registro)} style={{ borderTop: '1px solid #f3f4f6', background: malC || malPh ? '#fef2f2' : undefined }}>
+                            <td style={{ padding: '4px 8px', whiteSpace: 'nowrap' }}>{fmtDia(String(r.fecha))}</td>
+                            <td style={{ padding: '4px 8px', color: '#6b7280' }}>{String(r.responsable || '')}</td>
+                            <td style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: malC ? '#b91c1c' : '#111827' }}>
+                              {c !== null ? `${c} mS/cm` : '—'}
+                            </td>
+                            <td style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: malPh ? '#b91c1c' : '#111827' }}>
+                              {ph !== null ? ph : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {medInstrumental.length > 0 && (
+              <div style={{ marginTop: '14px' }}>
+                <p style={{ margin: '0 0 5px', fontSize: '12.5px', fontWeight: 700, color: '#374151' }}>
+                  Control de instrumental
+                  <span style={{ fontWeight: 400, color: '#9ca3af', fontSize: '11px' }}>
+                    {' '}— patrones: pH 4,00 · pH 7,00 · conductividad {PATRON_CONDUCTIVIDAD} mS/cm
+                  </span>
+                </p>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '520px' }}>
+                    <thead><tr style={{ background: '#f9fafb', color: '#6b7280' }}>
+                      <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 600 }}>Fecha</th>
+                      <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 600 }}>Quién midió</th>
+                      <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600 }}>pH 4</th>
+                      <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600 }}>pH 7</th>
+                      <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600 }}>Patrón</th>
+                      <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 600 }}>¿Calibró?</th>
+                    </tr></thead>
+                    <tbody>
+                      {medInstrumental.map((r) => (
+                        <tr key={String(r.id_registro)} style={{ borderTop: '1px solid #f3f4f6', background: String(r.fuera_de_rango) === 'SI' ? '#fef2f2' : undefined }}>
+                          <td style={{ padding: '4px 8px', whiteSpace: 'nowrap' }}>{fmtDia(String(r.fecha))}</td>
+                          <td style={{ padding: '4px 8px', color: '#6b7280' }}>{String(r.responsable || '')}</td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{num(r.ph4) ?? '—'}</td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{num(r.ph7) ?? '—'}</td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{num(r.conductividad_patron) ?? '—'}</td>
+                          <td style={{ padding: '4px 8px', color: String(r.calibro) === 'SI' ? '#b45309' : '#6b7280' }}>{String(r.calibro || '—')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ══ ÚLTIMOS REGISTROS ══ */}
         <div className="card" style={{ marginBottom: '14px' }}>
