@@ -29,7 +29,7 @@ import KilometrajeReminder from '@/components/KilometrajeReminder';
 import TardanzasHoyBanner from '@/components/TardanzasHoyBanner';
 import { GraficoVentaPorArticulo } from '@/app/ventas/VentasEvolucionCharts';
 import TareasProtocolo from '@/components/TareasProtocolo';
-import { leerConfigProtocolo, tareasDelDia as tareasProtocoloDelDia, tareasVencidas as tareasProtocoloVencidas, alarmaOsmosis } from '@/lib/protocoloTareas';
+import { leerConfigProtocolo, tareasDelDia as tareasProtocoloDelDia, tareasVencidas as tareasProtocoloVencidas, alertasProtocolo } from '@/lib/protocoloTareas';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 
 export const dynamic = 'force-dynamic';
@@ -285,20 +285,8 @@ export default async function PanelPage() {
   // manda al registrarla (ver /api/protocolo/registrar), queda a la vista en el Panel hasta
   // que una medición nueva vuelva a estar en rango — un mail se pierde, el tablero no.
   try {
-    const ultimaOsmosis = [...registrosProtocolo]
-      .filter((r) => r.id_tarea === 'control_osmosis' && String(r.tipo_registro) === 'ejecucion' && String(r.estado) !== 'no_aplica')
-      .sort((a, b) => String(a.fecha || '').localeCompare(String(b.fecha || '')))
-      .pop();
-    if (ultimaOsmosis) {
-      const { alarma, motivos } = alarmaOsmosis(ultimaOsmosis.conductividad, ultimaOsmosis.ph);
-      if (alarma) {
-        alertas = [...alertas, {
-          tipo: 'error' as const,
-          msg: `Agua de ósmosis fuera de límite (${String(ultimaOsmosis.fecha).slice(5)}): ${motivos.join(' · ')}`,
-          categoria: 'general' as const,
-          href: '/protocolo',
-        }];
-      }
+    for (const a of alertasProtocolo(registrosProtocolo)) {
+      alertas = [...alertas, { tipo: a.tipo, msg: a.msg, categoria: 'general' as const, href: a.href, clave: a.clave }];
     }
   } catch {}
 

@@ -612,6 +612,70 @@ export function alarmaOsmosis(conductividad: any, ph: any): { alarma: boolean; m
   return { alarma: motivos.length > 0, motivos };
 }
 
+// ── Alertas del protocolo para el Panel ──────────────────────────────────────────────
+//
+// El tablero es el lugar donde esto tiene que estar: un mail se pierde, se lee en el
+// teléfono y se olvida, y el que tiene que actuar no siempre es el que lo recibe. Acá
+// queda a la vista de todos hasta que una medición nueva vuelva a dar en rango.
+//
+// Cada alerta lleva el VALOR CARGADO y quién lo cargó. Esa es toda la diferencia entre
+// "algo está fuera de rango" —que obliga a ir a buscar el número a otro lado— y poder
+// decidir en el momento si el agua está mal o si se le fue un decimal a quien midió.
+
+export interface AlertaProtocolo {
+  tipo: 'error' | 'warn';
+  msg: string;
+  href: string;
+  clave: string;
+}
+
+const ddmmAlerta = (f: any) => {
+  const [, m, d] = String(f || '').split(/[T ]/)[0].split('-');
+  return d ? `${d}/${m}` : String(f || '');
+};
+
+export function alertasProtocolo(registros: RegistroProtocolo[]): AlertaProtocolo[] {
+  const out: AlertaProtocolo[] = [];
+
+  // Agua de ósmosis: se mira SOLO la última medición. Una que estuvo mal hace tres semanas
+  // y después volvió a dar bien no es un problema abierto — es historia, y está en la tabla
+  // de mediciones. Lo que hay que resolver es lo que sigue mal hoy.
+  const osm = ultimaEjecucion('control_osmosis', registros);
+  if (osm) {
+    const { alarma, motivos } = alarmaOsmosis(osm.conductividad, osm.ph);
+    if (alarma) {
+      const medido = [
+        osm.conductividad !== '' && osm.conductividad !== undefined ? `conductividad ${osm.conductividad} mS/cm` : '',
+        osm.ph !== '' && osm.ph !== undefined ? `pH ${osm.ph}` : '',
+      ].filter(Boolean).join(' · ');
+      out.push({
+        tipo: 'error',
+        clave: `osmosis-${ddmmAlerta(osm.fecha)}`,
+        href: '/protocolo',
+        msg: `Agua de ósmosis fuera de límite — medición del ${ddmmAlerta(osm.fecha)}${osm.responsable ? ` (${osm.responsable})` : ''}: ${medido}. Límites: hasta ${ALARMA_CONDUCTIVIDAD} mS/cm y pH ${ALARMA_PH}. ${motivos.join(' · ')}`,
+      });
+    }
+  }
+
+  // Instrumental: si el último chequeo dio fuera de tolerancia, TODO lo que se mida con ese
+  // equipo hasta que se calibre es un número en el que no se puede confiar. Por eso va al
+  // Panel y no solo a la pantalla del protocolo.
+  const inst = ultimaEjecucion('control_instrumental', registros);
+  if (inst) {
+    const { hayQueCalibrar, motivos } = evaluarInstrumental(inst);
+    if (hayQueCalibrar && String(inst.calibro).toUpperCase() !== 'SI') {
+      out.push({
+        tipo: 'error',
+        clave: `instrumental-${ddmmAlerta(inst.fecha)}`,
+        href: '/protocolo',
+        msg: `Instrumental fuera de tolerancia — chequeo del ${ddmmAlerta(inst.fecha)}${inst.responsable ? ` (${inst.responsable})` : ''}: ${motivos.join(' · ')}. Hay que calibrar antes de seguir midiendo.`,
+      });
+    }
+  }
+
+  return out;
+}
+
 // Marca de "fuera de rango" que se guarda en la fila, según el tipo de tarea.
 export function calcularFueraDeRango(datos: DatosRegistro): boolean {
   const tarea = tareaPorId(datos.id_tarea);

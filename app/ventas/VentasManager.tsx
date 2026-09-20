@@ -20,22 +20,38 @@ interface LineaCarga { id_control:string; nombre_cliente:string; rucula:number; 
 // Resumen de texto (cantidades por cliente y por producto) para el mensaje de "Cargar ventas".
 function resumenCarga(lineas: LineaCarga[]): string {
   const claveProd = [...ALL.map(p=>({key:p.key as keyof LineaCarga & string, label:p.label, u:'u'})), {key:'rucula_kg' as const,label:'Rúcula',u:'kg'}, {key:'lechuga_kg_crespa' as const,label:'Lechuga Crespa',u:'kg'}, {key:'lechuga_kg_roble' as const,label:'Lechuga Roble',u:'kg'}];
-  const porCliente = new Map<string, number>();
+
+  // El desglose por CULTIVO dentro de cada cliente, que es contra lo que se controla lo que
+  // se subió al camión. El total por cliente solo no alcanza: "La Esperanza 60 u" no dice
+  // si fueron 40 rúculas y 20 crespas o al revés, que es justo lo que hay que verificar.
+  const porCliente = new Map<string, { total: number; prods: Map<string, number> }>();
   const porProducto = new Map<string, number>();
   for (const l of lineas) {
-    let totalLinea = 0;
     for (const p of claveProd) {
       const v = Number((l as any)[p.key]) || 0;
       if (v <= 0) continue;
-      totalLinea += v;
+      const etiqueta = `${p.label}${p.u === 'kg' ? ' (kg)' : ''}`;
+      if (!porCliente.has(l.nombre_cliente)) porCliente.set(l.nombre_cliente, { total: 0, prods: new Map() });
+      const c = porCliente.get(l.nombre_cliente)!;
+      c.total += v;
+      c.prods.set(etiqueta, (c.prods.get(etiqueta) || 0) + v);
       porProducto.set(`${p.label} (${p.u})`, (porProducto.get(`${p.label} (${p.u})`) || 0) + v);
     }
-    if (totalLinea > 0) porCliente.set(l.nombre_cliente, (porCliente.get(l.nombre_cliente) || 0) + totalLinea);
   }
+
   const fmt = (n:number) => n.toLocaleString('es-AR');
-  const lineasCliente = Array.from(porCliente.entries()).sort((a,b)=>b[1]-a[1]).map(([c,t])=>`· ${c}: ${fmt(t)} u`).join('\n');
+  const bloquesCliente = Array.from(porCliente.entries())
+    .sort((a,b)=>b[1].total-a[1].total)
+    .map(([cliente, d]) => {
+      const detalle = Array.from(d.prods.entries())
+        .sort((a,b)=>b[1]-a[1])
+        .map(([prod, cant]) => `    ${fmt(cant)} ${prod}`)
+        .join('\n');
+      return `${cliente.toUpperCase()} — ${fmt(d.total)} u\n${detalle}`;
+    })
+    .join('\n\n');
   const lineasProducto = Array.from(porProducto.entries()).sort((a,b)=>b[1]-a[1]).map(([p,t])=>`· ${p}: ${fmt(t)}`).join('\n');
-  return `\nPor cliente:\n${lineasCliente}\n\nPor producto:\n${lineasProducto}`;
+  return `\n${bloquesCliente}\n\nTotal por producto:\n${lineasProducto}`;
 }
 type PK = 'rucula'|'lechuga_crespa'|'hoja_roble'|'bandeja_rucula'|'albahaca';
 type SV = { rucula:number; lechuga_crespa:number; hoja_roble:number };
