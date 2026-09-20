@@ -268,7 +268,13 @@ export async function emitirPendientes(
   // nada (hay una sola fecha pendiente por cliente), pero cuando se acumuló atraso cada día
   // sale en su propio comprobante y se puede conciliar contra los remitos del cliente.
   const porFecha = opciones.porFecha !== false;
-  const parSet = porFecha ? new Set(opciones.pares!.map(p => `${p.id_control}||${p.fecha}`)) : null;
+  // El filtro por días puntuales depende de que VENGAN días puntuales, no de porFecha.
+  // Cuando esto colgaba de porFecha —que ahora es true por defecto— la carga diaria de
+  // ventas, que llama sin `pares`, reventaba con "Cannot read properties of undefined
+  // (reading 'map')". El `!` de TypeScript tapó justamente el caso que rompía.
+  const parSet = opciones.pares?.length
+    ? new Set(opciones.pares.map(p => `${p.id_control}||${p.fecha}`))
+    : null;
   const pendientes = ventas.filter(v =>
     v.exportado === 'PENDIENTE'
     && (!idSet || idSet.has(String(v.id_control)))
