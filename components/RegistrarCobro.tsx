@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { sugerirCombinaciones, toleranciaDe } from '@/lib/conciliacionCobro';
+import { cuentasElegibles } from '@/lib/cuentasCobro';
 
 interface ClienteOpt { id_control: string; nombre: string }
 interface CobroFila {
@@ -18,20 +19,6 @@ const diasDesde = (f: string) => Math.round((Date.now() - new Date(f + 'T12:00:0
 
 interface FacturaCliente { numero: string; fecha: string; importe: number; yaCobrada: boolean }
 
-// Orden de las cuentas donde entra la plata. Xubio las devuelve en su propio orden, que no
-// tiene nada que ver con la frecuencia real: casi todo entra por Brubank, después Macro y
-// después la caja. Se ordenan por uso y la primera queda preseleccionada, así el caso normal
-// no obliga a elegir nada. El match es por nombre porque el id de cada cuenta lo pone Xubio.
-const PRIORIDAD_CUENTAS = ['brubank', 'macro', 'caja mq', 'aporte socios'];
-const sinAcentos = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-function ordenarCuentas(cuentas: { id: number; nombre: string }[]) {
-  const rango = (nombre: string) => {
-    const n = sinAcentos(nombre);
-    const i = PRIORIDAD_CUENTAS.findIndex((p) => n.includes(p));
-    return i === -1 ? PRIORIDAD_CUENTAS.length : i;
-  };
-  return [...cuentas].sort((a, b) => rango(a.nombre) - rango(b.nombre) || a.nombre.localeCompare(b.nombre));
-}
 
 // Diagnóstico + carga de cobros. El diagnóstico va primero a propósito: hasta no verlo en
 // verde no se sabe si las credenciales y las cuentas están bien, y el primer cobro no es
@@ -44,7 +31,10 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
   const [diag, setDiag] = useState<any>(null);
   const [diagLoading, setDiagLoading] = useState(false);
   const [cuentas, setCuentas] = useState<{ id: number; nombre: string }[]>(cuentasIniciales);
-  const cuentasOrdenadas = useMemo(() => ordenarCuentas(cuentas), [cuentas]);
+  // Solo las cuentas por las que entra plata de verdad (Brubank, Macro, Caja MQ). El
+  // resto de las que devuelve Xubio son cuentas viejas o de otro circuito, y tenerlas en
+  // la lista solo agrega chances de imputar a la cuenta equivocada.
+  const cuentasOrdenadas = useMemo(() => cuentasElegibles(cuentas), [cuentas]);
   const [avisoCuentas, setAvisoCuentas] = useState<string | null>(null);
 
   const [cliente, setCliente] = useState('');

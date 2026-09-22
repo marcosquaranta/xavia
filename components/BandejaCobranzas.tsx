@@ -2,6 +2,7 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { sugerirCombinaciones, toleranciaDe } from '@/lib/conciliacionCobro';
+import { cuentasElegibles, cuentaSugerida } from '@/lib/cuentasCobro';
 
 interface ItemUI {
   id_item: string;
@@ -32,7 +33,13 @@ function Fila({ item, clientes, cuentas, onListo }: {
   const router = useRouter();
   const [abierto, setAbierto] = useState(false);
   const [idControl, setIdControl] = useState(item.id_control || '');
-  const [cuentaId, setCuentaId] = useState(cuentas.length ? String(cuentas[0].id) : '');
+  // Las tres cuentas reales, y la que sugiere el propio aviso: si dice "transferencia a
+  // Banco Macro", tiene que quedar Macro elegido y no la de siempre.
+  const cuentasOk = useMemo(() => cuentasElegibles(cuentas), [cuentas]);
+  const [cuentaId, setCuentaId] = useState(() => {
+    const sug = cuentaSugerida(cuentas, `${item.descripcion} ${item.cliente}`);
+    return sug ? String(sug.id) : (cuentas.length ? String(cuentas[0].id) : '');
+  });
   const [facturas, setFacturas] = useState<FacturaCliente[]>([]);
   const [cargandoFacturas, setCargandoFacturas] = useState(false);
   const [elegidas, setElegidas] = useState<string[]>([]);
@@ -154,7 +161,7 @@ function Fila({ item, clientes, cuentas, onListo }: {
               <label style={{ fontSize: '10.5px', color: '#6b7280', fontWeight: 600 }}>¿Dónde entró?</label>
               <select value={cuentaId} onChange={e => setCuentaId(e.target.value)} disabled={trabajando} style={inputStyle}>
                 <option value="">— Elegir cuenta —</option>
-                {cuentas.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                {cuentasOk.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
               </select>
             </div>
           </div>

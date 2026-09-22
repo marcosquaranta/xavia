@@ -148,27 +148,69 @@ export async function getCuentas(cobranzasFallback: any[] = []): Promise<{ cuent
 // Circuitos contables. Xubio rechaza la cobranza sin este campo ("El campo
 // CircuitoContable esta vacío o es nulo"), y no tiene un default implícito: hay que
 // mandarle uno de los que tiene configurados la empresa.
-export interface CircuitoXubio { id: number; nombre: string }
-export async function getCircuitosContables(): Promise<CircuitoXubio[]> {
-  // Dos detalles que hacían que esto volviera vacío y que la cobranza se rechazara con
-  // "El campo CircuitoContable esta vacío o es nulo" (verificado contra la especificación
-  // de Xubio, /API/1.1/swagger.json):
-  //   · el parámetro `activo` es un ENTERO (1 / 0), no un booleano: con activo=true no
-  //     filtra como uno espera.
-  //   · el id del bean se llama `circuitoContable_id`, con guión bajo. Se buscaba
-  //     `circuitoContableId` y por eso TODOS quedaban en id 0 y los descartaba el filtro.
-  // Se piden los dos: si activo=1 no trae nada, se reintenta sin filtro.
+export interface CircuitoXubio { id: number; nombre: string; origen?: string }
+
+function mapCircuito(c: any): CircuitoXubio {
+  return {
+    // El id del bean se llama `circuitoContable_id`, con guión bajo (especificación de
+    // Xubio, /API/1.1/swagger.json). Se aceptan las otras formas por si cambia.
+    id: Number(c?.circuitoContable_id ?? c?.circuitoContableId ?? c?.ID ?? c?.id ?? 0),
+    nombre: String(c?.nombre || c?.codigo || ''),
+  };
+}
+
+// El circuito que usan las cobranzas YA CARGADAS. Es el camino que no puede fallar: si la
+// empresa cargó cobranzas alguna vez, el circuito que usó está ahí adentro. El listado
+// dedicado depende de que ese endpoint esté habilitado en el plan —lo mismo que pasó con
+// el plan de cuentas, que devuelve 404— y sin este respaldo un endpoint que no responde
+// deja la app sin poder registrar un solo cobro.
+export function circuitosDeCobranzas(cobranzas: any[]): CircuitoXubio[] {
+  const uso = new Map<number, { c: CircuitoXubio; n: number }>();
+  for (const cob of cobranzas || []) {
+    const c = mapCircuito(cob?.circuitoContable);
+    if (!(c.id > 0)) continue;
+    const prev = uso.get(c.id);
+    if (prev) prev.n++;
+    else uso.set(c.id, { c: { ...c, nombre: c.nombre || `Circuito ${c.id}`, origen: 'cobranzas anteriores' }, n: 1 });
+  }
+  return [...uso.values()].sort((a, b) => b.n - a.n).map(u => u.c);
+}
+
+// Con `cobranzasFallback` se puede resolver el circuito aunque el listado no responda.
+export async function getCircuitosContables(cobranzasFallback: any[] = []): Promise<CircuitoXubio[]> {
+  // El parámetro `activo` es un ENTERO (1 / 0), no un booleano: con activo=true no filtra
+  // como uno espera. Se prueban las dos variantes.
   for (const path of ['circuitoContableBean?activo=1', 'circuitoContableBean']) {
     try {
       const raw = await xubioGet<any[]>(path);
-      const out = (Array.isArray(raw) ? raw : []).map((c) => ({
-        id: Number(c?.circuitoContable_id ?? c?.circuitoContableId ?? c?.ID ?? c?.id ?? 0),
-        nombre: String(c?.nombre || c?.codigo || ''),
-      })).filter((c) => c.id > 0);
-      if (out.length) return out;
-    } catch { /* se prueba la variante siguiente */ }
+      const out = (Array.isArray(raw) ? raw : []).map(mapCircuito).filter((c) => c.id > 0);
+      if (out.length) return out.map(c => ({ ...c, origen: 'listado de Xubio' }));
+    } catch (e: any) {
+      console.error(`[xubio] ${path} falló:`, e?.message || e);
+    }
   }
-  return [];
+  return circuitosDeCobranzas(cobranzasFallback);
+}
+
+// Qué contestó Xubio cuando se le pidieron los circuitos. Sirve para que el mensaje de
+// error diga algo accionable en vez de "no devolvió ninguno": la diferencia entre que el
+// endpoint no exista, que conteste vacío o que conteste objetos con otra forma cambia por
+// completo qué hay que hacer.
+export async function diagnosticoCircuitos(): Promise<string> {
+  const partes: string[] = [];
+  for (const path of ['circuitoContableBean?activo=1', 'circuitoContableBean']) {
+    try {
+      const raw = await xubioGet<any>(path);
+      if (Array.isArray(raw)) {
+        partes.push(`${path}: ${raw.length} filas${raw.length ? ` · claves: ${Object.keys(raw[0] || {}).join(', ')}` : ''}`);
+      } else {
+        partes.push(`${path}: respondió ${typeof raw} (no una lista)`);
+      }
+    } catch (e: any) {
+      partes.push(`${path}: ${e?.message || 'error'}`);
+    }
+  }
+  return partes.join(' · ');
 }
 
 // Cuál de los circuitos usar. Xubio llama "default" al circuito por defecto de la empresa;

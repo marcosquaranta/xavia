@@ -42,7 +42,8 @@ export interface CobroRegistrado {
 // y se ve allá (mucho menos malo que al revés).
 
 import { appendRowObj, asegurarHoja, asegurarColumna, readSheet } from './sheets';
-import { crearCobranza, getClientesXubio, matchClienteXubio, getCircuitosContables, circuitoPorDefecto } from './xubio';
+import { crearCobranza, getClientesXubio, matchClienteXubio, getCircuitosContables, circuitoPorDefecto, getCobranzas, diagnosticoCircuitos } from './xubio';
+import { fechaArgentinaHoy } from './ocupacion';
 import type { ClienteVenta } from './types';
 
 export interface PedidoCobro {
@@ -99,16 +100,26 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
   let circuitoNombre = '';
   let circuitoError = '';
   try {
-    const elegido = circuitoPorDefecto(await getCircuitosContables());
+    // Si el listado de circuitos no responde, se saca de las cobranzas ya cargadas: el
+    // circuito que la empresa viene usando está adentro de cada una.
+    const hoy = fechaArgentinaHoy();
+    const d = new Date(hoy + 'T12:00:00'); d.setDate(d.getDate() - 180);
+    const desde = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const cobranzasPrevias = await getCobranzas(desde, hoy).catch(() => [] as any[]);
+    const elegido = circuitoPorDefecto(await getCircuitosContables(cobranzasPrevias));
     if (elegido) { circuitoId = elegido.id; circuitoNombre = elegido.nombre; }
-    else circuitoError = 'Xubio no devolvió ningún circuito contable.';
+    else circuitoError = 'Xubio no devolvió ningún circuito contable, ni el listado ni las cobranzas anteriores.';
   } catch (e: any) {
     circuitoError = `No se pudo leer el circuito contable de Xubio (${e?.message || 'error'}).`;
   }
   if (!circuitoId) {
+    // El detalle de qué contestó Xubio va en el mensaje: sin eso no se puede distinguir un
+    // endpoint deshabilitado de una empresa sin circuitos cargados, y son problemas
+    // distintos con soluciones distintas.
+    const detalle = await diagnosticoCircuitos().catch(() => '');
     return {
       ok: false, status: 502,
-      error: `${circuitoError} Sin ese dato Xubio rechaza la cobranza. Revisá en Xubio que haya un circuito contable activo (Configuración → Circuitos contables).`,
+      error: `${circuitoError} Sin ese dato Xubio rechaza la cobranza. Cargá una cobranza a mano en Xubio (una sola alcanza) y la app aprende de ahí el circuito.${detalle ? ` — Xubio contestó: ${detalle}` : ''}`,
     };
   }
 
