@@ -7,7 +7,9 @@ import {
 } from '@/lib/recordatoriosCobro';
 import { nombreClienteVisible } from '@/lib/clientes';
 import { HOJA_COBROS, type CobroRegistrado } from '@/lib/cobros';
-import { getCuentas, getCobranzas, type CuentaXubio } from '@/lib/xubio';
+import { getCuentas, getCobranzas, getComprobantes, type CuentaXubio } from '@/lib/xubio';
+import { facturasPorCliente, type FacturaCliente } from '@/lib/facturasCliente';
+import { sugerirCombinaciones } from '@/lib/conciliacionCobro';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 import type { ClienteVenta } from '@/lib/types';
 import Header from '@/components/Header';
@@ -69,6 +71,31 @@ export default async function CobranzasPage() {
 
   // Los alias que la app fue aprendiendo. Se muestran para poder borrar uno aprendido mal:
   // no falla de forma ruidosa, acierta siempre con la respuesta equivocada.
+  // Las facturas de TODOS los clientes, en una sola consulta, y la sugerencia ya resuelta
+  // para cada movimiento. Antes cada fila pedía las suyas al abrirse: con diez movimientos
+  // para imputar eran diez consultas a Xubio de varios segundos cada una, justo cuando la
+  // persona está esperando para decidir.
+  let facturasCliente: Record<string, FacturaCliente[]> = {};
+  try {
+    const hoyF = fechaArgentinaHoy();
+    const comps = await getComprobantes(sumarDiasISO(hoyF, -120), hoyF);
+    facturasCliente = facturasPorCliente(comps, cobros, clientes);
+  } catch {
+    // Si Xubio no responde, la bandeja sigue funcionando: cada fila pide las suyas al
+    // abrirse, que es como funcionaba antes.
+  }
+
+  // La combinación que mejor explica cada importe, calculada acá para que al abrir la fila
+  // ya esté elegida. Es la misma función que usa la pantalla.
+  const sugeridasPorItem: Record<string, string[]> = {};
+  for (const item of itemsBandeja) {
+    if (!item.id_control) continue;
+    const facturas = facturasCliente[item.id_control];
+    if (!facturas?.length) continue;
+    const mejor = sugerirCombinaciones(facturas, item.importe)[0];
+    if (mejor) sugeridasPorItem[item.id_item] = mejor.numeros;
+  }
+
   const aliasAprendidos = aliasRows
     .filter((a) => String(a.alias || '').trim().length >= 3)
     .map((a) => ({ alias: String(a.alias).trim(), cliente: String(a.cliente || ''), fecha: String(a.fecha_aprendido || '') }))
@@ -146,6 +173,8 @@ export default async function CobranzasPage() {
               clientes={filas.map((f) => ({ id_control: f.id_control, nombre: f.nombre }))}
               cuentas={cuentasXubio.map((c) => ({ id: c.id, nombre: c.nombre }))}
               aliases={aliasAprendidos}
+              facturasPorCliente={facturasCliente}
+              sugeridas={sugeridasPorItem}
             />
           </div>
         </div>

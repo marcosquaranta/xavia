@@ -26,9 +26,11 @@ const fmtDia = (f: string) => { const [y, m, d] = String(f || '').split('-'); re
 // Una fila de la bandeja: un movimiento que entró y todavía no se imputó. Se resuelve
 // entera acá adentro —cliente, facturas, cuenta— sin salir a otra pantalla, porque el
 // trabajo real es ir una por una y cualquier salto extra se paga por cada movimiento.
-function Fila({ item, clientes, cuentas, onListo }: {
+function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridasIniciales }: {
   item: ItemUI; clientes: ClienteOpt[]; cuentas: { id: number; nombre: string }[];
   onListo: (msg: string) => void;
+  facturasPrecargadas?: Record<string, FacturaCliente[]>;
+  sugeridasIniciales?: string[];
 }) {
   const router = useRouter();
   const [abierto, setAbierto] = useState(false);
@@ -40,9 +42,13 @@ function Fila({ item, clientes, cuentas, onListo }: {
     const sug = cuentaSugerida(cuentas, `${item.descripcion} ${item.cliente}`);
     return sug ? String(sug.id) : (cuentas.length ? String(cuentas[0].id) : '');
   });
-  const [facturas, setFacturas] = useState<FacturaCliente[]>([]);
+  // Las facturas ya vienen con la página: abrir la fila no dispara ninguna consulta.
+  const [facturas, setFacturas] = useState<FacturaCliente[]>(
+    () => (item.id_control && facturasPrecargadas?.[item.id_control]) || [],
+  );
   const [cargandoFacturas, setCargandoFacturas] = useState(false);
-  const [elegidas, setElegidas] = useState<string[]>([]);
+  // Y la sugerencia ya viene elegida: en el caso normal solo hay que confirmar.
+  const [elegidas, setElegidas] = useState<string[]>(() => sugeridasIniciales || []);
   // Decidir qué facturas cubre el cobro es la mitad del trabajo de imputar, y es lo que se
   // saltea cuando uno va rápido. Hasta que no haya una decisión —facturas elegidas, o
   // "a cuenta" dicho explícitamente— el botón de confirmar no se habilita.
@@ -53,6 +59,9 @@ function Fila({ item, clientes, cuentas, onListo }: {
   async function traerFacturas(id: string) {
     setFacturas([]); setElegidas([]); setACuenta(false);
     if (!id) return;
+    // Si el cliente ya vino precargado, no hay nada que pedir.
+    const ya = facturasPrecargadas?.[id];
+    if (ya?.length) { setFacturas(ya); return; }
     setCargandoFacturas(true);
     try {
       const r = await fetch(`/api/cobranzas/facturas?id_control=${encodeURIComponent(id)}`);
@@ -65,6 +74,7 @@ function Fila({ item, clientes, cuentas, onListo }: {
   async function abrir() {
     const nuevo = !abierto;
     setAbierto(nuevo);
+    // Solo se pide si no vino precargado — con las facturas de la página abrir es instantáneo.
     if (nuevo && idControl && !facturas.length) await traerFacturas(idControl);
   }
 
@@ -256,9 +266,13 @@ function Fila({ item, clientes, cuentas, onListo }: {
 
 interface AliasUI { alias: string; cliente: string; fecha: string }
 
-export default function BandejaCobranzas({ items, clientes, cuentas, aliases = [] }: {
+export default function BandejaCobranzas({
+  items, clientes, cuentas, aliases = [], facturasPorCliente = {}, sugeridas = {},
+}: {
   items: ItemUI[]; clientes: ClienteOpt[]; cuentas: { id: number; nombre: string }[];
   aliases?: AliasUI[];
+  facturasPorCliente?: Record<string, FacturaCliente[]>;
+  sugeridas?: Record<string, string[]>;
 }) {
   const router = useRouter();
   const [importando, setImportando] = useState(false);
@@ -272,6 +286,7 @@ export default function BandejaCobranzas({ items, clientes, cuentas, aliases = [
   const [importeManual, setImporteManual] = useState('');
   const [leyendo, setLeyendo] = useState(false);
   const [probando, setProbando] = useState(false);
+  const [avisando, setAvisando] = useState(false);
   const [verAliases, setVerAliases] = useState(false);
   const [borrandoAlias, setBorrandoAlias] = useState<string | null>(null);
 
@@ -308,6 +323,22 @@ export default function BandejaCobranzas({ items, clientes, cuentas, aliases = [
       setMsg(`✓ Correo de prueba enviado a ${(j.destinatarios || []).join(', ')}. Si no aparece en unos minutos, revisá el spam — el problema está en la recepción, no en el envío.`);
     } catch (e: any) { setErr(e.message); }
     finally { setProbando(false); }
+  }
+
+  // El aviso diario sale a las 10:30. Si algo entra después —una importación del banco al
+  // mediodía, un aviso reenviado a la tarde— no hay novedad hasta el día siguiente. Este
+  // botón manda el mismo resumen al momento.
+  async function avisarAhora() {
+    setAvisando(true); setErr(null); setMsg(null);
+    try {
+      const r = await fetch('/api/cron/bandeja-pendiente');
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Error');
+      setMsg(j.enviado
+        ? `✓ Resumen enviado: ${j.pendientes} ${j.pendientes === 1 ? 'cobro' : 'cobros'} por imputar.`
+        : 'No hay nada para imputar, así que no se mandó ningún correo.');
+    } catch (e: any) { setErr(e.message); }
+    finally { setAvisando(false); }
   }
 
   async function leerAviso() {
@@ -375,6 +406,11 @@ export default function BandejaCobranzas({ items, clientes, cuentas, aliases = [
           title="Manda un correo de prueba a administración para ver si los acuses llegan"
           style={{ fontSize: '11px', padding: '6px 11px', background: 'white', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer' }}>
           {probando ? 'Enviando…' : '🔔 Probar acuse'}
+        </button>
+        <button type="button" onClick={avisarAhora} disabled={avisando}
+          title="Manda ahora el resumen de cobros por imputar, sin esperar al de la mañana"
+          style={{ fontSize: '11px', padding: '6px 11px', background: 'white', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer' }}>
+          {avisando ? 'Enviando…' : '📨 Avisarme ahora'}
         </button>
         <span style={{ fontSize: '10.5px', color: '#9ca3af' }}>
           El CSV del banco dice cuánto entró; el aviso del cliente dice qué facturas paga.
@@ -461,6 +497,7 @@ export default function BandejaCobranzas({ items, clientes, cuentas, aliases = [
           </p>
           {items.map(i => (
             <Fila key={i.id_item} item={i} clientes={clientes} cuentas={cuentas}
+              facturasPrecargadas={facturasPorCliente} sugeridasIniciales={sugeridas[i.id_item]}
               onListo={(m) => { setMsg(m); setErr(null); }} />
           ))}
         </>
