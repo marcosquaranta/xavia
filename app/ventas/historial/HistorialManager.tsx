@@ -5,6 +5,7 @@ import type { VentaDia } from '@/lib/types';
 
 interface EntradaExpCliente {
   id_exportacion: string; fecha: string; fecha_exportacion: string; cliente: string; id_control: string;
+  sucursales?: string[];
   rucula: number; lechuga: number; rucula_kg: number; lechuga_kg: number;
 }
 interface EntradaPend {
@@ -140,6 +141,8 @@ export default function HistorialManager() {
   const [exportaciones, setExportaciones] = useState<EntradaExpCliente[]>([]);
   const [pendientes, setPendientes] = useState<EntradaPend[]>([]);
   const [filtro, setFiltro] = useState('');
+  const [filtroCliente, setFiltroCliente] = useState('');
+  const [filtroSucursal, setFiltroSucursal] = useState('');
   const [limpiando, setLimpiando] = useState(false);
   const [eliminandoTodosPend, setEliminandoTodosPend] = useState(false);
   const [eliminando, setEliminando] = useState<string | null>(null);
@@ -196,9 +199,20 @@ export default function HistorialManager() {
   }
 
   const q = filtro.trim().toLowerCase();
-  const expFiltradas = q
-    ? exportaciones.filter(e => e.cliente.toLowerCase().includes(q) || e.fecha.includes(q) || e.id_exportacion.toLowerCase().includes(q))
-    : exportaciones;
+  // Las opciones salen de lo que hay cargado, no de una lista fija: un cliente dado de baja
+  // sigue teniendo facturas viejas que hay que poder buscar.
+  const clientesOpts = Array.from(new Set(exportaciones.map(e => e.cliente))).sort((a, b) => a.localeCompare(b));
+  const sucursalesOpts = Array.from(new Set(exportaciones.flatMap(e => e.sucursales || []))).sort((a, b) => a.localeCompare(b));
+  const expFiltradas = exportaciones.filter(e => {
+    if (filtroCliente && e.cliente !== filtroCliente) return false;
+    if (filtroSucursal && !(e.sucursales || []).includes(filtroSucursal)) return false;
+    if (!q) return true;
+    return e.cliente.toLowerCase().includes(q)
+      || e.fecha.includes(q)
+      || e.id_exportacion.toLowerCase().includes(q)
+      || (e.sucursales || []).some(su => su.toLowerCase().includes(q));
+  });
+  const hayFiltro = !!(q || filtroCliente || filtroSucursal);
 
   if (loading) return <p style={{ color: '#9ca3af', fontSize: '13px' }}>Cargando…</p>;
 
@@ -256,12 +270,35 @@ export default function HistorialManager() {
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px', marginBottom: '2px' }}>
           <p className="card-title" style={{ margin: 0 }}>📤 Facturado</p>
-          <input type="text" value={filtro} onChange={ev => setFiltro(ev.target.value)} placeholder="Buscar por cliente, fecha o N° de exportación…"
-            style={{ fontSize: '12px', padding: '5px 10px', maxWidth: '280px' }} />
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <select value={filtroCliente} onChange={ev => setFiltroCliente(ev.target.value)}
+              style={{ fontSize: '12px', padding: '5px 8px', maxWidth: '200px' }}>
+              <option value="">Todos los clientes</option>
+              {clientesOpts.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            {sucursalesOpts.length > 0 && (
+              <select value={filtroSucursal} onChange={ev => setFiltroSucursal(ev.target.value)}
+                style={{ fontSize: '12px', padding: '5px 8px', maxWidth: '200px' }}>
+                <option value="">Todas las sucursales</option>
+                {sucursalesOpts.map(su => <option key={su} value={su}>{su}</option>)}
+              </select>
+            )}
+            <input type="text" value={filtro} onChange={ev => setFiltro(ev.target.value)} placeholder="Buscar por fecha o N° de exportación…"
+              style={{ fontSize: '12px', padding: '5px 10px', maxWidth: '240px' }} />
+            {hayFiltro && (
+              <button onClick={() => { setFiltro(''); setFiltroCliente(''); setFiltroSucursal(''); }}
+                style={{ fontSize: '11px', padding: '4px 9px', background: 'white', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer', color: '#6b7280' }}>
+                Limpiar
+              </button>
+            )}
+          </div>
         </div>
-        <p className="card-sub">Ya enviado a Xubio · más reciente primero · {exportaciones.length} líneas</p>
+        <p className="card-sub">
+          Ya enviado a Xubio · más reciente primero ·{' '}
+          {hayFiltro ? `${expFiltradas.length} de ${exportaciones.length} líneas` : `${exportaciones.length} líneas`}
+        </p>
         {expFiltradas.length === 0 ? (
-          <p style={{ color: '#9ca3af', fontSize: '13px' }}>{q ? 'Sin resultados para ese filtro.' : 'Todavía no se facturó nada.'}</p>
+          <p style={{ color: '#9ca3af', fontSize: '13px' }}>{hayFiltro ? 'Sin resultados para ese filtro.' : 'Todavía no se facturó nada.'}</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ fontSize: '13px', width: '100%' }}>
@@ -284,7 +321,14 @@ export default function HistorialManager() {
                     <tr style={{ borderBottom: abierto ? 'none' : '1px solid #f3f4f6', background: abierto ? '#eff6ff' : undefined }}>
                       <td style={{ padding: '7px 10px', fontWeight: 600, whiteSpace: 'nowrap' }}>{h.fecha}</td>
                       <td style={{ padding: '7px 10px', fontFamily: 'monospace', color: '#1e40af', fontWeight: 600, whiteSpace: 'nowrap' }}>{h.id_exportacion}</td>
-                      <td style={{ padding: '7px 10px', color: '#374151' }}>{h.cliente}</td>
+                      <td style={{ padding: '7px 10px', color: '#374151' }}>
+                        {h.cliente}
+                        {(h.sucursales || []).length > 0 && (
+                          <span style={{ display: 'block', fontSize: '10.5px', color: '#9ca3af' }}>
+                            {(h.sucursales || []).join(' · ')}
+                          </span>
+                        )}
+                      </td>
                       <td style={{ textAlign: 'right', padding: '7px 10px', color: '#166534' }}>{h.rucula > 0 ? fmt(h.rucula) : '—'}</td>
                       <td style={{ textAlign: 'right', padding: '7px 10px', color: '#4d7c0f' }}>{h.lechuga > 0 ? fmt(h.lechuga) : '—'}</td>
                       <td style={{ textAlign: 'right', padding: '7px 10px', color: '#92400e' }}>{fmtKg(h.rucula_kg)}</td>

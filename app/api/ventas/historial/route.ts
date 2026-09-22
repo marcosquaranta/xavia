@@ -21,6 +21,10 @@ export async function GET() {
     // sucursal) refleja exactamente la factura real.
     type EntradaExpCliente = {
       id_exportacion: string; fecha: string; fecha_exportacion: string; cliente: string; id_control: string;
+      // Las sucursales que entraron en esa factura. La línea sigue siendo por cliente
+      // —así se factura—, pero sin esto no se puede filtrar por sucursal, que es como se
+      // busca cuando el reclamo viene de una sucursal puntual.
+      sucursales: string[];
       rucula: number; lechuga: number; rucula_kg: number; lechuga_kg: number;
     };
     const porExpCliente = new Map<string, EntradaExpCliente>();
@@ -40,8 +44,11 @@ export async function GET() {
         const key = `${expId}__${v.id_control}`;
         const ex = porExpCliente.get(key) || {
           id_exportacion: expId, fecha, fecha_exportacion: String(v.fecha_carga || fecha), cliente: nombre, id_control: String(v.id_control),
+          sucursales: [],
           rucula: 0, lechuga: 0, rucula_kg: 0, lechuga_kg: 0,
         };
+        const suc = String(v.sucursal || '').trim();
+        if (suc && !ex.sucursales.includes(suc)) ex.sucursales.push(suc);
         ex.rucula    += Number(v.rucula || 0);
         ex.lechuga   += Number(v.lechuga_crespa || 0) + Number(v.hoja_roble || 0);
         ex.rucula_kg  += Number(v.rucula_kg || 0);
@@ -65,7 +72,7 @@ export async function GET() {
     const exportaciones = [...porExpCliente.values()]
       .filter(e => e.rucula > 0 || e.lechuga > 0 || e.rucula_kg > 0 || e.lechuga_kg > 0)
       .sort((a, b) => b.fecha.localeCompare(a.fecha) || b.id_exportacion.localeCompare(a.id_exportacion) || a.cliente.localeCompare(b.cliente))
-      .slice(0, 150);
+      .slice(0, 600);
 
     const pendientesArr = [...pendientes.values()]
       .filter(p => p.rucula > 0 || p.lechuga > 0 || p.rucula_kg > 0 || p.lechuga_kg > 0)
