@@ -248,30 +248,51 @@ export function circuitoPorDefecto(circuitos: CircuitoXubio[]): CircuitoXubio | 
 // idéntico, porque no hay forma de saber qué campos necesita de vuelta.
 export type MonedaXubio = Record<string, any>;
 
-export function monedaDeCobranzas(cobranzas: any[]): MonedaXubio | null {
-  const uso = new Map<string, { m: MonedaXubio; n: number }>();
-  for (const cob of cobranzas || []) {
-    const m = cob?.monedaCtaCte;
-    if (!m || typeof m !== 'object') continue;
-    const crudo = m.ID ?? m.id ?? m.moneda_id;
-    if (crudo === null || crudo === undefined || String(crudo).trim() === '') continue;
-    const clave = String(crudo);
-    const prev = uso.get(clave);
-    if (prev) prev.n++;
-    else uso.set(clave, { m: { ...m }, n: 1 });
-  }
-  const orden = [...uso.values()].sort((a, b) => b.n - a.n);
-  return orden.length ? orden[0].m : null;
+export interface DatosMoneda {
+  moneda: MonedaXubio | null;
+  cotizacion: number;
+  utilizaMonedaExtranjera: number;
 }
 
-// La cotización que acompaña a la moneda. En pesos es 1, pero se copia igual de lo que ya
-// existe en vez de asumirlo.
-export function cotizacionDeCobranzas(cobranzas: any[]): number {
-  for (const cob of cobranzas || []) {
-    const c = Number(cob?.cotizacion);
-    if (Number.isFinite(c) && c > 0) return c;
+// Los tres campos de moneda salen juntos de las cobranzas ya cargadas, y de la MISMA
+// cobranza. Xubio los pide de a uno —primero MonedaCtaCte, después UtilizaMonedaExtranjera—
+// y no tienen sentido por separado: una cotización sin su moneda, o una bandera de moneda
+// extranjera que no corresponde a la moneda que se manda, es una combinación que la empresa
+// nunca usó. Copiando la terna completa de un recibo real no hay forma de inventar una
+// combinación inválida.
+export function datosMonedaDeCobranzas(cobranzas: any[]): DatosMoneda {
+  const conMoneda = (cobranzas || []).filter((c) => {
+    const m = c?.monedaCtaCte;
+    if (!m || typeof m !== 'object') return false;
+    const id = m.ID ?? m.id ?? m.moneda_id;
+    return id !== null && id !== undefined && String(id).trim() !== '';
+  });
+
+  // La combinación más usada, no la primera: una cobranza suelta en dólares no puede
+  // definir cómo se carga el resto.
+  const uso = new Map<string, { d: DatosMoneda; n: number }>();
+  for (const c of conMoneda) {
+    const m = c.monedaCtaCte;
+    const id = String(m.ID ?? m.id ?? m.moneda_id);
+    const prev = uso.get(id);
+    if (prev) { prev.n++; continue; }
+    const cot = Number(c?.cotizacion);
+    const ume = Number(c?.utilizaMonedaExtranjera);
+    uso.set(id, {
+      n: 1,
+      d: {
+        moneda: { ...m },
+        cotizacion: Number.isFinite(cot) && cot > 0 ? cot : 1,
+        // 0 = moneda local. Es el valor de una empresa que factura en pesos, y es el que
+        // corresponde cuando la cobranza anterior no lo trae.
+        utilizaMonedaExtranjera: Number.isFinite(ume) ? ume : 0,
+      },
+    });
   }
-  return 1;
+
+  const orden = [...uso.values()].sort((a, b) => b.n - a.n);
+  if (orden.length) return orden[0].d;
+  return { moneda: null, cotizacion: 1, utilizaMonedaExtranjera: 0 };
 }
 
 export interface NuevaCobranza {
@@ -284,6 +305,7 @@ export interface NuevaCobranza {
   circuitoId?: string | number;
   moneda?: MonedaXubio | null;
   cotizacion?: number;
+  utilizaMonedaExtranjera?: number;
 }
 
 export async function crearCobranza(args: NuevaCobranza):
@@ -303,6 +325,11 @@ export async function crearCobranza(args: NuevaCobranza):
   if (args.moneda) {
     body.monedaCtaCte = args.moneda;
     body.cotizacion = args.cotizacion && args.cotizacion > 0 ? args.cotizacion : 1;
+    // Va SIEMPRE que haya moneda, incluso en cero: Xubio lo rechaza por vacío o nulo, y
+    // cero es un valor, no una ausencia.
+    body.utilizaMonedaExtranjera = Number.isFinite(args.utilizaMonedaExtranjera as number)
+      ? args.utilizaMonedaExtranjera
+      : 0;
   }
 
   const res = await xubioPost<any>('cobranzaBean', body);

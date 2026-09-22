@@ -42,7 +42,7 @@ export interface CobroRegistrado {
 // y se ve allá (mucho menos malo que al revés).
 
 import { appendRowObj, asegurarHoja, asegurarColumna, readSheet } from './sheets';
-import { crearCobranza, getClientesXubio, matchClienteXubio, getCircuitosContables, circuitoPorDefecto, getCobranzas, diagnosticoCircuitos, monedaDeCobranzas, cotizacionDeCobranzas, type MonedaXubio } from './xubio';
+import { crearCobranza, getClientesXubio, matchClienteXubio, getCircuitosContables, circuitoPorDefecto, getCobranzas, diagnosticoCircuitos, datosMonedaDeCobranzas, type DatosMoneda } from './xubio';
 import { fechaArgentinaHoy } from './ocupacion';
 import type { ClienteVenta } from './types';
 
@@ -100,9 +100,8 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
   let circuitoNombre = '';
   let circuitoError = '';
   // La moneda sale de las mismas cobranzas que se leen para el circuito: una sola consulta
-  // resuelve los dos campos que Xubio exige y no asume.
-  let moneda: MonedaXubio | null = null;
-  let cotizacion = 1;
+  // resuelve los tres campos de moneda que Xubio exige y no asume.
+  let datosMoneda: DatosMoneda = { moneda: null, cotizacion: 1, utilizaMonedaExtranjera: 0 };
   try {
     // Si el listado de circuitos no responde, se saca de las cobranzas ya cargadas: el
     // circuito que la empresa viene usando está adentro de cada una.
@@ -110,8 +109,7 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
     const d = new Date(hoy + 'T12:00:00'); d.setDate(d.getDate() - 180);
     const desde = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const cobranzasPrevias = await getCobranzas(desde, hoy).catch(() => [] as any[]);
-    moneda = monedaDeCobranzas(cobranzasPrevias);
-    cotizacion = cotizacionDeCobranzas(cobranzasPrevias);
+    datosMoneda = datosMonedaDeCobranzas(cobranzasPrevias);
     const elegido = circuitoPorDefecto(await getCircuitosContables(cobranzasPrevias));
     if (elegido) { circuitoId = elegido.id; circuitoNombre = elegido.nombre; }
     else circuitoError = 'Xubio no devolvió ningún circuito contable, ni el listado ni las cobranzas anteriores.';
@@ -129,7 +127,11 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
     };
   }
 
-  const r = await crearCobranza({ clienteId, fecha, importe, cuentaId, observacion: observacionXubio, circuitoId, moneda, cotizacion });
+  const r = await crearCobranza({ clienteId, fecha, importe, cuentaId, observacion: observacionXubio, circuitoId,
+    moneda: datosMoneda.moneda,
+    cotizacion: datosMoneda.cotizacion,
+    utilizaMonedaExtranjera: datosMoneda.utilizaMonedaExtranjera,
+  });
   if (!r.ok) return { ok: false, error: `Xubio rechazó el cobro: ${r.error}`, status: 502 };
 
   await asegurarHoja(HOJA_COBROS, HEADERS_COBROS);
