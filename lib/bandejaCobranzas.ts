@@ -69,8 +69,22 @@ const RUIDO = new Set([
   'CUENTA', 'CTA', 'VARIOS', 'INMEDIATA', 'INTERBANCARIA', 'DESDE', 'POR', 'REF',
 ]);
 
+// Largo mínimo de una palabra para que sirva como identificador. Tres letras alcanzan
+// porque la comparación es por PALABRA COMPLETA: "NAF" encuentra "NAF SRL" y no encuentra
+// "NAFTA". Antes el mínimo era cuatro justamente para evitar ese falso positivo, y el
+// precio fue no reconocer nunca a los clientes de nombre corto — NAF S.R.L. es Mamina, y
+// ningún pago suyo se identificaba.
+const LARGO_MINIMO_TOKEN = 3;
+
 function tokensUtiles(nombre: string): string[] {
-  return normalizarNombre(nombre).split(' ').filter(t => t.length >= 4 && !RUIDO.has(t));
+  return normalizarNombre(nombre).split(' ').filter(t => t.length >= LARGO_MINIMO_TOKEN && !RUIDO.has(t));
+}
+
+// Por palabra completa, no por subcadena. `normalizarNombre` ya dejó todo separado por
+// espacios simples, así que alcanza con mirar los bordes.
+function contienePalabra(texto: string, palabra: string): boolean {
+  if (!palabra) return false;
+  return ` ${texto} `.includes(` ${palabra} `);
 }
 
 export interface Candidato {
@@ -83,9 +97,9 @@ export interface Candidato {
 //
 //   1. Un alias ya aprendido que aparezca en la descripción. Es el que vale: lo confirmó
 //      una persona alguna vez para ese mismo texto.
-//   2. El nombre del cliente dentro de la descripción. Se piden palabras "con contenido"
-//      —de 4 letras para arriba y que no sean SA, SRL, TRANSFERENCIA y compañía— porque si
-//      no, cualquier movimiento matchea con cualquier cliente.
+//   2. El nombre del cliente dentro de la descripción, comparando por palabra completa y
+//      descartando las que no dicen nada (SA, SRL, TRANSFERENCIA y compañía). Sin eso,
+//      cualquier movimiento matchea con cualquier cliente.
 //
 // Si no hay ninguno, devuelve null: que la pantalla pida elegir a mano es mucho mejor que
 // adivinar mal, porque de eso sale un cobro imputado al cliente equivocado.
@@ -97,10 +111,10 @@ export function proponerCliente(
 
   // 1. Alias aprendidos, del más largo al más corto: el más específico gana.
   const porLargo = [...aliases]
-    .filter(a => normalizarNombre(a.alias).length >= 4)
+    .filter(a => normalizarNombre(a.alias).length >= LARGO_MINIMO_TOKEN)
     .sort((a, b) => normalizarNombre(b.alias).length - normalizarNombre(a.alias).length);
   for (const a of porLargo) {
-    if (desc.includes(normalizarNombre(a.alias))) {
+    if (contienePalabra(desc, normalizarNombre(a.alias))) {
       const cli = clientes.find(c => String(c.id_control) === String(a.id_control));
       return { id_control: String(a.id_control), cliente: nombreClienteVisible(cli) || a.cliente, confianza: 'alias' };
     }
@@ -114,7 +128,7 @@ export function proponerCliente(
     let puntos = 0, largo = 0;
     for (const nom of nombres) {
       for (const t of tokensUtiles(nom)) {
-        if (desc.includes(t)) { puntos++; largo = Math.max(largo, t.length); }
+        if (contienePalabra(desc, t)) { puntos++; largo = Math.max(largo, t.length); }
       }
     }
     if (puntos === 0) continue;
@@ -134,7 +148,7 @@ export function proponerCliente(
 // cambian en cada transferencia.
 export function aliasDesdeDescripcion(descripcion: string): string {
   const tokens = normalizarNombre(descripcion).split(' ')
-    .filter(t => t.length >= 4 && !RUIDO.has(t) && !/^\d+$/.test(t));
+    .filter(t => t.length >= LARGO_MINIMO_TOKEN && !RUIDO.has(t) && !/^\d+$/.test(t));
   return tokens.slice(0, 4).join(' ');
 }
 

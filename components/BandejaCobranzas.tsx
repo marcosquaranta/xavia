@@ -43,11 +43,15 @@ function Fila({ item, clientes, cuentas, onListo }: {
   const [facturas, setFacturas] = useState<FacturaCliente[]>([]);
   const [cargandoFacturas, setCargandoFacturas] = useState(false);
   const [elegidas, setElegidas] = useState<string[]>([]);
+  // Decidir qué facturas cubre el cobro es la mitad del trabajo de imputar, y es lo que se
+  // saltea cuando uno va rápido. Hasta que no haya una decisión —facturas elegidas, o
+  // "a cuenta" dicho explícitamente— el botón de confirmar no se habilita.
+  const [aCuenta, setACuenta] = useState(false);
   const [trabajando, setTrabajando] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function traerFacturas(id: string) {
-    setFacturas([]); setElegidas([]);
+    setFacturas([]); setElegidas([]); setACuenta(false);
     if (!id) return;
     setCargandoFacturas(true);
     try {
@@ -75,6 +79,11 @@ function Fila({ item, clientes, cuentas, onListo }: {
     if (accion === 'confirmar') {
       if (!idControl) { setErr('Elegí de qué cliente es.'); return; }
       if (!cuentaId) { setErr('Elegí en qué cuenta entró.'); return; }
+      if (cargandoFacturas) { setErr('Esperá a que terminen de cargar las facturas del cliente.'); return; }
+      if (!elegidas.length && !aCuenta) {
+        setErr('Decidí qué facturas cubre este cobro, o marcá "no asignar" si va a cuenta.');
+        return;
+      }
       const nombre = clientes.find(c => c.id_control === idControl)?.nombre || '';
       if (!window.confirm(`Se va a registrar en Xubio un cobro de ${fmt$(item.importe)} de ${nombre}, con fecha ${fmtDia(item.fecha)}.\n\nEsto impacta en la contabilidad. ¿Confirmás?`)) return;
     } else {
@@ -166,7 +175,11 @@ function Fila({ item, clientes, cuentas, onListo }: {
             </div>
           </div>
 
-          {cargandoFacturas && <p style={{ margin: 0, fontSize: '11.5px', color: '#6b7280' }}>Buscando facturas…</p>}
+          {cargandoFacturas && (
+            <p style={{ margin: '0 0 8px', fontSize: '11.5px', color: '#6b7280', background: '#f9fafb', border: '1px solid #f3f4f6', borderRadius: '6px', padding: '6px 9px' }}>
+              Buscando las facturas del cliente… el cobro no se puede confirmar hasta que terminen de cargar.
+            </p>
+          )}
 
           {sugerencias.length > 0 && (
             <div style={{ background: '#f5f8ff', border: '1px solid #dbe4fb', borderRadius: '6px', padding: '7px 9px', marginBottom: '8px' }}>
@@ -174,7 +187,7 @@ function Fila({ item, clientes, cuentas, onListo }: {
                 Este importe podría estar pagando:
               </p>
               {sugerencias.map((sg, i) => (
-                <button key={i} type="button" onClick={() => setElegidas(sg.numeros)} disabled={trabajando}
+                <button key={i} type="button" onClick={() => { setElegidas(sg.numeros); setACuenta(false); }} disabled={trabajando}
                   style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', width: '100%', textAlign: 'left',
                     cursor: 'pointer', fontSize: '11.5px', padding: '4px 7px', marginBottom: '4px',
                     background: 'white', border: '1px solid #dbe4fb', borderRadius: '5px' }}>
@@ -205,13 +218,31 @@ function Fila({ item, clientes, cuentas, onListo }: {
             </p>
           )}
 
+          {/* La decisión tiene que ser explícita. Un cobro sin facturas asignadas puede ser
+              correcto —un pago a cuenta lo es— pero tiene que decirse, no pasar por omisión. */}
+          {!cargandoFacturas && !elegidas.length && (
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '7px', margin: '0 0 8px', fontSize: '11.5px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '7px 9px', cursor: 'pointer' }}>
+              <input type="checkbox" checked={aCuenta} onChange={e => setACuenta(e.target.checked)} disabled={trabajando} style={{ marginTop: '2px' }} />
+              <span>
+                <strong>No asignar a ninguna factura</strong> — entra como cobro a cuenta del cliente.
+                Marcalo solo si de verdad no se sabe qué cancela: después no queda registro de a qué correspondía.
+              </span>
+            </label>
+          )}
+
           {err && <p style={{ margin: '0 0 8px', fontSize: '11.5px', color: '#dc2626' }}>{err}</p>}
 
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <button onClick={() => accion('confirmar')} disabled={trabajando}
-              style={{ fontSize: '11.5px', padding: '6px 14px', background: '#166534', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 700 }}>
-              {trabajando ? 'Registrando…' : 'Confirmar y registrar en Xubio'}
-            </button>
+            {(() => {
+              const listo = !trabajando && !cargandoFacturas && !!idControl && !!cuentaId && (elegidas.length > 0 || aCuenta);
+              return (
+                <button onClick={() => accion('confirmar')} disabled={!listo}
+                  title={listo ? '' : 'Falta elegir cliente, cuenta y qué facturas cubre'}
+                  style={{ fontSize: '11.5px', padding: '6px 14px', background: listo ? '#166534' : '#d1d5db', color: 'white', border: 'none', borderRadius: '5px', cursor: listo ? 'pointer' : 'not-allowed', fontWeight: 700 }}>
+                  {trabajando ? 'Registrando…' : 'Confirmar y registrar en Xubio'}
+                </button>
+              );
+            })()}
             <button onClick={() => accion('descartar')} disabled={trabajando}
               style={{ fontSize: '11.5px', padding: '6px 12px', background: 'white', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer' }}>
               No es un cobro — descartar

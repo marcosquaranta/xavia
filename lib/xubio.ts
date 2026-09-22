@@ -235,6 +235,42 @@ export function circuitoPorDefecto(circuitos: CircuitoXubio[]): CircuitoXubio | 
   return circuitos.find((c) => c.nombre.trim().toLowerCase() === 'default') || circuitos[0];
 }
 
+// ── Moneda de la cuenta corriente ───────────────────────────────────────────────────
+//
+// Xubio también exige este campo ("El campo MonedaCtaCte esta vacío o es nulo") y tampoco
+// asume uno por defecto, aunque la empresa opere solo en pesos.
+//
+// Igual que con el circuito y con las cuentas: en vez de inventar el id de "Pesos
+// Argentinos" —que varía entre cuentas de Xubio— se copia el que usan las cobranzas ya
+// cargadas. Es el dato correcto por definición: es el que la empresa viene usando.
+export interface MonedaXubio { ID: string | number; nombre?: string; codigo?: string }
+
+export function monedaDeCobranzas(cobranzas: any[]): MonedaXubio | null {
+  const uso = new Map<string, { m: MonedaXubio; n: number }>();
+  for (const cob of cobranzas || []) {
+    const m = cob?.monedaCtaCte;
+    if (!m || typeof m !== 'object') continue;
+    const crudo = m.ID ?? m.id ?? m.moneda_id;
+    if (crudo === null || crudo === undefined || String(crudo).trim() === '') continue;
+    const clave = String(crudo);
+    const prev = uso.get(clave);
+    if (prev) prev.n++;
+    else uso.set(clave, { m: { ID: crudo, nombre: m.nombre ? String(m.nombre) : undefined, codigo: m.codigo ? String(m.codigo) : undefined }, n: 1 });
+  }
+  const orden = [...uso.values()].sort((a, b) => b.n - a.n);
+  return orden.length ? orden[0].m : null;
+}
+
+// La cotización que acompaña a la moneda. En pesos es 1, pero se copia igual de lo que ya
+// existe en vez de asumirlo.
+export function cotizacionDeCobranzas(cobranzas: any[]): number {
+  for (const cob of cobranzas || []) {
+    const c = Number(cob?.cotizacion);
+    if (Number.isFinite(c) && c > 0) return c;
+  }
+  return 1;
+}
+
 export interface NuevaCobranza {
   clienteId: number;
   fecha: string;        // YYYY-MM-DD
@@ -243,6 +279,8 @@ export interface NuevaCobranza {
   numeroRecibo?: string;
   observacion?: string;
   circuitoId?: string | number;
+  moneda?: MonedaXubio | null;
+  cotizacion?: number;
 }
 
 export async function crearCobranza(args: NuevaCobranza):
@@ -259,6 +297,12 @@ export async function crearCobranza(args: NuevaCobranza):
   if (args.numeroRecibo) body.numeroRecibo = args.numeroRecibo;
   if (args.observacion) body.observacion = args.observacion;
   if (args.circuitoId) body.circuitoContable = { ID: args.circuitoId };
+  if (args.moneda) {
+    body.monedaCtaCte = { ID: args.moneda.ID };
+    body.cotizacion = args.cotizacion && args.cotizacion > 0 ? args.cotizacion : 1;
+    // La empresa opera en pesos; el campo existe igual y Xubio lo quiere explícito.
+    body.utilizaMonedaExtranjera = 0;
+  }
 
   const res = await xubioPost<any>('cobranzaBean', body);
   if (!res.ok) {
