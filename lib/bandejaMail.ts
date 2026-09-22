@@ -88,13 +88,15 @@ export async function crearItemDesdeAviso(args: {
 
   // Confirmación de reenvío: se guarda para poder leer el código, no como cobro.
   if (esConfirmacionDeReenvio(asunto, texto)) {
-    const codigo = codigoConfirmacion(texto);
+    // El código puede venir en el asunto —Gmail lo pone como "(#123456789)"— y no en el
+    // cuerpo, así que se busca en los dos.
+    const codigo = codigoConfirmacion(`${asunto} ${texto}`);
     const hash = hashMovimiento(hoy, 0, `confirmacion ${codigo || asunto}`);
     if (previos.some(p => String(p.hash) === hash)) return { ok: false, motivo: 'duplicado', codigo };
     const idItem = nuevoIdItem(previos);
     await appendRowObj(HOJA_BANDEJA, {
       id_item: idItem, fecha_importacion: hoy, origen: 'setup', fecha: hoy, importe: 0,
-      descripcion: `Confirmación de reenvío de Gmail${codigo ? ` — código ${codigo}` : ''} · ${texto.replace(/\s+/g, ' ').slice(0, 400)}`,
+      descripcion: `${codigo ? `CÓDIGO: ${codigo} — ` : ''}Confirmación de reenvío de Gmail · ${asunto} · ${texto.replace(/\s+/g, ' ').slice(0, 400)}`,
       hash, id_control: '', cliente: '', comprobantes: '', estado: 'pendiente', id_cobro: '',
       usuario: args.usuario, nota: 'confirmación de reenvío',
     });
