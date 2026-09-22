@@ -46,6 +46,14 @@ import { crearCobranza, getClientesXubio, matchClienteXubio, getCircuitosContabl
 import { fechaArgentinaHoy } from './ocupacion';
 import type { ClienteVenta } from './types';
 
+// Los últimos cuatro dígitos de un comprobante: "A-00002-00000849" → "0849". Si el texto
+// no tiene la forma esperada se devuelve como vino, que es preferible a recortar a ciegas
+// algo que no se entendió.
+export function cortoDeComprobante(numero: string): string {
+  const soloDigitos = String(numero || '').replace(/\D/g, '');
+  return soloDigitos.length >= 4 ? soloDigitos.slice(-4) : String(numero || '').trim();
+}
+
 export interface PedidoCobro {
   idControl: string;
   fecha: string;          // YYYY-MM-DD
@@ -89,8 +97,14 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
 
   // Xubio no deja imputar por API, así que las facturas van en la observación del recibo:
   // es lo más cerca de "este cobro cancela estas facturas" que se puede dejar asentado allá.
+  //
+  // Van solo los últimos cuatro dígitos. "A-00002-00000849" ocupa quince caracteres de los
+  // cuales once son siempre iguales —la letra y el punto de venta no cambian— así que en un
+  // cobro de cuatro facturas la observación se vuelve ilegible sin agregar información. Con
+  // "0849" se reconoce el comprobante de un vistazo. El número completo queda igual en la
+  // hoja de cobros de la app, que es donde se consulta si hace falta el dato exacto.
   const observacionXubio = comprobantes.length
-    ? `${observacion ? observacion + ' — ' : ''}Cancela: ${comprobantes.join(', ')}`
+    ? `${observacion ? observacion + ' — ' : ''}Cancela: ${comprobantes.map(cortoDeComprobante).join(', ')}`
     : observacion;
 
   // Xubio exige el circuito contable y no asume uno por defecto. Si no se consigue se corta
