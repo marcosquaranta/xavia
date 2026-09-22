@@ -44,6 +44,79 @@ async function contenidoDelMail(emailId: string): Promise<{ texto: string; asunt
   }
 }
 
+// Acuse de recibo. Sin esto, mandar un aviso a la casilla es tirar algo a un pozo: no hay
+// forma de saber si llegó, si se entendió o si se perdió en el camino. El acuse va a
+// administración y NO al remitente original — el que manda el aviso es el cliente, y no
+// tiene por qué recibir nada de esto.
+//
+// Se manda SIEMPRE, también cuando no se pudo interpretar: ese es justamente el momento en
+// que hace falta enterarse.
+const ACUSE_A = ['administracion@xavia.com.ar'];
+const URL_BANDEJA = 'https://xavia-self.vercel.app/cobranzas';
+
+const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
+
+async function acusarRecibo(args: {
+  asunto: string; remitente: string; resultado: any; texto: string;
+}): Promise<void> {
+  if (!process.env.RESEND_API_KEY) return;
+  const r = args.resultado || {};
+
+  let titulo = '', color = '#166534', detalle = '';
+  if (r.motivo === 'confirmacion') {
+    titulo = 'Llegó la confirmación de reenvío de Gmail';
+    color = '#b45309';
+    detalle = `<p style="font-size:14px">Código: <strong style="font-size:18px">${r.codigo || '(no se encontró en el mensaje)'}</strong></p>
+      <p style="font-size:13px;color:#555">Pegalo en Gmail → Configuración → Reenvío y correo POP/IMAP. No uses el link del mail: falla cuando hay varias cuentas de Google abiertas.</p>`;
+  } else if (r.ok) {
+    titulo = 'Aviso de pago procesado';
+    detalle = `<ul style="font-size:14px;color:#111">
+      <li>Importe: <strong>${fmt$(Number(r.importe) || 0)}</strong></li>
+      <li>Cliente: ${r.cliente ? `<strong>${r.cliente}</strong>` : '<span style="color:#b45309">no lo reconocí — lo elegís al confirmar</span>'}</li>
+      <li>Facturas: ${r.comprobantes?.length ? `<code>${r.comprobantes.join(', ')}</code>` : '<span style="color:#9ca3af">ninguna mencionada</span>'}</li>
+    </ul>
+    <p style="font-size:13px;color:#555">Está en la bandeja esperando que lo confirmes. Todavía no se registró nada en Xubio.</p>`;
+  } else if (r.motivo === 'duplicado') {
+    titulo = 'Ese aviso ya estaba cargado';
+    color = '#6b7280';
+    detalle = `<p style="font-size:13px;color:#555">Se ignoró para no imputar el mismo cobro dos veces. Si creés que es un pago distinto con el mismo importe y fecha, cargalo a mano desde la bandeja.</p>`;
+  } else {
+    titulo = 'Llegó un mail pero no pude interpretarlo';
+    color = '#b91c1c';
+    detalle = `<p style="font-size:13px;color:#555">No encontré un importe en el mensaje. Puede ser que el dato esté en un PDF adjunto (todavía no los leo) o en una imagen. Abrí la bandeja y usá <strong>Pegar aviso de pago</strong> con el texto, o cargá el cobro a mano.</p>`;
+  }
+
+  const html = `
+    <div style="font-family:system-ui,Arial,sans-serif;color:#111;max-width:560px">
+      <h2 style="margin:0 0 4px;color:${color}">${titulo}</h2>
+      <p style="margin:0 0 12px;color:#6b7280;font-size:13px">
+        De: ${args.remitente || '(sin remitente)'}<br>Asunto: ${args.asunto || '(sin asunto)'}
+      </p>
+      ${detalle}
+      <p style="margin:16px 0 0">
+        <a href="${URL_BANDEJA}" style="background:#166534;color:white;text-decoration:none;padding:9px 16px;border-radius:6px;font-weight:700;display:inline-block">
+          Abrir la bandeja
+        </a>
+      </p>
+      <p style="margin:14px 0 0;font-size:11px;color:#9ca3af;white-space:pre-wrap">${args.texto.replace(/\s+/g, ' ').slice(0, 300)}…</p>
+    </div>`;
+
+  try {
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'Xavia App <ventas@xavia.com.ar>',
+        to: ACUSE_A,
+        subject: `${titulo} — ${args.asunto || 'aviso de pago'}`,
+        html,
+      }),
+    });
+  } catch (e) {
+    console.error('[cobranzas/email] no se pudo mandar el acuse:', e);
+  }
+}
+
 export async function POST(req: NextRequest) {
   const esperado = process.env.COBRANZAS_EMAIL_TOKEN;
   if (!esperado) return NextResponse.json({ error: 'no_configurado' }, { status: 503 });
@@ -68,6 +141,10 @@ export async function POST(req: NextRequest) {
 
     if (!contenido || !contenido.texto) {
       console.error('[cobranzas/email] sin contenido para', data?.email_id);
+      await acusarRecibo({
+        asunto: String(data?.subject || ''), remitente: String(data?.from || ''),
+        resultado: { ok: false }, texto: '(no se pudo leer el cuerpo del mensaje)',
+      });
       return NextResponse.json({ ok: true, sinContenido: true });
     }
 
@@ -79,8 +156,13 @@ export async function POST(req: NextRequest) {
       usuario: 'correo reenviado',
     });
 
+    await acusarRecibo({
+      asunto: contenido.asunto, remitente: contenido.remitente,
+      resultado: r, texto: contenido.texto,
+    });
+
     // Siempre 200: si se contesta un error, Resend reintenta y termina duplicando. Lo que
-    // no se pudo interpretar queda en el log y, si tenía importe, en la bandeja.
+    // no se pudo interpretar queda avisado por el acuse y, si tenía importe, en la bandeja.
     return NextResponse.json({ ok: true, resultado: r });
   } catch (err: any) {
     console.error('[cobranzas/email] error procesando el correo:', err);
