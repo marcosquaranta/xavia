@@ -11,13 +11,14 @@
 
 import { appendRowObj, asegurarHoja, readSheet } from './sheets';
 import { parsearAvisoPago } from './avisosPago';
-import { extraerAvisoConIA, type PdfAdjunto } from './extraerAvisoIA';
+import { extraerAvisoConIA, type PdfAdjunto, type ClienteParaIA } from './extraerAvisoIA';
 import { hashMovimiento } from './importacionBanco';
 import { fechaArgentinaHoy } from './ocupacion';
 import {
   HOJA_BANDEJA, HEADERS_BANDEJA, HOJA_ALIAS,
   proponerCliente, nuevoIdItem, type ItemBandeja, type AliasCobranza,
 } from './bandejaCobranzas';
+import { nombreClienteVisible } from './clientes';
 import type { ClienteVenta } from './types';
 
 // Gmail no reenvía a una dirección nueva hasta que se confirma con un código que manda a
@@ -111,6 +112,14 @@ export async function crearItemDesdeAviso(args: {
   }
 
   const leido = parsearAvisoPago(`${asunto}\n${texto}`);
+
+  // Los clientes se leen antes que nada: hacen falta para el matcheo por texto y, si hay
+  // que llamar a la IA, para que pueda elegir de la lista.
+  const [clientes, aliases] = await Promise.all([
+    readSheet<ClienteVenta>('Clientes'),
+    readSheet<AliasCobranza>(HOJA_ALIAS).catch(() => [] as AliasCobranza[]),
+  ]);
+
   let comprobantes = leido.comprobantes;
   let retencion = leido.retencion;
   let importe = args.importeForzado && args.importeForzado > 0 ? args.importeForzado : leido.importe;
@@ -118,23 +127,50 @@ export async function crearItemDesdeAviso(args: {
   let confianza: 'alta' | 'media' | 'baja' | undefined;
   let comentarioIA = '';
   let pagador = '';
+  let fechaIA = '';
 
-  // Los patrones no encontraron el importe. Ahí entra la IA, que es la única que puede
-  // leer un PDF adjunto o una tabla HTML donde el dato está repartido en celdas. No se la
-  // llama antes porque los patrones son gratis y siempre dan lo mismo.
-  if (!(Number(importe) > 0)) {
-    const ia = await extraerAvisoConIA({ texto, asunto, remitente: args.remitente, pdfs: args.pdfs });
-    if (ia && Number(ia.importe) > 0) {
-      importe = ia.importe;
-      if (ia.comprobantes.length) comprobantes = ia.comprobantes;
-      if (ia.retencion) retencion = ia.retencion;
-      if (ia.fecha && !args.fechaForzada) (leido as any).fecha = ia.fecha;
+  // Matcheo por texto primero: alias aprendidos y nombres. Es gratis y determinístico.
+  let cand = proponerCliente(`${args.remitente || ''} ${asunto} ${texto}`, clientes, aliases);
+
+  // Se llama a la IA cuando falta el importe O cuando no se reconoció al cliente. Lo
+  // segundo importa tanto como lo primero: el nombre del aviso casi nunca es el que usamos
+  // —"NAF S.R.L." es Mamina— y ningún matcheo por texto va a unir esas dos cosas.
+  const faltaImporte = !(Number(importe) > 0);
+  if (faltaImporte || !cand) {
+    const paraIA: ClienteParaIA[] = clientes
+      .filter(c => String(c.activo || '').toUpperCase() !== 'NO')
+      .map(c => ({
+        id: String(c.id_control),
+        nombre: nombreClienteVisible(c),
+        razonSocial: String(c.nombre_xubio || ''),
+        alias: String(c.alias || ''),
+        sucursales: String(c.sucursales || ''),
+      }));
+
+    const ia = await extraerAvisoConIA({
+      texto, asunto, remitente: args.remitente, pdfs: args.pdfs, clientes: paraIA,
+    });
+
+    if (ia) {
+      comentarioIA = [ia.comentario, ia.razonDelCliente].filter(Boolean).join(' · ');
+      if (faltaImporte && Number(ia.importe) > 0) {
+        importe = ia.importe;
+        if (ia.comprobantes.length) comprobantes = ia.comprobantes;
+        if (ia.retencion) retencion = ia.retencion;
+        if (ia.fecha) fechaIA = ia.fecha;
+        leidoCon = 'ia';
+        confianza = ia.confianza;
+      }
       pagador = ia.nombrePagador || '';
-      leidoCon = 'ia';
-      confianza = ia.confianza;
-      comentarioIA = ia.comentario;
-    } else if (ia) {
-      comentarioIA = ia.comentario;
+      // El cliente que eligió la IA solo se usa si el matcheo por texto no encontró nada:
+      // un alias confirmado por una persona vale más que una deducción del modelo.
+      if (!cand && ia.idCliente) {
+        const cli = clientes.find(c => String(c.id_control) === String(ia.idCliente));
+        if (cli) {
+          cand = { id_control: String(cli.id_control), cliente: nombreClienteVisible(cli), confianza: 'nombre' };
+          leidoCon = 'ia';
+        }
+      }
     }
   }
 
@@ -142,20 +178,14 @@ export async function crearItemDesdeAviso(args: {
 
   const fecha = /^\d{4}-\d{2}-\d{2}$/.test(String(args.fechaForzada || ''))
     ? String(args.fechaForzada)
-    : (leido.fecha || hoy);
+    : (leido.fecha || fechaIA || hoy);
 
   const hash = hashMovimiento(fecha, Number(importe), `aviso ${comprobantes.join(',')}`);
   if (previos.some(p => String(p.hash) === hash)) return { ok: false, motivo: 'duplicado' };
 
-  // El cliente se busca en TODO lo que vino: el remitente muchas veces lo dice mejor que el
-  // cuerpo ("pagos@darsupermercados.com.ar").
-  const [clientes, aliases] = await Promise.all([
-    readSheet<ClienteVenta>('Clientes'),
-    readSheet<AliasCobranza>(HOJA_ALIAS).catch(() => [] as AliasCobranza[]),
-  ]);
-  // El nombre que sacó la IA entra en la búsqueda: cuando el pagador figura solo dentro
-  // del PDF, es el único lugar donde aparece.
-  const cand = proponerCliente(`${pagador} ${args.remitente || ''} ${asunto} ${texto}`, clientes, aliases);
+  // Último intento por texto con el nombre que sacó la IA del PDF: cuando el pagador figura
+  // solo ahí adentro, es el único lugar donde aparece.
+  if (!cand && pagador) cand = proponerCliente(pagador, clientes, aliases);
 
   const descripcion = [
     args.remitente ? `De ${args.remitente}` : '',
@@ -181,7 +211,7 @@ export async function crearItemDesdeAviso(args: {
     estado: 'pendiente',
     id_cobro: '',
     usuario: args.usuario,
-    nota: cand ? `reconocido por ${cand.confianza}` : 'sin reconocer al cliente',
+    nota: cand ? `reconocido por ${cand.confianza}${leidoCon === 'ia' ? ' (IA)' : ''}` : 'sin reconocer al cliente',
   });
 
   return {

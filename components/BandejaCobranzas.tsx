@@ -237,6 +237,7 @@ export default function BandejaCobranzas({ items, clientes, cuentas }: {
   const [leido, setLeido] = useState<any>(null);
   const [importeManual, setImporteManual] = useState('');
   const [leyendo, setLeyendo] = useState(false);
+  const [probando, setProbando] = useState(false);
 
   async function importar(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -257,6 +258,20 @@ export default function BandejaCobranzas({ items, clientes, cuentas }: {
       router.refresh();
     } catch (e: any) { setErr(e.message); }
     finally { setImportando(false); }
+  }
+
+  // "No me llega el mail" tiene media docena de causas que se ven igual desde afuera: la
+  // clave de envío, el dominio del remitente, la casilla de destino, el spam. Esto las
+  // separa en un click, en vez de tener que reenviar un aviso y esperar a ver qué pasa.
+  async function probarAcuse() {
+    setProbando(true); setErr(null); setMsg(null);
+    try {
+      const r = await fetch('/api/cobranzas/probar-acuse', { method: 'POST' });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Error');
+      setMsg(`✓ Correo de prueba enviado a ${(j.destinatarios || []).join(', ')}. Si no aparece en unos minutos, revisá el spam — el problema está en la recepción, no en el envío.`);
+    } catch (e: any) { setErr(e.message); }
+    finally { setProbando(false); }
   }
 
   async function leerAviso() {
@@ -303,6 +318,11 @@ export default function BandejaCobranzas({ items, clientes, cuentas }: {
         <button type="button" onClick={() => { setAvisoAbierto(v => !v); setLeido(null); }}
           style={{ fontSize: '11.5px', padding: '6px 14px', background: 'white', color: '#1e40af', border: '1px solid #bfdbfe', borderRadius: '5px', cursor: 'pointer', fontWeight: 700 }}>
           ✉️ Pegar aviso de pago
+        </button>
+        <button type="button" onClick={probarAcuse} disabled={probando}
+          title="Manda un correo de prueba a administración para ver si los acuses llegan"
+          style={{ fontSize: '11px', padding: '6px 11px', background: 'white', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer' }}>
+          {probando ? 'Enviando…' : '🔔 Probar acuse'}
         </button>
         <span style={{ fontSize: '10.5px', color: '#9ca3af' }}>
           El CSV del banco dice cuánto entró; el aviso del cliente dice qué facturas paga.

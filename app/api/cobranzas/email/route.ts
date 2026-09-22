@@ -110,8 +110,8 @@ const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 
 async function acusarRecibo(args: {
   asunto: string; remitente: string; resultado: any; texto: string;
-}): Promise<void> {
-  if (!process.env.RESEND_API_KEY) return;
+}): Promise<{ ok: boolean; detalle: string }> {
+  if (!process.env.RESEND_API_KEY) return { ok: false, detalle: 'RESEND_API_KEY no configurada' };
   const r = args.resultado || {};
 
   let titulo = '', color = '#166534', detalle = '';
@@ -163,7 +163,7 @@ async function acusarRecibo(args: {
     </div>`;
 
   try {
-    await fetch('https://api.resend.com/emails', {
+    const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -173,8 +173,17 @@ async function acusarRecibo(args: {
         html,
       }),
     });
-  } catch (e) {
+    // Mirar la respuesta, no solo mandar. Un acuse que Resend rechaza y nadie chequea es
+    // peor que no tener acuse: se confía en un aviso que nunca llega.
+    if (!res.ok) {
+      const err = await res.text().catch(() => '');
+      console.error('[cobranzas/email] Resend rechazó el acuse:', res.status, err);
+      return { ok: false, detalle: `Resend ${res.status}: ${err.slice(0, 200)}` };
+    }
+    return { ok: true, detalle: 'enviado' };
+  } catch (e: any) {
     console.error('[cobranzas/email] no se pudo mandar el acuse:', e);
+    return { ok: false, detalle: e?.message || 'excepción al enviar' };
   }
 }
 
@@ -202,11 +211,11 @@ export async function POST(req: NextRequest) {
 
     if (!contenido || !contenido.texto) {
       console.error('[cobranzas/email] sin contenido para', data?.email_id);
-      await acusarRecibo({
+      const acuseSin = await acusarRecibo({
         asunto: String(data?.subject || ''), remitente: String(data?.from || ''),
         resultado: { ok: false }, texto: '(no se pudo leer el cuerpo del mensaje)',
       });
-      return NextResponse.json({ ok: true, sinContenido: true });
+      return NextResponse.json({ ok: true, sinContenido: true, acuse: acuseSin });
     }
 
     // Los adjuntos se bajan solo si hacen falta: si el cuerpo ya trae un importe, el lector
@@ -223,14 +232,14 @@ export async function POST(req: NextRequest) {
       pdfs,
     });
 
-    await acusarRecibo({
+    const acuse = await acusarRecibo({
       asunto: contenido.asunto, remitente: contenido.remitente,
       resultado: r, texto: contenido.texto,
     });
 
     // Siempre 200: si se contesta un error, Resend reintenta y termina duplicando. Lo que
     // no se pudo interpretar queda avisado por el acuse y, si tenía importe, en la bandeja.
-    return NextResponse.json({ ok: true, resultado: r });
+    return NextResponse.json({ ok: true, resultado: r, acuse });
   } catch (err: any) {
     console.error('[cobranzas/email] error procesando el correo:', err);
     return NextResponse.json({ ok: true, error: err?.message || 'error' });

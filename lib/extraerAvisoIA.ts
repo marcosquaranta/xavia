@@ -23,8 +23,21 @@ export interface AvisoExtraido {
   comprobantes: string[];
   retencion: number | null;
   nombrePagador: string | null;  // como figura en el aviso, para matchear con el cliente
+  // El cliente de NUESTRA lista que el modelo cree que pagó. Existe porque el nombre del
+  // aviso casi nunca es el que usamos puertas adentro: "NAF S.R.L." es Mamina, y ningún
+  // matcheo por texto va a unir esas dos cosas. Null cuando no está seguro.
+  idCliente: string | null;
+  razonDelCliente: string;       // por qué eligió ese, para poder desconfiar con criterio
   confianza: 'alta' | 'media' | 'baja';
   comentario: string;            // qué encontró, o por qué no pudo
+}
+
+export interface ClienteParaIA {
+  id: string;
+  nombre: string;       // como lo llamamos nosotros
+  razonSocial: string;  // como factura
+  alias: string;
+  sucursales: string;
 }
 
 export interface PdfAdjunto { nombre: string; base64: string }
@@ -44,7 +57,9 @@ Devolvé SOLO un objeto JSON, sin texto alrededor y sin bloque de código, con e
   "fecha": "YYYY-MM-DD" o null,      // la fecha del PAGO, no la de las facturas
   "comprobantes": ["A-00005-00001234"],  // números de factura que el aviso dice estar pagando, normalizados a LETRA-PUNTOVENTA(5 dígitos)-NÚMERO(8 dígitos). Vacío si no menciona ninguno.
   "retencion": número o null,        // total de retenciones (IIBB, ganancias, etc.) si las discrimina
-  "nombrePagador": "texto" o null,   // razón social o nombre de quien paga, tal como figura
+  "nombrePagador": "texto" o null,   // razón social o nombre de quien paga, tal como figura en el aviso
+  "idCliente": "texto" o null,       // el id de NUESTRA lista de clientes que corresponde al pagador
+  "razonDelCliente": "una frase",    // por qué elegiste ese cliente (o por qué ninguno)
   "confianza": "alta" | "media" | "baja",
   "comentario": "una frase"          // qué encontraste, o por qué no pudiste
 }
@@ -52,12 +67,17 @@ Devolvé SOLO un objeto JSON, sin texto alrededor y sin bloque de código, con e
 Reglas:
 - Si no encontrás un importe claro, poné null y explicá por qué en el comentario. NO inventes un número.
 - No confundas un CUIT, un número de operación ni un número de factura con un importe.
-- "alta" solo si el aviso dice explícitamente cuánto se pagó. Si tuviste que deducirlo, es "media" o "baja".`;
+- "alta" solo si el aviso dice explícitamente cuánto se pagó. Si tuviste que deducirlo, es "media" o "baja".
+
+Sobre el cliente: al final te paso nuestra lista de clientes, con el nombre que usamos, la razón social con la que factura, su alias y sus sucursales. El nombre que aparece en un aviso de pago suele ser la razón social o el nombre de una sucursal, no el que usamos nosotros. Elegí el id que corresponda al pagador.
+- Si ninguno corresponde, poné null. NO elijas el más parecido por elegir alguno: un cobro imputado al cliente equivocado es peor que uno sin identificar.
+- Si dudás entre dos, poné null y explicá la duda en razonDelCliente.`;
 
 // Devuelve null cuando no hay API key configurada: el sistema tiene que seguir andando sin
 // IA, solo que sin esta ayuda.
 export async function extraerAvisoConIA(args: {
   texto: string; asunto?: string; remitente?: string; pdfs?: PdfAdjunto[];
+  clientes?: ClienteParaIA[];
 }): Promise<AvisoExtraido | null> {
   if (!process.env.ANTHROPIC_API_KEY) return null;
 
@@ -73,6 +93,19 @@ export async function extraerAvisoConIA(args: {
     });
   }
 
+  // La lista de clientes va al final y en formato compacto: es contenido estable, y
+  // ponerlo después del correo mantiene el prompt del sistema y el correo juntos.
+  const listaClientes = (args.clientes || []).length
+    ? [
+        '',
+        '--- nuestros clientes (id | nombre que usamos | razón social | alias | sucursales) ---',
+        ...(args.clientes || []).map(c =>
+          [c.id, c.nombre, c.razonSocial, c.alias, String(c.sucursales || '').replace(/\|/g, ', ')]
+            .map(x => String(x || '').trim()).join(' | ')),
+        '--- fin de la lista ---',
+      ].join('\n')
+    : '';
+
   contenido.push({
     type: 'text',
     text: [
@@ -82,6 +115,7 @@ export async function extraerAvisoConIA(args: {
       '--- contenido del correo ---',
       args.texto.slice(0, 20000),
       '--- fin del contenido ---',
+      listaClientes,
     ].join('\n'),
   });
 
@@ -107,7 +141,7 @@ export async function extraerAvisoConIA(args: {
       .join('\n')
       .trim();
 
-    return parsearRespuesta(texto);
+    return parsearRespuesta(texto, args.clientes);
   } catch (e: any) {
     // Que falle la IA no puede romper la recepción del correo: se sigue sin ella.
     if (e instanceof Anthropic.RateLimitError) console.error('[extraerAvisoIA] rate limit');
@@ -120,7 +154,7 @@ export async function extraerAvisoConIA(args: {
 
 // El modelo devuelve JSON, pero se valida todo igual antes de creerle: un importe mal
 // tipeado acá termina en una cobranza mal registrada.
-export function parsearRespuesta(texto: string): AvisoExtraido | null {
+export function parsearRespuesta(texto: string, clientes?: ClienteParaIA[]): AvisoExtraido | null {
   const crudo = texto.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
   const desde = crudo.indexOf('{'), hasta = crudo.lastIndexOf('}');
   if (desde === -1 || hasta <= desde) return null;
@@ -137,12 +171,20 @@ export function parsearRespuesta(texto: string): AvisoExtraido | null {
     ? j.comprobantes.map((c: any) => String(c).trim().toUpperCase()).filter(Boolean).slice(0, 30)
     : [];
 
+  // El id tiene que existir en la lista que se le pasó. Si devuelve uno inventado —o uno
+  // de otra conversación— se descarta: imputar a un cliente que no existe es peor que no
+  // identificarlo.
+  const idCrudo = j?.idCliente === null || j?.idCliente === undefined ? '' : String(j.idCliente).trim();
+  const idValido = idCrudo && (!clientes || clientes.some(c => String(c.id) === idCrudo)) ? idCrudo : null;
+
   return {
     importe: num(j?.importe),
     fecha: /^\d{4}-\d{2}-\d{2}$/.test(fecha) ? fecha : null,
     comprobantes,
     retencion: num(j?.retencion),
     nombrePagador: j?.nombrePagador ? String(j.nombrePagador).slice(0, 120) : null,
+    idCliente: idValido,
+    razonDelCliente: String(j?.razonDelCliente || '').slice(0, 200),
     confianza: ['alta', 'media', 'baja'].includes(j?.confianza) ? j.confianza : 'baja',
     comentario: String(j?.comentario || '').slice(0, 300),
   };
