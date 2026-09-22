@@ -23,6 +23,10 @@
     {
       "path": "/api/cron/recordatorios-cobro",
       "schedule": "0 12 * * 1"
+    },
+    {
+      "path": "/api/cron/bandeja-pendiente",
+      "schedule": "30 13 * * *"
     }
   ]
 }
