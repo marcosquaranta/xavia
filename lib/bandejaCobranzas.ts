@@ -142,14 +142,42 @@ export function proponerCliente(
   return null;
 }
 
+// Palabras propias del correo que NO identifican a nadie. Van aparte del ruido bancario
+// porque el problema que resuelven es distinto y más grave.
+const RUIDO_MAIL = new Set([
+  'ASUNTO', 'AVISO', 'FWD', 'RV', 'REENVIADO', 'MENSAJE', 'ORIGINAL', 'PARA', 'ENVIADO',
+  'GMAIL', 'HOTMAIL', 'YAHOO', 'OUTLOOK', 'COM', 'COM AR', 'MAIL', 'CORREO', 'ADJUNTO',
+]);
+
 // El texto que conviene guardar como alias cuando alguien confirma a mano de quién era un
 // movimiento: las palabras con contenido de la descripción, sin el ruido bancario. Guardar
 // la descripción entera no serviría — trae importes, números de operación y fechas que
 // cambian en cada transferencia.
+//
+// Las DIRECCIONES DE CORREO se borran antes que nada, y es la parte importante. Cuando un
+// aviso de pago se reenvía desde Gmail, el remitente que llega no es el del cliente sino el
+// de quien reenvía. De ahí salió un alias "MARCOS QUARANTA GMAIL COM" apuntando a un
+// cliente: el próximo aviso reenviado —de cualquier cliente— habría matcheado con ese alias
+// y el cobro se habría propuesto para el cliente equivocado. Un alias aprendido mal no
+// falla ruidosamente: acierta cada vez con la respuesta errónea.
 export function aliasDesdeDescripcion(descripcion: string): string {
-  const tokens = normalizarNombre(descripcion).split(' ')
-    .filter(t => t.length >= LARGO_MINIMO_TOKEN && !RUIDO.has(t) && !/^\d+$/.test(t));
-  return tokens.slice(0, 4).join(' ');
+  const sinMails = String(descripcion || '')
+    // Direcciones completas, y también las que quedaron con los puntos ya convertidos en
+    // espacios por una normalización anterior ("marcos quaranta gmail com").
+    .replace(/[\w.+-]+@[\w.-]+/g, ' ')
+    // Hasta tres palabras antes del proveedor: "marcos quaranta gmail com" son dos, y con
+    // una sola sobrevivía el nombre de pila, que es justo lo que no puede quedar.
+    .replace(/\b(?:[\w.+-]+\s+){1,3}(?:gmail|hotmail|yahoo|outlook|live|icloud)\s+com\b/gi, ' ');
+
+  const tokens = normalizarNombre(sinMails).split(' ')
+    .filter(t => t.length >= LARGO_MINIMO_TOKEN
+      && !RUIDO.has(t) && !RUIDO_MAIL.has(t)
+      && !/^\d+$/.test(t));
+
+  const alias = tokens.slice(0, 4).join(' ');
+  // Con menos que esto no identifica a nadie: es preferible no aprender nada a aprender un
+  // alias que va a matchear con cualquier cosa.
+  return alias.replace(/\s/g, '').length >= 4 ? alias : '';
 }
 
 export function nuevoIdItem(previos: ItemBandeja[]): string {

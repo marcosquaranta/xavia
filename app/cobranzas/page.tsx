@@ -14,7 +14,7 @@ import Header from '@/components/Header';
 import { ClientesRecordatorio, DatosPago, ProbarRecordatorios, type ClienteFila } from '@/components/CobranzasConfig';
 import RegistrarCobro from '@/components/RegistrarCobro';
 import BandejaCobranzas from '@/components/BandejaCobranzas';
-import { HOJA_BANDEJA, type ItemBandeja } from '@/lib/bandejaCobranzas';
+import { HOJA_BANDEJA, HOJA_ALIAS, type ItemBandeja, type AliasCobranza } from '@/lib/bandejaCobranzas';
 import ReclamoManual from '@/components/ReclamoManual';
 
 export const dynamic = 'force-dynamic';
@@ -39,14 +39,16 @@ export default async function CobranzasPage() {
   let clientes: ClienteVenta[] = [], enviados: RecordatorioCobro[] = [], configRows: { clave: string; valor: any }[] = [];
   let cobros: CobroRegistrado[] = [];
   let bandeja: ItemBandeja[] = [];
+  let aliasRows: AliasCobranza[] = [];
   try {
-    [clientes, enviados, configRows, cobros, bandeja] = await Promise.all([
+    [clientes, enviados, configRows, cobros, bandeja, aliasRows] = await Promise.all([
       readSheet<ClienteVenta>('Clientes').catch(() => []),
       readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => []),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
       readSheet<CobroRegistrado>(HOJA_COBROS).catch(() => []),
       // La hoja no existe hasta la primera importación del resumen bancario.
       readSheet<ItemBandeja>(HOJA_BANDEJA).catch(() => []),
+      readSheet<AliasCobranza>(HOJA_ALIAS).catch(() => []),
     ]);
   } catch {}
 
@@ -64,6 +66,13 @@ export default async function CobranzasPage() {
       origen: String(i.origen || 'banco'),
     }))
     .sort((a, b) => b.fecha.localeCompare(a.fecha) || b.importe - a.importe);
+
+  // Los alias que la app fue aprendiendo. Se muestran para poder borrar uno aprendido mal:
+  // no falla de forma ruidosa, acierta siempre con la respuesta equivocada.
+  const aliasAprendidos = aliasRows
+    .filter((a) => String(a.alias || '').trim().length >= 3)
+    .map((a) => ({ alias: String(a.alias).trim(), cliente: String(a.cliente || ''), fecha: String(a.fecha_aprendido || '') }))
+    .sort((a, b) => b.fecha.localeCompare(a.fecha));
 
   const filas: ClienteFila[] = clientes
     .filter((c) => String(c.activo || '').toUpperCase() !== 'NO')
@@ -136,6 +145,7 @@ export default async function CobranzasPage() {
               items={itemsBandeja}
               clientes={filas.map((f) => ({ id_control: f.id_control, nombre: f.nombre }))}
               cuentas={cuentasXubio.map((c) => ({ id: c.id, nombre: c.nombre }))}
+              aliases={aliasAprendidos}
             />
           </div>
         </div>

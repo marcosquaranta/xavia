@@ -254,8 +254,11 @@ function Fila({ item, clientes, cuentas, onListo }: {
   );
 }
 
-export default function BandejaCobranzas({ items, clientes, cuentas }: {
+interface AliasUI { alias: string; cliente: string; fecha: string }
+
+export default function BandejaCobranzas({ items, clientes, cuentas, aliases = [] }: {
   items: ItemUI[]; clientes: ClienteOpt[]; cuentas: { id: number; nombre: string }[];
+  aliases?: AliasUI[];
 }) {
   const router = useRouter();
   const [importando, setImportando] = useState(false);
@@ -269,6 +272,8 @@ export default function BandejaCobranzas({ items, clientes, cuentas }: {
   const [importeManual, setImporteManual] = useState('');
   const [leyendo, setLeyendo] = useState(false);
   const [probando, setProbando] = useState(false);
+  const [verAliases, setVerAliases] = useState(false);
+  const [borrandoAlias, setBorrandoAlias] = useState<string | null>(null);
 
   async function importar(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -334,6 +339,22 @@ export default function BandejaCobranzas({ items, clientes, cuentas }: {
       router.refresh();
     } catch (e: any) { setErr(e.message); }
     finally { setLeyendo(false); }
+  }
+
+  async function borrarAlias(alias: string) {
+    if (!window.confirm(`Se va a borrar el alias "${alias}". Los movimientos que lo contengan van a dejar de reconocerse solos. ¿Confirmás?`)) return;
+    setBorrandoAlias(alias); setErr(null); setMsg(null);
+    try {
+      const r = await fetch('/api/cobranzas/alias', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alias }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Error');
+      setMsg(`✓ Alias "${alias}" borrado.`);
+      router.refresh();
+    } catch (e: any) { setErr(e.message); }
+    finally { setBorrandoAlias(null); }
   }
 
   const total = items.reduce((a, i) => a + i.importe, 0);
@@ -443,6 +464,38 @@ export default function BandejaCobranzas({ items, clientes, cuentas }: {
               onListo={(m) => { setMsg(m); setErr(null); }} />
           ))}
         </>
+      )}
+
+      {/* Los alias aprendidos, para poder revisarlos y borrar uno que esté mal. Van al
+          final y plegados: se miran cuando algo se reconoce raro, no todos los días. */}
+      {aliases.length > 0 && (
+        <div style={{ marginTop: '14px', borderTop: '1px solid #f3f4f6', paddingTop: '10px' }}>
+          <button type="button" onClick={() => setVerAliases(v => !v)}
+            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: '11.5px', color: '#6b7280', fontWeight: 600 }}>
+            {verAliases ? '▾' : '▸'} Alias aprendidos ({aliases.length})
+          </button>
+          {verAliases && (
+            <div style={{ marginTop: '7px' }}>
+              <p style={{ margin: '0 0 7px', fontSize: '10.5px', color: '#9ca3af', lineHeight: 1.5 }}>
+                Cómo aparece cada cliente en el resumen del banco o en los avisos. Si alguno está mal,
+                borralo: un alias equivocado no falla de forma visible — hace que los cobros se propongan
+                para el cliente equivocado, ya reconocidos en verde.
+              </p>
+              {aliases.map(a => (
+                <div key={a.alias} style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', fontSize: '11.5px', padding: '4px 7px', borderTop: '1px solid #f9fafb' }}>
+                  <span style={{ fontFamily: 'monospace', color: '#374151' }}>{a.alias}</span>
+                  <span style={{ color: '#9ca3af' }}>→</span>
+                  <span style={{ fontWeight: 600 }}>{a.cliente}</span>
+                  <span style={{ color: '#d1d5db', fontSize: '10px' }}>{a.fecha}</span>
+                  <button onClick={() => borrarAlias(a.alias)} disabled={borrandoAlias === a.alias}
+                    style={{ marginLeft: 'auto', background: 'none', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '4px', padding: '1px 7px', fontSize: '10.5px', cursor: 'pointer' }}>
+                    {borrandoAlias === a.alias ? '…' : '✕ borrar'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
