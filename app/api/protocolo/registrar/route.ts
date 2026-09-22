@@ -145,6 +145,20 @@ export async function POST(req: NextRequest) {
     const previos = await readSheet<RegistroProtocolo>(HOJA_REGISTROS).catch(() => [] as RegistroProtocolo[]);
 
     const fueraDeRango = calcularFueraDeRango(datos);
+
+    // Los valores numéricos se guardan COMO NÚMEROS, no como el texto que llegó del
+    // formulario. La hoja se escribe con USER_ENTERED —que interpreta cada valor igual que
+    // si lo tipearan a mano— y con la configuración regional de la planilla "4.1" no es
+    // cuatro coma uno: es el 4 de enero. Se guardaba la fecha convertida en número de serie
+    // (46026) y después todo lo que leía ese pH veía 46026: la tabla, la alarma, el
+    // cumplimiento. Mandando un número de verdad, Sheets no tiene nada que interpretar.
+    const num = (v: any) => {
+      if (v === null || v === undefined || String(v).trim() === '') return '';
+      // Se acepta tanto "4.1" como "4,1": el que carga escribe con la coma del teclado.
+      const n = Number(String(v).trim().replace(',', '.'));
+      return Number.isFinite(n) ? n : '';
+    };
+
     const fila = {
       id_tarea: datos.id_tarea,
       tipo_registro: datos.tipo_registro,
@@ -154,19 +168,19 @@ export async function POST(req: NextRequest) {
       estado: datos.estado || 'hecha',
       producto: datos.producto || tarea.producto || '',
       dosis: datos.dosis || '',
-      temperatura: datos.temperatura ?? '',
-      humedad: datos.humedad ?? '',
-      ph: datos.ph ?? '',
-      conductividad: datos.conductividad ?? '',
-      ph4: datos.ph4 ?? '',
-      ph7: datos.ph7 ?? '',
+      temperatura: num(datos.temperatura),
+      humedad: num(datos.humedad),
+      ph: num(datos.ph),
+      conductividad: num(datos.conductividad),
+      ph4: num(datos.ph4),
+      ph7: num(datos.ph7),
       // Se guarda calculado, no como lo dice el operario: la tolerancia la define el
       // protocolo (pH ±0,3 · conductímetro ±3%), no el criterio del que mide.
       calibro: datos.id_tarea === 'control_instrumental'
         ? (evaluarInstrumental(datos).hayQueCalibrar ? 'SI' : 'NO')
         : (datos.calibro ?? ''),
-      conductividad_patron: datos.conductividad_patron ?? '',
-      litros: datos.litros ?? '',
+      conductividad_patron: num(datos.conductividad_patron),
+      litros: num(datos.litros),
       fuera_de_rango: fueraDeRango ? 'SI' : 'NO',
       notas: datos.notas || '',
       usuario: user.email,

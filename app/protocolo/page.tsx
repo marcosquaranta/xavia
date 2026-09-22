@@ -4,7 +4,7 @@ import { readSheet } from '@/lib/sheets';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 import {
   leerConfigProtocolo, tareasDelDia, tareasVencidas, cumplimientoProtocolo,
-  lunesDeSemana, sumarDias, TAREAS_PROTOCOLO, CONFIG_ALARMA_EMAILS,
+  lunesDeSemana, sumarDias, TAREAS_PROTOCOLO, CONFIG_ALARMA_EMAILS, numeroDeMedicion,
   ALARMA_CONDUCTIVIDAD, ALARMA_PH, PATRON_CONDUCTIVIDAD,
 } from '@/lib/protocoloTareas';
 import type { RegistroProtocolo } from '@/lib/types';
@@ -72,7 +72,9 @@ export default async function ProtocoloPage() {
     .slice(0, n);
   const medOsmosis = medicionesDe('control_osmosis');
   const medInstrumental = medicionesDe('control_instrumental');
-  const num = (v: any) => { const n = Number(v); return isNaN(n) ? null : n; };
+  // Repara de paso los valores que Sheets había convertido en fechas (ver
+  // numeroDeMedicion): las filas viejas se muestran con el número que se cargó.
+  const num = (v: any) => numeroDeMedicion(v);
 
   const nombreTarea = (id: string) => TAREAS_PROTOCOLO.find((t) => t.id === id)?.nombre || id;
 
@@ -287,18 +289,19 @@ export default async function ProtocoloPage() {
                     // lado. Cuando salta una alarma lo primero que se pregunta es qué número
                     // se cargó, para saber si el agua está mal o si se fue un decimal.
                     const val = (v: any) => v !== '' && v !== undefined && v !== null;
+                    const rep = (v: any) => numeroDeMedicion(v) ?? v;
                     const datos = [
                       r.producto ? String(r.producto) : '',
                       r.dosis ? String(r.dosis) : '',
-                      val(r.temperatura) ? `${r.temperatura} °C` : '',
-                      val(r.humedad) ? `${r.humedad}%` : '',
-                      val(r.conductividad) ? `conductividad ${r.conductividad} mS/cm` : '',
-                      val(r.ph) ? `pH ${r.ph}` : '',
-                      val(r.ph4) ? `pH4 → ${r.ph4}` : '',
-                      val(r.ph7) ? `pH7 → ${r.ph7}` : '',
-                      val(r.conductividad_patron) ? `patrón → ${r.conductividad_patron} mS/cm` : '',
+                      val(r.temperatura) ? `${rep(r.temperatura)} °C` : '',
+                      val(r.humedad) ? `${rep(r.humedad)}%` : '',
+                      val(r.conductividad) ? `conductividad ${rep(r.conductividad)} mS/cm` : '',
+                      val(r.ph) ? `pH ${rep(r.ph)}` : '',
+                      val(r.ph4) ? `pH4 → ${rep(r.ph4)}` : '',
+                      val(r.ph7) ? `pH7 → ${rep(r.ph7)}` : '',
+                      val(r.conductividad_patron) ? `patrón → ${rep(r.conductividad_patron)} mS/cm` : '',
                       val(r.calibro) ? `calibró: ${r.calibro}` : '',
-                      val(r.litros) ? `${r.litros} L` : '',
+                      val(r.litros) ? `${rep(r.litros)} L` : '',
                     ].filter(Boolean).join(' · ');
                     return (
                       <tr key={String(r.id_registro)} style={{

@@ -106,6 +106,34 @@ export const PATRON_CONDUCTIVIDAD = 12.88;      // mS/cm (= 12880 µS/cm)
 export const PATRON_CONDUCTIVIDAD_US = 12880;   // como viene rotulado el frasco
 export const TOLERANCIA_CONDUCTIVIDAD_PCT = 5;  // definido por Marcelo
 
+// ── Recuperar los valores que Sheets convirtió en fechas ────────────────────────────
+//
+// Hasta que se arregló la escritura, un pH de "4.1" llegaba a la planilla como texto y
+// USER_ENTERED lo interpretaba como el 4 de enero, guardando el número de serie de esa
+// fecha (46026). Todo lo que leía ese campo veía 46026: la tabla de mediciones, la alarma
+// —que marcaba en rojo mediciones perfectas— y el cumplimiento.
+//
+// La conversión es reversible sin ambigüedad: el serial da un día y un mes, y el valor
+// original era "día.mes". 46026 es el 4 de enero, o sea 4.1. Se repara al LEER y no se
+// toca lo guardado: las filas viejas quedan como están y se muestran bien.
+//
+// El rango es el de las fechas plausibles de una planilla (1990-2050). Ninguna medición
+// real de pH, conductividad, temperatura o humedad se acerca a esos números.
+const SERIAL_MINIMO = 32000;  // ~1987
+const SERIAL_MAXIMO = 60000;  // ~2064
+
+export function numeroDeMedicion(v: any): number | null {
+  if (v === null || v === undefined || String(v).trim() === '') return null;
+  const n = Number(String(v).trim().replace(',', '.'));
+  if (!Number.isFinite(n)) return null;
+  if (!Number.isInteger(n) || n < SERIAL_MINIMO || n > SERIAL_MAXIMO) return n;
+
+  const d = new Date(Date.UTC(1899, 11, 30) + n * 86400000);
+  if (isNaN(d.getTime())) return n;
+  const recuperado = Number(`${d.getUTCDate()}.${d.getUTCMonth() + 1}`);
+  return Number.isFinite(recuperado) ? recuperado : n;
+}
+
 export interface ChequeoInstrumental {
   hayQueCalibrar: boolean;
   motivos: string[];
@@ -113,12 +141,12 @@ export interface ChequeoInstrumental {
 export function evaluarInstrumental(datos: { ph4?: any; ph7?: any; conductividad_patron?: any }): ChequeoInstrumental {
   const motivos: string[] = [];
   for (const [campo, patron] of [['ph4', 4], ['ph7', 7]] as const) {
-    const v = Number((datos as any)[campo]);
+    const v = numeroDeMedicion((datos as any)[campo]) ?? NaN;
     if (isNaN(v) || v === 0) continue;
     const desvio = Math.round(Math.abs(v - patron) * 100) / 100;
     if (desvio > TOLERANCIA_PH) motivos.push(`pH ${patron}: leyó ${v} (desvío ${desvio}, tolerancia ±${TOLERANCIA_PH})`);
   }
-  const c = Number(datos.conductividad_patron);
+  const c = numeroDeMedicion(datos.conductividad_patron) ?? NaN;
   if (!isNaN(c) && c > 0) {
     const pct = Math.round(Math.abs((c - PATRON_CONDUCTIVIDAD) / PATRON_CONDUCTIVIDAD) * 1000) / 10;
     if (pct > TOLERANCIA_CONDUCTIVIDAD_PCT) motivos.push(`conductímetro: leyó ${c} mS/cm contra ${PATRON_CONDUCTIVIDAD} (desvío ${pct}%, tolerancia ±${TOLERANCIA_CONDUCTIVIDAD_PCT}%)`);
@@ -605,7 +633,8 @@ export function fueraDeRangoFoliar(temperatura: any, humedad: any): boolean {
   return t < COND_TEMP_MIN || t > COND_TEMP_MAX || h < COND_HUM_MIN || h > COND_HUM_MAX;
 }
 export function alarmaOsmosis(conductividad: any, ph: any): { alarma: boolean; motivos: string[] } {
-  const c = Number(conductividad), p = Number(ph);
+  const c = numeroDeMedicion(conductividad) ?? NaN;
+  const p = numeroDeMedicion(ph) ?? NaN;
   const motivos: string[] = [];
   if (!isNaN(c) && c > ALARMA_CONDUCTIVIDAD) motivos.push(`conductividad ${c} mS/cm (límite ${ALARMA_CONDUCTIVIDAD})`);
   if (!isNaN(p) && p > ALARMA_PH) motivos.push(`pH ${p} (límite ${ALARMA_PH})`);
