@@ -61,6 +61,7 @@ export default async function CobranzasPage() {
       id_control: String(i.id_control || '').trim(),
       cliente: String(i.cliente || ''),
       nota: String(i.nota || ''),
+      origen: String(i.origen || 'banco'),
     }))
     .sort((a, b) => b.fecha.localeCompare(a.fecha) || b.importe - a.importe);
 

@@ -11,6 +11,7 @@ interface ItemUI {
   id_control: string;
   cliente: string;
   nota: string;
+  origen: string;  // banco | mail | manual | setup
 }
 interface ClienteOpt { id_control: string; nombre: string }
 interface FacturaCliente { numero: string; fecha: string; importe: number; yaCobrada: boolean }
@@ -91,11 +92,41 @@ function Fila({ item, clientes, cuentas, onListo }: {
   }
 
   const reconocido = !!item.id_control;
+  const ORIGEN: Record<string, { txt: string; bg: string; fg: string }> = {
+    banco: { txt: 'banco', bg: '#eef2ff', fg: '#3730a3' },
+    mail: { txt: 'mail', bg: '#ecfeff', fg: '#155e75' },
+    manual: { txt: 'pegado', bg: '#f5f3ff', fg: '#5b21b6' },
+    setup: { txt: 'configuración', bg: '#fffbeb', fg: '#92400e' },
+  };
+  const org = ORIGEN[item.origen] || ORIGEN.banco;
+
+  // La confirmación de reenvío de Gmail no es un cobro: es el código que hay que copiar
+  // para terminar de conectar la casilla. Se muestra entero y sin nada que confirmar.
+  if (item.origen === 'setup') {
+    return (
+      <div style={{ border: '1px solid #fde68a', borderLeft: '4px solid #d97706', background: '#fffbeb', borderRadius: '7px', marginBottom: '7px', padding: '9px 11px' }}>
+        <p style={{ margin: '0 0 4px', fontSize: '12px', fontWeight: 700, color: '#92400e' }}>
+          Confirmación de reenvío de Gmail — copiá el código y pegalo en Gmail
+        </p>
+        <p style={{ margin: '0 0 7px', fontSize: '11.5px', color: '#78350f', lineHeight: 1.5, wordBreak: 'break-word' }}>
+          {item.descripcion}
+        </p>
+        <button onClick={() => accion('descartar')} disabled={trabajando}
+          style={{ fontSize: '11px', padding: '4px 10px', background: 'white', color: '#92400e', border: '1px solid #fde68a', borderRadius: '5px', cursor: 'pointer' }}>
+          Listo, sacar de la bandeja
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div style={{ border: '1px solid #e5e7eb', borderLeft: `4px solid ${reconocido ? '#16a34a' : '#d97706'}`, borderRadius: '7px', marginBottom: '7px', background: 'white' }}>
       <div onClick={abrir} style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', padding: '8px 11px', cursor: 'pointer' }}>
         <span style={{ fontSize: '12px', color: '#6b7280', minWidth: '42px', fontVariantNumeric: 'tabular-nums' }}>{fmtDia(item.fecha)}</span>
         <span style={{ fontSize: '15px', fontWeight: 800, minWidth: '110px' }}>{fmt$(item.importe)}</span>
+        <span style={{ fontSize: '9.5px', fontWeight: 700, padding: '1px 6px', borderRadius: '8px', background: org.bg, color: org.fg }}>
+          {org.txt}
+        </span>
         <span style={{ fontSize: '12.5px', fontWeight: 700, color: reconocido ? '#166534' : '#b45309' }}>
           {reconocido ? item.cliente : 'sin reconocer'}
         </span>
@@ -108,7 +139,7 @@ function Fila({ item, clientes, cuentas, onListo }: {
       {abierto && (
         <div style={{ padding: '0 11px 11px', borderTop: '1px solid #f3f4f6' }}>
           <p style={{ margin: '8px 0 6px', fontSize: '11px', color: '#6b7280', lineHeight: 1.5 }}>
-            <strong>Dice el banco:</strong> {item.descripcion}
+            <strong>{item.origen === 'banco' ? 'Dice el banco:' : 'Dice el aviso:'}</strong> {item.descripcion}
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: '8px', marginBottom: '8px' }}>
             <div>
