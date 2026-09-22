@@ -243,7 +243,10 @@ export function circuitoPorDefecto(circuitos: CircuitoXubio[]): CircuitoXubio | 
 // Igual que con el circuito y con las cuentas: en vez de inventar el id de "Pesos
 // Argentinos" —que varía entre cuentas de Xubio— se copia el que usan las cobranzas ya
 // cargadas. Es el dato correcto por definición: es el que la empresa viene usando.
-export interface MonedaXubio { ID: string | number; nombre?: string; codigo?: string }
+// El objeto entero como vino de Xubio. Reconstruirlo con solo el ID fue lo que rompió:
+// la lección del circuito contable vale igual acá — lo que Xubio devolvió, se le devuelve
+// idéntico, porque no hay forma de saber qué campos necesita de vuelta.
+export type MonedaXubio = Record<string, any>;
 
 export function monedaDeCobranzas(cobranzas: any[]): MonedaXubio | null {
   const uso = new Map<string, { m: MonedaXubio; n: number }>();
@@ -255,7 +258,7 @@ export function monedaDeCobranzas(cobranzas: any[]): MonedaXubio | null {
     const clave = String(crudo);
     const prev = uso.get(clave);
     if (prev) prev.n++;
-    else uso.set(clave, { m: { ID: crudo, nombre: m.nombre ? String(m.nombre) : undefined, codigo: m.codigo ? String(m.codigo) : undefined }, n: 1 });
+    else uso.set(clave, { m: { ...m }, n: 1 });
   }
   const orden = [...uso.values()].sort((a, b) => b.n - a.n);
   return orden.length ? orden[0].m : null;
@@ -298,15 +301,18 @@ export async function crearCobranza(args: NuevaCobranza):
   if (args.observacion) body.observacion = args.observacion;
   if (args.circuitoId) body.circuitoContable = { ID: args.circuitoId };
   if (args.moneda) {
-    body.monedaCtaCte = { ID: args.moneda.ID };
+    body.monedaCtaCte = args.moneda;
     body.cotizacion = args.cotizacion && args.cotizacion > 0 ? args.cotizacion : 1;
-    // La empresa opera en pesos; el campo existe igual y Xubio lo quiere explícito.
-    body.utilizaMonedaExtranjera = 0;
   }
 
   const res = await xubioPost<any>('cobranzaBean', body);
   if (!res.ok) {
-    const err = res.data?.description || res.data?.error || res.data?.message || `HTTP ${res.status}`;
+    const conocido = res.data?.description || res.data?.error || res.data?.message;
+    // Cuando Xubio no manda un mensaje reconocible va el cuerpo crudo recortado: sin eso
+    // un 500 no se puede diagnosticar desde acá, porque no hay acceso a sus logs.
+    const err = conocido || `HTTP ${res.status}${res.crudo ? ` — contestó: ${res.crudo.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300)}` : ''}`;
+    console.error('[xubio] cobranzaBean rechazada:', res.status, res.crudo?.slice(0, 500));
+    console.error('[xubio] cuerpo enviado:', JSON.stringify(body).slice(0, 800));
     return { ok: false, error: String(err) };
   }
   return { ok: true, transaccionid: res.data?.transaccionid, numeroRecibo: res.data?.numeroRecibo };
@@ -391,7 +397,7 @@ export const PRODUCTO_CODIGO: Record<string, string> = {
   lechuga_kg_roble: 'KG Lechuga Hoja de Roble',
 };
 
-async function xubioPost<T = any>(path: string, body: any): Promise<{ ok: boolean; status: number; data: T }> {
+async function xubioPost<T = any>(path: string, body: any): Promise<{ ok: boolean; status: number; data: T; crudo: string }> {
   const token = await getToken();
   const res = await fetch(`${BASE}/${path}`, {
     method: 'POST',
@@ -399,8 +405,14 @@ async function xubioPost<T = any>(path: string, body: any): Promise<{ ok: boolea
     body: JSON.stringify(body),
     cache: 'no-store',
   });
-  const data = await res.json().catch(() => ({} as any));
-  return { ok: res.ok, status: res.status, data };
+  // Se lee como TEXTO y después se intenta parsear. Con `res.json().catch(() => ({}))` un
+  // error 500 —que Xubio contesta en HTML o en texto plano— se convertía en un objeto
+  // vacío, y el mensaje que llegaba a la pantalla era "HTTP 500" a secas: sin una palabra
+  // sobre qué campo estaba mal.
+  const crudo = await res.text().catch(() => '');
+  let data: any = {};
+  try { data = crudo ? JSON.parse(crudo) : {}; } catch { /* no era JSON: queda el texto */ }
+  return { ok: res.ok, status: res.status, data, crudo };
 }
 
 export interface ClienteXubio { cliente_id: number; nombre: string; }
