@@ -49,6 +49,7 @@ export function importeDeTexto(t: string): number | null {
     const dec = limpio.length - limpio.lastIndexOf('.') - 1;
     if (dec === 3) norm = limpio.replace(/\./g, '');
   }
+  // Sin separadores queda tal cual: "500000" es 500000.
   const n = Number(norm);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
@@ -81,20 +82,63 @@ function fechaDeTexto(texto: string): string | null {
   return null;
 }
 
+// Palabras que, cerca de un número pelado, lo convierten en un importe. Hacen falta porque
+// un número sin separadores ni decimales no se distingue de cualquier otro número: es el
+// contexto el que dice que 500000 es plata y no un número de operación.
+const CLAVES_IMPORTE = [
+  'importe', 'monto', 'total', 'neto', 'pago', 'pagamos', 'abonamos', 'abonado', 'pagado',
+  'transferi', 'transferimos', 'transferencia', 'deposito', 'depositamos', 'acreditado',
+  'por un valor de', 'la suma de', 'valor',
+  // Las retenciones también son importes: hay que reconocerlas para poder DESCARTARLAS
+  // después. Si no se capturan, no se las puede distinguir del neto.
+  'retencion', 'iibb', 'ingresos brutos', 'ganancias',
+];
+
+// Un importe pelado tiene que tener al menos esta magnitud para que se lo considere plata.
+// Por debajo, un número suelto es casi siempre otra cosa (una cantidad, un piso, una hora).
+const MINIMO_IMPORTE_PELADO = 1000;
+
 // Todos los importes del texto, con la porción de línea que los precede — que es lo que
 // permite distinguir el neto a pagar de una retención o del total de una factura suelta.
 function importesConContexto(texto: string): { valor: number; contexto: string; idx: number }[] {
   const out: { valor: number; contexto: string; idx: number }[] = [];
-  // Con $ adelante, o un número con separadores que parezca plata.
-  const re = /(\$\s?)?(\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?|\d+[.,]\d{2})/g;
+  const agregar = (crudo: string, idx: number) => {
+    const valor = importeDeTexto(crudo);
+    if (valor === null) return;
+    if (out.some(o => o.idx === idx)) return; // ya lo tomó el patrón anterior
+    // El contexto es la FRASE en la que está el número, no los 60 caracteres anteriores:
+    // en "Retención 34680. Total transferido 1249320" la ventana ancha metía "retención"
+    // dentro del contexto del neto y lo hacía descartar el número correcto.
+    const desde = Math.max(0, idx - 60);
+    const bruto = texto.slice(desde, idx);
+    const corte = Math.max(bruto.lastIndexOf('. '), bruto.lastIndexOf('\n'), bruto.lastIndexOf(';'));
+    const contexto = corte >= 0 ? bruto.slice(corte + 1) : bruto;
+    out.push({ valor, contexto: sinAcentos(contexto), idx });
+  };
+
+  // 1. Con separadores de miles o decimales: 1.284.000,00 · 1,284,000.00 · 450000,50
+  const conFormato = /(\$\s?)?(\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?|\d+[.,]\d{2})/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(texto)) !== null) {
-    const valor = importeDeTexto(m[0]);
-    if (valor === null) continue;
-    const desde = Math.max(0, m.index - 60);
-    out.push({ valor, contexto: sinAcentos(texto.slice(desde, m.index)), idx: m.index });
+  while ((m = conFormato.exec(texto)) !== null) agregar(m[0], m.index);
+
+  // 2. Número PELADO con el signo pesos adelante: "$500000". Sin el $ no se puede saber que
+  //    es plata, con el $ no hay duda.
+  const conPeso = /\$\s?(\d{4,12})\b/g;
+  while ((m = conPeso.exec(texto)) !== null) agregar(m[0], m.index);
+
+  // 3. Número pelado cerca de una palabra que hable de plata: "te transferí 500000",
+  //    "importe 1699320". Es el caso de los avisos escritos a mano, que son la mitad.
+  const plano = sinAcentos(texto);
+  const pelado = /\b(\d{4,12})\b/g;
+  while ((m = pelado.exec(texto)) !== null) {
+    const valor = Number(m[1]);
+    if (!(valor >= MINIMO_IMPORTE_PELADO)) continue;
+    const ctx = plano.slice(Math.max(0, m.index - 40), m.index);
+    if (!CLAVES_IMPORTE.some(k => ctx.includes(sinAcentos(k)))) continue;
+    agregar(m[1], m.index);
   }
-  return out;
+
+  return out.sort((a, b) => a.idx - b.idx);
 }
 
 export function parsearAvisoPago(texto: string): AvisoPago {
