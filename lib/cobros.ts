@@ -96,7 +96,7 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
   // Xubio exige el circuito contable y no asume uno por defecto. Si no se consigue se corta
   // acá: Xubio lo va a rechazar igual, y su error ("El campo CircuitoContable esta vacío o
   // es nulo") no dice dónde está el problema.
-  let circuitoId: number | undefined;
+  let circuitoId: string | number | undefined;
   let circuitoNombre = '';
   let circuitoError = '';
   try {

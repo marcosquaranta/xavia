@@ -148,15 +148,27 @@ export async function getCuentas(cobranzasFallback: any[] = []): Promise<{ cuent
 // Circuitos contables. Xubio rechaza la cobranza sin este campo ("El campo
 // CircuitoContable esta vacío o es nulo"), y no tiene un default implícito: hay que
 // mandarle uno de los que tiene configurados la empresa.
-export interface CircuitoXubio { id: number; nombre: string; origen?: string }
+// El id se guarda COMO VIENE, sin convertirlo a número.
+//
+// Xubio devolvía los dos circuitos de la empresa con la clave correcta y la app los
+// descartaba igual, porque el filtro exigía `Number(id) > 0` y ese identificador no es
+// numérico. Un id es una etiqueta que hay que devolver idéntica a como llegó: interpretarlo
+// solo agrega formas de perderlo.
+export interface CircuitoXubio { id: string | number; nombre: string; origen?: string }
 
 function mapCircuito(c: any): CircuitoXubio {
-  return {
-    // El id del bean se llama `circuitoContable_id`, con guión bajo (especificación de
-    // Xubio, /API/1.1/swagger.json). Se aceptan las otras formas por si cambia.
-    id: Number(c?.circuitoContable_id ?? c?.circuitoContableId ?? c?.ID ?? c?.id ?? 0),
-    nombre: String(c?.nombre || c?.codigo || ''),
-  };
+  // El bean lo llama `circuitoContable_id`, con guión bajo (especificación de Xubio,
+  // /API/1.1/swagger.json). Las otras formas están por si cambia.
+  const crudo = c?.circuitoContable_id ?? c?.circuitoContableId ?? c?.ID ?? c?.id;
+  const id = crudo === null || crudo === undefined ? '' : (typeof crudo === 'object' ? '' : crudo);
+  return { id, nombre: String(c?.nombre || c?.codigo || '') };
+}
+
+// Un id sirve si tiene contenido. El cero explícito no: es lo que devuelve Xubio cuando el
+// campo está vacío.
+function idUsable(id: string | number): boolean {
+  if (typeof id === 'number') return Number.isFinite(id) && id !== 0;
+  return String(id ?? '').trim() !== '' && String(id).trim() !== '0';
 }
 
 // El circuito que usan las cobranzas YA CARGADAS. Es el camino que no puede fallar: si la
@@ -165,10 +177,10 @@ function mapCircuito(c: any): CircuitoXubio {
 // el plan de cuentas, que devuelve 404— y sin este respaldo un endpoint que no responde
 // deja la app sin poder registrar un solo cobro.
 export function circuitosDeCobranzas(cobranzas: any[]): CircuitoXubio[] {
-  const uso = new Map<number, { c: CircuitoXubio; n: number }>();
+  const uso = new Map<string | number, { c: CircuitoXubio; n: number }>();
   for (const cob of cobranzas || []) {
     const c = mapCircuito(cob?.circuitoContable);
-    if (!(c.id > 0)) continue;
+    if (!idUsable(c.id)) continue;
     const prev = uso.get(c.id);
     if (prev) prev.n++;
     else uso.set(c.id, { c: { ...c, nombre: c.nombre || `Circuito ${c.id}`, origen: 'cobranzas anteriores' }, n: 1 });
@@ -183,7 +195,7 @@ export async function getCircuitosContables(cobranzasFallback: any[] = []): Prom
   for (const path of ['circuitoContableBean?activo=1', 'circuitoContableBean']) {
     try {
       const raw = await xubioGet<any[]>(path);
-      const out = (Array.isArray(raw) ? raw : []).map(mapCircuito).filter((c) => c.id > 0);
+      const out = (Array.isArray(raw) ? raw : []).map(mapCircuito).filter((c) => idUsable(c.id));
       if (out.length) return out.map(c => ({ ...c, origen: 'listado de Xubio' }));
     } catch (e: any) {
       console.error(`[xubio] ${path} falló:`, e?.message || e);
@@ -202,7 +214,10 @@ export async function diagnosticoCircuitos(): Promise<string> {
     try {
       const raw = await xubioGet<any>(path);
       if (Array.isArray(raw)) {
-        partes.push(`${path}: ${raw.length} filas${raw.length ? ` · claves: ${Object.keys(raw[0] || {}).join(', ')}` : ''}`);
+        // Con las claves solas no alcanzó para entender por qué se descartaban: hacen falta
+        // los valores. Son el id y el nombre de un circuito contable, nada sensible.
+        const muestra = raw.length ? ` · primera fila: ${JSON.stringify(raw[0]).slice(0, 200)}` : '';
+        partes.push(`${path}: ${raw.length} filas${muestra}`);
       } else {
         partes.push(`${path}: respondió ${typeof raw} (no una lista)`);
       }
@@ -227,7 +242,7 @@ export interface NuevaCobranza {
   cuentaId: number;     // dónde entró la plata
   numeroRecibo?: string;
   observacion?: string;
-  circuitoId?: number;
+  circuitoId?: string | number;
 }
 
 export async function crearCobranza(args: NuevaCobranza):
