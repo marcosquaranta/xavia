@@ -42,7 +42,7 @@ export interface CobroRegistrado {
 // y se ve allá (mucho menos malo que al revés).
 
 import { appendRowObj, asegurarHoja, asegurarColumna, readSheet } from './sheets';
-import { crearCobranza, getClientesXubio, matchClienteXubio, getCircuitosContables, circuitoPorDefecto, getCobranzas, diagnosticoCircuitos, datosMonedaDeCobranzas, type DatosMoneda } from './xubio';
+import { crearCobranza, getClientesXubio, matchClienteXubio, getCircuitosContables, circuitoPorDefecto, getCobranzas, diagnosticoCircuitos, datosMonedaDeCobranzas, plantillaInstrumento, type DatosMoneda } from './xubio';
 import { fechaArgentinaHoy } from './ocupacion';
 import type { ClienteVenta } from './types';
 
@@ -102,6 +102,7 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
   // La moneda sale de las mismas cobranzas que se leen para el circuito: una sola consulta
   // resuelve los tres campos de moneda que Xubio exige y no asume.
   let datosMoneda: DatosMoneda = { moneda: null, cotizacion: 1, utilizaMonedaExtranjera: 0 };
+  let plantilla: Record<string, any> | null = null;
   try {
     // Si el listado de circuitos no responde, se saca de las cobranzas ya cargadas: el
     // circuito que la empresa viene usando está adentro de cada una.
@@ -110,6 +111,7 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
     const desde = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const cobranzasPrevias = await getCobranzas(desde, hoy).catch(() => [] as any[]);
     datosMoneda = datosMonedaDeCobranzas(cobranzasPrevias);
+    plantilla = plantillaInstrumento(cobranzasPrevias, cuentaId);
     const elegido = circuitoPorDefecto(await getCircuitosContables(cobranzasPrevias));
     if (elegido) { circuitoId = elegido.id; circuitoNombre = elegido.nombre; }
     else circuitoError = 'Xubio no devolvió ningún circuito contable, ni el listado ni las cobranzas anteriores.';
@@ -131,6 +133,7 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
     moneda: datosMoneda.moneda,
     cotizacion: datosMoneda.cotizacion,
     utilizaMonedaExtranjera: datosMoneda.utilizaMonedaExtranjera,
+    plantilla,
   });
   if (!r.ok) return { ok: false, error: `Xubio rechazó el cobro: ${r.error}`, status: 502 };
 

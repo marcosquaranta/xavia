@@ -295,6 +295,39 @@ export function datosMonedaDeCobranzas(cobranzas: any[]): DatosMoneda {
   return { moneda: null, cotizacion: 1, utilizaMonedaExtranjera: 0 };
 }
 
+// El renglón de "dónde entró la plata", copiado de una cobranza real.
+//
+// Armarlo a mano con cuenta + importe + descripción hacía que Xubio contestara un 500 con
+// una página de error de Tomcat: su servidor se rompe, no valida. Un 500 sin mensaje no se
+// puede diagnosticar desde afuera, así que en vez de adivinar qué campo falta se copia la
+// estructura de un recibo que Xubio aceptó —con cuentaTipo, moneda, cotización y lo que
+// sea que lleve— y se reemplaza solo lo que cambia.
+//
+// Los identificadores del recibo viejo se borran a propósito: dejarlos pegaría el cobro
+// nuevo a una transacción que ya existe.
+const CLAVES_A_BORRAR = ['transaccionICId', 'transaccionId', 'transaccionid', 'itemId'];
+
+export function plantillaInstrumento(cobranzas: any[], cuentaId: number): Record<string, any> | null {
+  const instrumentos: any[] = [];
+  for (const cob of cobranzas || []) {
+    for (const inst of (cob?.transaccionInstrumentoDeCobro || [])) {
+      if (inst && typeof inst === 'object') instrumentos.push(inst);
+    }
+  }
+  if (!instrumentos.length) return null;
+
+  // Se prefiere un renglón de la MISMA cuenta: cada cuenta puede tener su tipo, y el de la
+  // cuenta correcta es el que seguro funciona para esa cuenta.
+  const mismaCuenta = instrumentos.find((i) => {
+    const id = i?.cuenta?.ID ?? i?.cuenta?.id ?? i?.cuenta?.cuentaId;
+    return String(id) === String(cuentaId);
+  });
+
+  const base = { ...(mismaCuenta || instrumentos[0]) };
+  for (const k of CLAVES_A_BORRAR) delete base[k];
+  return base;
+}
+
 export interface NuevaCobranza {
   clienteId: number;
   fecha: string;        // YYYY-MM-DD
@@ -306,6 +339,8 @@ export interface NuevaCobranza {
   moneda?: MonedaXubio | null;
   cotizacion?: number;
   utilizaMonedaExtranjera?: number;
+  // Renglón de una cobranza anterior del que copiar la estructura (ver plantillaInstrumento).
+  plantilla?: Record<string, any> | null;
 }
 
 export async function crearCobranza(args: NuevaCobranza):
@@ -314,6 +349,9 @@ export async function crearCobranza(args: NuevaCobranza):
     cliente: { ID: args.clienteId },
     fecha: args.fecha,
     transaccionInstrumentoDeCobro: [{
+      // Sobre la plantilla del recibo real: así viajan los campos que Xubio necesita y que
+      // no están documentados. Sin plantilla se manda lo mínimo, que es como estaba antes.
+      ...(args.plantilla || {}),
       cuenta: { ID: args.cuentaId },
       importe: args.importe,
       descripcion: args.observacion || 'Cobro registrado desde XaviaApp',
@@ -337,7 +375,16 @@ export async function crearCobranza(args: NuevaCobranza):
     const conocido = res.data?.description || res.data?.error || res.data?.message;
     // Cuando Xubio no manda un mensaje reconocible va el cuerpo crudo recortado: sin eso
     // un 500 no se puede diagnosticar desde acá, porque no hay acceso a sus logs.
-    const err = conocido || `HTTP ${res.status}${res.crudo ? ` — contestó: ${res.crudo.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300)}` : ''}`;
+    // De una página de error de Tomcat lo único que sirve son las líneas de "Message" y
+    // "Description"; el resto es el CSS de la plantilla. Si no están, queda claro que el
+    // servidor se rompió sin decir por qué, que también es información.
+    const limpio = String(res.crudo || '')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\{[^}]*\}/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const err = conocido || `HTTP ${res.status}${limpio ? ` — contestó: ${limpio.slice(0, 400)}` : ''}`;
     console.error('[xubio] cobranzaBean rechazada:', res.status, res.crudo?.slice(0, 500));
     console.error('[xubio] cuerpo enviado:', JSON.stringify(body).slice(0, 800));
     return { ok: false, error: String(err) };
