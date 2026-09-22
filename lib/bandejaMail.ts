@@ -11,6 +11,7 @@
 
 import { appendRowObj, asegurarHoja, readSheet } from './sheets';
 import { parsearAvisoPago } from './avisosPago';
+import { extraerAvisoConIA, type PdfAdjunto } from './extraerAvisoIA';
 import { hashMovimiento } from './importacionBanco';
 import { fechaArgentinaHoy } from './ocupacion';
 import {
@@ -68,6 +69,11 @@ export interface ResultadoItemAviso {
   comprobantes?: string[];
   cliente?: string;
   codigo?: string | null;
+  // Cómo se leyó el aviso, para poder decirlo en el acuse: con los patrones de siempre o
+  // con la IA. Importa porque la confianza es distinta y el costo también.
+  leidoCon?: 'patrones' | 'ia';
+  confianza?: 'alta' | 'media' | 'baja';
+  comentarioIA?: string;
 }
 
 export async function crearItemDesdeAviso(args: {
@@ -78,6 +84,7 @@ export async function crearItemDesdeAviso(args: {
   usuario: string;
   importeForzado?: number;
   fechaForzada?: string;
+  pdfs?: PdfAdjunto[];
 }): Promise<ResultadoItemAviso> {
   const texto = String(args.texto || '');
   const asunto = String(args.asunto || '');
@@ -104,14 +111,40 @@ export async function crearItemDesdeAviso(args: {
   }
 
   const leido = parsearAvisoPago(`${asunto}\n${texto}`);
-  const importe = args.importeForzado && args.importeForzado > 0 ? args.importeForzado : leido.importe;
-  if (!(Number(importe) > 0)) return { ok: false, motivo: 'sin_importe' };
+  let comprobantes = leido.comprobantes;
+  let retencion = leido.retencion;
+  let importe = args.importeForzado && args.importeForzado > 0 ? args.importeForzado : leido.importe;
+  let leidoCon: 'patrones' | 'ia' = 'patrones';
+  let confianza: 'alta' | 'media' | 'baja' | undefined;
+  let comentarioIA = '';
+  let pagador = '';
+
+  // Los patrones no encontraron el importe. Ahí entra la IA, que es la única que puede
+  // leer un PDF adjunto o una tabla HTML donde el dato está repartido en celdas. No se la
+  // llama antes porque los patrones son gratis y siempre dan lo mismo.
+  if (!(Number(importe) > 0)) {
+    const ia = await extraerAvisoConIA({ texto, asunto, remitente: args.remitente, pdfs: args.pdfs });
+    if (ia && Number(ia.importe) > 0) {
+      importe = ia.importe;
+      if (ia.comprobantes.length) comprobantes = ia.comprobantes;
+      if (ia.retencion) retencion = ia.retencion;
+      if (ia.fecha && !args.fechaForzada) (leido as any).fecha = ia.fecha;
+      pagador = ia.nombrePagador || '';
+      leidoCon = 'ia';
+      confianza = ia.confianza;
+      comentarioIA = ia.comentario;
+    } else if (ia) {
+      comentarioIA = ia.comentario;
+    }
+  }
+
+  if (!(Number(importe) > 0)) return { ok: false, motivo: 'sin_importe', comentarioIA };
 
   const fecha = /^\d{4}-\d{2}-\d{2}$/.test(String(args.fechaForzada || ''))
     ? String(args.fechaForzada)
     : (leido.fecha || hoy);
 
-  const hash = hashMovimiento(fecha, Number(importe), `aviso ${leido.comprobantes.join(',')}`);
+  const hash = hashMovimiento(fecha, Number(importe), `aviso ${comprobantes.join(',')}`);
   if (previos.some(p => String(p.hash) === hash)) return { ok: false, motivo: 'duplicado' };
 
   // El cliente se busca en TODO lo que vino: el remitente muchas veces lo dice mejor que el
@@ -120,13 +153,16 @@ export async function crearItemDesdeAviso(args: {
     readSheet<ClienteVenta>('Clientes'),
     readSheet<AliasCobranza>(HOJA_ALIAS).catch(() => [] as AliasCobranza[]),
   ]);
-  const cand = proponerCliente(`${args.remitente || ''} ${asunto} ${texto}`, clientes, aliases);
+  // El nombre que sacó la IA entra en la búsqueda: cuando el pagador figura solo dentro
+  // del PDF, es el único lugar donde aparece.
+  const cand = proponerCliente(`${pagador} ${args.remitente || ''} ${asunto} ${texto}`, clientes, aliases);
 
   const descripcion = [
     args.remitente ? `De ${args.remitente}` : '',
     asunto || 'Aviso de pago',
-    leido.comprobantes.length ? `facturas ${leido.comprobantes.join(', ')}` : '',
-    leido.retencion ? `retención ${leido.retencion}` : '',
+    comprobantes.length ? `facturas ${comprobantes.join(', ')}` : '',
+    retencion ? `retención ${retencion}` : '',
+    leidoCon === 'ia' ? `leído con IA (confianza ${confianza})` : '',
     texto.replace(/\s+/g, ' ').slice(0, 140),
   ].filter(Boolean).join(' · ');
 
@@ -141,7 +177,7 @@ export async function crearItemDesdeAviso(args: {
     hash,
     id_control: cand?.id_control || '',
     cliente: cand?.cliente || '',
-    comprobantes: leido.comprobantes.join(', '),
+    comprobantes: comprobantes.join(', '),
     estado: 'pendiente',
     id_cobro: '',
     usuario: args.usuario,
@@ -150,6 +186,7 @@ export async function crearItemDesdeAviso(args: {
 
   return {
     ok: true, idItem, importe: Number(importe),
-    comprobantes: leido.comprobantes, cliente: cand?.cliente,
+    comprobantes, cliente: cand?.cliente,
+    leidoCon, confianza, comentarioIA,
   };
 }

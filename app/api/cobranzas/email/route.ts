@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { crearItemDesdeAviso, htmlATexto } from '@/lib/bandejaMail';
+import type { PdfAdjunto } from '@/lib/extraerAvisoIA';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -44,6 +45,57 @@ async function contenidoDelMail(emailId: string): Promise<{ texto: string; asunt
   }
 }
 
+// Los PDF adjuntos. En las órdenes de pago de los supermercados el importe y las facturas
+// viven ahí adentro y no en el cuerpo del mail, así que sin esto el aviso llega vacío.
+//
+// Resend no manda el contenido en el webhook —solo metadatos, para no arrastrar archivos
+// grandes— sino un `download_url` que dura una hora. Se bajan acá, en el momento.
+//
+// Solo PDF: son los que el modelo puede leer como documento. Un adjunto de imagen o una
+// planilla se ignoran, y el acuse lo dice para que se cargue a mano.
+const MAX_PDF_MB = 25;
+
+async function pdfsDelMail(emailId: string): Promise<PdfAdjunto[]> {
+  const key = process.env.RESEND_API_KEY;
+  if (!key || !emailId) return [];
+  try {
+    const res = await fetch(`https://api.resend.com/emails/receiving/${emailId}/attachments`, {
+      headers: { Authorization: `Bearer ${key}` },
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      console.error('[cobranzas/email] no se pudieron listar los adjuntos:', res.status);
+      return [];
+    }
+    const j: any = await res.json();
+    const lista: any[] = Array.isArray(j?.data) ? j.data : Array.isArray(j) ? j : [];
+    const out: PdfAdjunto[] = [];
+    for (const a of lista.slice(0, 5)) {
+      const tipo = String(a?.content_type || '').toLowerCase();
+      const nombre = String(a?.filename || 'adjunto.pdf');
+      if (!tipo.includes('pdf') && !nombre.toLowerCase().endsWith('.pdf')) continue;
+      const url = String(a?.download_url || '');
+      if (!url) continue;
+      try {
+        const bin = await fetch(url, { cache: 'no-store' });
+        if (!bin.ok) continue;
+        const buf = Buffer.from(await bin.arrayBuffer());
+        if (buf.length > MAX_PDF_MB * 1024 * 1024) {
+          console.error('[cobranzas/email] adjunto demasiado grande:', nombre, buf.length);
+          continue;
+        }
+        out.push({ nombre, base64: buf.toString('base64') });
+      } catch (e) {
+        console.error('[cobranzas/email] no se pudo bajar el adjunto', nombre, e);
+      }
+    }
+    return out;
+  } catch (e) {
+    console.error('[cobranzas/email] excepción con los adjuntos:', e);
+    return [];
+  }
+}
+
 // Acuse de recibo. Sin esto, mandar un aviso a la casilla es tirar algo a un pozo: no hay
 // forma de saber si llegó, si se entendió o si se perdió en el camino. El acuse va a
 // administración y NO al remitente original — el que manda el aviso es el cliente, y no
@@ -70,7 +122,14 @@ async function acusarRecibo(args: {
       <p style="font-size:13px;color:#555">Pegalo en Gmail → Configuración → Reenvío y correo POP/IMAP. No uses el link del mail: falla cuando hay varias cuentas de Google abiertas.</p>`;
   } else if (r.ok) {
     titulo = 'Aviso de pago procesado';
-    detalle = `<ul style="font-size:14px;color:#111">
+    detalle = `${r.leidoCon === 'ia'
+      ? `<p style="font-size:12.5px;color:#5b21b6;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:7px 10px">
+           Este lo leyó la IA (el texto solo no alcanzaba, o el dato estaba en un PDF). Confianza: <strong>${r.confianza}</strong>.
+           ${r.comentarioIA ? `<br>${r.comentarioIA}` : ''}
+           ${r.confianza !== 'alta' ? '<br><strong>Revisá el importe antes de confirmar.</strong>' : ''}
+         </p>`
+      : ''}
+    <ul style="font-size:14px;color:#111">
       <li>Importe: <strong>${fmt$(Number(r.importe) || 0)}</strong></li>
       <li>Cliente: ${r.cliente ? `<strong>${r.cliente}</strong>` : '<span style="color:#b45309">no lo reconocí — lo elegís al confirmar</span>'}</li>
       <li>Facturas: ${r.comprobantes?.length ? `<code>${r.comprobantes.join(', ')}</code>` : '<span style="color:#9ca3af">ninguna mencionada</span>'}</li>
@@ -83,7 +142,9 @@ async function acusarRecibo(args: {
   } else {
     titulo = 'Llegó un mail pero no pude interpretarlo';
     color = '#b91c1c';
-    detalle = `<p style="font-size:13px;color:#555">No encontré un importe en el mensaje. Puede ser que el dato esté en un PDF adjunto (todavía no los leo) o en una imagen. Abrí la bandeja y usá <strong>Pegar aviso de pago</strong> con el texto, o cargá el cobro a mano.</p>`;
+    detalle = `<p style="font-size:13px;color:#555">No encontré un importe, ni en el texto ni en los adjuntos.${
+      r.comentarioIA ? ` La IA dice: <em>${r.comentarioIA}</em>` : ''
+    } Puede ser que el dato esté en una imagen escaneada. Abrí la bandeja y usá <strong>Pegar aviso de pago</strong> con el texto, o cargá el cobro a mano.</p>`;
   }
 
   const html = `
@@ -148,12 +209,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, sinContenido: true });
     }
 
+    // Los adjuntos se bajan solo si hacen falta: si el cuerpo ya trae un importe, el lector
+    // por patrones lo resuelve gratis y no hay para qué traer nada ni llamar a la IA.
+    const traeAdjuntos = Array.isArray(data?.attachments) && data.attachments.length > 0;
+    const pdfs = traeAdjuntos ? await pdfsDelMail(String(data?.email_id || '')) : [];
+
     const r = await crearItemDesdeAviso({
       texto: contenido.texto,
       asunto: contenido.asunto,
       remitente: contenido.remitente,
       origen: 'mail',
       usuario: 'correo reenviado',
+      pdfs,
     });
 
     await acusarRecibo({
