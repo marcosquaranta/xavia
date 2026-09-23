@@ -202,6 +202,12 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
                     cursor: 'pointer', fontSize: '11.5px', padding: '4px 7px', marginBottom: '4px',
                     background: 'white', border: '1px solid #dbe4fb', borderRadius: '5px' }}>
                   <span style={{ fontWeight: 700 }}>{sg.numeros.length === 1 ? '1 factura' : `${sg.numeros.length} facturas`}</span>
+                  {sg.masViejas && (
+                    <span title="Las facturas más viejas sin cobrar, sumadas hasta acercarse al importe"
+                      style={{ fontSize: '9.5px', fontWeight: 700, padding: '1px 5px', borderRadius: '8px', background: '#fef3c7', color: '#92400e' }}>
+                      las más viejas
+                    </span>
+                  )}
                   {sg.consecutivas && <span style={{ fontSize: '9.5px', fontWeight: 700, padding: '1px 5px', borderRadius: '8px', background: '#ede9fe', color: '#5b21b6' }}>seguidas</span>}
                   <span style={{ fontFamily: 'monospace', fontSize: '10.5px', color: '#1d4ed8' }}>{sg.numeros.join(' + ')}</span>
                   <span style={{ marginLeft: 'auto', fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: '8px',

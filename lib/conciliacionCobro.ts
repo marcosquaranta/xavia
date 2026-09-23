@@ -21,6 +21,9 @@ export interface Combinacion {
   diferencia: number;   // total − objetivo (negativo = falta plata para llegar)
   exacta: boolean;
   consecutivas: boolean; // comprobantes seguidos del cliente (ver corridas más abajo)
+  // La fila de referencia: arrancar por la factura más vieja e ir sumando. Se muestra
+  // siempre, aunque no entre en la tolerancia (ver combinacionMasViejas).
+  masViejas?: boolean;
 }
 
 // Cuánto se permite que una combinación se aleje del importe cobrado. Existe porque en la
@@ -72,6 +75,50 @@ function corridas(facturas: FacturaCandidata[]): string[][] {
 //   3. la de comprobantes seguidos, que es como se paga cuando se junta más de una,
 //   4. la que incluye las facturas MÁS NUEVAS: las viejas, si siguen en la lista, lo más
 //      probable es que ya se hayan pagado y todavía no esté registrado.
+// Arrancar por la factura más vieja e ir sumando hasta acercarse al importe.
+//
+// Es como se paga en la práctica: un cliente que manda una transferencia está cancelando lo
+// más viejo que debe, no una selección caprichosa. Por eso esta combinación se muestra
+// SIEMPRE, aunque no entre en la tolerancia: la diferencia contra el importe real es
+// información en sí misma. Si da +$40.000, probablemente quedó una factura afuera; si da
+// −$12.000, puede ser una retención o una nota de crédito.
+//
+// Se prueba cada corte —las 2 más viejas, las 3, las 4…— y gana el que queda más cerca del
+// importe. Pasarse un poco es tan válido como quedarse corto: no se asume que el cliente
+// paga de más ni de menos.
+export function combinacionMasViejas(
+  facturas: FacturaCandidata[], objetivo: number, opciones: { incluirYaCobradas?: boolean } = {},
+): Combinacion | null {
+  const obj = Math.round(objetivo);
+  if (!(obj > 0)) return null;
+
+  const candidatas = facturas
+    .filter(f => (opciones.incluirYaCobradas ? true : !f.yaCobrada) && Math.round(f.importe) > 0)
+    .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
+  if (!candidatas.length) return null;
+
+  let mejor: { hasta: number; total: number; dif: number } | null = null;
+  let acum = 0;
+  for (let i = 0; i < candidatas.length; i++) {
+    acum += Math.round(candidatas[i].importe);
+    const dif = acum - obj;
+    if (!mejor || Math.abs(dif) < Math.abs(mejor.dif)) mejor = { hasta: i, total: acum, dif };
+    // Una vez pasado el objetivo, seguir sumando solo aleja: el acumulado nunca baja.
+    if (acum > obj) break;
+  }
+  if (!mejor) return null;
+
+  const elegidas = candidatas.slice(0, mejor.hasta + 1);
+  return {
+    numeros: elegidas.map(f => f.numero),
+    total: mejor.total,
+    diferencia: mejor.dif,
+    exacta: mejor.dif === 0,
+    consecutivas: elegidas.length > 1,
+    masViejas: true,
+  };
+}
+
 export function sugerirCombinaciones(
   facturas: FacturaCandidata[], objetivo: number, opciones: { incluirYaCobradas?: boolean } = {},
 ): Combinacion[] {
@@ -154,7 +201,7 @@ export function sugerirCombinaciones(
   // que al tildarlas se vea primero lo último emitido.
   for (const c of out) c.numeros.sort((a, b) => String(fechaDe.get(b) || '').localeCompare(String(fechaDe.get(a) || '')));
 
-  return out
+  const ordenadas = out
     .sort((a, b) =>
       (a.exacta === b.exacta ? 0 : a.exacta ? -1 : 1) ||
       a.numeros.length - b.numeros.length ||
@@ -162,4 +209,17 @@ export function sugerirCombinaciones(
       Math.abs(a.diferencia) - Math.abs(b.diferencia) ||
       reciente(b) - reciente(a))
     .slice(0, MAX_RESULTADOS);
+
+  // La fila de referencia va al final y fuera del orden: no compite con las que sí dan el
+  // importe, es otra pregunta —"¿y si estuviera pagando lo más viejo?"— y la respuesta vale
+  // aunque no cierre. Si resulta ser una de las que ya están, se marca esa en vez de
+  // repetirla.
+  const viejas = combinacionMasViejas(facturas, objetivo, opciones);
+  if (viejas) {
+    const clave = [...viejas.numeros].sort().join('|');
+    const yaEstaba = ordenadas.find(c => [...c.numeros].sort().join('|') === clave);
+    if (yaEstaba) yaEstaba.masViejas = true;
+    else ordenadas.push(viejas);
+  }
+  return ordenadas;
 }

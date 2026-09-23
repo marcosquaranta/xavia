@@ -259,6 +259,12 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
                               background: 'white', border: '1px solid #dbe4fb', borderRadius: '5px', color: '#1f2937',
                             }}>
                             <span style={{ fontWeight: 700 }}>{sg.numeros.length === 1 ? '1 factura' : `${sg.numeros.length} facturas`}</span>
+                            {sg.masViejas && (
+                              <span title="Las facturas más viejas sin cobrar, sumadas hasta acercarse al importe"
+                                style={{ fontSize: '9.5px', fontWeight: 700, padding: '1px 5px', borderRadius: '8px', background: '#fef3c7', color: '#92400e' }}>
+                                las más viejas
+                              </span>
+                            )}
                             {sg.consecutivas && (
                               <span title="Comprobantes seguidos del cliente" style={{ fontSize: '9.5px', fontWeight: 700, padding: '1px 5px', borderRadius: '8px', background: '#ede9fe', color: '#5b21b6' }}>
                                 seguidas
