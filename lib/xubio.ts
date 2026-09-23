@@ -129,20 +129,47 @@ export function cuentasDeCobranzas(cobranzas: any[]): CuentaXubio[] {
 // plan. Por eso se intenta y, si no está, se caen las cuentas desde las cobranzas ya
 // cargadas. Se devuelve `origen` para poder decir en pantalla de dónde salieron, en vez de
 // mostrar una lista sin explicar por qué es corta.
+// Las formas de pedir el plan de cuentas, en orden. `activo=1` está primero porque el
+// parámetro es un ENTERO y no un booleano: con `activo=true` Xubio contesta 404, que es
+// exactamente el mismo error que tenía el listado de circuitos contables y que hizo creer
+// durante semanas que el endpoint no estaba habilitado en este plan.
+const PATHS_CUENTAS = ['cuenta?activo=1', 'cuenta', 'cuenta?activo=0', 'banco'];
+
 export async function getCuentas(cobranzasFallback: any[] = []): Promise<{ cuentas: CuentaXubio[]; origen: string; aviso?: string }> {
-  for (const path of ['cuenta?activo=true', 'cuenta']) {
+  for (const path of PATHS_CUENTAS) {
     try {
       const raw = await xubioGet<any[]>(path);
       const cuentas = (Array.isArray(raw) ? raw : []).map(mapCuenta).filter((c) => c.id > 0 && c.nombre);
-      if (cuentas.length) return { cuentas, origen: 'plan de cuentas de Xubio' };
-    } catch { /* sigue con la próxima opción */ }
+      if (cuentas.length) return { cuentas, origen: `plan de cuentas de Xubio (${path})` };
+    } catch (e: any) {
+      console.error(`[xubio] ${path} falló:`, e?.message || e);
+    }
   }
   const cuentas = cuentasDeCobranzas(cobranzasFallback);
   return {
     cuentas,
     origen: 'cuentas usadas en cobranzas anteriores',
-    aviso: 'Xubio no expone el plan de cuentas en este plan (GET /cuenta da 404), así que se listan las cuentas donde ya entraron cobros. Si falta alguna, hacé un cobro en esa cuenta desde Xubio una vez y aparece acá.',
+    aviso: 'Xubio no devolvió el plan de cuentas, así que se listan solo las cuentas donde YA entró algún cobro. Por eso puede faltar alguna: hacé un cobro en esa cuenta desde Xubio una vez y a partir de ahí aparece acá.',
   };
+}
+
+// Qué contesta Xubio a cada forma de pedir el plan de cuentas. Sin esto, "solo aparece
+// Brubank" no se puede distinguir de "el endpoint no responde": son problemas distintos.
+export async function diagnosticoCuentas(): Promise<string> {
+  const partes: string[] = [];
+  for (const path of PATHS_CUENTAS) {
+    try {
+      const raw = await xubioGet<any>(path);
+      if (Array.isArray(raw)) {
+        partes.push(`${path}: ${raw.length} filas${raw.length ? ` · ej: ${JSON.stringify(raw[0]).slice(0, 120)}` : ''}`);
+      } else {
+        partes.push(`${path}: respondió ${typeof raw} (no una lista)`);
+      }
+    } catch (e: any) {
+      partes.push(`${path}: ${e?.message || 'error'}`);
+    }
+  }
+  return partes.join(' · ');
 }
 
 // Circuitos contables. Xubio rechaza la cobranza sin este campo ("El campo

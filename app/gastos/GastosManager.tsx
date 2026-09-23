@@ -42,6 +42,7 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
   const [editVals, setEditVals] = useState<{ fecha: string; descripcion: string; categoria: CategoriaGasto; monto: number; medio_pago: string } | null>(null);
   const [borrando, setBorrando] = useState<string | null>(null);
   const [exportando, setExportando] = useState(false);
+  const [verResumen, setVerResumen] = useState(false);
   const [msgExport, setMsgExport] = useState<string | null>(null);
 
   const delMes = useMemo(() => {
@@ -58,6 +59,22 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
   }, [delMes]);
 
   const totalGeneral = delMes.reduce((a, g) => a + (Number(g.monto) || 0), 0);
+
+  // Resumen por categoría para mandar por mail: solo concepto y monto, de mayor a menor.
+  // Los movimientos entre medios de pago quedan afuera — no son gasto, es plata que va de
+  // una cuenta a otra, y sumarlos infla el total con algo que nadie gastó.
+  const resumenCategorias = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const g of delMes) {
+      if (g.categoria === 'movimiento_interno') continue;
+      map.set(g.categoria, (map.get(g.categoria) || 0) + (Number(g.monto) || 0));
+    }
+    const filas = Array.from(map.entries())
+      .map(([cat, monto]) => ({ cat, label: LABEL_CAT[cat] || cat, monto }))
+      .sort((a, b) => b.monto - a.monto);
+    const total = filas.reduce((a, f) => a + f.monto, 0);
+    return { filas, total };
+  }, [delMes]);
   const totalesPorMedio = useMemo(() => {
     const map = new Map<string, number>();
     for (const g of delMes) map.set(g.medio_pago, (map.get(g.medio_pago) || 0) + (Number(g.monto) || 0));
@@ -142,8 +159,59 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
     }
   }
 
+  const MESES_NOMBRE = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
   return (
     <div>
+      {/* ══ Resumen por categoría, pensado para sacarle una captura ══
+          Sin medio de pago, sin detalle, sin botones adentro del recuadro: lo que se
+          recorta y se pega en un mail tiene que ser solo conceptos y montos. */}
+      <div className="card" style={{ marginBottom: '14px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
+          <p className="card-title" style={{ margin: 0 }}>Resumen por categoría</p>
+          <button type="button" onClick={() => setVerResumen((v) => !v)}
+            style={{ background: 'none', border: '1px solid #e5e7eb', borderRadius: '5px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer', color: '#6b7280' }}>
+            {verResumen ? 'Ocultar' : 'Ver para copiar'}
+          </button>
+        </div>
+        {verResumen && (
+          resumenCategorias.filas.length === 0 ? (
+            <p style={{ margin: '10px 0 0', fontSize: '13px', color: '#9ca3af' }}>No hay gastos cargados en este mes.</p>
+          ) : (
+            <>
+              <div style={{ marginTop: '10px', background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px 18px', maxWidth: '460px' }}>
+                <p style={{ margin: '0 0 2px', fontSize: '16px', fontWeight: 800, color: '#111827' }}>
+                  Gastos de {MESES_NOMBRE[mes - 1]} {anio}
+                </p>
+                <p style={{ margin: '0 0 12px', fontSize: '11.5px', color: '#9ca3af' }}>Xavia</p>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                  <tbody>
+                    {resumenCategorias.filas.map((f) => (
+                      <tr key={f.cat} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                        <td style={{ padding: '6px 0', color: '#374151' }}>{f.label}</td>
+                        <td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                          {fmtMoneda(f.monto)}
+                        </td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td style={{ padding: '10px 0 0', fontWeight: 800, fontSize: '15px' }}>Total</td>
+                      <td style={{ padding: '10px 0 0', textAlign: 'right', fontWeight: 800, fontSize: '15px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                        {fmtMoneda(resumenCategorias.total)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p style={{ margin: '7px 0 0', fontSize: '10.5px', color: '#9ca3af', lineHeight: 1.5 }}>
+                Recortá el recuadro blanco y pegalo en el mail. No incluye los movimientos entre
+                medios de pago: no son gasto, es plata que pasa de una cuenta a otra.
+              </p>
+            </>
+          )
+        )}
+      </div>
+
       {/* ══ Alta de gasto ══ */}
       <form onSubmit={agregar} className="card" style={{ marginBottom: '14px' }}>
         <p className="card-title">Nuevo gasto</p>

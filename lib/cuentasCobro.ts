@@ -7,7 +7,7 @@
 //
 // Las tres reales, en orden de uso. El orden importa: la primera es la que queda elegida
 // cuando el aviso no dice nada, que es el caso más común.
-export const CUENTAS_COBRO = ['brubank', 'macro', 'caja mq'] as const;
+export const CUENTAS_COBRO = ['brubank', 'macro', 'caja mq', 'caja marce'] as const;
 
 export interface CuentaOpcion { id: number; nombre: string }
 

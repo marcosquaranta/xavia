@@ -815,7 +815,7 @@ export function construirHtml(d: ReporteSemanalData): string {
   // reemplaza por el mismo gráfico de barras "email-safe" (tablas) que ya funcionaba bien
   // en Proyección de cosecha.
   const ventasSemanasChart = graficoBarrasHtml(
-    d.ventasSemanas.map(p => ({ label: p.label, a: p.rucula, b: p.lechuga })),
+    d.ventasSemanas.map(p => ({ label: p.enCurso ? `${p.label} (en curso)` : p.label, a: p.rucula, b: p.lechuga })),
     '#134e4a', '#84cc16', 'Rúcula', 'Lechuga'
   );
   // Descarte por cultivo Y por fase — tabla en vez de gráfico de barras, para poder abrir
@@ -1108,7 +1108,10 @@ export function construirTexto(d: ReporteSemanalData): string {
   L.push(`Total: ${fmtN(totU)} u · ${fmtMoneda(totM)}`);
   L.push('');
   L.push(`Últimas 4 semanas (u.) — Rúcula / Lechuga:`);
-  for (const s of d.ventasSemanas) L.push(`  ${s.label}: ${fmtN(s.rucula)} / ${fmtN(s.lechuga)}`);
+  for (const s of d.ventasSemanas) {
+    const marca = s.enCurso ? ` (en curso, ${s.diasTranscurridos} de 7 días)` : '';
+    L.push(`  ${s.label}: ${fmtN(s.rucula)} / ${fmtN(s.lechuga)}${marca}`);
+  }
   L.push('');
 
   L.push(`👤 *Principales clientes* (vs. semana ant.)`);

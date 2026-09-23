@@ -617,24 +617,47 @@ const fmtISOLocal = (d: Date) => {
   return `${y}-${m}-${day}`;
 };
 
-// ── Ventas por cultivo (unidades), últimas N semanas CALENDARIO completas (lunes a
-// domingo, terminando el domingo pasado — la semana en curso queda afuera por estar
-// incompleta). A diferencia de evolucionVentaPorArticuloSemanal, no depende de qué
-// semanas tengan ventas cargadas: si hubo un hueco de carga, esa semana simplemente
-// aparece en 0 en vez de saltarse silenciosamente a semanas más viejas para completar N,
-// lo que corría las etiquetas y hacía parecer "actual" un dato de varios meses atrás. ──
-export interface PuntoVentaCultivoSemana { semana: string; label: string; rucula: number; lechuga: number }
+// ── Ventas por cultivo (unidades), últimas N semanas calendario (lunes a domingo),
+// terminando en la SEMANA EN CURSO.
+//
+// La semana actual se incluía afuera por estar incompleta, y eso dejaba el gráfico
+// mirando siempre para atrás: un miércoles, lo más nuevo era de hace diez días. Ahora
+// entra, pero marcada —va `enCurso` y cuántos días lleva— porque un lunes a la mañana esa
+// barra va a ser casi cero y eso no es una caída de ventas, es que la semana recién
+// arranca. Quien la dibuja tiene que decirlo.
+//
+// A diferencia de evolucionVentaPorArticuloSemanal, no depende de qué semanas tengan
+// ventas cargadas: si hubo un hueco de carga, esa semana aparece en 0 en vez de saltarse
+// silenciosamente a semanas más viejas para completar N, lo que corría las etiquetas y
+// hacía parecer "actual" un dato de varios meses atrás. ──
+export interface PuntoVentaCultivoSemana {
+  semana: string; label: string; rucula: number; lechuga: number;
+  enCurso?: boolean;        // la semana todavía no terminó
+  diasTranscurridos?: number; // cuántos de los 7 días ya pasaron
+}
 export function ventasPorCultivoUltimasSemanas(
-  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], n = 4
+  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], n = 4, hoy: Date = new Date()
 ): PuntoVentaCultivoSemana[] {
-  const lunesActual = lunesDeSemana(new Date());
+  const lunesActual = lunesDeSemana(hoy);
+  const hoyStr = fmtISOLocal(hoy);
   const puntos: PuntoVentaCultivoSemana[] = [];
-  for (let i = n; i >= 1; i--) {
+  for (let i = n - 1; i >= 0; i--) {
     const lunes = new Date(lunesActual); lunes.setDate(lunes.getDate() - i * 7);
     const domingo = new Date(lunes); domingo.setDate(domingo.getDate() + 6);
     const desde = fmtISOLocal(lunes), hasta = fmtISOLocal(domingo);
     const r = ventasEnRango(ventas, precios, clientes, desde, hasta);
-    puntos.push({ semana: desde, label: `${String(lunes.getDate()).padStart(2, '0')}/${String(lunes.getMonth() + 1).padStart(2, '0')}`, rucula: r.rucula.unidades, lechuga: r.lechuga.unidades });
+    const enCurso = i === 0;
+    // Los días que ya pasaron, contando el de hoy: es lo que permite leer la barra sin
+    // confundir una semana que empieza con una semana mala.
+    const diasTranscurridos = enCurso
+      ? Math.min(7, Math.round((new Date(hoyStr + 'T12:00:00').getTime() - new Date(desde + 'T12:00:00').getTime()) / 86400000) + 1)
+      : 7;
+    puntos.push({
+      semana: desde,
+      label: `${String(lunes.getDate()).padStart(2, '0')}/${String(lunes.getMonth() + 1).padStart(2, '0')}`,
+      rucula: r.rucula.unidades, lechuga: r.lechuga.unidades,
+      enCurso, diasTranscurridos,
+    });
   }
   return puntos;
 }

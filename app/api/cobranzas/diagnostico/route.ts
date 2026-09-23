@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
-import { getCuentas, getCobranzas, getComprobantes, importeCobranza, getClientesXubio, getCircuitosContables, circuitoPorDefecto } from '@/lib/xubio';
+import { getCuentas, getCobranzas, getComprobantes, importeCobranza, getClientesXubio, getCircuitosContables, circuitoPorDefecto, diagnosticoCuentas } from '@/lib/xubio';
 import { sumarDias } from '@/lib/recordatoriosCobro';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 
@@ -54,10 +54,16 @@ export async function GET() {
     const r = await getCuentas(cobs);
     cuentas = r.cuentas;
     avisoCuentas = r.aviso;
+    // Se nombran las cuentas encontradas: "solo aparece Brubank" es un síntoma que hay
+    // que poder ver acá, no descubrir al intentar registrar un cobro.
+    const nombres = cuentas.map((c) => c.nombre).join(', ');
     push('Cuentas donde imputar el cobro', cuentas.length > 0,
       cuentas.length > 0
-        ? `${cuentas.length} cuentas · origen: ${r.origen}`
+        ? `${cuentas.length} cuentas · origen: ${r.origen} · ${nombres}`
         : 'no se pudo armar la lista de cuentas — sin plan de cuentas por API y sin cobranzas de las cuales deducirlas');
+    // Y qué contestó cada forma de pedirlo, para saber si falta una cuenta porque Xubio no
+    // la da o porque nunca entró un cobro en ella.
+    push('Plan de cuentas — qué contesta Xubio', true, await diagnosticoCuentas().catch(() => 'no se pudo consultar'));
   } catch (e: any) {
     push('Cuentas donde imputar el cobro', false, e?.message || 'error');
   }
