@@ -20,13 +20,23 @@ function rango(nombre: string): number {
   return i === -1 ? CUENTAS_COBRO.length : i;
 }
 
-// Solo las tres, ordenadas. Si ninguna matchea —porque en Xubio se llaman distinto— se
-// devuelven todas: es preferible una lista larga a una pantalla donde no se puede
-// registrar ningún cobro.
+// Las cuentas por las que entra plata, primero; el resto detrás.
+//
+// Xubio devuelve el PLAN DE CUENTAS completo —78 cuentas, casi todas de gastos: Almuerzos,
+// Combustible, Ropa de Trabajo— y elegir ahí adentro la cuenta donde entró una
+// transferencia es una invitación a imputar mal. Por eso las de cobro van arriba.
+//
+// Pero no se esconde el resto: si una cuenta de cobro está en Xubio con otro nombre del
+// que espera CUENTAS_COBRO, dejarla afuera haría imposible registrar ese cobro. Se marca
+// la separación y listo — la lista ordenada resuelve el 95% de los casos sin bloquear el
+// 5% restante.
 export function cuentasElegibles<T extends CuentaOpcion>(cuentas: T[]): T[] {
-  const conocidas = cuentas.filter(c => rango(c.nombre) < CUENTAS_COBRO.length);
-  if (!conocidas.length) return cuentas;
-  return [...conocidas].sort((a, b) => rango(a.nombre) - rango(b.nombre) || a.nombre.localeCompare(b.nombre));
+  return [...cuentas].sort((a, b) => rango(a.nombre) - rango(b.nombre) || a.nombre.localeCompare(b.nombre));
+}
+
+// Cuántas de las primeras son "de cobro": la pantalla las separa visualmente del resto.
+export function cantidadPreferidas(cuentas: CuentaOpcion[]): number {
+  return cuentas.filter(c => rango(c.nombre) < CUENTAS_COBRO.length).length;
 }
 
 // Qué cuenta sugiere el texto de un aviso. "Transferencia a Banco Macro" tiene que quedar

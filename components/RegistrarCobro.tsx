@@ -1,7 +1,7 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { sugerirCombinaciones, toleranciaDe } from '@/lib/conciliacionCobro';
-import { cuentasElegibles } from '@/lib/cuentasCobro';
+import { cuentasElegibles, cantidadPreferidas } from '@/lib/cuentasCobro';
 
 interface ClienteOpt { id_control: string; nombre: string }
 interface CobroFila {
@@ -217,7 +217,17 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
               <label style={labelStyle}>¿Dónde entró? *</label>
               <select value={cuentaId} onChange={(e) => setCuentaId(e.target.value)} disabled={loading} style={inputStyle}>
                 <option value="">— Elegir cuenta —</option>
-                {cuentasOrdenadas.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                {(() => {
+                  // Las de cobro arriba, el resto detrás de un separador: el plan de cuentas
+                  // de Xubio trae 78 cuentas y casi todas son de gastos.
+                  const nPref = cantidadPreferidas(cuentasOrdenadas);
+                  return cuentasOrdenadas.map((c, i) => (
+                    <Fragment key={c.id}>
+                      {i === nPref && nPref > 0 && <option disabled>──────────</option>}
+                      <option value={c.id}>{c.nombre}</option>
+                    </Fragment>
+                  ));
+                })()}
               </select>
             </div>
             <div style={{ gridColumn: '1 / -1' }}>

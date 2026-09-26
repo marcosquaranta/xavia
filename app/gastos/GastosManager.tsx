@@ -1,5 +1,5 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { CATEGORIAS_GASTO, MEDIOS_PAGO, admiteMontoNegativo, type Gasto, type CategoriaGasto, type Articulo } from '@/lib/types';
 import NumberInput from '@/components/NumberInput';
@@ -11,6 +11,10 @@ const ORDEN_CAT: CategoriaGasto[] = CATEGORIAS_GASTO.map((c) => c.value);
 const HOY = new Date();
 const hoyISO = () => HOY.toISOString().split('T')[0];
 const fmtMoneda = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
+// Arriba de este monto, el gasto se nombra aparte en el resumen: es lo bastante grande como
+// para que alguien pregunte "¿y esto qué fue?" al ver el total de la categoría.
+const UMBRAL_DETALLE = 200000;
+const fmtDiaMes = (f: string) => { const [, m, d] = f.split('-'); return d && m ? `${d}/${m}` : f; };
 const fmtFecha = (s: string) => { const [y, m, d] = String(s || '').split(/[T ]/)[0].split('-'); return d && m ? `${d}/${m}` : s; };
 
 interface Props { gastos: Gasto[]; articulos: Articulo[]; usuario: string }
@@ -70,7 +74,22 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
       map.set(g.categoria, (map.get(g.categoria) || 0) + (Number(g.monto) || 0));
     }
     const filas = Array.from(map.entries())
-      .map(([cat, monto]) => ({ cat, label: LABEL_CAT[cat] || cat, monto }))
+      .map(([cat, monto]) => ({
+        cat, label: LABEL_CAT[cat] || cat, monto,
+        // Los gastos grandes, uno por uno. Un total de categoría no dice nada por sí solo:
+        // "Insumos $1.400.000" puede ser un sustrato que se compró una vez o veinte cosas
+        // chicas, y son conversaciones distintas. Arriba del umbral se nombra el gasto.
+        //
+        // Si la categoría es un solo gasto, no se detalla: repetir el mismo número dos
+        // veces seguidas no agrega nada y ensucia la captura.
+        grandes: (() => {
+          const items = delMes.filter((g) => g.categoria === cat && (Number(g.monto) || 0) > UMBRAL_DETALLE);
+          if (items.length <= 1 && Math.abs(monto - (Number(items[0]?.monto) || 0)) < 1) return [];
+          return items
+            .map((g) => ({ id: String(g.id_gasto), fecha: String(g.fecha || '').split(/[T ]/)[0], descripcion: String(g.descripcion || '').trim(), monto: Number(g.monto) || 0 }))
+            .sort((a, b) => b.monto - a.monto);
+        })(),
+      }))
       .sort((a, b) => b.monto - a.monto);
     const total = filas.reduce((a, f) => a + f.monto, 0);
     return { filas, total };
@@ -187,12 +206,26 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
                   <tbody>
                     {resumenCategorias.filas.map((f) => (
-                      <tr key={f.cat} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                        <td style={{ padding: '6px 0', color: '#374151' }}>{f.label}</td>
-                        <td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                          {fmtMoneda(f.monto)}
-                        </td>
-                      </tr>
+                      <Fragment key={f.cat}>
+                        <tr style={{ borderBottom: f.grandes.length ? 'none' : '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '6px 0', color: '#374151' }}>{f.label}</td>
+                          <td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                            {fmtMoneda(f.monto)}
+                          </td>
+                        </tr>
+                        {/* Los gastos grandes de la categoría, indentados: se leen como
+                            detalle de la línea de arriba, no como categorías nuevas. */}
+                        {f.grandes.map((g, i) => (
+                          <tr key={g.id} style={{ borderBottom: i === f.grandes.length - 1 ? '1px solid #f3f4f6' : 'none' }}>
+                            <td style={{ padding: '1px 0 1px 16px', fontSize: '12px', color: '#9ca3af' }}>
+                              {fmtDiaMes(g.fecha)} · {g.descripcion || 'sin detalle'}
+                            </td>
+                            <td style={{ padding: '1px 0', textAlign: 'right', fontSize: '12px', color: '#9ca3af', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                              {fmtMoneda(g.monto)}
+                            </td>
+                          </tr>
+                        ))}
+                      </Fragment>
                     ))}
                     <tr>
                       <td style={{ padding: '10px 0 0', fontWeight: 800, fontSize: '15px' }}>Total</td>
@@ -204,7 +237,8 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
                 </table>
               </div>
               <p style={{ margin: '7px 0 0', fontSize: '10.5px', color: '#9ca3af', lineHeight: 1.5 }}>
-                Recortá el recuadro blanco y pegalo en el mail. No incluye los movimientos entre
+                Recortá el recuadro blanco y pegalo en el mail. Abajo de cada categoría van los
+                gastos de más de {fmtMoneda(UMBRAL_DETALLE)}. No incluye los movimientos entre
                 medios de pago: no son gasto, es plata que pasa de una cuenta a otra.
               </p>
             </>

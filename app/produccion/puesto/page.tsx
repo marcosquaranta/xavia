@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
+import { OBJETIVOS_MARCE } from '@/lib/objetivosMarce';
 import Header from '@/components/Header';
 export const dynamic = 'force-dynamic';
 
@@ -135,7 +136,7 @@ export default async function PuestoProduccionPage() {
             <p style={{ margin: '10px 0 6px' }}>Marcelo es el primero de los cuatro socios en tener indicadores formales de seguimiento — los 3 acordados:</p>
             <ol style={{ margin: 0, paddingLeft: '18px' }}>
               <Item>
-                <strong>Ocupación de posiciones — objetivo 95% promedio mensual, abierto por cultivo.</strong> Se mide
+                <strong>Ocupación de posiciones — objetivo {OBJETIVOS_MARCE.ocupacion.objetivo}% promedio mensual, abierto por cultivo.</strong> Se mide
                 como promedio del mes (no una foto puntual), para que contemple los huecos entre cosecha y trasplante.
                 Marcelo aceptó el objetivo condicionado a resolver antes algunas mejoras pendientes en plantinera.
               </Item>

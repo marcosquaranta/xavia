@@ -130,7 +130,25 @@ export interface DiferenciaCliente {
   xubio: number;    // comprobantes de Xubio (netos de notas de crédito)
   diferencia: number; // app − xubio
   pct: number | null;
+  dias: DiferenciaDia[]; // en qué días está la diferencia, de mayor a menor
 }
+
+// En qué día está la diferencia. Un total por cliente dice que algo no cuadra, pero no
+// deja hacer nada: "Mamina −$335.368" obliga a revisar un mes entero de ventas contra un
+// mes entero de comprobantes. El día concreto, con el número de factura, convierte eso en
+// abrir UN comprobante y comparar.
+export interface DiferenciaDia {
+  fecha: string;
+  app: number;
+  xubio: number;
+  diferencia: number;
+  comprobantes: string[]; // los de Xubio de ese día, para ir directo a buscarlos
+}
+
+// Abajo de esto, un día no se nombra: es redondeo de precios, no un problema. El umbral
+// por día es mucho más chico que el del cliente porque acá ya sabemos que el cliente no
+// cuadra; lo único que falta es ubicar dónde.
+export const DIF_MINIMA_DIA = 1_000;
 
 export interface ComparacionFacturado {
   desde: string;
@@ -170,6 +188,7 @@ export function compararFacturado(
   // comprobante en `exportado`). Las PENDIENTE no van: esas ya las cuenta el control de
   // arriba y contarlas acá las haría aparecer como "diferencia" dos veces.
   const porClienteApp = new Map<string, { nombre: string; monto: number }>();
+  const porDiaApp = new Map<string, number>();            // "clave||fecha" → monto
   for (const v of ventas) {
     const f = soloFecha(v.fecha);
     if (!f || f < desde || f > hasta) continue;
@@ -188,10 +207,12 @@ export function compararFacturado(
     const prev = porClienteApp.get(clave);
     if (prev) prev.monto += monto;
     else porClienteApp.set(clave, { nombre: nombreClienteVisible(cliente) || String(v.nombre_cliente || clave), monto });
+    porDiaApp.set(`${clave}||${f}`, (porDiaApp.get(`${clave}||${f}`) || 0) + monto);
   }
 
   // Lado Xubio: comprobantes del período, con las notas de crédito (tipo 3) en negativo.
   const porClienteXubio = new Map<string, { nombre: string; monto: number }>();
+  const porDiaXubio = new Map<string, { monto: number; comprobantes: string[] }>();
   for (const c of comprobantes) {
     const f = soloFecha(c?.fecha);
     if (!f || f < desde || f > hasta) continue;
@@ -203,6 +224,12 @@ export function compararFacturado(
     const prev = porClienteXubio.get(clave);
     if (prev) prev.monto += monto;
     else porClienteXubio.set(clave, { nombre, monto });
+    const kd = `${clave}||${f}`;
+    const pd = porDiaXubio.get(kd) || { monto: 0, comprobantes: [] };
+    pd.monto += monto;
+    const nro = String(c?.numeroDocumento || '').trim();
+    if (nro && !pd.comprobantes.includes(nro)) pd.comprobantes.push(nro);
+    porDiaXubio.set(kd, pd);
   }
 
   const claves = new Set([...porClienteApp.keys(), ...porClienteXubio.keys()]);
@@ -213,13 +240,27 @@ export function compararFacturado(
     const diferencia = app - xubio;
     const base = Math.max(Math.abs(app), Math.abs(xubio));
     const pct = base > 0 ? Math.round((diferencia / base) * 1000) / 10 : null;
-    // Se listan solo las que importan: en plata Y en proporción. Una diferencia de
-    // $60.000 sobre $8.000.000 es corrimiento de fechas, no un problema.
+    // Se listan por MONTO, sin exigir además un porcentaje. El filtro por proporción
+    // estaba pensado para no avisar de redondeos, pero escondía plata real: una diferencia
+    // de $60.000 en un cliente que factura $8.000.000 no llega al 2% y se ignoraba, y son
+    // $60.000 que igual hay que explicar. El porcentaje sigue calculado como dato.
     if (Math.abs(diferencia) < DIF_MINIMA_PESOS) continue;
-    if (pct !== null && Math.abs(pct) < DIF_MINIMA_PCT) continue;
+    // En qué días está: es lo que convierte el aviso en algo que se puede revisar.
+    const dias: DiferenciaDia[] = [];
+    const fechas = new Set<string>();
+    for (const kk of porDiaApp.keys()) if (kk.startsWith(`${k}||`)) fechas.add(kk.slice(k.length + 2));
+    for (const kk of porDiaXubio.keys()) if (kk.startsWith(`${k}||`)) fechas.add(kk.slice(k.length + 2));
+    for (const f of fechas) {
+      const dApp = Math.round(porDiaApp.get(`${k}||${f}`) || 0);
+      const dXu = Math.round(porDiaXubio.get(`${k}||${f}`)?.monto || 0);
+      const dDif = dApp - dXu;
+      if (Math.abs(dDif) < DIF_MINIMA_DIA) continue;
+      dias.push({ fecha: f, app: dApp, xubio: dXu, diferencia: dDif, comprobantes: porDiaXubio.get(`${k}||${f}`)?.comprobantes || [] });
+    }
+    dias.sort((a, b) => Math.abs(b.diferencia) - Math.abs(a.diferencia));
     porCliente.push({
       cliente: porClienteApp.get(k)?.nombre || porClienteXubio.get(k)?.nombre || k,
-      app, xubio, diferencia, pct,
+      app, xubio, diferencia, pct, dias,
     });
   }
   porCliente.sort((a, b) => Math.abs(b.diferencia) - Math.abs(a.diferencia));

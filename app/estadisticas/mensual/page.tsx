@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import CumplimientoObjetivo from '@/components/CumplimientoObjetivo';
+import { OBJETIVOS_MARCE } from '@/lib/objetivosMarce';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { calcularDiasPorFase } from '@/lib/lotes';
@@ -477,13 +479,14 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
             <div style={{ ...cardStyle, margin: 0, border: '1px solid #f3f4f6' }}>
               <p style={{ margin: '0 0 2px', fontSize: '12.5px', fontWeight: 700 }}>1. Ocupación de posiciones</p>
-              <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#9ca3af' }}>Objetivo: 95% promedio mensual, por cultivo</p>
+              <p style={{ margin: '0 0 6px', fontSize: '11px', color: '#9ca3af' }}>Objetivo: {OBJETIVOS_MARCE.ocupacion.objetivo}% promedio mensual, por cultivo</p>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '6px' }}>
-                <strong style={{ fontSize: '28px', color: ocupacionUltimoMesRep?.total.pct !== null && ocupacionUltimoMesRep?.total.pct !== undefined ? (ocupacionUltimoMesRep.total.pct >= 95 ? '#059669' : '#d97706') : '#9ca3af' }}>
+                <strong style={{ fontSize: '28px', color: ocupacionUltimoMesRep?.total.pct !== null && ocupacionUltimoMesRep?.total.pct !== undefined ? (ocupacionUltimoMesRep.total.pct >= (OBJETIVOS_MARCE.ocupacion.objetivo ?? 95) ? '#059669' : '#d97706') : '#9ca3af' }}>
                   {ocupacionUltimoMesRep?.total.pct !== null && ocupacionUltimoMesRep?.total.pct !== undefined ? `${ocupacionUltimoMesRep.total.pct}%` : '—'}
                 </strong>
                 <span style={{ fontSize: '11px', color: '#9ca3af' }}>{ocupacionUltimoMesRep?.label ?? 'sin datos'}</span>
               </div>
+              <CumplimientoObjetivo valor={ocupacionUltimoMesRep?.total.pct} kpi={OBJETIVOS_MARCE.ocupacion} />
               {ocupacionUltimoMesRep && (
                 <p style={{ margin: '0 0 6px', fontSize: '11px', color: '#6b7280' }}>
                   Rúcula {ocupacionUltimoMesRep.rucula.pct ?? '—'}% · Lechuga {ocupacionUltimoMesRep.lechuga.pct ?? '—'}%
@@ -502,11 +505,12 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
 
             <div style={{ ...cardStyle, margin: 0, border: '1px solid #f3f4f6' }}>
               <p style={{ margin: '0 0 2px', fontSize: '12.5px', fontWeight: 700 }}>2. Eficiencia Siembra → Cosecha</p>
-              <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#9ca3af' }}>% que llega vivo a cosecha, según descarte de las 3 etapas — sin ventas ni cámara. Sin objetivo fijado aún</p>
+              <p style={{ margin: '0 0 6px', fontSize: '11px', color: '#9ca3af' }}>% que llega vivo a cosecha, según descarte de las 3 etapas — sin ventas ni cámara.</p>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '6px' }}>
                 <strong style={{ fontSize: '28px', color: '#111827' }}>{eficienciaUltimoMesRep ? `${eficienciaUltimoMesRep.pctGlobal}%` : '—'}</strong>
                 <span style={{ fontSize: '11px', color: '#9ca3af' }}>{eficienciaUltimoMesRep?.mes.label ?? 'sin datos'}</span>
               </div>
+              <CumplimientoObjetivo valor={eficienciaUltimoMesRep?.pctGlobal} kpi={OBJETIVOS_MARCE.eficiencia} />
               {eficienciaUltimoMesRep && (
                 <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#6b7280' }}>
                   Rúcula {eficienciaUltimoMesRep.mes.rucula.pct ?? '—'}% · Crespa {eficienciaUltimoMesRep.mes.lechuga_crespa.pct ?? '—'}% · Roble {eficienciaUltimoMesRep.mes.lechuga_roble.pct ?? '—'}%
@@ -520,11 +524,12 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
 
             <div style={{ ...cardStyle, margin: 0, border: '1px solid #f3f4f6' }}>
               <p style={{ margin: '0 0 2px', fontSize: '12.5px', fontWeight: 700 }}>3. Productividad de empleados</p>
-              <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#9ca3af' }}>Plantas cosechadas al mes por hora-persona total. En medición — sin objetivo aún</p>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '10px' }}>
+              <p style={{ margin: '0 0 6px', fontSize: '11px', color: '#9ca3af' }}>Plantas cosechadas al mes por hora-persona total.</p>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '6px' }}>
                 <strong style={{ fontSize: '28px', color: '#111827' }}>{productividadPlantasUltimoMesRep ? productividadPlantasUltimoMesRep.productividad!.toLocaleString('es-AR') : '—'}</strong>
                 <span style={{ fontSize: '11px', color: '#9ca3af' }}>pl/h · {productividadPlantasUltimoMesRep?.label ?? 'sin datos'}</span>
               </div>
+              <CumplimientoObjetivo valor={productividadPlantasUltimoMesRep?.productividad} kpi={OBJETIVOS_MARCE.productividad} />
               {evoProductividadPlantasRep.series[0].puntos.length > 0
                 ? <GraficoEvolucion series={evoProductividadPlantasRep.series} labels={evoProductividadPlantasRep.labels} hoyIdx={evoProductividadPlantasRep.hoyIdx} unidad=" pl/h" />
                 : <p style={{ color: '#9ca3af', fontSize: '12px', textAlign: 'center', padding: '16px' }}>Sin datos de CrossChex disponibles.</p>}

@@ -1,8 +1,8 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { sugerirCombinaciones, toleranciaDe } from '@/lib/conciliacionCobro';
-import { cuentasElegibles, cuentaSugerida } from '@/lib/cuentasCobro';
+import { cuentasElegibles, cuentaSugerida, cantidadPreferidas } from '@/lib/cuentasCobro';
 
 interface ItemUI {
   id_item: string;
@@ -180,7 +180,17 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
               <label style={{ fontSize: '10.5px', color: '#6b7280', fontWeight: 600 }}>¿Dónde entró?</label>
               <select value={cuentaId} onChange={e => setCuentaId(e.target.value)} disabled={trabajando} style={inputStyle}>
                 <option value="">— Elegir cuenta —</option>
-                {cuentasOk.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                {(() => {
+                  // Las de cobro arriba, el resto detrás de un separador: el plan de cuentas
+                  // de Xubio trae 78 cuentas y casi todas son de gastos.
+                  const nPref = cantidadPreferidas(cuentasOk);
+                  return cuentasOk.map((c, i) => (
+                    <Fragment key={c.id}>
+                      {i === nPref && nPref > 0 && <option disabled>──────────</option>}
+                      <option value={c.id}>{c.nombre}</option>
+                    </Fragment>
+                  ));
+                })()}
               </select>
             </div>
           </div>

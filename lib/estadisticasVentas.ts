@@ -36,12 +36,18 @@ function semanaLabel(sk: string): string {
   const [, m, d] = sk.split('-');
   return `${d}/${m}`;
 }
+// La semana en curso SE INCLUYE. Antes quedaba afuera por estar incompleta, y el efecto
+// era peor que el problema que evitaba: un miércoles, lo más nuevo del gráfico era de hace
+// diez días, y el dato de esta semana —el único sobre el que todavía se puede hacer algo—
+// no aparecía en ningún lado. Va marcada en la etiqueta para que nadie lea una semana que
+// recién empieza como una caída de ventas.
 function ultimasNSemanas(ventas: VentaDia[], n: number): string[] {
-  const semanaActual = semanaKey(new Date().toISOString().slice(0, 10));
-  const claves = Array.from(new Set(ventas.map((v) => semanaKey(v.fecha)).filter(Boolean)))
-    .filter((k) => k !== semanaActual) // la semana en curso está incompleta y distorsiona la tendencia
-    .sort();
+  const claves = Array.from(new Set(ventas.map((v) => semanaKey(v.fecha)).filter(Boolean))).sort();
   return claves.slice(-n);
+}
+
+export function esSemanaActual(clave: string): boolean {
+  return clave === semanaKey(new Date().toISOString().slice(0, 10));
 }
 
 // Lee un campo tolerando variantes de mayúsculas/acentos en el header de la planilla
@@ -177,7 +183,10 @@ export function evolucionVentaPorCliente(ventas: VentaDia[], clientes: ClienteVe
 
 export function evolucionVentaPorClienteSemanal(ventas: VentaDia[], clientes: ClienteVenta[], n = 10, topN = 6): EvolucionClientes {
   const semanasKeys = ultimasNSemanas(ventas, n);
-  return construirEvolucionCliente(ventas, clientes, semanasKeys, semanaLabel, semanaKey, topN);
+  // La semana en curso se etiqueta distinto: comparar media semana contra semanas enteras
+  // sin decirlo hace parecer que las ventas se cayeron.
+  const etiqueta = (k: string) => esSemanaActual(k) ? `${semanaLabel(k)} (en curso)` : semanaLabel(k);
+  return construirEvolucionCliente(ventas, clientes, semanasKeys, etiqueta, semanaKey, topN);
 }
 
 function construirEvolucionCliente(
