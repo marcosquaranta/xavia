@@ -28,10 +28,10 @@ export const OBJETIVOS_MARCE = {
   },
   eficiencia: {
     nombre: 'Eficiencia siembra → cosecha',
-    objetivo: null,
+    objetivo: 85,
     unidad: '%',
     mejor: 'alto',
-    nota: 'En seguimiento para fijar el número con base propia.',
+    nota: 'Acordado con Marcos en septiembre de 2026. Mide descarte de las 3 etapas, sin ventas ni cámara.',
   },
   productividad: {
     nombre: 'Productividad de empleados',

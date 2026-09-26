@@ -5,8 +5,13 @@
 // entre veinte opciones cuando en la práctica son tres es una invitación a equivocarse, y
 // equivocarse acá manda la plata a la cuenta contable incorrecta.
 //
-// Las tres reales, en orden de uso. El orden importa: la primera es la que queda elegida
+// Las cuatro reales, en orden de uso. El orden importa: la primera es la que queda elegida
 // cuando el aviso no dice nada, que es el caso más común.
+// Cada nombre es un PEDAZO del nombre real, no el nombre completo: en Xubio la misma cuenta
+// está escrita de formas que no se pueden anticipar —"Banco Macro" y no "Macro", "CAJAMQ"
+// sin espacio y no "Caja MQ"— y pedir el nombre exacto hacía que la cuenta simplemente no
+// apareciera arriba, sin ningún error que lo explicara. Por eso se compara por `clave`, que
+// ignora espacios y puntuación.
 export const CUENTAS_COBRO = ['brubank', 'macro', 'caja mq', 'caja marce'] as const;
 
 export interface CuentaOpcion { id: number; nombre: string }
@@ -14,9 +19,14 @@ export interface CuentaOpcion { id: number; nombre: string }
 const norm = (s: any) => String(s ?? '')
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 
+// Solo letras y números: es lo que hace que "CAJAMQ", "Caja MQ" y "caja-mq" sean la misma
+// cosa, y que "macro" encuentre a "Banco Macro". Sin esto la comparación dependía de cómo
+// alguien tipeó el nombre en Xubio hace dos años.
+const clave = (s: any) => norm(s).replace(/[^a-z0-9]/g, '');
+
 function rango(nombre: string): number {
-  const n = norm(nombre);
-  const i = CUENTAS_COBRO.findIndex(c => n.includes(c));
+  const n = clave(nombre);
+  const i = CUENTAS_COBRO.findIndex(c => n.includes(clave(c)));
   return i === -1 ? CUENTAS_COBRO.length : i;
 }
 
@@ -45,12 +55,12 @@ export function cantidadPreferidas(cuentas: CuentaOpcion[]): number {
 export function cuentaSugerida<T extends CuentaOpcion>(cuentas: T[], texto: string): T | undefined {
   const elegibles = cuentasElegibles(cuentas);
   if (!elegibles.length) return undefined;
-  const t = norm(texto);
+  const t = clave(texto);
   if (t) {
-    const nombradas = CUENTAS_COBRO.filter(c => t.includes(c));
+    const nombradas = CUENTAS_COBRO.filter(c => t.includes(clave(c)));
     // Una sola mencionada: es esa. Dos o más: no hay forma de saber cuál, va la primera.
     if (nombradas.length === 1) {
-      const hit = elegibles.find(c => norm(c.nombre).includes(nombradas[0]));
+      const hit = elegibles.find(c => clave(c.nombre).includes(clave(nombradas[0])));
       if (hit) return hit;
     }
   }
