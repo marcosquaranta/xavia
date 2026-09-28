@@ -5,14 +5,22 @@
 // entre veinte opciones cuando en la práctica son tres es una invitación a equivocarse, y
 // equivocarse acá manda la plata a la cuenta contable incorrecta.
 //
-// Las cuatro reales, en orden de uso. El orden importa: la primera es la que queda elegida
+// Las seis reales, en orden de uso. El orden importa: la primera es la que queda elegida
 // cuando el aviso no dice nada, que es el caso más común.
+//
 // Cada nombre es un PEDAZO del nombre real, no el nombre completo: en Xubio la misma cuenta
 // está escrita de formas que no se pueden anticipar —"Banco Macro" y no "Macro", "CAJAMQ"
 // sin espacio y no "Caja MQ"— y pedir el nombre exacto hacía que la cuenta simplemente no
 // apareciera arriba, sin ningún error que lo explicara. Por eso se compara por `clave`, que
 // ignora espacios y puntuación.
-export const CUENTAS_COBRO = ['brubank', 'macro', 'caja mq', 'caja marce'] as const;
+export const CUENTAS_COBRO = [
+  'brubank',      // recibe casi todo: es la que queda elegida cuando el aviso no dice nada
+  'macro',
+  'caja mq',
+  'caja marce',
+  'caja fl',
+  'caja jp',
+] as const;
 
 export interface CuentaOpcion { id: number; nombre: string }
 
@@ -30,24 +38,46 @@ function rango(nombre: string): number {
   return i === -1 ? CUENTAS_COBRO.length : i;
 }
 
-// Las cuentas por las que entra plata, primero; el resto detrás.
+// Solo las cuentas por las que entra plata.
 //
-// Xubio devuelve el PLAN DE CUENTAS completo —78 cuentas, casi todas de gastos: Almuerzos,
-// Combustible, Ropa de Trabajo— y elegir ahí adentro la cuenta donde entró una
-// transferencia es una invitación a imputar mal. Por eso las de cobro van arriba.
+// Xubio devuelve el plan de cuentas entero —78 cuentas, casi todas de gastos: Almuerzos,
+// Combustible, Ropa de Trabajo— y buscar ahí adentro la cuenta donde entró una
+// transferencia es una invitación a imputar mal. Se muestran solo las de CUENTAS_COBRO.
 //
-// Pero no se esconde el resto: si una cuenta de cobro está en Xubio con otro nombre del
-// que espera CUENTAS_COBRO, dejarla afuera haría imposible registrar ese cobro. Se marca
-// la separación y listo — la lista ordenada resuelve el 95% de los casos sin bloquear el
-// 5% restante.
+// La única excepción es no dejar a nadie sin poder trabajar: si NINGUNA de las de la lista
+// aparece en Xubio, se devuelven todas. Un desplegable largo es molesto; uno vacío hace
+// imposible registrar el cobro.
 export function cuentasElegibles<T extends CuentaOpcion>(cuentas: T[]): T[] {
-  return [...cuentas].sort((a, b) => rango(a.nombre) - rango(b.nombre) || a.nombre.localeCompare(b.nombre));
+  const preferidas = cuentas
+    .filter(c => rango(c.nombre) < CUENTAS_COBRO.length)
+    .sort((a, b) => rango(a.nombre) - rango(b.nombre) || a.nombre.localeCompare(b.nombre));
+  if (preferidas.length) return preferidas;
+  return [...cuentas].sort((a, b) => a.nombre.localeCompare(b.nombre));
 }
 
-// Cuántas de las primeras son "de cobro": la pantalla las separa visualmente del resto.
 export function cantidadPreferidas(cuentas: CuentaOpcion[]): number {
   return cuentas.filter(c => rango(c.nombre) < CUENTAS_COBRO.length).length;
 }
+
+// Cuáles de las cuentas esperadas NO están en Xubio. Se informa en pantalla en vez de
+// dejarlo pasar: que falte una es un dato accionable —hay que crearla en Xubio o está
+// escrita de otra forma— y sin decirlo se vive como "la app no me deja elegirla".
+export function cuentasFaltantes(cuentas: CuentaOpcion[]): string[] {
+  return CUENTAS_COBRO
+    .filter(k => !cuentas.some(c => clave(c.nombre).includes(clave(k))))
+    .map(k => ETIQUETAS[k] || k);
+}
+
+// Cómo se nombra cada una en pantalla. Las claves son pedazos de nombre pensados para
+// matchear, no para leer: avisar que falta "macro" no le dice nada a nadie.
+const ETIQUETAS: Record<string, string> = {
+  brubank: 'Brubank',
+  macro: 'Banco Macro',
+  'caja mq': 'Caja MQ',
+  'caja marce': 'Caja Marce',
+  'caja fl': 'Caja FL',
+  'caja jp': 'Caja JP',
+};
 
 // Qué cuenta sugiere el texto de un aviso. "Transferencia a Banco Macro" tiene que quedar
 // en Macro, no en Brubank. Si el texto no dice nada —o nombra dos— gana la primera de la

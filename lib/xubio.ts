@@ -152,7 +152,12 @@ export function cuentasDeCobranzas(cobranzas: any[]): CuentaXubio[] {
 // parámetro es un ENTERO y no un booleano: con `activo=true` Xubio contesta 404, que es
 // exactamente el mismo error que tenía el listado de circuitos contables y que hizo creer
 // durante semanas que el endpoint no estaba habilitado en este plan.
-const PATHS_CUENTAS = ['cuenta?activo=1', 'cuenta', 'cuenta?activo=0', 'banco'];
+//
+// `banco` NO va en esta lista. Devuelve el catálogo de bancos de la Argentina —los 68 que
+// existen, "Brubank SAU" incluido— y no las cuentas de Xavia. Sumarlo llenó el desplegable
+// de bancos con los que la empresa no tiene nada, y peor: esos ids son de un catálogo, no
+// de cuentas contables, así que elegir uno habría mandado el cobro a cualquier lado.
+const PATHS_CUENTAS = ['cuenta?activo=1', 'cuenta', 'cuenta?activo=0'];
 
 // Se consultan TODAS las fuentes y se unen, no la primera que conteste.
 //
@@ -194,7 +199,9 @@ export async function getCuentas(cobranzasFallback: any[] = []): Promise<{ cuent
 // Brubank" no se puede distinguir de "el endpoint no responde": son problemas distintos.
 export async function diagnosticoCuentas(): Promise<string> {
   const partes: string[] = [];
-  for (const path of PATHS_CUENTAS) {
+  // Acá sí se mira `banco`, aunque no se use para elegir: saber qué contesta es justamente
+  // lo que permitió descubrir que era el catálogo de bancos del país y no las cuentas.
+  for (const path of [...PATHS_CUENTAS, 'banco']) {
     try {
       const raw = await xubioGet<any>(path);
       if (Array.isArray(raw)) {

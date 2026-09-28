@@ -9,7 +9,9 @@ import { nombreClienteVisible } from '@/lib/clientes';
 import { HOJA_COBROS, type CobroRegistrado } from '@/lib/cobros';
 import { getCuentas, getCobranzas, getComprobantes, type CuentaXubio } from '@/lib/xubio';
 import { facturasPorCliente, type FacturaCliente } from '@/lib/facturasCliente';
+import { cuentasFaltantes } from '@/lib/cuentasCobro';
 import { sugerirCombinaciones } from '@/lib/conciliacionCobro';
+import { claveComprobante } from '@/lib/comprobantes';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 import type { ClienteVenta } from '@/lib/types';
 import Header from '@/components/Header';
@@ -70,6 +72,10 @@ export default async function CobranzasPage() {
       id_control: String(i.id_control || '').trim(),
       cliente: String(i.cliente || ''),
       nota: String(i.nota || ''),
+      // Las facturas que el propio aviso dice estar pagando. Las saca la IA del mail o del
+      // PDF adjunto y quedan guardadas, pero no se estaban usando para nada: la pantalla
+      // las recalculaba por importe, que es adivinar algo que el aviso ya dijo.
+      comprobantes: String(i.comprobantes || ''),
       origen: String(i.origen || 'banco'),
     }))
     .sort((a, b) => b.fecha.localeCompare(a.fecha) || b.importe - a.importe);
@@ -93,11 +99,28 @@ export default async function CobranzasPage() {
 
   // La combinación que mejor explica cada importe, calculada acá para que al abrir la fila
   // ya esté elegida. Es la misma función que usa la pantalla.
+  // Qué queda elegido al abrir la fila. Lo que DICE el aviso gana sobre lo que se deduce
+  // del importe: si la orden de pago nombra las facturas, eso no es una hipótesis.
   const sugeridasPorItem: Record<string, string[]> = {};
   for (const item of itemsBandeja) {
     if (!item.id_control) continue;
     const facturas = facturasCliente[item.id_control];
     if (!facturas?.length) continue;
+
+    // Se cruzan contra las facturas reales del cliente para quedarse con el número tal
+    // como está en Xubio, y para no elegir una que no existe si la IA leyó mal un dígito.
+    const declaradas = item.comprobantes
+      .split(/[,;]+/).map((x) => claveComprobante(x)).filter(Boolean);
+    if (declaradas.length) {
+      const encontradas = facturas
+        .filter((f) => declaradas.includes(claveComprobante(f.numero)))
+        .map((f) => f.numero);
+      if (encontradas.length === declaradas.length) {
+        sugeridasPorItem[item.id_item] = encontradas;
+        continue;
+      }
+    }
+
     const mejor = sugerirCombinaciones(facturas, item.importe)[0];
     if (mejor) sugeridasPorItem[item.id_item] = mejor.numeros;
   }
@@ -178,6 +201,7 @@ export default async function CobranzasPage() {
               items={itemsBandeja}
               clientes={filas.map((f) => ({ id_control: f.id_control, nombre: f.nombre }))}
               cuentas={cuentasXubio.map((c) => ({ id: c.id, nombre: c.nombre }))}
+              cuentasFaltantes={cuentasFaltantes(cuentasXubio)}
               aliases={aliasAprendidos}
               facturasPorCliente={facturasCliente}
               sugeridas={sugeridasPorItem}

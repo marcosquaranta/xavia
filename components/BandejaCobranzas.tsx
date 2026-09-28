@@ -13,9 +13,10 @@ interface ItemUI {
   cliente: string;
   nota: string;
   origen: string;  // banco | mail | manual | setup
+  comprobantes?: string; // las facturas que el propio aviso dice pagar (las lee la IA)
 }
 interface ClienteOpt { id_control: string; nombre: string }
-interface FacturaCliente { numero: string; fecha: string; importe: number; yaCobrada: boolean }
+interface FacturaCliente { numero: string; fecha: string; importe: number; yaCobrada: boolean; saldadaManual?: boolean }
 
 const inputStyle: React.CSSProperties = {
   fontSize: '12.5px', padding: '5px 7px', border: '1px solid #d1d5db', borderRadius: '5px', width: '100%',
@@ -53,8 +54,17 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
   // saltea cuando uno va rápido. Hasta que no haya una decisión —facturas elegidas, o
   // "a cuenta" dicho explícitamente— el botón de confirmar no se habilita.
   const [aCuenta, setACuenta] = useState(false);
+  // La lista completa para tildar de a una. Las sugerencias resuelven el caso normal, pero
+  // cuando ninguna cierra —un pago parcial, una factura de hace seis meses, dos cobros que
+  // cancelan la misma— la única salida era marcar "a cuenta" y perder el detalle.
+  const [verTodas, setVerTodas] = useState(false);
   const [trabajando, setTrabajando] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  function alternarFactura(numero: string) {
+    setACuenta(false);
+    setElegidas((prev) => prev.includes(numero) ? prev.filter((n) => n !== numero) : [...prev, numero]);
+  }
 
   async function traerFacturas(id: string) {
     setFacturas([]); setElegidas([]); setACuenta(false);
@@ -201,16 +211,30 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
             </p>
           )}
 
+          {!!item.comprobantes && (
+            <p style={{ margin: '0 0 6px', fontSize: '11px', color: '#155e75', background: '#ecfeff', border: '1px solid #cffafe', borderRadius: '5px', padding: '4px 7px' }}>
+              El aviso dice que paga: <strong style={{ fontFamily: 'monospace' }}>{item.comprobantes}</strong>
+            </p>
+          )}
+
           {sugerencias.length > 0 && (
             <div style={{ background: '#f5f8ff', border: '1px solid #dbe4fb', borderRadius: '6px', padding: '7px 9px', marginBottom: '8px' }}>
               <p style={{ margin: '0 0 5px', fontSize: '11px', fontWeight: 700, color: '#1e3a8a' }}>
                 Este importe podría estar pagando:
               </p>
-              {sugerencias.map((sg, i) => (
+              {sugerencias.map((sg, i) => {
+                // Cuál está elegida. Antes las tres se veían iguales aunque una estuviera
+                // aplicada, así que no había forma de saber cuál se iba a registrar salvo
+                // leer la línea de "Cancela" y compararla a ojo.
+                const activa = sg.numeros.length === elegidas.length
+                  && sg.numeros.every((n) => elegidas.includes(n));
+                return (
                 <button key={i} type="button" onClick={() => { setElegidas(sg.numeros); setACuenta(false); }} disabled={trabajando}
                   style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', width: '100%', textAlign: 'left',
                     cursor: 'pointer', fontSize: '11.5px', padding: '4px 7px', marginBottom: '4px',
-                    background: 'white', border: '1px solid #dbe4fb', borderRadius: '5px' }}>
+                    background: activa ? '#eef6ff' : 'white',
+                    border: activa ? '2px solid #2563eb' : '1px solid #dbe4fb', borderRadius: '5px' }}>
+                  <span style={{ fontSize: '11px', color: activa ? '#1d4ed8' : '#cbd5e1' }}>{activa ? '\u25c9' : '\u25cb'}</span>
                   <span style={{ fontWeight: 700 }}>{sg.numeros.length === 1 ? '1 factura' : `${sg.numeros.length} facturas`}</span>
                   {sg.masViejas && (
                     <span title="Las facturas más viejas sin cobrar, sumadas hasta acercarse al importe"
@@ -225,10 +249,41 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
                     {sg.exacta ? 'exacto' : `${sg.diferencia > 0 ? '+' : '−'}${fmt$(Math.abs(sg.diferencia))}`}
                   </span>
                 </button>
-              ))}
+                );
+              })}
               <p style={{ margin: '3px 0 0', fontSize: '10px', color: '#6b7280' }}>
                 Tolerancia {fmt$(toleranciaDe(item.importe))}, por retenciones o redondeos.
               </p>
+            </div>
+          )}
+
+          {/* Elegir a mano. Es la salida para todo lo que las sugerencias no pueden
+              resolver: pagos parciales, facturas viejas, o cuando el aviso nombra una que
+              por importe no cierra. */}
+          {!!facturas.length && (
+            <div style={{ marginBottom: '8px' }}>
+              <button type="button" onClick={() => setVerTodas((v) => !v)}
+                style={{ background: 'none', border: 'none', padding: 0, fontSize: '11px', color: '#2563eb', cursor: 'pointer', fontWeight: 700 }}>
+                {verTodas ? '▾ Ocultar la lista de facturas' : '▸ Elegir las facturas a mano'}
+              </button>
+              {verTodas && (
+                <div style={{ marginTop: '5px', maxHeight: '190px', overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '4px 6px' }}>
+                  {facturas.map((f) => {
+                    const cerrada = f.yaCobrada || f.saldadaManual;
+                    return (
+                      <label key={f.numero}
+                        style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '11.5px', padding: '2px 0', cursor: 'pointer', opacity: cerrada ? 0.5 : 1 }}>
+                        <input type="checkbox" checked={elegidas.includes(f.numero)}
+                          onChange={() => alternarFactura(f.numero)} disabled={trabajando} />
+                        <span style={{ fontFamily: 'monospace', fontSize: '10.5px' }}>{f.numero}</span>
+                        <span style={{ color: '#9ca3af' }}>{fmtDia(f.fecha)}</span>
+                        <span style={{ marginLeft: 'auto', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmt$(f.importe)}</span>
+                        {cerrada && <span style={{ fontSize: '9.5px', color: '#166534' }}>ya cobrada</span>}
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -238,11 +293,23 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
             </p>
           )}
 
-          {elegidas.length > 0 && (
-            <p style={{ margin: '0 0 8px', fontSize: '11.5px', color: '#166534', fontWeight: 600 }}>
-              Cancela: {elegidas.join(', ')}
-            </p>
-          )}
+          {elegidas.length > 0 && (() => {
+            // Cuánto suma lo elegido contra lo que entró: con selección a mano ya no hay
+            // ninguna garantía de que cierre, así que la diferencia se muestra siempre.
+            const suma = facturas.filter((f) => elegidas.includes(f.numero)).reduce((a, f) => a + f.importe, 0);
+            const dif = Math.round(suma - item.importe);
+            const ok = Math.abs(dif) <= toleranciaDe(item.importe);
+            return (
+              <p style={{ margin: '0 0 8px', fontSize: '11.5px', color: ok ? '#166534' : '#b45309', fontWeight: 600 }}>
+                Cancela: {elegidas.join(', ')}
+                {suma > 0 && (
+                  <span style={{ fontWeight: 400 }}>
+                    {' '}— suma {fmt$(suma)}{dif === 0 ? ' (exacto)' : ` (${dif > 0 ? '+' : '−'}${fmt$(Math.abs(dif))})`}
+                  </span>
+                )}
+              </p>
+            );
+          })()}
 
           {/* La decisión tiene que ser explícita. Un cobro sin facturas asignadas puede ser
               correcto —un pago a cuenta lo es— pero tiene que decirse, no pasar por omisión. */}
@@ -283,12 +350,15 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
 interface AliasUI { alias: string; cliente: string; fecha: string }
 
 export default function BandejaCobranzas({
-  items, clientes, cuentas, aliases = [], facturasPorCliente = {}, sugeridas = {},
+  items, clientes, cuentas, aliases = [], facturasPorCliente = {}, sugeridas = {}, cuentasFaltantes = [],
 }: {
   items: ItemUI[]; clientes: ClienteOpt[]; cuentas: { id: number; nombre: string }[];
   aliases?: AliasUI[];
   facturasPorCliente?: Record<string, FacturaCliente[]>;
   sugeridas?: Record<string, string[]>;
+  // Las cuentas esperadas que Xubio no devolvió. Se avisa una vez arriba y no en cada fila:
+  // que falte una es un problema de configuración de Xubio, no de este cobro.
+  cuentasFaltantes?: string[];
 }) {
   const router = useRouter();
   const [importando, setImportando] = useState(false);
@@ -498,6 +568,14 @@ export default function BandejaCobranzas({
         </div>
       )}
 
+      {/* Si una cuenta esperada no está en Xubio, se dice acá y no se deja que se viva como
+          "la app no me deja elegirla": lo que hay que hacer es crearla allá. */}
+      {cuentasFaltantes.length > 0 && (
+        <p style={{ margin: '0 0 10px', fontSize: '11.5px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '7px 10px' }}>
+          No están en el plan de cuentas de Xubio: <strong>{cuentasFaltantes.join(', ')}</strong>.
+          Hasta que se creen allá, no se puede imputar un cobro a esas cuentas.
+        </p>
+      )}
       {msg && <p style={{ margin: '0 0 10px', fontSize: '12px', color: '#166534', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '7px 10px' }}>{msg}</p>}
       {err && <p style={{ margin: '0 0 10px', fontSize: '12px', color: '#991b1b', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '7px 10px' }}>{err}</p>}
 
