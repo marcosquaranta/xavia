@@ -10,6 +10,7 @@
 
 import { nombreClienteComprobante } from './recordatoriosCobro';
 import type { ClienteVenta } from './types';
+import { claveComprobante } from './comprobantes';
 
 export interface FacturaCliente {
   numero: string;
@@ -32,12 +33,15 @@ export function facturasPorCliente(
 ): Record<string, FacturaCliente[]> {
   // Las facturas que la app ya imputó. No es lo mismo que "pagas" —Xubio no expone eso—
   // pero alcanza para no ofrecer dos veces la misma.
+  // Por clave y no por texto literal: el mismo comprobante escrito distinto —con o sin
+  // ceros a la izquierda, con espacio en vez de guion— no se reconocía, y entonces una
+  // factura ya cobrada se seguía ofreciendo como si estuviera abierta.
   const yaCobradas = new Set<string>();
   for (const c of cobros || []) {
     if (String(c?.estado) === 'anulado') continue;
     for (const n of String(c?.comprobantes || '').split(',')) {
-      const t = n.trim();
-      if (t) yaCobradas.add(t);
+      const k = claveComprobante(n);
+      if (k) yaCobradas.add(k);
     }
   }
 
@@ -63,8 +67,8 @@ export function facturasPorCliente(
       numero,
       fecha: soloFecha(c?.fecha),
       importe: Number(c?.importetotal) || 0,
-      yaCobrada: yaCobradas.has(numero),
-      saldadaManual: !!saldadas?.has(numero),
+      yaCobrada: yaCobradas.has(claveComprobante(numero)),
+      saldadaManual: !!saldadas?.has(claveComprobante(numero)),
     });
   }
 

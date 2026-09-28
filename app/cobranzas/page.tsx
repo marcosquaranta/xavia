@@ -147,7 +147,7 @@ export default async function CobranzasPage() {
 
   return (
     <>
-      <Header user={user} current="ventas" />
+      <Header user={user} current="cobranzas" />
       <div className="container">
         <h1 className="page-title">Cobranzas</h1>
         <p className="page-subtitle">

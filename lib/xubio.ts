@@ -96,10 +96,29 @@ export function importeCobranza(cob: any): number {
 
 export interface CuentaXubio { id: number; nombre: string; codigo: string }
 
+// El id de una cuenta viene con un nombre distinto segun el endpoint: `cuenta` lo manda
+// como cuentaId/ID/id y `banco` puede mandarlo como bancoId. Con una lista fija de nombres,
+// un endpoint que use otro devolvía cuentas con id 0 que después se filtraban por inválidas:
+// la cuenta existía en Xubio y simplemente no aparecía, sin ningún error que lo explicara.
+// Por eso, si ninguno de los nombres conocidos sirve, se busca cualquier campo numérico
+// cuyo nombre termine en "id".
+function idDeCuenta(c: any): number {
+  const directo = Number(c?.cuentaId ?? c?.ID ?? c?.id ?? 0);
+  if (directo > 0) return directo;
+  for (const [k, v] of Object.entries(c || {})) {
+    if (!/id$/i.test(k)) continue;
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}
+
 function mapCuenta(c: any): CuentaXubio {
   return {
-    id: Number(c?.cuentaId ?? c?.ID ?? c?.id ?? 0),
-    nombre: String(c?.nombre || ''),
+    id: idDeCuenta(c),
+    // Las cuentas bancarias a veces traen el nombre en otro campo: sin esto, una cuenta con
+    // id válido se descartaba igual por quedarse sin nombre.
+    nombre: String(c?.nombre || c?.descripcion || c?.nombreBanco || c?.banco || '').trim(),
     codigo: String(c?.codigo || ''),
   };
 }
@@ -179,7 +198,21 @@ export async function diagnosticoCuentas(): Promise<string> {
     try {
       const raw = await xubioGet<any>(path);
       if (Array.isArray(raw)) {
-        partes.push(`${path}: ${raw.length} filas${raw.length ? ` · ej: ${JSON.stringify(raw[0]).slice(0, 120)}` : ''}`);
+        // Cuántas sobreviven al mapeo y cuáles se parecen a una cuenta de cobro. Sin esto,
+        // "no me aparece Banco Macro" no se puede distinguir entre tres cosas distintas:
+        // que Xubio no la tenga, que la devuelva con otro nombre de campo, o que esté
+        // escrita de una forma que la app no reconoce.
+        const mapeadas = raw.map(mapCuenta);
+        const usables = mapeadas.filter((c) => c.id > 0 && c.nombre);
+        const pega = usables
+          .filter((c) => /macro|caja|brubank|banco|efectivo/i.test(c.nombre))
+          .map((c) => c.nombre).slice(0, 25);
+        partes.push([
+          `${path}: ${raw.length} filas`,
+          `${usables.length} usables${raw.length - usables.length ? ` (${raw.length - usables.length} sin id o sin nombre)` : ''}`,
+          pega.length ? `cuentas de plata: ${pega.join(', ')}` : 'ninguna cuenta de plata reconocible',
+          raw.length ? `ej: ${JSON.stringify(raw[0]).slice(0, 160)}` : '',
+        ].filter(Boolean).join(' · '));
       } else {
         partes.push(`${path}: respondió ${typeof raw} (no una lista)`);
       }

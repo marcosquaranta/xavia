@@ -31,9 +31,15 @@ export interface Combinacion {
 // coincidencia al peso dejaría afuera justo los casos reales.
 export const TOLERANCIA_PCT = 2;
 export const TOLERANCIA_MIN = 1000; // en pesos, para que en importes chicos el % no sea nada
+// Techo duro. Sin él, el 2% de un cobro de $3.000.000 son $60.000 de margen, y con ese
+// margen entran combinaciones que claramente no son el pago: no hay retención ni redondeo
+// que explique $60.000 de diferencia. Una sugerencia que erra por tanto no ayuda a decidir,
+// estorba, porque hay que descartarla a mano una por una.
+export const TOLERANCIA_MAX = 10_000;
 
 export function toleranciaDe(objetivo: number): number {
-  return Math.max(TOLERANCIA_MIN, Math.round((Math.abs(objetivo) * TOLERANCIA_PCT) / 100));
+  const porcentual = Math.round((Math.abs(objetivo) * TOLERANCIA_PCT) / 100);
+  return Math.min(TOLERANCIA_MAX, Math.max(TOLERANCIA_MIN, porcentual));
 }
 
 // Límites para que esto no se vuelva eterno ni cuelgue el navegador: el problema es una

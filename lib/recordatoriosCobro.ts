@@ -3,6 +3,7 @@ import { getComprobantes, getCobranzas, importeCobranza } from './xubio';
 import { fechaArgentinaHoy } from './ocupacion';
 import type { ClienteVenta } from './types';
 import { leerSaldadas, numerosSaldados } from './facturasSaldadas';
+import { claveComprobante } from './comprobantes';
 import { VENTANA_MINIMA_DIAS } from './cobranzasVentana';
 
 // ── Recordatorios de cobro ────────────────────────────────────────────────────────────
@@ -164,7 +165,7 @@ export function calcularSaldos(comprobantes: any[], cobranzas: any[], saldadas?:
     // Las que se dieron por saldadas a mano no suman deuda: si no, la guarda de saldo
     // seguiría viendo al cliente en rojo por una factura que ya se decidió que está, y le
     // seguiría escribiendo igual.
-    if (saldadas?.has(String(c?.numeroDocumento || '').trim())) continue;
+    if (saldadas?.has(claveComprobante(c?.numeroDocumento))) continue;
     // Las notas de crédito (tipo 3) restan: si no, un cliente al que se le anuló una
     // factura figuraría debiendo algo que ya no debe.
     const signo = Number(c?.tipo) === 3 ? -1 : 1;
@@ -250,7 +251,7 @@ export function calcularEnvios(
         if (!f.numero) return false;
         // Dada por saldada a mano: no se reclama, y tampoco cuenta como "ya reclamada",
         // que es otra cosa.
-        if (opciones.saldadas?.has(f.numero)) return false;
+        if (opciones.saldadas?.has(claveComprobante(f.numero))) return false;
         if (yaRecordados.has(f.numero)) { yaReclamadas++; return false; }
         return true;
       })

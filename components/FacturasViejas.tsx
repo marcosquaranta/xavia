@@ -45,20 +45,33 @@ export default function FacturasViejas({
   const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [verMarcadas, setVerMarcadas] = useState(false);
+  // Por defecto solo lo abierto, que es para lo que existe la pantalla. Pero se puede ver
+  // todo: si una factura que se cobró desde la app igual aparece como abierta, lo único que
+  // lo delata es verlas juntas con su estado al lado.
+  const [verTodas, setVerTodas] = useState(false);
 
   // Solo lo que sigue abierto: lo ya imputado por la app no se ofrece, y lo ya marcado a
   // mano tampoco (se ve abajo, con su motivo). De la más vieja a la más nueva, porque son
   // justamente las viejas las que hay que limpiar.
-  const abiertas = useMemo(() => {
+  const todas = useMemo(() => {
     return (facturasPorCliente[idControl] || [])
-      .filter((f) => !f.yaCobrada && !f.saldadaManual)
       .slice()
       .sort((a, b) => a.fecha.localeCompare(b.fecha));
   }, [facturasPorCliente, idControl]);
 
+  const abiertas = useMemo(() => todas.filter((f) => !f.yaCobrada && !f.saldadaManual), [todas]);
+  const visibles = verTodas ? todas : abiertas;
+  // Solo se puede tildar lo que sigue abierto: marcar como saldada una que ya se cobró no
+  // cambia nada y ensucia el registro con una decisión que nadie tomó.
+  const todasTildadas = abiertas.length > 0 && abiertas.every((f) => elegidas.has(f.numero));
+
   const totalElegido = abiertas.filter((f) => elegidas.has(f.numero)).reduce((a, f) => a + f.importe, 0);
   const nombreCliente = clientes.find((c) => String(c.id_control) === idControl)?.nombre || '';
   const listo = elegidas.size > 0 && motivo.trim().length > 0 && !guardando;
+
+  function alternarTodas() {
+    setElegidas(todasTildadas ? new Set() : new Set(abiertas.map((f) => f.numero)));
+  }
 
   function alternar(numero: string) {
     setElegidas((prev) => {
@@ -131,34 +144,78 @@ export default function FacturasViejas({
         {clientes.map((c) => <option key={c.id_control} value={c.id_control}>{c.nombre}</option>)}
       </select>
 
-      {idControl && (abiertas.length === 0 ? (
+      {idControl && (todas.length === 0 ? (
+        <p style={{ margin: '12px 0 0', fontSize: '13px', color: '#6b7280' }}>
+          Este cliente no tiene facturas en los últimos 120 días.
+        </p>
+      ) : abiertas.length === 0 && !verTodas ? (
         <p style={{ margin: '12px 0 0', fontSize: '13px', color: '#059669' }}>
-          No quedan facturas abiertas de este cliente en los últimos 120 días.
+          Las {todas.length} facturas de este cliente ya están cobradas o saldadas.{' '}
+          <button
+            type="button"
+            onClick={() => setVerTodas(true)}
+            style={{ background: 'none', border: 'none', padding: 0, fontSize: '13px', color: '#2563eb', cursor: 'pointer', fontWeight: 600 }}
+          >
+            Verlas igual
+          </button>
         </p>
       ) : (
         <>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginTop: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px', marginTop: '12px' }}>
+            <p style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}>
+              {abiertas.length} {abiertas.length === 1 ? 'abierta' : 'abiertas'}
+              {todas.length > abiertas.length ? ` · ${todas.length - abiertas.length} ya cerradas` : ''}
+            </p>
+            {todas.length > abiertas.length && (
+              <button
+                type="button"
+                onClick={() => setVerTodas((v) => !v)}
+                style={{ background: 'none', border: 'none', padding: 0, fontSize: '12px', color: '#2563eb', cursor: 'pointer', fontWeight: 600 }}
+              >
+                {verTodas ? 'Ver solo las abiertas' : 'Ver también las cerradas'}
+              </button>
+            )}
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginTop: '6px' }}>
             <thead>
               <tr style={{ color: '#6b7280', fontSize: '11.5px', textAlign: 'left' }}>
-                <th style={{ padding: '4px 6px', width: '28px' }}></th>
+                <th style={{ padding: '4px 6px', width: '28px' }}>
+                  <input
+                    type="checkbox"
+                    checked={todasTildadas}
+                    onChange={alternarTodas}
+                    disabled={!abiertas.length}
+                    title="Seleccionar todas las abiertas"
+                  />
+                </th>
                 <th style={{ padding: '4px 6px' }}>Factura</th>
                 <th style={{ padding: '4px 6px' }}>Fecha</th>
                 <th style={{ padding: '4px 6px', textAlign: 'right' }}>Importe</th>
+                <th style={{ padding: '4px 6px' }}>Estado</th>
               </tr>
             </thead>
             <tbody>
-              {abiertas.map((f) => {
+              {visibles.map((f) => {
                 const dias = diasDesde(f.fecha);
+                const cerrada = f.yaCobrada || f.saldadaManual;
                 return (
-                  <tr key={f.numero} style={{ borderTop: '1px solid #f3f4f6' }}>
+                  <tr key={f.numero} style={{ borderTop: '1px solid #f3f4f6', opacity: cerrada ? 0.55 : 1 }}>
                     <td style={{ padding: '4px 6px' }}>
-                      <input type="checkbox" checked={elegidas.has(f.numero)} onChange={() => alternar(f.numero)} />
+                      <input
+                        type="checkbox"
+                        checked={elegidas.has(f.numero)}
+                        onChange={() => alternar(f.numero)}
+                        disabled={cerrada}
+                      />
                     </td>
                     <td style={{ padding: '4px 6px', fontFamily: 'ui-monospace, monospace', fontSize: '12px' }}>{f.numero}</td>
-                    <td style={{ padding: '4px 6px', color: dias > 60 ? '#b45309' : '#6b7280' }}>
+                    <td style={{ padding: '4px 6px', color: !cerrada && dias > 60 ? '#b45309' : '#6b7280' }}>
                       {fmtFecha(f.fecha)} <span style={{ fontSize: '11px', color: '#9ca3af' }}>({dias} días)</span>
                     </td>
                     <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmt(f.importe)}</td>
+                    <td style={{ padding: '4px 6px', fontSize: '11.5px', color: cerrada ? '#059669' : '#b45309' }}>
+                      {f.yaCobrada ? 'cobrada en la app' : f.saldadaManual ? 'saldada a mano' : 'abierta'}
+                    </td>
                   </tr>
                 );
               })}

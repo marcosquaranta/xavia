@@ -17,6 +17,7 @@
 
 import { appendRowObj, asegurarHoja, readSheet, updateRow } from './sheets';
 import { fechaArgentinaHoy } from './ocupacion';
+import { claveComprobante } from './comprobantes';
 
 export const HOJA_SALDADAS = 'FacturasSaldadas';
 export const HEADERS_SALDADAS = [
@@ -36,13 +37,14 @@ export interface FacturaSaldada {
   estado: 'saldada' | 'revertida' | string;
 }
 
-// Los números que están marcados hoy. Las revertidas no cuentan: revertir tiene que
+// Los números que están marcados hoy, como CLAVE (ver comprobantes.ts): se comparan contra
+// lo que devuelve Xubio, y ahí el mismo comprobante puede venir escrito de otra forma. Las revertidas no cuentan: revertir tiene que
 // devolver la factura a la lista, no dejarla escondida con otro nombre.
 export function numerosSaldados(filas: FacturaSaldada[]): Set<string> {
   const out = new Set<string>();
   for (const f of filas || []) {
     if (String(f?.estado) === 'revertida') continue;
-    const n = String(f?.numero || '').trim();
+    const n = claveComprobante(f?.numero);
     if (n) out.add(n);
   }
   return out;

@@ -187,6 +187,29 @@ async function acusarRecibo(args: {
   }
 }
 
+// El único buzón que se procesa. Marcos reenvía a mano lo que el filtro de Gmail no
+// agarra, así que cualquier otra cosa que llegue al dominio —una respuesta de un cliente,
+// una notificación de Resend, un mail mandado por error— no es un aviso de pago y no tiene
+// que terminar en la bandeja de cobranzas.
+//
+// Se puede cambiar por variable de entorno sin tocar código, porque la dirección la asigna
+// Resend y puede cambiar el día que se mueva el dominio.
+const BUZON_COBROS = (process.env.COBRANZAS_BUZON || 'cobros@xeniikkro.resend.app').toLowerCase().trim();
+
+// A quién venía dirigido el correo. Resend manda estos campos a veces como texto y a veces
+// como lista, y el texto puede venir con nombre ("Cobros <cobros@...>"), así que se aplana
+// todo a minúsculas y se busca la dirección adentro.
+function destinatarios(data: any): string {
+  const campos = [data?.to, data?.cc, data?.bcc, data?.headers?.to];
+  const partes: string[] = [];
+  for (const c of campos) {
+    if (!c) continue;
+    if (Array.isArray(c)) partes.push(...c.map((x: any) => typeof x === 'string' ? x : String(x?.address || x?.email || '')));
+    else partes.push(String(c));
+  }
+  return partes.join(' ').toLowerCase();
+}
+
 export async function POST(req: NextRequest) {
   const esperado = process.env.COBRANZAS_EMAIL_TOKEN;
   if (!esperado) return NextResponse.json({ error: 'no_configurado' }, { status: 503 });
@@ -202,6 +225,16 @@ export async function POST(req: NextRequest) {
     if (tipo && tipo !== 'email.received') return NextResponse.json({ ok: true, ignorado: tipo });
 
     const data = evento?.data || {};
+
+    // Si se pudo leer a quién iba dirigido y no era el buzón de cobros, se descarta sin
+    // procesarlo. Cuando NO se puede leer el destinatario se procesa igual: quedarse con
+    // la duda y tirar el correo sería peor —un aviso de pago perdido en silencio— que
+    // dejar pasar alguno de más, que a lo sumo aparece como una fila para descartar.
+    const paraQuien = destinatarios(data);
+    if (paraQuien && !paraQuien.includes(BUZON_COBROS)) {
+      console.log('[cobranzas/email] ignorado, no iba a', BUZON_COBROS, '→', paraQuien.slice(0, 200));
+      return NextResponse.json({ ok: true, ignorado: 'otro_destinatario' });
+    }
     // El webhook trae SOLO metadatos —así lo diseñó Resend, para no mandar adjuntos
     // gigantes—, el cuerpo se pide aparte. Si por lo que sea ya viniera el texto, se usa.
     const yaTraeTexto = String(data?.text || '').trim() || htmlATexto(String(data?.html || ''));
