@@ -2,6 +2,7 @@ import { asegurarHoja, asegurarColumna, readSheet, appendRowObj } from './sheets
 import { getComprobantes, getCobranzas, importeCobranza } from './xubio';
 import { fechaArgentinaHoy } from './ocupacion';
 import type { ClienteVenta } from './types';
+import { leerSaldadas, numerosSaldados } from './facturasSaldadas';
 import { VENTANA_MINIMA_DIAS } from './cobranzasVentana';
 
 // ── Recordatorios de cobro ────────────────────────────────────────────────────────────
@@ -155,11 +156,15 @@ export function nombreClienteComprobante(c: any): string {
 }
 
 // Saldo por cliente (normalizado) = facturado − cobrado en la ventana. Positivo = debe.
-export function calcularSaldos(comprobantes: any[], cobranzas: any[]): Map<string, number> {
+export function calcularSaldos(comprobantes: any[], cobranzas: any[], saldadas?: Set<string>): Map<string, number> {
   const saldo = new Map<string, number>();
   for (const c of comprobantes) {
     const k = norm(nombreClienteComprobante(c));
     if (!k) continue;
+    // Las que se dieron por saldadas a mano no suman deuda: si no, la guarda de saldo
+    // seguiría viendo al cliente en rojo por una factura que ya se decidió que está, y le
+    // seguiría escribiendo igual.
+    if (saldadas?.has(String(c?.numeroDocumento || '').trim())) continue;
     // Las notas de crédito (tipo 3) restan: si no, un cliente al que se le anuló una
     // factura figuraría debiendo algo que ya no debe.
     const signo = Number(c?.tipo) === 3 ? -1 : 1;
@@ -203,7 +208,7 @@ export function calcularEnvios(
   // Envío manual "insistir": se ignora el registro de lo ya reclamado. Nunca lo usa el
   // cron — el control de duplicados existe para que el automático no repita solo, no para
   // frenar a alguien que decide insistir a propósito.
-  opciones: { ignorarYaReclamadas?: boolean } = {},
+  opciones: { ignorarYaReclamadas?: boolean; saldadas?: Set<string> } = {},
 ): { envios: EnvioRecordatorio[]; omitidos: EnvioOmitido[]; yaReclamadas: number } {
   const atraso = diasDeAtraso(yaEnviados, hoy);
   let yaReclamadas = 0;
@@ -243,6 +248,9 @@ export function calcularEnvios(
       }))
       .filter((f) => {
         if (!f.numero) return false;
+        // Dada por saldada a mano: no se reclama, y tampoco cuenta como "ya reclamada",
+        // que es otra cosa.
+        if (opciones.saldadas?.has(f.numero)) return false;
         if (yaRecordados.has(f.numero)) { yaReclamadas++; return false; }
         return true;
       })
@@ -480,15 +488,21 @@ export async function correrRecordatoriosCobro(
     // Una sola ventana de comprobantes sirve para las dos cosas: encontrar las facturas
     // del día objetivo y calcular el saldo de cada cliente.
     const desde = sumarDias(hoy, -DIAS_VENTANA_SALDO);
-    const [comprobantes, cobranzas] = await Promise.all([
+    const [comprobantes, cobranzas, saldadasFilas] = await Promise.all([
       getComprobantes(desde, hoy),
       getCobranzas(desde, hoy).catch(() => []),
+      leerSaldadas(),
     ]);
-    const saldos = calcularSaldos(comprobantes, cobranzas);
+    // Las que alguien dio por saldadas a mano no se reclaman. Es el caso que más quema la
+    // confianza en el recordatorio automático: reclamarle a un cliente una factura que ya
+    // pagó por fuera de la app.
+    const saldadas = numerosSaldados(saldadasFilas);
+    const saldos = calcularSaldos(comprobantes, cobranzas, saldadas);
     // Insistir solo tiene sentido en el envío puntual: en la corrida completa reclamaría
     // de nuevo todo a todo el mundo.
     const { envios, omitidos, yaReclamadas } = calcularEnvios(hoy, activos, comprobantes, previos, saldos, {
       ignorarYaReclamadas: reclamarDeNuevo && !!soloCliente,
+      saldadas,
     });
     base.omitidos = omitidos;
     base.yaReclamadas = yaReclamadas;

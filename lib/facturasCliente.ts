@@ -16,6 +16,10 @@ export interface FacturaCliente {
   fecha: string;      // YYYY-MM-DD
   importe: number;
   yaCobrada: boolean; // ya entró en un cobro registrado desde la app
+  // Dada por saldada a mano, sin movimiento en Xubio (ver facturasSaldadas.ts). Se informa
+  // en vez de ocultarse: quien está imputando un cobro tiene que poder ver que alguien
+  // decidió que esta factura ya estaba, y con qué criterio.
+  saldadaManual: boolean;
 }
 
 const norm = (s: any) => String(s || '')
@@ -24,7 +28,7 @@ const soloFecha = (v: any) => String(v || '').split(/[T ]/)[0];
 
 // `cobros` son las filas de CobrosRegistrados: de ahí sale qué facturas ya se contaron.
 export function facturasPorCliente(
-  comprobantes: any[], cobros: any[], clientes: ClienteVenta[],
+  comprobantes: any[], cobros: any[], clientes: ClienteVenta[], saldadas?: Set<string>,
 ): Record<string, FacturaCliente[]> {
   // Las facturas que la app ya imputó. No es lo mismo que "pagas" —Xubio no expone eso—
   // pero alcanza para no ofrecer dos veces la misma.
@@ -60,6 +64,7 @@ export function facturasPorCliente(
       fecha: soloFecha(c?.fecha),
       importe: Number(c?.importetotal) || 0,
       yaCobrada: yaCobradas.has(numero),
+      saldadaManual: !!saldadas?.has(numero),
     });
   }
 

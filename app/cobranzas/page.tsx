@@ -18,6 +18,8 @@ import RegistrarCobro from '@/components/RegistrarCobro';
 import BandejaCobranzas from '@/components/BandejaCobranzas';
 import { HOJA_BANDEJA, HOJA_ALIAS, type ItemBandeja, type AliasCobranza } from '@/lib/bandejaCobranzas';
 import ReclamoManual from '@/components/ReclamoManual';
+import FacturasViejas from '@/components/FacturasViejas';
+import { leerSaldadas, numerosSaldados, type FacturaSaldada } from '@/lib/facturasSaldadas';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,8 +44,9 @@ export default async function CobranzasPage() {
   let cobros: CobroRegistrado[] = [];
   let bandeja: ItemBandeja[] = [];
   let aliasRows: AliasCobranza[] = [];
+  let saldadas: FacturaSaldada[] = [];
   try {
-    [clientes, enviados, configRows, cobros, bandeja, aliasRows] = await Promise.all([
+    [clientes, enviados, configRows, cobros, bandeja, aliasRows, saldadas] = await Promise.all([
       readSheet<ClienteVenta>('Clientes').catch(() => []),
       readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => []),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
@@ -51,6 +54,8 @@ export default async function CobranzasPage() {
       // La hoja no existe hasta la primera importación del resumen bancario.
       readSheet<ItemBandeja>(HOJA_BANDEJA).catch(() => []),
       readSheet<AliasCobranza>(HOJA_ALIAS).catch(() => []),
+      // La hoja no existe hasta que se marca la primera factura a mano.
+      leerSaldadas(),
     ]);
   } catch {}
 
@@ -75,11 +80,12 @@ export default async function CobranzasPage() {
   // para cada movimiento. Antes cada fila pedía las suyas al abrirse: con diez movimientos
   // para imputar eran diez consultas a Xubio de varios segundos cada una, justo cuando la
   // persona está esperando para decidir.
+  const saldadasSet = numerosSaldados(saldadas);
   let facturasCliente: Record<string, FacturaCliente[]> = {};
   try {
     const hoyF = fechaArgentinaHoy();
     const comps = await getComprobantes(sumarDiasISO(hoyF, -120), hoyF);
-    facturasCliente = facturasPorCliente(comps, cobros, clientes);
+    facturasCliente = facturasPorCliente(comps, cobros, clientes, saldadasSet);
   } catch {
     // Si Xubio no responde, la bandeja sigue funcionando: cada fila pide las suyas al
     // abrirse, que es como funcionaba antes.
@@ -200,6 +206,32 @@ export default async function CobranzasPage() {
                   importe: Number(c.importe) || 0, numero_recibo: String(c.numero_recibo || ''),
                   transaccionid: String(c.transaccionid || ''), estado: String(c.estado || ''),
                   observacion: String(c.observacion || ''),
+                }))}
+            />
+          </div>
+        </div>
+
+        {/* ══ LIMPIAR FACTURAS VIEJAS ══ */}
+        <div className="card" style={{ marginBottom: '14px' }}>
+          <p className="card-title">Facturas que ya están cobradas pero siguen apareciendo</p>
+          <p className="card-sub">
+            Para las que se cobraron por fuera de la app —un cheque, una compensación, un cobro cargado
+            a mano en Xubio— o las que ya no se van a cobrar. Se dan por saldadas y dejan de aparecer al
+            imputar y en los reclamos. <strong>No se registra ningún movimiento en Xubio</strong>, así que
+            la contabilidad queda como está. Se puede deshacer.
+          </p>
+          <div style={{ marginTop: '10px' }}>
+            <FacturasViejas
+              clientes={clientes
+                .map((c) => ({ id_control: String(c.id_control), nombre: nombreClienteVisible(c) }))
+                .sort((a, b) => a.nombre.localeCompare(b.nombre))}
+              facturasPorCliente={facturasCliente}
+              saldadas={saldadas
+                .filter((f) => String(f.estado) !== 'revertida')
+                .map((f) => ({
+                  numero: String(f.numero), cliente: String(f.cliente || ''),
+                  importe: Number(f.importe) || 0, fecha_marcado: String(f.fecha_marcado || ''),
+                  motivo: String(f.motivo || ''), usuario: String(f.usuario || ''),
                 }))}
             />
           </div>
