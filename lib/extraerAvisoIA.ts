@@ -23,6 +23,11 @@ export interface AvisoExtraido {
   comprobantes: string[];
   retencion: number | null;
   nombrePagador: string | null;  // como figura en el aviso, para matchear con el cliente
+  // A qué cuenta NUESTRA entró la plata, como la nombra el aviso ("Banco Macro"). La orden
+  // de pago lo dice casi siempre, pero está adentro del PDF, y el PDF no queda en ningún
+  // texto que se pueda matchear después. Sin esto, todo cobro caía en la cuenta de siempre
+  // y había que corregirlo a mano cada vez.
+  cuentaDestino: string | null;
   // El cliente de NUESTRA lista que el modelo cree que pagó. Existe porque el nombre del
   // aviso casi nunca es el que usamos puertas adentro: "NAF S.R.L." es Mamina, y ningún
   // matcheo por texto va a unir esas dos cosas. Null cuando no está seguro.
@@ -58,6 +63,7 @@ Devolvé SOLO un objeto JSON, sin texto alrededor y sin bloque de código, con e
   "comprobantes": ["A-00005-00001234"],  // números de factura que el aviso dice estar pagando, normalizados a LETRA-PUNTOVENTA(5 dígitos)-NÚMERO(8 dígitos). Vacío si no menciona ninguno.
   "retencion": número o null,        // total de retenciones (IIBB, ganancias, etc.) si las discrimina
   "nombrePagador": "texto" o null,   // razón social o nombre de quien paga, tal como figura en el aviso
+  "cuentaDestino": "texto" o null,   // el banco o cuenta DONDE SE ACREDITA el dinero, tal como lo nombra el aviso
   "idCliente": "texto" o null,       // el id de NUESTRA lista de clientes que corresponde al pagador
   "razonDelCliente": "una frase",    // por qué elegiste ese cliente (o por qué ninguno)
   "confianza": "alta" | "media" | "baja",
@@ -68,6 +74,11 @@ Reglas:
 - Si no encontrás un importe claro, poné null y explicá por qué en el comentario. NO inventes un número.
 - No confundas un CUIT, un número de operación ni un número de factura con un importe.
 - "alta" solo si el aviso dice explícitamente cuánto se pagó. Si tuviste que deducirlo, es "media" o "baja".
+
+Sobre cuentaDestino: es la cuenta de XAVIA donde entra la plata, la del que COBRA. Un aviso suele nombrar los dos bancos —el del que paga y el del que cobra— y son cosas distintas: "transferencia desde nuestra cuenta del Banco Galicia a Banco Macro" tiene cuentaDestino "Banco Macro", no "Banco Galicia".
+- Poné el nombre tal cual aparece, sin normalizar ("Bco. Macro" se devuelve así).
+- Si el aviso nombra un solo banco y no queda claro si es el que paga o el que cobra, poné null. Una cuenta de destino equivocada manda la plata a la cuenta contable incorrecta.
+- Si es un pago con cheque o en efectivo y no hay cuenta, poné null.
 
 Sobre el cliente: al final te paso nuestra lista de clientes, con el nombre que usamos, la razón social con la que factura, su alias y sus sucursales. El nombre que aparece en un aviso de pago suele ser la razón social o el nombre de una sucursal, no el que usamos nosotros. Elegí el id que corresponda al pagador.
 - Si ninguno corresponde, poné null. NO elijas el más parecido por elegir alguno: un cobro imputado al cliente equivocado es peor que uno sin identificar.
@@ -183,6 +194,7 @@ export function parsearRespuesta(texto: string, clientes?: ClienteParaIA[]): Avi
     comprobantes,
     retencion: num(j?.retencion),
     nombrePagador: j?.nombrePagador ? String(j.nombrePagador).slice(0, 120) : null,
+    cuentaDestino: j?.cuentaDestino ? String(j.cuentaDestino).slice(0, 80) : null,
     idCliente: idValido,
     razonDelCliente: String(j?.razonDelCliente || '').slice(0, 200),
     confianza: ['alta', 'media', 'baja'].includes(j?.confianza) ? j.confianza : 'baja',

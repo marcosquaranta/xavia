@@ -18,6 +18,7 @@ import {
   HOJA_BANDEJA, HEADERS_BANDEJA, HOJA_ALIAS,
   proponerCliente, nuevoIdItem, type ItemBandeja, type AliasCobranza,
 } from './bandejaCobranzas';
+import { marcarCuentaDeclarada } from './cuentasCobro';
 import { nombreClienteVisible } from './clientes';
 import type { ClienteVenta } from './types';
 
@@ -127,6 +128,7 @@ export async function crearItemDesdeAviso(args: {
   let confianza: 'alta' | 'media' | 'baja' | undefined;
   let comentarioIA = '';
   let pagador = '';
+  let cuentaDestino = '';
   let fechaIA = '';
 
   // Matcheo por texto primero: alias aprendidos y nombres. Es gratis y determinístico.
@@ -162,6 +164,7 @@ export async function crearItemDesdeAviso(args: {
         confianza = ia.confianza;
       }
       pagador = ia.nombrePagador || '';
+      cuentaDestino = ia.cuentaDestino || '';
       // El cliente que eligió la IA solo se usa si el matcheo por texto no encontró nada:
       // un alias confirmado por una persona vale más que una deducción del modelo.
       if (!cand && ia.idCliente) {
@@ -187,11 +190,16 @@ export async function crearItemDesdeAviso(args: {
   // solo ahí adentro, es el único lugar donde aparece.
   if (!cand && pagador) cand = proponerCliente(pagador, clientes, aliases);
 
+  // La cuenta de destino va en la descripción y no en una columna nueva: la descripción es
+  // justo el texto contra el que la pantalla busca la cuenta (ver cuentaSugerida), así que
+  // ponerla acá la deja elegida sola, y además queda a la vista en "Dice el aviso" para
+  // poder desconfiar.
   const descripcion = [
     args.remitente ? `De ${args.remitente}` : '',
     asunto || 'Aviso de pago',
     comprobantes.length ? `facturas ${comprobantes.join(', ')}` : '',
     retencion ? `retención ${retencion}` : '',
+    cuentaDestino ? marcarCuentaDeclarada(cuentaDestino) : '',
     leidoCon === 'ia' ? `leído con IA (confianza ${confianza})` : '',
     texto.replace(/\s+/g, ' ').slice(0, 140),
   ].filter(Boolean).join(' · ');

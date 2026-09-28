@@ -55,6 +55,25 @@ export function cantidadPreferidas(cuentas: CuentaOpcion[]): number {
 export function cuentaSugerida<T extends CuentaOpcion>(cuentas: T[], texto: string): T | undefined {
   const elegibles = cuentasElegibles(cuentas);
   if (!elegibles.length) return undefined;
+  // Si el aviso dijo explícitamente dónde entró, manda eso y se ignora el resto del texto.
+  // Es importante: el cuerpo de un mail reenviado suele arrastrar NUESTROS datos de pago
+  // —que nombran Brubank— abajo de todo, y entonces un aviso que dice claramente "Banco
+  // Macro" nombraba dos cuentas, quedaba ambiguo, y ganaba la de siempre.
+  const explicita = extraerCuentaDeclarada(texto);
+  if (explicita) {
+    const k = clave(explicita);
+    // Primero por nombre completo, después por la palabra que identifica a la cuenta. La
+    // segunda vuelta es la que importa en la práctica: el aviso escribe "Bco. Macro" y en
+    // Xubio está como "Banco Macro", que no se contienen en ningún sentido. Lo que sí
+    // comparten es "macro", y eso es lo que CUENTAS_COBRO guarda.
+    const hit = elegibles.find(c => clave(c.nombre).includes(k) || k.includes(clave(c.nombre)))
+      || (() => {
+        const nombradas = CUENTAS_COBRO.filter(c => k.includes(clave(c)));
+        if (nombradas.length !== 1) return undefined;
+        return elegibles.find(c => clave(c.nombre).includes(clave(nombradas[0])));
+      })();
+    if (hit) return hit;
+  }
   const t = clave(texto);
   if (t) {
     const nombradas = CUENTAS_COBRO.filter(c => t.includes(clave(c)));
@@ -65,4 +84,25 @@ export function cuentaSugerida<T extends CuentaOpcion>(cuentas: T[], texto: stri
     }
   }
   return elegibles[0];
+}
+
+// ── Cómo queda anotado en el aviso a qué cuenta entró la plata ───────────────────────
+//
+// La IA lee la orden de pago (casi siempre un PDF) y saca el banco de destino, pero el PDF
+// no se guarda: lo único que queda es la descripción del movimiento. Por eso el dato se
+// escribe ahí con esta marca, y se vuelve a leer desde ahí. Un solo lugar define las dos
+// puntas para que no se desincronicen.
+export const MARCA_CUENTA = 'entró en ';
+
+export function marcarCuentaDeclarada(nombre: string): string {
+  return `${MARCA_CUENTA}${String(nombre || '').trim()}`;
+}
+
+// El nombre de cuenta que el aviso declaró, o '' si no declaró ninguna. Corta en el
+// separador de campos para no arrastrarse el resto de la descripción.
+export function extraerCuentaDeclarada(texto: string): string {
+  const t = String(texto || '');
+  const i = norm(t).indexOf(norm(MARCA_CUENTA));
+  if (i === -1) return '';
+  return t.slice(i + MARCA_CUENTA.length).split('·')[0].trim().slice(0, 60);
 }

@@ -135,15 +135,33 @@ export function cuentasDeCobranzas(cobranzas: any[]): CuentaXubio[] {
 // durante semanas que el endpoint no estaba habilitado en este plan.
 const PATHS_CUENTAS = ['cuenta?activo=1', 'cuenta', 'cuenta?activo=0', 'banco'];
 
+// Se consultan TODAS las fuentes y se unen, no la primera que conteste.
+//
+// Antes se cortaba en la primera que devolvía filas, y eso escondía cuentas reales: el plan
+// de cuentas (`cuenta`) trae las cuentas contables y `banco` trae las bancarias, y no son
+// el mismo conjunto. Una cuenta que existía solo en `banco` simplemente no aparecía en el
+// desplegable, sin ningún error: parecía que Xubio no la tenía. Unir las listas cuesta una
+// consulta más y hace imposible ese modo de fallar.
 export async function getCuentas(cobranzasFallback: any[] = []): Promise<{ cuentas: CuentaXubio[]; origen: string; aviso?: string }> {
+  const porId = new Map<number, CuentaXubio>();
+  const origenes: string[] = [];
   for (const path of PATHS_CUENTAS) {
     try {
       const raw = await xubioGet<any[]>(path);
       const cuentas = (Array.isArray(raw) ? raw : []).map(mapCuenta).filter((c) => c.id > 0 && c.nombre);
-      if (cuentas.length) return { cuentas, origen: `plan de cuentas de Xubio (${path})` };
+      if (!cuentas.length) continue;
+      let nuevas = 0;
+      for (const c of cuentas) if (!porId.has(c.id)) { porId.set(c.id, c); nuevas++; }
+      if (nuevas) origenes.push(`${path}: ${nuevas}`);
     } catch (e: any) {
       console.error(`[xubio] ${path} falló:`, e?.message || e);
     }
+  }
+  if (porId.size) {
+    return {
+      cuentas: [...porId.values()].sort((a, b) => a.nombre.localeCompare(b.nombre)),
+      origen: `plan de cuentas de Xubio (${origenes.join(' · ')})`,
+    };
   }
   const cuentas = cuentasDeCobranzas(cobranzasFallback);
   return {
