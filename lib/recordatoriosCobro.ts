@@ -4,6 +4,7 @@ import { fechaArgentinaHoy } from './ocupacion';
 import type { ClienteVenta } from './types';
 import { leerSaldadas, numerosSaldados } from './facturasSaldadas';
 import { claveComprobante } from './comprobantes';
+import { HOJA_COBROS } from './cobros';
 import { VENTANA_MINIMA_DIAS } from './cobranzasVentana';
 
 // ── Recordatorios de cobro ────────────────────────────────────────────────────────────
@@ -68,7 +69,18 @@ export { VENTANA_MINIMA_DIAS, ventanaDemasiadoAngosta } from './cobranzasVentana
 // antigüedad configurada y hasta este límite; más vieja que eso ya no es un recordatorio de
 // rutina, es una gestión de cobranza aparte. El tope también evita que la primera corrida
 // arrastre un año de comprobantes.
-export const MAX_DIAS_ATRAS = 90;
+export const MAX_DIAS_ATRAS = 365;
+
+// Cuánto se espera antes de reclamar una factura recién emitida. Sigue existiendo un
+// mínimo —a nadie se le reclama una factura de anteayer— pero ya no hay máximo: el
+// recordatorio pasó a ser un estado de cuenta con TODO lo que figura impago, no una
+// selección de las que "todavía tiene sentido" reclamar.
+//
+// El máximo existía como defensa mientras la app no podía saber qué factura estaba paga:
+// una de 50 días probablemente ya lo estaba y reclamarla quedaba mal. Esa defensa ahora
+// está en otro lado y es mejor: se excluye lo que se cobró desde la app y lo que se marcó
+// saldado a mano, y el mail le pide al cliente que avise si algo de lo que aparece ya lo
+// pagó. Es más honesto pedir la corrección que esconder deuda real por las dudas.
 
 // Datos bancarios del mail. Van en Configuracion para poder cambiarlos sin tocar código,
 // pero arrancan cargados: un recordatorio de pago sin decir a dónde pagar no sirve.
@@ -209,30 +221,28 @@ export function calcularEnvios(
   // Envío manual "insistir": se ignora el registro de lo ya reclamado. Nunca lo usa el
   // cron — el control de duplicados existe para que el automático no repita solo, no para
   // frenar a alguien que decide insistir a propósito.
-  opciones: { ignorarYaReclamadas?: boolean; saldadas?: Set<string> } = {},
+  opciones: {
+    ignorarYaReclamadas?: boolean;
+    saldadas?: Set<string>;
+    // Facturas ya imputadas desde la app. Ahora que el mail lista TODO lo impago, esta es
+    // la defensa principal contra reclamar algo ya cobrado: antes alcanzaba con que cada
+    // comprobante entrara en un solo recordatorio.
+    cobradas?: Set<string>;
+  } = {},
 ): { envios: EnvioRecordatorio[]; omitidos: EnvioOmitido[]; yaReclamadas: number } {
-  const atraso = diasDeAtraso(yaEnviados, hoy);
   let yaReclamadas = 0;
   const envios: EnvioRecordatorio[] = [];
   const omitidos: EnvioOmitido[] = [];
-
-  // Un comprobante entra en un único recordatorio, para siempre.
-  const yaRecordados = new Set<string>();
-  if (!opciones.ignorarYaReclamadas) for (const r of yaEnviados) {
-    if (String(r.estado) === 'error') continue; // si falló, se puede reintentar
-    for (const n of String(r.comprobantes || '').split(',')) {
-      const t = n.trim();
-      if (t) yaRecordados.add(t);
-    }
-  }
 
   for (const cliente of clientes) {
     const k = norm(cliente.nombreXubio);
     // Ventana de antigüedad: ni tan nuevas que todavía estén en plazo, ni tan viejas que lo
     // más probable es que ya estén pagas. El tope general (MAX_DIAS_ATRAS) queda de red por
     // si alguien configura una ventana enorme.
+    // Solo el piso de antigüedad: se respeta el plazo de pago del cliente y de ahí para
+    // atrás entra todo lo que siga impago, hasta el tope general.
     const hastaFecha = sumarDias(hoy, -cliente.antiguedadDias);
-    const desdeFecha = sumarDias(hoy, -Math.min(cliente.antiguedadHasta + atraso, MAX_DIAS_ATRAS));
+    const desdeFecha = sumarDias(hoy, -MAX_DIAS_ATRAS);
     const delCliente = comprobantes.filter((c) => {
       if (Number(c?.tipo) !== 1) return false; // solo facturas, no notas de crédito/débito
       if (norm(nombreClienteComprobante(c)) !== k) return false;
@@ -249,10 +259,10 @@ export function calcularEnvios(
       }))
       .filter((f) => {
         if (!f.numero) return false;
-        // Dada por saldada a mano: no se reclama, y tampoco cuenta como "ya reclamada",
-        // que es otra cosa.
-        if (opciones.saldadas?.has(claveComprobante(f.numero))) return false;
-        if (yaRecordados.has(f.numero)) { yaReclamadas++; return false; }
+        const k = claveComprobante(f.numero);
+        // Lo que ya se cobró —imputado desde la app o dado por saldado a mano— no se
+        // reclama nunca. Se cuenta aparte para poder decir cuántas se dejaron afuera.
+        if (opciones.cobradas?.has(k) || opciones.saldadas?.has(k)) { yaReclamadas++; return false; }
         return true;
       })
       .sort((a, b) => a.fecha.localeCompare(b.fecha));
@@ -286,7 +296,7 @@ const fmtFecha = (f: string) => { const [y, m, dd] = f.split('-'); return `${dd}
 export function asuntoRecordatorio(envio: EnvioRecordatorio): string {
   const n = envio.facturas.length;
   const detalle = n === 1 ? `Factura ${envio.facturas[0].numero}` : `${n} comprobantes`;
-  return `Recordatorio de pago — ${envio.cliente.nombre} — ${detalle} — Xavia`;
+  return `Estado de cuenta — ${envio.cliente.nombre} — ${detalle} — Xavia`;
 }
 
 export function cuerpoRecordatorioHtml(envio: EnvioRecordatorio, datosPago: string): string {
@@ -301,7 +311,7 @@ export function cuerpoRecordatorioHtml(envio: EnvioRecordatorio, datosPago: stri
   <div style="font-family:system-ui,Arial,sans-serif;color:#111;max-width:560px">
     <p style="font-size:14px">Hola, ¿cómo están?</p>
     <p style="font-size:14px">
-      Les escribimos para recordarles el vencimiento de ${envio.facturas.length === 1 ? 'el siguiente comprobante' : 'los siguientes comprobantes'}:
+      Les enviamos el detalle de ${envio.facturas.length === 1 ? 'el comprobante que nos figura pendiente' : 'los comprobantes que nos figuran pendientes'} de pago:
     </p>
     <table style="border-collapse:collapse;width:100%;font-size:13px;margin:14px 0">
       <thead><tr style="background:#f5f5f5">
@@ -319,8 +329,14 @@ export function cuerpoRecordatorioHtml(envio: EnvioRecordatorio, datosPago: stri
       <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase">Datos para transferir</p>
       ${pago}
     </div>` : ''}
+    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px 14px;margin:14px 0">
+      <p style="margin:0;font-size:13px;color:#92400e;line-height:1.55">
+        <strong>Si alguno de estos comprobantes ya está pagado, por favor envíennos el comprobante de pago</strong>
+        respondiendo este correo, así lo registramos y lo sacamos del listado. Este detalle sale de nuestros
+        registros y puede no tener impactado algún pago reciente.
+      </p>
+    </div>
     <p style="font-size:13px;color:#374151">
-      Si ya realizaron el pago, por favor ignoren este mensaje y, si pueden, envíennos el comprobante así lo registramos.
       Ante cualquier consulta, respondan este mismo correo.
     </p>
     <p style="font-size:13px;color:#374151">Muchas gracias,<br><strong>Administración — Xavia</strong></p>
@@ -329,11 +345,14 @@ export function cuerpoRecordatorioHtml(envio: EnvioRecordatorio, datosPago: stri
 
 export function cuerpoRecordatorioTexto(envio: EnvioRecordatorio, datosPago: string): string {
   const L: string[] = ['Hola, ¿cómo están?', ''];
-  L.push(`Les recordamos el vencimiento de ${envio.facturas.length === 1 ? 'el siguiente comprobante' : 'los siguientes comprobantes'}:`);
+  L.push(`Les enviamos el detalle de ${envio.facturas.length === 1 ? 'el comprobante que nos figura pendiente' : 'los comprobantes que nos figuran pendientes'} de pago:`);
   for (const f of envio.facturas) L.push(`  ${f.numero} · ${fmtFecha(f.fecha)} · ${fmtMoneda(f.importe)}`);
   L.push(`  TOTAL: ${fmtMoneda(envio.total)}`, '');
   if (datosPago.trim()) { L.push('Datos para transferir:'); for (const l of datosPago.split('\n').filter(Boolean)) L.push('  ' + l); L.push(''); }
-  L.push('Si ya realizaron el pago, por favor ignoren este mensaje y, si pueden, envíennos el comprobante así lo registramos.');
+  L.push('IMPORTANTE: si alguno de estos comprobantes ya está pagado, por favor envíennos el');
+  L.push('comprobante de pago respondiendo este correo, así lo registramos y lo sacamos del');
+  L.push('listado. Este detalle sale de nuestros registros y puede no tener impactado algún');
+  L.push('pago reciente.', '');
   L.push('Ante cualquier consulta, respondan este mismo correo.', '', 'Muchas gracias,', 'Administración — Xavia');
   return L.join('\n');
 }
@@ -486,24 +505,36 @@ export async function correrRecordatoriosCobro(
     const datosPagoFila = configRows.find((r) => String(r.clave).trim() === CONFIG_DATOS_PAGO);
     const datosPago = String(datosPagoFila?.valor || '').trim() || DATOS_PAGO_DEFAULT;
 
-    // Una sola ventana de comprobantes sirve para las dos cosas: encontrar las facturas
-    // del día objetivo y calcular el saldo de cada cliente.
-    const desde = sumarDias(hoy, -DIAS_VENTANA_SALDO);
-    const [comprobantes, cobranzas, saldadasFilas] = await Promise.all([
+    // Una sola ventana de comprobantes sirve para las dos cosas: armar el estado de cuenta
+    // y calcular el saldo de cada cliente. Va hasta MAX_DIAS_ATRAS porque el mail ahora
+    // lista todo lo impago, no solo lo que entraba en una ventana de antigüedad.
+    const desde = sumarDias(hoy, -MAX_DIAS_ATRAS);
+    const [comprobantes, cobranzas, saldadasFilas, cobrosApp] = await Promise.all([
       getComprobantes(desde, hoy),
       getCobranzas(desde, hoy).catch(() => []),
       leerSaldadas(),
+      readSheet<{ estado: string; comprobantes: string }>(HOJA_COBROS).catch(() => []),
     ]);
-    // Las que alguien dio por saldadas a mano no se reclaman. Es el caso que más quema la
-    // confianza en el recordatorio automático: reclamarle a un cliente una factura que ya
-    // pagó por fuera de la app.
+    // Lo que no se reclama: lo dado por saldado a mano y lo ya imputado desde la app. Es
+    // el caso que más quema la confianza en el recordatorio automático — reclamarle a un
+    // cliente una factura que ya pagó— y ahora que el mail lista todo lo impago, es la
+    // única defensa que queda.
     const saldadas = numerosSaldados(saldadasFilas);
+    const cobradas = new Set<string>();
+    for (const c of cobrosApp) {
+      if (String(c?.estado) === 'anulado') continue;
+      for (const n of String(c?.comprobantes || '').split(',')) {
+        const k = claveComprobante(n);
+        if (k) cobradas.add(k);
+      }
+    }
     const saldos = calcularSaldos(comprobantes, cobranzas, saldadas);
     // Insistir solo tiene sentido en el envío puntual: en la corrida completa reclamaría
     // de nuevo todo a todo el mundo.
     const { envios, omitidos, yaReclamadas } = calcularEnvios(hoy, activos, comprobantes, previos, saldos, {
       ignorarYaReclamadas: reclamarDeNuevo && !!soloCliente,
       saldadas,
+      cobradas,
     });
     base.omitidos = omitidos;
     base.yaReclamadas = yaReclamadas;

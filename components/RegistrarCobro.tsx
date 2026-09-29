@@ -7,6 +7,9 @@ interface ClienteOpt { id_control: string; nombre: string }
 interface CobroFila {
   id_cobro: string; cliente: string; fecha: string; importe: number;
   numero_recibo: string; transaccionid: string; estado: string; observacion: string;
+  // Cuándo se cargó desde la app, que no es lo mismo que la fecha del cobro: un cobro de
+  // ayer se puede registrar hoy, y lo que se quiere ver al terminar es lo cargado HOY.
+  fecha_registro?: string;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -45,6 +48,9 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; s: string } | null>(null);
   const [filas, setFilas] = useState(cobros);
+  // Lo que se mira después de registrar un cobro es si ESE cobro salió. Los de la semana
+  // pasada ya se miraron el día que se cargaron: quedan atrás de un click.
+  const [verViejos, setVerViejos] = useState(false);
 
   // Facturas del cliente elegido, para tildar cuáles cubre el cobro.
   const [facturas, setFacturas] = useState<FacturaCliente[]>([]);
@@ -340,9 +346,27 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
         </>
       )}
 
-      {filas.length > 0 && (
+      {filas.length > 0 && (() => {
+        const hoyStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+        const deHoy = filas.filter((c) => String(c.fecha_registro || c.fecha || '').slice(0, 10) === hoyStr);
+        const viejos = filas.filter((c) => !deHoy.includes(c));
+        const visibles = verViejos ? filas : deHoy;
+        return (
         <div style={{ marginTop: '14px', overflowX: 'auto' }}>
-          <p style={{ margin: '0 0 6px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' }}>Cobros registrados desde la app</p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px', marginBottom: '6px' }}>
+            <p style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' }}>
+              Cobros registrados desde la app {deHoy.length > 0 && !verViejos ? '— hoy' : ''}
+            </p>
+            {viejos.length > 0 && (
+              <button type="button" onClick={() => setVerViejos((v) => !v)}
+                style={{ background: 'none', border: 'none', padding: 0, fontSize: '11px', color: '#2563eb', cursor: 'pointer', fontWeight: 700 }}>
+                {verViejos ? 'Ver solo los de hoy' : `Ver los ${viejos.length} anteriores`}
+              </button>
+            )}
+          </div>
+          {visibles.length === 0 && (
+            <p style={{ margin: '0 0 6px', fontSize: '12px', color: '#9ca3af' }}>Hoy no se registró ningún cobro.</p>
+          )}
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '520px' }}>
             <thead>
               <tr style={{ background: '#f9fafb', color: '#6b7280' }}>
@@ -354,7 +378,7 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
               </tr>
             </thead>
             <tbody>
-              {filas.map((c) => (
+              {visibles.map((c) => (
                 <tr key={c.id_cobro} style={{ borderTop: '1px solid #f3f4f6', opacity: c.estado === 'anulado' ? 0.45 : 1 }}>
                   <td style={{ padding: '6px 8px', color: '#6b7280' }}>{fmtDia(c.fecha)}</td>
                   <td style={{ padding: '6px 8px', fontWeight: 600, textDecoration: c.estado === 'anulado' ? 'line-through' : 'none' }}>{c.cliente}</td>
@@ -382,7 +406,8 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
             </tbody>
           </table>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

@@ -26,6 +26,10 @@ async function guardar(body: any): Promise<void> {
 
 export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) {
   const [filas, setFilas] = useState(clientes);
+  // Por defecto solo los que tienen el recordatorio prendido. La lista completa son todos
+  // los clientes activos, y en el 99% de las veces que se entra acá es para tocarle algo a
+  // uno que ya está prendido, no para prender uno nuevo.
+  const [verTodos, setVerTodos] = useState(false);
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; s: string } | null>(null);
   const [guardando, setGuardando] = useState<string | null>(null);
 
@@ -58,7 +62,7 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
     try {
       await guardar({ id_control: c.id_control, antiguedadHasta });
       setFilas((p) => p.map((x) => x.id_control === c.id_control ? { ...x, antiguedadHasta } : x));
-      setMsg({ t: 'ok', s: `✓ ${c.nombre}: se reclaman las facturas de ${c.antiguedad} a ${antiguedadHasta} días` });
+      setMsg({ t: 'ok', s: `✓ ${c.nombre}: plazo actualizado` });
     } catch (e: any) { setMsg({ t: 'err', s: e.message }); }
     setGuardando(null);
   }
@@ -94,7 +98,7 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
         const js2 = await sim2.json();
         det = (js2.detalle || [])[0];
         if (!det) {
-          setMsg({ t: 'err', s: `${c.nombre}: no hay ninguna factura entre ${c.antiguedad} y ${c.antiguedadHasta} días de antigüedad. Ampliá la ventana si querés reclamar otras.` });
+          setMsg({ t: 'err', s: `${c.nombre}: no le figura ninguna factura impaga de más de ${c.antiguedad} días.` });
           setGuardando(null); return;
         }
         insistir = true;
@@ -131,41 +135,49 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
     setGuardando(null);
   }
 
+  const visibles = verTodos ? filas : filas.filter((c) => c.activo);
+  const apagados = filas.length - filas.filter((c) => c.activo).length;
+
   return (
     <div>
+      {apagados > 0 && (
+        <p style={{ margin: '0 0 8px', fontSize: '11.5px' }}>
+          <button type="button" onClick={() => setVerTodos((v) => !v)}
+            style={{ background: 'none', border: 'none', padding: 0, fontSize: '11.5px', color: '#2563eb', cursor: 'pointer', fontWeight: 700 }}>
+            {verTodos ? 'Ocultar los que no tienen recordatorio' : `Ver los ${apagados} clientes sin recordatorio`}
+          </button>
+        </p>
+      )}
+      {visibles.length === 0 && (
+        <p style={{ margin: '0 0 8px', fontSize: '12.5px', color: '#9ca3af' }}>
+          Ningún cliente tiene el recordatorio prendido todavía.
+        </p>
+      )}
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', minWidth: '520px' }}>
           <thead>
             <tr style={{ background: '#f9fafb', color: '#6b7280' }}>
               <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>Cliente</th>
               <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 600, width: '90px' }}>Recordatorio</th>
-              <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 600, width: '150px' }}>Antigüedad<br /><span style={{ fontWeight: 400, fontSize: '10px' }}>desde / hasta (días)</span></th>
+              <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 600, width: '110px' }}>Plazo<br /><span style={{ fontWeight: 400, fontSize: '10px' }}>no se reclama antes de (días)</span></th>
               <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>Mail de cobranzas</th>
               <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600 }}></th>
             </tr>
           </thead>
           <tbody>
-            {filas.map((c) => (
+            {visibles.map((c) => (
               <tr key={c.id_control} style={{ borderTop: '1px solid #f3f4f6', opacity: guardando === c.id_control ? 0.5 : 1 }}>
                 <td style={{ padding: '6px 8px', fontWeight: c.activo ? 700 : 400 }}>{c.nombre}</td>
                 <td style={{ padding: '6px 8px', textAlign: 'center' }}>
                   <input type="checkbox" checked={c.activo} disabled={guardando !== null}
                     onChange={(e) => togglear(c, e.target.checked)} />
                 </td>
+                {/* Solo el piso. El tope de antigüedad se sacó: el recordatorio ahora
+                    lista TODO lo que figura impago, no una ventana. */}
                 <td style={{ padding: '6px 8px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                   <input type="number" min={1} defaultValue={c.antiguedad} disabled={guardando !== null}
-                    style={{ ...inputStyle, width: '52px', display: 'inline-block', textAlign: 'right' }}
+                    style={{ ...inputStyle, width: '58px', display: 'inline-block', textAlign: 'right' }}
                     onBlur={(e) => guardarAntiguedad(c, e.target.value)} />
-                  <span style={{ fontSize: '11px', color: '#9ca3af', margin: '0 4px' }}>a</span>
-                  <input type="number" min={1} defaultValue={c.antiguedadHasta} disabled={guardando !== null}
-                    style={{ ...inputStyle, width: '52px', display: 'inline-block', textAlign: 'right' }}
-                    onBlur={(e) => guardarAntiguedadHasta(c, e.target.value)} />
-                  {c.activo && ventanaDemasiadoAngosta(c.antiguedad, c.antiguedadHasta) && (
-                    <span title={`La corrida es semanal: con una ventana de menos de ${VENTANA_MINIMA_DIAS} días hay facturas que ningún lunes van a caer adentro`}
-                      style={{ display: 'block', fontSize: '10px', color: '#b45309', fontWeight: 600 }}>
-                      ⚠ ventana angosta
-                    </span>
-                  )}
                 </td>
                 <td style={{ padding: '6px 8px' }}>
                   <input defaultValue={c.email} disabled={guardando !== null} style={inputStyle}

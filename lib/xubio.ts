@@ -181,6 +181,16 @@ export async function getCuentas(cobranzasFallback: any[] = []): Promise<{ cuent
       console.error(`[xubio] ${path} falló:`, e?.message || e);
     }
   }
+  // Las cuentas donde YA entró plata se suman siempre, no solo como respaldo. El plan de
+  // cuentas que devuelve la API no trae todas las que existen en Xubio —hay cuentas que se
+  // ven en la pantalla de Xubio y no aparecen acá— y una cuenta que recibió una cobranza
+  // real es, por definición, una cuenta válida para recibir otra. No es el catálogo de
+  // bancos del país: son movimientos de esta empresa.
+  const deCobranzas = cuentasDeCobranzas(cobranzasFallback);
+  let sumadas = 0;
+  for (const c of deCobranzas) if (!porId.has(c.id)) { porId.set(c.id, c); sumadas++; }
+  if (sumadas) origenes.push(`cobranzas anteriores: ${sumadas}`);
+
   if (porId.size) {
     return {
       cuentas: [...porId.values()].sort((a, b) => a.nombre.localeCompare(b.nombre)),

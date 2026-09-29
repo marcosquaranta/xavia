@@ -3,7 +3,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import {
   HOJA_RECORDATORIOS, COL_ACTIVO, COL_EMAIL, CONFIG_DATOS_PAGO, DATOS_PAGO_DEFAULT,
-  MAX_DIAS_ATRAS, ANTIGUEDAD_DEFAULT, ANTIGUEDAD_HASTA_DEFAULT, COL_ANTIGUEDAD, COL_ANTIGUEDAD_HASTA, type RecordatorioCobro,
+  ANTIGUEDAD_DEFAULT, ANTIGUEDAD_HASTA_DEFAULT, COL_ANTIGUEDAD, COL_ANTIGUEDAD_HASTA, type RecordatorioCobro,
 } from '@/lib/recordatoriosCobro';
 import { nombreClienteVisible } from '@/lib/clientes';
 import { HOJA_COBROS, type CobroRegistrado } from '@/lib/cobros';
@@ -15,15 +15,20 @@ import { claveComprobante } from '@/lib/comprobantes';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 import type { ClienteVenta } from '@/lib/types';
 import Header from '@/components/Header';
-import { ClientesRecordatorio, DatosPago, ProbarRecordatorios, type ClienteFila } from '@/components/CobranzasConfig';
+import { ClientesRecordatorio, DatosPago, type ClienteFila } from '@/components/CobranzasConfig';
 import RegistrarCobro from '@/components/RegistrarCobro';
 import BandejaCobranzas from '@/components/BandejaCobranzas';
 import { HOJA_BANDEJA, HOJA_ALIAS, type ItemBandeja, type AliasCobranza } from '@/lib/bandejaCobranzas';
 import ReclamoManual from '@/components/ReclamoManual';
 import FacturasViejas from '@/components/FacturasViejas';
+import ResumenImpagas from '@/components/ResumenImpagas';
 import { leerSaldadas, numerosSaldados, type FacturaSaldada } from '@/lib/facturasSaldadas';
 
 export const dynamic = 'force-dynamic';
+
+// Cuánto para atrás se mira. Es la misma ventana que el recordatorio: lo que se ve en
+// pantalla tiene que ser lo mismo que se le reclama al cliente.
+const DIAS_PAGINA = 365;
 
 const sumarDiasISO = (fecha: string, dias: number) => {
   const d = new Date(fecha + 'T12:00:00');
@@ -87,18 +92,31 @@ export default async function CobranzasPage() {
   // para imputar eran diez consultas a Xubio de varios segundos cada una, justo cuando la
   // persona está esperando para decidir.
   const saldadasSet = numerosSaldados(saldadas);
+
+  // Las tres consultas a Xubio salen juntas. Antes iban una atrás de otra —cobranzas,
+  // después cuentas, después comprobantes— y la página tardaba la suma de las tres aunque
+  // ninguna dependiera del resultado de la anterior. En paralelo tarda lo que la más lenta.
+  const hoyF = fechaArgentinaHoy();
   let facturasCliente: Record<string, FacturaCliente[]> = {};
+  let cuentasXubio: CuentaXubio[] = [];
+  let errorCuentas: string | null = null;
   try {
-    const hoyF = fechaArgentinaHoy();
-    const comps = await getComprobantes(sumarDiasISO(hoyF, -120), hoyF);
+    const [comps, cobs] = await Promise.all([
+      // Un año: es la misma ventana que usa el recordatorio, así lo que se ve acá es lo
+      // mismo que se le reclama al cliente. Con menos, el resumen mostraba una deuda más
+      // chica que la del mail y no había forma de entender la diferencia.
+      getComprobantes(sumarDiasISO(hoyF, -DIAS_PAGINA), hoyF).catch(() => [] as any[]),
+      getCobranzas(sumarDiasISO(hoyF, -DIAS_PAGINA), hoyF).catch(() => [] as any[]),
+    ]);
     facturasCliente = facturasPorCliente(comps, cobros, clientes, saldadasSet);
-  } catch {
-    // Si Xubio no responde, la bandeja sigue funcionando: cada fila pide las suyas al
+    cuentasXubio = (await getCuentas(cobs)).cuentas;
+    if (!cuentasXubio.length) errorCuentas = 'Xubio no devolvió ninguna cuenta donde imputar el cobro.';
+  } catch (e: any) {
+    // Si Xubio no responde, la bandeja sigue funcionando: cada fila pide sus facturas al
     // abrirse, que es como funcionaba antes.
+    errorCuentas = e?.message || 'No se pudo conectar con Xubio.';
   }
 
-  // La combinación que mejor explica cada importe, calculada acá para que al abrir la fila
-  // ya esté elegida. Es la misma función que usa la pantalla.
   // Qué queda elegido al abrir la fila. Lo que DICE el aviso gana sobre lo que se deduce
   // del importe: si la orden de pago nombra las facturas, eso no es una hipótesis.
   const sugeridasPorItem: Record<string, string[]> = {};
@@ -144,28 +162,15 @@ export default async function CobranzasPage() {
     // Los prendidos primero: son los que se miran.
     .sort((a, b) => (a.activo === b.activo ? a.nombre.localeCompare(b.nombre) : a.activo ? -1 : 1));
 
-  // Las cuentas se traen acá y no cuando el usuario aprieta un botón: el formulario de
-  // cobro las necesita para existir, y esconderlo detrás de "probar conexión" hacía que
-  // pareciera que la función no estaba. Si Xubio no responde, el formulario avisa y el
-  // botón de diagnóstico sigue estando para ver qué pasó.
-  let cuentasXubio: CuentaXubio[] = [];
-  let errorCuentas: string | null = null;
-  try {
-    const hoyC = fechaArgentinaHoy();
-    const desdeC = sumarDiasISO(hoyC, -60);
-    const cobs = await getCobranzas(desdeC, hoyC).catch(() => []);
-    cuentasXubio = (await getCuentas(cobs)).cuentas;
-    if (!cuentasXubio.length) errorCuentas = 'Xubio no devolvió ninguna cuenta donde imputar el cobro.';
-  } catch (e: any) {
-    errorCuentas = e?.message || 'No se pudo conectar con Xubio.';
-  }
-
   const datosPagoFila = configRows.find((r) => String(r.clave).trim() === CONFIG_DATOS_PAGO);
   const datosPago = String(datosPagoFila?.valor || '').trim() || DATOS_PAGO_DEFAULT;
 
+  // Solo la última semana. El historial completo vive en la planilla; acá lo único que se
+  // mira es si la corrida del lunes salió bien, y para eso 25 filas viejas son ruido.
+  const desdeHistorial = sumarDiasISO(hoyF, -7);
   const historial = [...enviados]
-    .sort((a, b) => String(b.fecha_envio || '').localeCompare(String(a.fecha_envio || '')))
-    .slice(0, 25);
+    .filter((r) => String(r.fecha_envio || '').slice(0, 10) >= desdeHistorial)
+    .sort((a, b) => String(b.fecha_envio || '').localeCompare(String(a.fecha_envio || '')));
   const prendidos = filas.filter((f) => f.activo).length;
 
   return (
@@ -175,16 +180,25 @@ export default async function CobranzasPage() {
         <h1 className="page-title">Cobranzas</h1>
         <p className="page-subtitle">
           Registrar cobros en Xubio · recordatorios semanales a los clientes elegidos (salen los lunes a la mañana)
+          con todo lo que les figura impago
         </p>
 
-        {/* Lo que la app NO puede saber, dicho antes de que alguien lo asuma al revés. */}
-        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '11px 14px', marginBottom: '14px' }}>
-          <p style={{ margin: 0, fontSize: '12.5px', color: '#92400e', lineHeight: 1.5 }}>
-            <strong>Xubio no permite saber si una factura puntual está paga</strong> — no existe ese dato en su API.
-            Lo que sí hace la app es comparar lo facturado contra lo cobrado de cada cliente (últimos 120 días):
-            si el cliente está al día, el recordatorio no sale. Y cada comprobante entra en un solo recordatorio,
-            así nunca se reclama dos veces lo mismo.
+        {/* ══ QUIÉN DEBE QUÉ ══ */}
+        <div className="card" style={{ marginBottom: '14px' }}>
+          <p className="card-title">Facturas impagas por cliente</p>
+          <p className="card-sub">
+            Todo lo facturado en los últimos {DIAS_PAGINA} días que no figura cobrado: ni imputado desde la app
+            ni dado por saldado a mano. Es exactamente lo que se le reclama a cada cliente en el recordatorio.
           </p>
+          <div style={{ marginTop: '10px' }}>
+            <ResumenImpagas
+              clientes={clientes
+                .map((c) => ({ id_control: String(c.id_control), nombre: nombreClienteVisible(c) }))
+                .sort((a, b) => a.nombre.localeCompare(b.nombre))}
+              facturasPorCliente={facturasCliente}
+              conRecordatorio={filas.filter((f) => f.activo).map((f) => String(f.id_control))}
+            />
+          </div>
         </div>
 
         {/* ══ BANDEJA ══ */}
@@ -227,6 +241,7 @@ export default async function CobranzasPage() {
                 .slice(0, 15)
                 .map((c) => ({
                   id_cobro: c.id_cobro, cliente: c.cliente, fecha: c.fecha,
+                  fecha_registro: String(c.fecha_registro || ''),
                   importe: Number(c.importe) || 0, numero_recibo: String(c.numero_recibo || ''),
                   transaccionid: String(c.transaccionid || ''), estado: String(c.estado || ''),
                   observacion: String(c.observacion || ''),
@@ -281,32 +296,20 @@ export default async function CobranzasPage() {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(300px,1fr))', gap: '14px', marginBottom: '14px', alignItems: 'start' }}>
-          <div className="card" style={{ margin: 0 }}>
-            <p className="card-title">Datos de pago del mail</p>
-            <p className="card-sub">Se incluyen en cada recordatorio, tal cual los escribas acá</p>
-            <div style={{ marginTop: '10px' }}>
-              <DatosPago valor={datosPago} />
-            </div>
+        {/* Los datos de pago se editan una vez por año: van plegados. */}
+        <details className="card" style={{ marginBottom: '14px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#374151' }}>
+            Datos de pago que se incluyen en cada recordatorio
+          </summary>
+          <div style={{ marginTop: '10px' }}>
+            <DatosPago valor={datosPago} />
           </div>
-
-          <div className="card" style={{ margin: 0 }}>
-            <p className="card-title">Probar</p>
-            <p className="card-sub">
-              La simulación muestra a quién le llegaría y con qué facturas, sin mandar nada.
-              Entran las facturas que ya cumplieron la antigüedad de cada cliente y no se reclamaron todavía,
-              hasta {MAX_DIAS_ATRAS} días para atrás.
-            </p>
-            <div style={{ marginTop: '10px' }}>
-              <ProbarRecordatorios />
-            </div>
-          </div>
-        </div>
+        </details>
 
         <div className="card">
-          <p className="card-title">Últimos recordatorios enviados</p>
+          <p className="card-title">Recordatorios enviados — últimos 7 días</p>
           {historial.length === 0 ? (
-            <p style={{ margin: '8px 0 0', fontSize: '12.5px', color: '#9ca3af' }}>Todavía no se envió ninguno.</p>
+            <p style={{ margin: '8px 0 0', fontSize: '12.5px', color: '#9ca3af' }}>Ninguno en los últimos 7 días.</p>
           ) : (
             <div style={{ overflowX: 'auto', marginTop: '10px' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '560px' }}>
