@@ -152,6 +152,15 @@ export async function POST(req: NextRequest) {
     // cuatro coma uno: es el 4 de enero. Se guardaba la fecha convertida en número de serie
     // (46026) y después todo lo que leía ese pH veía 46026: la tabla, la alarma, el
     // cumplimiento. Mandando un número de verdad, Sheets no tiene nada que interpretar.
+    // La hora va con apóstrofo adelante: es la forma que tiene Sheets de decir "esto es
+    // texto, no lo interpretes". Sin eso, USER_ENTERED convierte "09:59" en 0.41597222 —la
+    // fracción del día— y eso es lo que se terminaba mostrando en el panel. El apóstrofo no
+    // forma parte del valor: al leer vuelve "09:59".
+    const horaTexto = (v: any) => {
+      const t = String(v ?? '').trim();
+      return t ? `'${t}` : '';
+    };
+
     const num = (v: any) => {
       if (v === null || v === undefined || String(v).trim() === '') return '';
       // Se acepta tanto "4.1" como "4,1": el que carga escribe con la coma del teclado.
@@ -163,7 +172,7 @@ export async function POST(req: NextRequest) {
       id_tarea: datos.id_tarea,
       tipo_registro: datos.tipo_registro,
       fecha: datos.fecha,
-      hora: datos.hora || '',
+      hora: horaTexto(datos.hora),
       responsable: datos.responsable || '',
       estado: datos.estado || 'hecha',
       producto: datos.producto || tarea.producto || '',

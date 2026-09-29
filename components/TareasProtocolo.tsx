@@ -4,7 +4,7 @@ import {
   CONDICIONES_TXT, COND_TEMP_MIN, COND_TEMP_MAX, COND_HUM_MIN, COND_HUM_MAX,
   ALARMA_CONDUCTIVIDAD, ALARMA_PH, fueraDeRangoFoliar, alarmaOsmosis,
   PATRON_PH, PATRON_CONDUCTIVIDAD, LITROS_MOCHILA, TANQUES_RIEGO, dosisSugerida, evaluarDosis, evaluarInstrumental,
-  TOLERANCIA_SOBREDOSIS_PCT, type InstanciaTarea, type EstadoTarea, type CampoRegistro,
+  TOLERANCIA_SOBREDOSIS_PCT, horaDeRegistro, resumenMedicion, type InstanciaTarea, type EstadoTarea, type CampoRegistro,
 } from '@/lib/protocoloTareas';
 
 const COLOR_ESTADO: Record<EstadoTarea, { bg: string; color: string; label: string }> = {
@@ -138,7 +138,9 @@ function BloqueTarea({ bloque, esAdmin, nombreUsuario }: { bloque: Bloque; esAdm
 
       {reg && !expandido && (
         <p style={{ margin: '4px 0 0', fontSize: '10px', color: '#166534' }}>
-          {String(reg.estado) === 'no_aplica' ? 'No se aplicó' : `${reg.responsable} · ${reg.hora}`}
+          {String(reg.estado) === 'no_aplica'
+            ? 'No se aplicó'
+            : [reg.responsable, horaDeRegistro(reg.hora), resumenMedicion(reg)].filter(Boolean).join(' · ')}
           {String(reg.fuera_de_rango) === 'SI' && <span style={{ color: '#dc2626', fontWeight: 700 }}> · fuera de rango</span>}
         </p>
       )}

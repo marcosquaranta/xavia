@@ -134,6 +134,54 @@ export function numeroDeMedicion(v: any): number | null {
   return Number.isFinite(recuperado) ? recuperado : n;
 }
 
+// ── La hora de un registro ───────────────────────────────────────────────────────────
+//
+// Mismo problema que el pH, otra vez: la hoja se escribe con USER_ENTERED, que interpreta
+// cada valor como si lo tipearan a mano, y "09:59" tipeado a mano en Sheets no es texto,
+// es una HORA. Se guarda como fracción del día —9:59 son 0.41597222— y eso es lo que
+// terminaba en pantalla, abajo del nombre del responsable: "Marcelo Macerola ·
+// 0.41597222222222224".
+//
+// La conversión es exacta y reversible, así que las filas ya guardadas se reparan al leer
+// y no hace falta tocar la planilla.
+export function horaDeRegistro(v: any): string {
+  const t = String(v ?? '').trim();
+  if (!t) return '';
+  // Ya está bien escrita.
+  if (/^\d{1,2}:\d{2}/.test(t)) return t;
+
+  const n = Number(t.replace(',', '.'));
+  // Una hora es una fracción de día: entre 0 y 1. Cualquier otra cosa se devuelve como
+  // vino, que es mejor que inventarle una hora a un dato que no se entendió.
+  if (!Number.isFinite(n) || n < 0 || n >= 1) return t;
+
+  const minutosTotales = Math.round(n * 24 * 60);
+  const hh = Math.floor(minutosTotales / 60) % 24;
+  const mm = minutosTotales % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+// Lo que se midió, en una línea corta. Marcelo pidió ver QUÉ valor cargó el operario, no
+// solo que la tarea figure hecha: un pH de 9 cargado sin querer se ve igual de "hecho" que
+// uno de 6,6, y la diferencia es toda.
+export function resumenMedicion(reg: any): string {
+  const partes: string[] = [];
+  const v = (campo: string, etiqueta: string, unidad = '') => {
+    const n = numeroDeMedicion(reg?.[campo]);
+    if (n === null || !Number.isFinite(n)) return;
+    partes.push(`${etiqueta} ${String(n).replace('.', ',')}${unidad}`);
+  };
+  v('ph', 'pH');
+  v('conductividad', 'cond.', ' mS');
+  v('ph4', 'pH4');
+  v('ph7', 'pH7');
+  v('conductividad_patron', 'patrón', ' mS');
+  v('temperatura', '', '°C');
+  v('humedad', '', '%');
+  v('litros', '', ' L');
+  return partes.join(' · ');
+}
+
 export interface ChequeoInstrumental {
   hayQueCalibrar: boolean;
   motivos: string[];

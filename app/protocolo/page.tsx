@@ -4,7 +4,7 @@ import { readSheet } from '@/lib/sheets';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 import {
   leerConfigProtocolo, tareasDelDia, tareasVencidas, cumplimientoProtocolo,
-  lunesDeSemana, sumarDias, TAREAS_PROTOCOLO, CONFIG_ALARMA_EMAILS, numeroDeMedicion,
+  lunesDeSemana, sumarDias, TAREAS_PROTOCOLO, CONFIG_ALARMA_EMAILS, numeroDeMedicion, horaDeRegistro,
   ALARMA_CONDUCTIVIDAD, ALARMA_PH, PATRON_CONDUCTIVIDAD,
 } from '@/lib/protocoloTareas';
 import type { RegistroProtocolo } from '@/lib/types';
@@ -311,7 +311,7 @@ export default async function ProtocoloPage() {
                         <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }}>{fmtDia(String(r.fecha))}</td>
                         <td style={{ padding: '5px 8px' }}>{nombreTarea(String(r.id_tarea))}</td>
                         <td style={{ padding: '5px 8px' }}>{String(r.responsable || '')}</td>
-                        <td style={{ padding: '5px 8px' }}>{String(r.hora || '')}</td>
+                        <td style={{ padding: '5px 8px' }}>{horaDeRegistro(r.hora)}</td>
                         <td style={{ padding: '5px 8px', color: '#6b7280' }}>
                           {String(r.estado) === 'no_aplica' ? <em>no se aplicó</em> : datos || '—'}
                           {String(r.fuera_de_rango) === 'SI' && <span style={{ color: '#dc2626', fontWeight: 700 }}> · fuera de rango</span>}
