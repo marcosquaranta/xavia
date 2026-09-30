@@ -59,20 +59,25 @@ export const ARTICULOS: Articulo[] = [
     color: '#047857',
   },
   // ── Ensaladas (septiembre 2026) ──
-  // Cuántas plantas consume cada una queda sin definir a propósito: sin el dato real, poner
-  // un número inventado haría que el stock y la cámara descuenten mal, que es peor que no
-  // descontar. Se completa cuando Marcos lo confirme.
+  // Consumo confirmado por Marcos: 2,5 plantas de rúcula y 1 de lechuga.
+  //
+  // El consumo es fraccionario a propósito y no se redondea: 2,5 es el promedio real, y
+  // redondear a 3 infla el descuento de stock un 20% en cada venta. Los totales se redondean
+  // recién al mostrarlos.
+  //
+  // PENDIENTE: de qué VARIEDAD es la lechuga de la ensalada clásica (crespa u hoja de roble).
+  // Sin ese dato no se puede descontar en las vistas que abren lechuga por variedad —cámara
+  // y stock por cultivo—, así que ahí todavía no descuenta. Donde la lechuga va junta
+  // —cajones, reporte semanal, valorización y facturación— sí cuenta.
   {
     key: 'ensalada_rucula_parmesano', label: 'Ens. Rúc/Parm', labelLargo: 'Ensalada de rúcula y parmesano',
-    // OJO: nombre PENDIENTE DE CONFIRMAR contra Xubio. Ver comentario de `xubio` arriba.
-    xubio: 'ENSALADA_RUCULA_PARMESANO', unidad: 'unidad', activo: true,
-    color: '#0f766e',
+    xubio: 'Ensalada Rucula y Parmesano', unidad: 'unidad', activo: true,
+    color: '#0f766e', plantas: { rucula: 2.5 },
   },
   {
     key: 'ensalada_clasica', label: 'Ens. Clásica', labelLargo: 'Ensalada clásica',
-    // OJO: nombre PENDIENTE DE CONFIRMAR contra Xubio.
-    xubio: 'ENSALADA_CLASICA', unidad: 'unidad', activo: true,
-    color: '#0e7490',
+    xubio: 'Ensalada Clasica', unidad: 'unidad', activo: true,
+    color: '#0e7490', plantas: { lechuga: 1 },
   },
   // ── Dado de baja ──
   // No se hace más (Marcos, septiembre 2026). Se mantiene para las ventas ya cargadas.

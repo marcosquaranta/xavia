@@ -5,6 +5,7 @@ import { readSheet } from '@/lib/sheets';
 import type { Lote, VentaDia, StockCamara } from '@/lib/types';
 import Header from '@/components/Header';
 
+import { plantasDeVenta } from '@/lib/articulos';
 export const dynamic = 'force-dynamic';
 
 function parseD(s: any): Date | null {
@@ -41,8 +42,12 @@ export default async function StockDetallePage({ params, searchParams }: { param
     if (r) return false;
     return isCrespa ? x.includes('crespa') : !x.includes('crespa');
   };
+  // La ensalada de rúcula descuenta 2,5 plantas por unidad (ver lib/articulos.ts). La
+  // clásica todavía no descuenta acá: esta pantalla abre lechuga por variedad y falta saber
+  // si lleva crespa u hoja de roble. Contarla en la que sea daría un stock equivocado en
+  // las dos.
   const ventaQty = (v: VentaDia) => isRucula
-    ? num(v.rucula) + num(v.bandeja_rucula)
+    ? plantasDeVenta(v, 'rucula')
     : isCrespa ? num(v.lechuga_crespa) : num(v.hoja_roble);
 
   // Mes (default: actual). ?mes=YYYY-MM

@@ -2,6 +2,7 @@ import type { Lote, VentaDia, StockCamara } from './types';
 import { pesoPromedioRango } from './estadisticas';
 import { GR_PAQ_RUCULA, GR_PAQ_LECHUGA } from './estadisticasVentas';
 
+import { plantasDeVenta } from './articulos';
 export type CultivoCamara = 'rucula' | 'lechuga_crespa' | 'lechuga_roble' | 'albahaca';
 
 function parseDate(s: any): Date | null {
@@ -139,7 +140,11 @@ function vendidoEntre(cultivo: CultivoCamara, ventas: VentaDia[], lotes: Lote[],
       if (cultivo === 'rucula') {
         const directo = (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0);
         const kg = ((Number(v.rucula_kg) || 0) * 1000) / gramosPorPaquete;
-        return acc + directo + kg;
+        // Las ensaladas consumen plantas de la cámara igual que un paquete, solo que varias
+        // por unidad vendida. Sin esto, vender ensaladas vaciaba la cámara sin que el stock
+        // lo reflejara nunca.
+        const ensaladas = plantasDeVenta(v, 'rucula') - directo;
+        return acc + directo + kg + Math.max(0, ensaladas);
       }
       if (cultivo === 'albahaca') {
         // Solo por unidad: no hay venta de albahaca por kg.
