@@ -13,6 +13,8 @@ export interface FacturaCandidata {
   fecha: string;      // YYYY-MM-DD
   importe: number;
   yaCobrada?: boolean;
+  // Cubierta por los cobros que el cliente tiene en Xubio (ver facturasCliente.ts).
+  cubierta?: boolean;
 }
 
 export interface Combinacion {
@@ -135,7 +137,10 @@ export function sugerirCombinaciones(
   // Las ya cobradas quedan afuera por defecto: si el cobro anterior las canceló, volver a
   // proponerlas es justamente el error que se quiere evitar.
   const candidatas = facturas
-    .filter((f) => (opciones.incluirYaCobradas ? true : !f.yaCobrada) && Math.round(f.importe) > 0)
+    // Las cubiertas por cobros de Xubio quedan afuera igual que las ya imputadas: proponer
+    // una factura que el cliente ya pagó es el error que esta pantalla tiene que evitar, y
+    // además son las que hacían que la lista de combinaciones fuera interminable.
+    .filter((f) => (opciones.incluirYaCobradas ? true : (!f.yaCobrada && !f.cubierta)) && Math.round(f.importe) > 0)
     .sort((a, b) => b.importe - a.importe)
     .slice(0, MAX_FACTURAS);
   if (!candidatas.length) return [];

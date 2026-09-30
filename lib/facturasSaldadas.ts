@@ -15,7 +15,7 @@
 // mucho peor que la molestia que resuelve. Esto vive solo del lado de la app, es reversible
 // y queda registrado quién lo marcó y cuándo.
 
-import { appendRowObj, asegurarHoja, readSheet, updateRow } from './sheets';
+import { appendRowsObj, asegurarHoja, readSheet, updateRow } from './sheets';
 import { fechaArgentinaHoy } from './ocupacion';
 import { claveComprobante } from './comprobantes';
 
@@ -66,22 +66,28 @@ export async function marcarSaldadas(p: PedidoSaldar): Promise<{ marcadas: numbe
   const ya = numerosSaldados(previas);
   const hoy = fechaArgentinaHoy();
 
-  let marcadas = 0, yaEstaban = 0;
+  // Se juntan todas y se escriben de una sola vez.
+  //
+  // Antes era un append por factura, y marcar treinta facturas eran treinta llamadas a la
+  // API de Sheets en pocos segundos: Google las rechaza por cuota y la marca quedaba a
+  // medias, sin forma de saber cuáles entraron. Justo cuando más facturas hay para limpiar
+  // —que es cuando esta pantalla sirve— es cuando fallaba.
+  const nuevas: Record<string, any>[] = [];
+  const reactivar: string[] = [];
+  let yaEstaban = 0;
+
   for (const f of p.facturas) {
     const numero = String(f?.numero || '').trim();
     if (!numero) continue;
     // Marcar dos veces la misma no es un error del usuario: puede haber abierto la pantalla
     // en dos pestañas. Se cuenta y se sigue.
-    if (ya.has(numero)) { yaEstaban++; continue; }
+    if (ya.has(claveComprobante(numero))) { yaEstaban++; continue; }
     // Una fila revertida que se vuelve a marcar se reactiva en vez de duplicarse, así la
     // hoja no acumula dos filas contradictorias para la misma factura.
-    const revertida = previas.find(x => String(x.numero).trim() === numero && String(x.estado) === 'revertida');
-    if (revertida) {
-      await updateRow(HOJA_SALDADAS, 'numero', numero, {
-        estado: 'saldada', fecha_marcado: hoy, usuario: p.usuario, motivo: p.motivo,
-      });
+    if (previas.some(x => claveComprobante(x.numero) === claveComprobante(numero) && String(x.estado) === 'revertida')) {
+      reactivar.push(numero);
     } else {
-      await appendRowObj(HOJA_SALDADAS, {
+      nuevas.push({
         numero,
         id_control: String(f.id_control || ''),
         cliente: String(f.cliente || ''),
@@ -93,10 +99,17 @@ export async function marcarSaldadas(p: PedidoSaldar): Promise<{ marcadas: numbe
         estado: 'saldada',
       });
     }
-    ya.add(numero);
-    marcadas++;
+    ya.add(claveComprobante(numero));
   }
-  return { marcadas, yaEstaban };
+
+  if (nuevas.length) await appendRowsObj(HOJA_SALDADAS, nuevas);
+  // Las reactivaciones son pocas —hay que haber revertido antes— así que van de a una.
+  for (const numero of reactivar) {
+    await updateRow(HOJA_SALDADAS, 'numero', numero, {
+      estado: 'saldada', fecha_marcado: hoy, usuario: p.usuario, motivo: p.motivo,
+    });
+  }
+  return { marcadas: nuevas.length + reactivar.length, yaEstaban };
 }
 
 // Deshacer. Existe porque la marca se pone en lote y a ojo: sin vuelta atrás, un error de

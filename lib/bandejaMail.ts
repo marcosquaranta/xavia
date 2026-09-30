@@ -138,7 +138,14 @@ export async function crearItemDesdeAviso(args: {
   // segundo importa tanto como lo primero: el nombre del aviso casi nunca es el que usamos
   // —"NAF S.R.L." es Mamina— y ningún matcheo por texto va a unir esas dos cosas.
   const faltaImporte = !(Number(importe) > 0);
-  if (faltaImporte || !cand) {
+  // Tercer motivo para llamarla: hay un PDF adjunto y no se sabe qué facturas se pagan.
+  //
+  // La orden de pago viene casi siempre como PDF, y ahí está el detalle de comprobantes que
+  // el cuerpo del mail no tiene. Con las dos condiciones anteriores, un aviso con importe en
+  // el cuerpo y cliente reconocido no abría el adjunto nunca, y el cobro entraba sin saber
+  // qué cancela — que es justo el trabajo que hay que hacer después a mano.
+  const hayPdfSinDetalle = (args.pdfs?.length || 0) > 0 && comprobantes.length === 0;
+  if (faltaImporte || !cand || hayPdfSinDetalle) {
     const paraIA: ClienteParaIA[] = clientes
       .filter(c => String(c.activo || '').toUpperCase() !== 'NO')
       .map(c => ({
@@ -157,11 +164,17 @@ export async function crearItemDesdeAviso(args: {
       comentarioIA = [ia.comentario, ia.razonDelCliente].filter(Boolean).join(' · ');
       if (faltaImporte && Number(ia.importe) > 0) {
         importe = ia.importe;
-        if (ia.comprobantes.length) comprobantes = ia.comprobantes;
         if (ia.retencion) retencion = ia.retencion;
         if (ia.fecha) fechaIA = ia.fecha;
         leidoCon = 'ia';
         confianza = ia.confianza;
+      }
+      // Las facturas se toman aunque el importe ya se supiera: vienen del PDF, que es el
+      // único lugar donde están. Antes esto estaba adentro del if de arriba, así que un
+      // aviso con importe en el cuerpo perdía el detalle del adjunto.
+      if (!comprobantes.length && ia.comprobantes.length) {
+        comprobantes = ia.comprobantes;
+        if (leidoCon !== 'ia') confianza = confianza || ia.confianza;
       }
       pagador = ia.nombrePagador || '';
       cuentaDestino = ia.cuentaDestino || '';

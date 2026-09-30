@@ -52,6 +52,16 @@ export default async function CobranzasPage() {
   let bandeja: ItemBandeja[] = [];
   let aliasRows: AliasCobranza[] = [];
   let saldadas: FacturaSaldada[] = [];
+  // Xubio arranca junto con las planillas, no después. Son las dos consultas más lentas de
+  // la página y ninguna depende de la otra: esperarlas en serie hacía que entrar a
+  // Cobranzas tardara la suma de las dos. Se lanzan acá y se esperan más abajo.
+  const hoyF = fechaArgentinaHoy();
+  const desdeF = sumarDiasISO(hoyF, -DIAS_PAGINA);
+  const pedidoXubio = Promise.all([
+    getComprobantes(desdeF, hoyF).catch(() => [] as any[]),
+    getCobranzas(desdeF, hoyF).catch(() => [] as any[]),
+  ]).catch(() => [[], []] as [any[], any[]]);
+
   try {
     [clientes, enviados, configRows, cobros, bandeja, aliasRows, saldadas] = await Promise.all([
       readSheet<ClienteVenta>('Clientes').catch(() => []),
@@ -93,22 +103,12 @@ export default async function CobranzasPage() {
   // persona está esperando para decidir.
   const saldadasSet = numerosSaldados(saldadas);
 
-  // Las tres consultas a Xubio salen juntas. Antes iban una atrás de otra —cobranzas,
-  // después cuentas, después comprobantes— y la página tardaba la suma de las tres aunque
-  // ninguna dependiera del resultado de la anterior. En paralelo tarda lo que la más lenta.
-  const hoyF = fechaArgentinaHoy();
   let facturasCliente: Record<string, FacturaCliente[]> = {};
   let cuentasXubio: CuentaXubio[] = [];
   let errorCuentas: string | null = null;
   try {
-    const [comps, cobs] = await Promise.all([
-      // Un año: es la misma ventana que usa el recordatorio, así lo que se ve acá es lo
-      // mismo que se le reclama al cliente. Con menos, el resumen mostraba una deuda más
-      // chica que la del mail y no había forma de entender la diferencia.
-      getComprobantes(sumarDiasISO(hoyF, -DIAS_PAGINA), hoyF).catch(() => [] as any[]),
-      getCobranzas(sumarDiasISO(hoyF, -DIAS_PAGINA), hoyF).catch(() => [] as any[]),
-    ]);
-    facturasCliente = facturasPorCliente(comps, cobros, clientes, saldadasSet);
+    const [comps, cobs] = await pedidoXubio;
+    facturasCliente = facturasPorCliente(comps, cobros, clientes, saldadasSet, cobs);
     cuentasXubio = (await getCuentas(cobs)).cuentas;
     if (!cuentasXubio.length) errorCuentas = 'Xubio no devolvió ninguna cuenta donde imputar el cobro.';
   } catch (e: any) {

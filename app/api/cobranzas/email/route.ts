@@ -251,10 +251,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, sinContenido: true, acuse: acuseSin });
     }
 
-    // Los adjuntos se bajan solo si hacen falta: si el cuerpo ya trae un importe, el lector
-    // por patrones lo resuelve gratis y no hay para qué traer nada ni llamar a la IA.
-    const traeAdjuntos = Array.isArray(data?.attachments) && data.attachments.length > 0;
-    const pdfs = traeAdjuntos ? await pdfsDelMail(String(data?.email_id || '')) : [];
+    // Los adjuntos se piden SIEMPRE, no solo cuando el webhook los anuncia.
+    //
+    // El webhook de Resend trae metadatos, y el campo `attachments` puede no venir aunque el
+    // correo tenga adjuntos. Con la condición anterior —bajar solo si `data.attachments`
+    // tenía algo— las órdenes de pago en PDF no se leían nunca: el aviso entraba con lo poco
+    // que dijera el cuerpo del mail y el PDF, que es donde está la información de verdad,
+    // no se miraba. Y no había forma de notarlo desde afuera, porque el aviso igual entraba.
+    //
+    // Cuesta una llamada más a la API de Resend por correo. Es barato al lado de lo que
+    // arregla, y si el correo no tiene adjuntos la lista vuelve vacía y no se baja nada.
+    const pdfs = await pdfsDelMail(String(data?.email_id || ''));
+    if (pdfs.length) console.log(`[cobranzas/email] ${pdfs.length} PDF(s) para leer:`, pdfs.map(p => p.nombre).join(', '));
 
     const r = await crearItemDesdeAviso({
       texto: contenido.texto,

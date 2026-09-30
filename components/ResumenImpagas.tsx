@@ -40,7 +40,7 @@ export default function ResumenImpagas({
     return clientes
       .map((c) => {
         const impagas = (facturasPorCliente[c.id_control] || [])
-          .filter((f) => !f.yaCobrada && !f.saldadaManual)
+          .filter((f) => !f.yaCobrada && !f.saldadaManual && !f.cubierta)
           .slice()
           .sort((a, b) => a.fecha.localeCompare(b.fecha));
         const total = impagas.reduce((a, f) => a + f.importe, 0);
