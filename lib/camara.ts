@@ -151,7 +151,8 @@ function vendidoEntre(cultivo: CultivoCamara, ventas: VentaDia[], lotes: Lote[],
         return acc + (Number(v.albahaca) || 0);
       }
       if (cultivo === 'lechuga_crespa') {
-        const directo = Number(v.lechuga_crespa) || 0;
+        // Incluye las plantas de crespa que se van en ensaladas: salen de la misma cámara.
+        const directo = plantasDeVenta(v, 'lechuga', 'crespa');
         const kg = ((Number(v.lechuga_kg_crespa) || 0) * 1000) / gramosPorPaquete;
         return acc + directo + kg;
       }

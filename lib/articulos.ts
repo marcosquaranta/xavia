@@ -34,6 +34,10 @@ export interface Articulo {
   // Cuántas plantas de cada cultivo consume una unidad. Es lo que conecta la venta con el
   // stock, la cámara y los cajones: sin esto, vender un artículo no descuenta nada.
   plantas?: { rucula?: number; lechuga?: number };
+  // De qué variedad es esa lechuga. Hace falta porque la cámara y el stock abren lechuga en
+  // crespa y hoja de roble, y descontar de la que no es da un stock equivocado en las dos:
+  // de menos en la que realmente se consumió y de más en la otra.
+  variedadLechuga?: 'crespa' | 'roble';
   legacy?: boolean;     // sigue existiendo por las ventas viejas, no se ofrece nunca
 }
 
@@ -65,10 +69,8 @@ export const ARTICULOS: Articulo[] = [
   // redondear a 3 infla el descuento de stock un 20% en cada venta. Los totales se redondean
   // recién al mostrarlos.
   //
-  // PENDIENTE: de qué VARIEDAD es la lechuga de la ensalada clásica (crespa u hoja de roble).
-  // Sin ese dato no se puede descontar en las vistas que abren lechuga por variedad —cámara
-  // y stock por cultivo—, así que ahí todavía no descuenta. Donde la lechuga va junta
-  // —cajones, reporte semanal, valorización y facturación— sí cuenta.
+  // La clásica lleva lechuga CRESPA (confirmado por Marcos): descuenta de crespa en la
+  // cámara y en el stock por cultivo.
   {
     key: 'ensalada_rucula_parmesano', label: 'Ens. Rúc/Parm', labelLargo: 'Ensalada de rúcula y parmesano',
     xubio: 'Ensalada Rucula y Parmesano', unidad: 'unidad', activo: true,
@@ -77,7 +79,7 @@ export const ARTICULOS: Articulo[] = [
   {
     key: 'ensalada_clasica', label: 'Ens. Clásica', labelLargo: 'Ensalada clásica',
     xubio: 'Ensalada Clasica', unidad: 'unidad', activo: true,
-    color: '#0e7490', plantas: { lechuga: 1 },
+    color: '#0e7490', plantas: { lechuga: 1 }, variedadLechuga: 'crespa',
   },
   // ── Dado de baja ──
   // No se hace más (Marcos, septiembre 2026). Se mantiene para las ventas ya cargadas.
@@ -133,13 +135,26 @@ export const LABELS: Record<string, string> = Object.fromEntries(ARTICULOS.map((
 export const LABELS_LARGOS: Record<string, string> = Object.fromEntries(ARTICULOS.map((a) => [a.key, a.labelLargo]));
 export const PRODUCTO_XUBIO: Record<string, string> = Object.fromEntries(ARTICULOS.map((a) => [a.key, a.xubio]));
 
-// Cuántas plantas de un cultivo consume una fila de venta. Los artículos sin `plantas`
-// —hoy las ensaladas— suman 0: es deliberado, ver el comentario de arriba.
-export function plantasDeVenta(v: any, cultivo: 'rucula' | 'lechuga'): number {
+// Cuántas plantas de un cultivo consume una fila de venta. Un artículo sin `plantas` suma
+// 0 — es la forma de decir "esto no sale de la cámara".
+//
+// `variedad` acota a una variedad de lechuga: se usa donde el stock está abierto en crespa
+// y hoja de roble. Sin acotar, suma toda la lechuga junta, que es lo que necesitan los
+// cajones y el reporte semanal.
+export function plantasDeVenta(
+  v: any, cultivo: 'rucula' | 'lechuga', variedad?: 'crespa' | 'roble',
+): number {
   let total = 0;
   for (const a of ARTICULOS) {
     const por = a.plantas?.[cultivo];
     if (!por) continue;
+    // Los artículos que SON la variedad (lechuga_crespa, hoja_roble) se reconocen por su
+    // clave; los que la consumen sin serlo —una ensalada— por `variedadLechuga`.
+    if (variedad && cultivo === 'lechuga') {
+      const suya = a.variedadLechuga
+        || (a.key === 'lechuga_crespa' ? 'crespa' : a.key === 'hoja_roble' ? 'roble' : undefined);
+      if (suya !== variedad) continue;
+    }
     total += (Number(v?.[a.key]) || 0) * por;
   }
   return total;

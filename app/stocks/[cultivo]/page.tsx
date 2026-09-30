@@ -42,13 +42,11 @@ export default async function StockDetallePage({ params, searchParams }: { param
     if (r) return false;
     return isCrespa ? x.includes('crespa') : !x.includes('crespa');
   };
-  // La ensalada de rúcula descuenta 2,5 plantas por unidad (ver lib/articulos.ts). La
-  // clásica todavía no descuenta acá: esta pantalla abre lechuga por variedad y falta saber
-  // si lleva crespa u hoja de roble. Contarla en la que sea daría un stock equivocado en
-  // las dos.
+  // Las ensaladas descuentan plantas, no unidades: 2,5 de rúcula la de parmesano y 1 de
+  // crespa la clásica (ver lib/articulos.ts).
   const ventaQty = (v: VentaDia) => isRucula
     ? plantasDeVenta(v, 'rucula')
-    : isCrespa ? num(v.lechuga_crespa) : num(v.hoja_roble);
+    : plantasDeVenta(v, 'lechuga', isCrespa ? 'crespa' : 'roble');
 
   // Mes (default: actual). ?mes=YYYY-MM
   const hoy = new Date();
