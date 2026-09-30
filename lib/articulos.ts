@@ -39,6 +39,11 @@ export interface Articulo {
   // de menos en la que realmente se consumió y de más en la otra.
   variedadLechuga?: 'crespa' | 'roble';
   legacy?: boolean;     // sigue existiendo por las ventas viejas, no se ofrece nunca
+  // Se carga en su propia sección y no como una columna más de la grilla de paquetes.
+  // La grilla principal es ancha —una columna por artículo y una fila por sucursal— y
+  // sumarle artículos que compran dos o tres clientes la vuelve ilegible para los veinte
+  // que no los compran.
+  seccionAparte?: boolean;
 }
 
 export const ARTICULOS: Articulo[] = [
@@ -75,11 +80,13 @@ export const ARTICULOS: Articulo[] = [
     key: 'ensalada_rucula_parmesano', label: 'Ens. Rúc/Parm', labelLargo: 'Ensalada de rúcula y parmesano',
     xubio: 'Ensalada Rucula y Parmesano', unidad: 'unidad', activo: true,
     color: '#0f766e', plantas: { rucula: 2.5 },
+    seccionAparte: true,
   },
   {
     key: 'ensalada_clasica', label: 'Ens. Clásica', labelLargo: 'Ensalada clásica',
     xubio: 'Ensalada Clasica', unidad: 'unidad', activo: true,
     color: '#0e7490', plantas: { lechuga: 1 }, variedadLechuga: 'crespa',
+    seccionAparte: true,
   },
   // ── Dado de baja ──
   // No se hace más (Marcos, septiembre 2026). Se mantiene para las ventas ya cargadas.

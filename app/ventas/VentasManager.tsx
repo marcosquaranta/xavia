@@ -11,8 +11,12 @@ import { ARTICULOS_UNIDAD, KEYS_UNIDAD, KEYS_KG } from '@/lib/articulos';
 // encontrarlos todos. Se cargan solo los ACTIVOS —la bandeja de rúcula ya no se hace— pero
 // las ventas viejas que la tienen se siguen leyendo y valorizando igual.
 const PP = ARTICULOS_UNIDAD.filter(a => a.principal);
-const PE = ARTICULOS_UNIDAD.filter(a => !a.principal);
-const ALL = ARTICULOS_UNIDAD;
+const PE = ARTICULOS_UNIDAD.filter(a => !a.principal && !a.seccionAparte);
+const ALL = [...PP, ...PE];
+// Las ensaladas van en su propia tabla, abajo, y solo con los clientes que las compran.
+// Como columnas de la grilla principal aparecían para los veinte clientes que no las
+// compran, y esa grilla ya tiene una fila por sucursal: se volvía ilegible.
+const ENSALADAS = ARTICULOS_UNIDAD.filter(a => a.seccionAparte);
 
 interface LineaCarga {
   id_control:string; nombre_cliente:string;
@@ -21,7 +25,10 @@ interface LineaCarga {
 }
 // Resumen de texto (cantidades por cliente y por producto) para el mensaje de "Cargar ventas".
 function resumenCarga(lineas: LineaCarga[]): string {
-  const claveProd = [...ALL.map(p=>({key:p.key as keyof LineaCarga & string, label:p.label, u:'u'})), {key:'rucula_kg' as const,label:'Rúcula',u:'kg'}, {key:'lechuga_kg_crespa' as const,label:'Lechuga Crespa',u:'kg'}, {key:'lechuga_kg_roble' as const,label:'Lechuga Roble',u:'kg'}];
+  // ARTICULOS_UNIDAD y no ALL: el mensaje de confirmación tiene que nombrar TODO lo que se
+  // cargó, incluidas las ensaladas, que se cargan en su propia sección. Si sale de la misma
+  // lista que arma la grilla, lo que no está en la grilla se confirma en silencio.
+  const claveProd = [...ARTICULOS_UNIDAD.map(p=>({key:p.key as keyof LineaCarga & string, label:p.label, u:'u'})), {key:'rucula_kg' as const,label:'Rúcula',u:'kg'}, {key:'lechuga_kg_crespa' as const,label:'Lechuga Crespa',u:'kg'}, {key:'lechuga_kg_roble' as const,label:'Lechuga Roble',u:'kg'}];
 
   // El desglose por CULTIVO dentro de cada cliente, que es contra lo que se controla lo que
   // se subió al camión. El total por cliente solo no alcanza: "La Esperanza 60 u" no dice
@@ -106,10 +113,10 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   const [ctds,setCtds]=useState<Ctds>({});
   const [ests,setEsts]=useState<Ests>({});
   const [disp,setDisp]=useState<Record<PK,string>>(vacio(''));
-  // El tilde de "extras" arranca PRENDIDO si algún cliente ya tiene precio cargado en
-  // alguno de esos artículos, o sea si de verdad se venden. Cuando se agregaron las
-  // ensaladas quedaron atrás de este tilde —que además seguía diciendo "Bandeja +
-  // Albahaca"— y desde la pantalla de carga no había forma de saber que estaban ahí.
+  // Arranca prendido si algún cliente tiene precio cargado en alguno de esos artículos, o
+  // sea si de verdad se venden. El texto del tilde también sale del catálogo: decía
+  // "Bandeja + Albahaca" escrito a mano y siguió diciéndolo después de dar de baja la
+  // bandeja, que es exactamente cómo un artículo termina escondido sin que nadie lo sepa.
   const [extras,setExtras]=useState(()=>PE.some(a=>precios.some(p=>Number((p as any)[a.key])>0)));
   const [loading,setLoading]=useState(false);
   const [exp,setExp]=useState(false);
@@ -148,6 +155,13 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
 
   const prods = extras ? ALL : PP;
   const filas = mkFilas(clientes,frecuencias);
+  // Solo los clientes con precio cargado en alguna ensalada. Tener precio es lo que
+  // significa "a este cliente se le vende esto": sin precio la venta se cargaría en
+  // cantidad y saldría en $0 en la factura.
+  const filasEnsalada = filas.filter(f=>ENSALADAS.some(a=>pr(f.id_control,f.sucursal,a.key)>0));
+  const totsEnsalada: Record<string,number> = Object.fromEntries(
+    ENSALADAS.map(a=>[a.key, filasEnsalada.reduce((acc,f)=>acc+(Number(q(f.id_control,f.sucursal,a.key))||0),0)]),
+  );
 
   function pr(id:string,suc:string,k:PK){const r=precios.find(p=>String(p.id_control)===String(id)&&p.sucursal_obs===suc);return r?Number((r as any)[k]||0):0;}
   function q(id:string,suc:string,k:PK){return ctds[`${id}__${suc}`]?.[k]||'';}
@@ -882,6 +896,78 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
               </tbody>
             </table>
           </div>
+        )}
+
+        {/* ── Sección Ensaladas ──
+            Aparte de la grilla de paquetes a pedido de Marcos: mezcladas ahí se hacía
+            confuso. Usa los mismos handlers que la grilla principal, así que guarda igual
+            —al salir del campo, con el mismo indicador de color— sin código duplicado. */}
+        {ENSALADAS.length>0&&(
+          filasEnsalada.length>0?(
+          <div style={{marginTop:'16px',border:'1px solid #99f6e4',borderRadius:'8px',overflow:'hidden'}}>
+            <div style={{background:'#f0fdfa',padding:'8px 14px',borderBottom:'1px solid #99f6e4',display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap'}}>
+              <span style={{fontSize:'13px',fontWeight:700,color:'#0f766e'}}>🥗 Ensaladas</span>
+              <span style={{fontSize:'11px',color:'#0d9488'}}>
+                Solo los clientes con precio cargado · descuentan plantas, no paquetes
+              </span>
+            </div>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
+              <thead>
+                <tr style={{background:'#ccfbf1',borderBottom:'1px solid #99f6e4'}}>
+                  <th style={{textAlign:'left',padding:'8px 12px',minWidth:'150px'}}>Cliente</th>
+                  {ENSALADAS.map(a=>(
+                    <th key={a.key} style={{textAlign:'center',padding:'8px 10px',color:a.color,fontWeight:700,minWidth:'120px'}}>{a.labelLargo}</th>
+                  ))}
+                  <th style={{textAlign:'center',padding:'8px 6px',color:'#9ca3af',minWidth:'92px',fontSize:'10px'}}>Fecha fact.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filasEnsalada.map((f,i)=>(
+                  <tr key={`${f.id_control}__${f.sucursal}`} style={{borderTop:'1px solid #f1f5f9',background:i%2?'#fafafa':'white'}}>
+                    <td style={{padding:'5px 12px',fontWeight:600}}>
+                      {f.nombre_cliente}
+                      {f.sucursal&&<span style={{color:'#9ca3af',fontWeight:400}}> · {f.sucursal}</span>}
+                    </td>
+                    {ENSALADAS.map(a=>{
+                      // Un cliente puede comprar una ensalada y no la otra: la que no tiene
+                      // precio no se deja cargar, para no facturarle algo en $0.
+                      const precio=pr(f.id_control,f.sucursal,a.key);
+                      if(!(precio>0)) return <td key={a.key} style={{textAlign:'center',color:'#d1d5db',fontSize:'11px'}}>sin precio</td>;
+                      const est=e(f.id_control,f.sucursal,a.key);const val=q(f.id_control,f.sucursal,a.key);
+                      return(
+                        <td key={a.key} style={{padding:'3px 6px'}}>
+                          <input type="number" min={0} value={val} placeholder="—"
+                            onChange={ev=>onChange(f,a.key,ev.target.value)} onBlur={()=>onBlur(f,a.key)}
+                            style={{width:'100%',textAlign:'center',fontSize:'15px',fontWeight:700,
+                              border:`2px solid ${est==='saving'?'#fbbf24':est==='saved'?'#86efac':est==='error'?'#fca5a5':Number(val)>0?'#5eead4':'#e5e7eb'}`,
+                              borderRadius:'6px',padding:'5px 4px',background:Number(val)>0?'#f0fdfa':'white',color:Number(val)>0?'#0f766e':'#9ca3af',outline:'none'}}/>
+                        </td>
+                      );
+                    })}
+                    <td style={{padding:'3px 5px'}}>
+                      <input type="date" value={fc[f.id_control]||fecha} onChange={ev=>setFc(p=>({...p,[f.id_control]:ev.target.value}))}
+                        style={{width:'100%',fontSize:'10px',border:`1px solid ${fc[f.id_control]&&fc[f.id_control]!==fecha?'#fbbf24':'#e5e7eb'}`,borderRadius:'5px',padding:'4px 3px',background:fc[f.id_control]&&fc[f.id_control]!==fecha?'#fffbeb':'white',color:fc[f.id_control]&&fc[f.id_control]!==fecha?'#92400e':'#9ca3af'}}/>
+                    </td>
+                  </tr>
+                ))}
+                <tr style={{background:'#f0fdfa',borderTop:'2px solid #5eead4'}}>
+                  <td style={{padding:'8px 12px',fontSize:'12px',fontWeight:700,color:'#0f766e'}}>Total</td>
+                  {ENSALADAS.map(a=>(
+                    <td key={a.key} style={{textAlign:'center',padding:'8px',fontSize:'15px',fontWeight:800,color:totsEnsalada[a.key]>0?'#0f766e':'#d1d5db'}}>
+                      {totsEnsalada[a.key]>0?totsEnsalada[a.key].toLocaleString('es-AR'):'—'}
+                    </td>
+                  ))}
+                  <td/>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          ):(
+            <p style={{marginTop:'14px',fontSize:'11.5px',color:'#92400e',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'8px',padding:'8px 12px'}}>
+              🥗 <strong>Ensaladas:</strong> todavía no hay ningún cliente con precio cargado, así que no hay a quién
+              cargárselas. Se cargan en Admin → Clientes de venta y esta sección aparece sola.
+            </p>
+          )
         )}
 
         {/* ── Resumen del día (en paquetes / unidades) ── */}
