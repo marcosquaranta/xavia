@@ -3,6 +3,7 @@ import { Fragment, useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { VentaDia } from '@/lib/types';
 
+import { ARTICULOS } from '@/lib/articulos';
 interface EntradaExpCliente {
   id_exportacion: string; fecha: string; fecha_exportacion: string; cliente: string; id_control: string;
   sucursales?: string[];
@@ -15,15 +16,10 @@ interface EntradaPend {
 const fmt = (n: number) => Math.round(n).toLocaleString('es-AR');
 const fmtKg = (n: number) => n > 0 ? `${n.toFixed(1)} kg` : '—';
 
+// Acá van TODOS, también los dados de baja: es una pantalla que mira hacia atrás y una
+// venta de bandeja de rúcula del año pasado tiene que poder verse y corregirse.
 const CAMPOS = [
-  { key: 'rucula', label: 'Rúcula' },
-  { key: 'lechuga_crespa', label: 'Crespa' },
-  { key: 'hoja_roble', label: 'Hoja Roble' },
-  { key: 'bandeja_rucula', label: 'Bandeja' },
-  { key: 'albahaca', label: 'Albahaca' },
-  { key: 'rucula_kg', label: 'Rúcula kg' },
-  { key: 'lechuga_kg_crespa', label: 'Crespa kg' },
-  { key: 'lechuga_kg_roble', label: 'Roble kg' },
+  ...ARTICULOS.filter((a) => !a.legacy).map((a) => ({ key: a.key, label: a.label })),
 ] as const;
 
 // Editor inline de una venta puntual ya facturada — corrige el registro interno de Xavia

@@ -2,8 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { appendRowObj, batchUpdateRows, readSheet } from '@/lib/sheets';
 import type { VentaDia } from '@/lib/types';
+import { KEYS_UNIDAD } from '@/lib/articulos';
 
+import { asegurarColumnasArticulos } from '@/lib/articulosSheets';
 export async function POST(req: NextRequest) {
+  // Las columnas de los artículos nuevos tienen que existir antes de escribir por nombre.
+  await asegurarColumnasArticulos();
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
   try {
@@ -36,9 +40,14 @@ export async function POST(req: NextRequest) {
         toUpdate.push({
           keyValue: existente.id_venta,
           updates: {
-            rucula: l.rucula || 0, lechuga_crespa: l.lechuga_crespa || 0,
-            hoja_roble: l.hoja_roble || 0, bandeja_rucula: l.bandeja_rucula || 0,
-            albahaca: l.albahaca || 0,
+            // Por clave de artículo: agregar un producto no obliga a tocar este objeto, que
+            // es justamente el lugar donde olvidarse hace que la venta se guarde sin él.
+            ...Object.fromEntries(KEYS_UNIDAD.map((k) => [k, (l as any)[k] || 0])),
+            // La bandeja de rúcula ya no se carga, pero si la fila vieja la tiene no se pisa
+            // con 0: sería borrar una venta real al re-guardar cualquier otro campo.
+            bandeja_rucula: (l as any).bandeja_rucula !== undefined
+              ? (l as any).bandeja_rucula || 0
+              : (Number((existente as any).bandeja_rucula) || 0),
             rucula_kg: l.rucula_kg || 0,
             // lechuga_kg (legacy) ya no lo manda la pantalla de Ventas — si no viene en el
             // request se preserva lo que ya estaba, para no pisar con 0 una venta por kg
@@ -55,8 +64,8 @@ export async function POST(req: NextRequest) {
         await appendRowObj('Ventas', {
           id_venta: `V-${String(nextId++).padStart(5, '0')}`, fecha,
           id_control: l.id_control, nombre_cliente: l.nombre_cliente, sucursal: l.sucursal,
-          rucula: l.rucula || 0, lechuga_crespa: l.lechuga_crespa || 0, hoja_roble: l.hoja_roble || 0,
-          bandeja_rucula: l.bandeja_rucula || 0, albahaca: l.albahaca || 0,
+          ...Object.fromEntries(KEYS_UNIDAD.map((k) => [k, (l as any)[k] || 0])),
+          bandeja_rucula: (l as any).bandeja_rucula || 0,
           rucula_kg: l.rucula_kg || 0, lechuga_kg: l.lechuga_kg || 0,
           lechuga_kg_crespa: l.lechuga_kg_crespa || 0, lechuga_kg_roble: l.lechuga_kg_roble || 0,
           exportado: '', usuario: user.email, fecha_carga: fechaCarga,

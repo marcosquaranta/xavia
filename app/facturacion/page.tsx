@@ -7,17 +7,13 @@ import { nombreClienteVisible } from '@/lib/clientes';
 import Header from '@/components/Header';
 import FacturacionManager from './FacturacionManager';
 
+import { ARTICULOS } from '@/lib/articulos';
 export const dynamic = 'force-dynamic';
 
+// Todos, incluidos los de baja y el legacy: se factura lo que se cargó, no lo que se
+// vende hoy.
 const PRODS: { key: string; label: string }[] = [
-  { key: 'rucula', label: 'Rúcula' },
-  { key: 'lechuga_crespa', label: 'Crespa' },
-  { key: 'hoja_roble', label: 'Roble' },
-  { key: 'bandeja_rucula', label: 'Bandeja' },
-  { key: 'albahaca', label: 'Albahaca' },
-  { key: 'rucula_kg', label: 'Rúcula KG' },
-  { key: 'lechuga_kg', label: 'Lechuga KG' }, // legacy, ventas cargadas antes del split crespa/roble
-  { key: 'lechuga_kg_crespa', label: 'Lechuga Crespa KG' },
+  ...ARTICULOS.map((a) => ({ key: a.key, label: a.label })),
   { key: 'lechuga_kg_roble', label: 'Lechuga Roble KG' },
 ];
 

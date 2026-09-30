@@ -4,11 +4,12 @@ import { readSheet, batchUpdateRows } from '@/lib/sheets';
 import { emitirPendientes } from '@/lib/facturacionEmitir';
 import { entregasConCobro, avisarCobroEnEntrega } from '@/lib/avisoCobroEntrega';
 import type { VentaDia, ClienteVenta } from '@/lib/types';
+import { PROD_KEYS } from '@/lib/articulos';
 
 // A quién le llega el aviso de "hay que cobrar en la entrega".
 const DESTINATARIOS_AVISO = ['administracion@xavia.com.ar'];
 
-const QTY_KEYS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'];
+const QTY_KEYS = PROD_KEYS;
 
 // Marca las ventas borrador de una fecha como PENDIENTE y las emite DIRECTO a Xubio
 // (una factura por cliente, sin pasar por la sección Facturación). Las que fallen

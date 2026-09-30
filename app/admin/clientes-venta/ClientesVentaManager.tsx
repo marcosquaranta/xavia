@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { ClienteVenta, PrecioVenta } from '@/lib/types';
 
+import { ARTICULOS_UNIDAD } from '@/lib/articulos';
 // Último cambio de cada precio, por "id_control||sucursal||producto". Viene de la hoja
 // PreciosHistorico, que se empezó a llenar en septiembre de 2026: un producto sin entrada
 // no quiere decir que nunca se le haya tocado el precio, sino que el cambio es anterior a
@@ -17,13 +18,10 @@ interface Props {
   cambios: Record<string, CambioPrecioUI>;
 }
 
-const PROD_LABELS = [
-  { key: 'rucula',         label: 'Rúcula' },
-  { key: 'lechuga_crespa', label: 'Lechuga Crespa' },
-  { key: 'hoja_roble',     label: 'Hoja de Roble' },
-  { key: 'bandeja_rucula', label: 'Bandeja Rúcula' },
-  { key: 'albahaca',       label: 'Albahaca' },
-];
+// Solo los artículos que se venden hoy. Los dados de baja no se editan —no tiene sentido
+// ponerle precio nuevo a algo que no se hace más— pero su precio viejo sigue en la planilla
+// y se sigue usando para valorizar las ventas de cuando sí se vendía.
+const PROD_LABELS = ARTICULOS_UNIDAD.map((a) => ({ key: a.key, label: a.labelLargo }));
 // lechuga_kg (precio único, legacy) ya no se edita acá — reemplazado por precio propio
 // por variedad. El valor viejo se preserva en la planilla pero no se toca desde este form.
 const KG_LABELS = [

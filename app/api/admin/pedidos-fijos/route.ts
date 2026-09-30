@@ -2,14 +2,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
 import { appendRowObj, asegurarHoja, deleteRow, readSheet, updateRow } from '@/lib/sheets';
 import type { PedidoFijo } from '@/lib/types';
+import { KEYS_UNIDAD_HISTORICAS } from '@/lib/articulos';
 
-const HEADERS = ['id_pedido_fijo', 'id_control', 'nombre_cliente', 'sucursal', 'dia_semana', 'rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'activo', 'notas'];
+import { asegurarColumnasArticulos } from '@/lib/articulosSheets';
+// Las columnas de artículos salen del catálogo, y las de baja quedan: un pedido fijo
+// cargado con bandeja de rúcula se sigue leyendo.
+const HEADERS = ['id_pedido_fijo', 'id_control', 'nombre_cliente', 'sucursal', 'dia_semana', ...KEYS_UNIDAD_HISTORICAS, 'activo', 'notas'];
 
 export async function POST(req: NextRequest) {
+  // Las columnas de los artículos nuevos tienen que existir antes de escribir por nombre.
+  await asegurarColumnasArticulos();
   if (!(await isAdmin())) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
   try {
     const body = await req.json();
-    const { id_control, nombre_cliente, sucursal, dia_semana, rucula, lechuga_crespa, hoja_roble, bandeja_rucula, albahaca, notas } = body;
+    const { id_control, nombre_cliente, sucursal, dia_semana, notas } = body;
     if (!id_control || dia_semana === undefined || dia_semana === null) {
       return NextResponse.json({ error: 'datos_incompletos' }, { status: 400 });
     }
@@ -19,8 +25,8 @@ export async function POST(req: NextRequest) {
     const idNuevo = `PF-${String(maxId + 1).padStart(4, '0')}`;
     await appendRowObj('PedidosFijos', {
       id_pedido_fijo: idNuevo, id_control, nombre_cliente: nombre_cliente || '', sucursal: sucursal || '',
-      dia_semana: Number(dia_semana), rucula: Number(rucula) || 0, lechuga_crespa: Number(lechuga_crespa) || 0,
-      hoja_roble: Number(hoja_roble) || 0, bandeja_rucula: Number(bandeja_rucula) || 0, albahaca: Number(albahaca) || 0,
+      dia_semana: Number(dia_semana),
+      ...Object.fromEntries(KEYS_UNIDAD_HISTORICAS.map((k) => [k, Number(body[k]) || 0])),
       activo: 'SI', notas: notas || '',
     });
     return NextResponse.json({ ok: true, id_pedido_fijo: idNuevo });

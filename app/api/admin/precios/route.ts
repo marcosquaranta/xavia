@@ -4,15 +4,17 @@ import { appendRowObj, asegurarHoja, readRaw, readSheet, setRowByHeader } from '
 import { getCurrentUser } from '@/lib/auth';
 import { HOJA_PRECIOS_HIST, HEADERS_PRECIOS_HIST, detectarCambios, type CambioPrecio } from '@/lib/preciosHistorico';
 import type { PrecioVenta } from '@/lib/types';
+import { PROD_KEYS } from '@/lib/articulos';
 
+import { asegurarColumnasArticulos } from '@/lib/articulosSheets';
 // Upsert de precio por id_control + sucursal_obs
 export async function POST(req: NextRequest) {
+  // Las columnas de los artículos nuevos tienen que existir antes de escribir por nombre.
+  await asegurarColumnasArticulos();
   if (!(await isAdmin())) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
   try {
-    const {
-      id_control, nombre_cliente, sucursal_obs, rucula, lechuga_crespa, hoja_roble,
-      bandeja_rucula, albahaca, rucula_kg, lechuga_kg, lechuga_kg_crespa, lechuga_kg_roble,
-    } = await req.json();
+    const body = await req.json();
+    const { id_control, nombre_cliente, sucursal_obs } = body;
     if (!id_control || !sucursal_obs) return NextResponse.json({ error: 'datos_incompletos' }, { status: 400 });
 
     const precios = await readSheet<PrecioVenta>('Precios');
@@ -26,10 +28,9 @@ export async function POST(req: NextRequest) {
     // como lechuga_kg_crespa/lechuga_kg_roble.
     const camposObj: Record<string, any> = {
       id_control: String(id_control), nombre_cliente: nombre_cliente || (existe as any)?.nombre_cliente || '', sucursal_obs,
-      rucula: campo(rucula, 'rucula'), lechuga_crespa: campo(lechuga_crespa, 'lechuga_crespa'), hoja_roble: campo(hoja_roble, 'hoja_roble'),
-      bandeja_rucula: campo(bandeja_rucula, 'bandeja_rucula'), albahaca: campo(albahaca, 'albahaca'),
-      rucula_kg: campo(rucula_kg, 'rucula_kg'), lechuga_kg: campo(lechuga_kg, 'lechuga_kg'),
-      lechuga_kg_crespa: campo(lechuga_kg_crespa, 'lechuga_kg_crespa'), lechuga_kg_roble: campo(lechuga_kg_roble, 'lechuga_kg_roble'),
+      // Un precio por cada artículo del catálogo, incluidos los dados de baja: si se
+      // borrara el precio de la bandeja de rúcula, las ventas viejas pasarían a valer $0.
+      ...Object.fromEntries(PROD_KEYS.map((k) => [k, campo(body[k], k as keyof PrecioVenta)])),
     };
 
     if (existe) {

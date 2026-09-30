@@ -4,19 +4,21 @@ import Link from 'next/link';
 import type { ClienteVenta, PrecioVenta, VentaDia, PedidoFijo } from '@/lib/types';
 import { ventasCargadasSemana } from '@/lib/estadisticasVentas';
 import { nombreClienteVisible } from '@/lib/clientes';
+import { ARTICULOS_UNIDAD, KEYS_UNIDAD, KEYS_KG } from '@/lib/articulos';
 
-const PP = [
-  { key:'rucula',         xubio:'Rucula Hidropónica',                     label:'Rúcula',     color:'#166534' },
-  { key:'lechuga_crespa', xubio:'Lechuga Crespa Hidropónica',             label:'Crespa',     color:'#4d7c0f' },
-  { key:'hoja_roble',     xubio:'Lechuga Hoja de Roble Verde Hidropónica',label:'Hoja Roble', color:'#65a30d' },
-] as const;
-const PE = [
-  { key:'bandeja_rucula', xubio:'Rucula Bandeja',      label:'Bandeja', color:'#14532d' },
-  { key:'albahaca',       xubio:'Albahaca Hidropónica',label:'Albahaca',color:'#047857' },
-] as const;
-const ALL = [...PP,...PE];
+// Los artículos salen del catálogo (lib/articulos.ts), no de una lista escrita acá: esa
+// lista estaba repetida en veinticinco archivos y agregar un producto significaba
+// encontrarlos todos. Se cargan solo los ACTIVOS —la bandeja de rúcula ya no se hace— pero
+// las ventas viejas que la tienen se siguen leyendo y valorizando igual.
+const PP = ARTICULOS_UNIDAD.filter(a => a.principal);
+const PE = ARTICULOS_UNIDAD.filter(a => !a.principal);
+const ALL = ARTICULOS_UNIDAD;
 
-interface LineaCarga { id_control:string; nombre_cliente:string; rucula:number; lechuga_crespa:number; hoja_roble:number; bandeja_rucula:number; albahaca:number; rucula_kg:number; lechuga_kg_crespa:number; lechuga_kg_roble:number }
+interface LineaCarga {
+  id_control:string; nombre_cliente:string;
+  // Las cantidades van por clave de artículo: agregar uno no cambia este tipo.
+  [key:string]:string|number;
+}
 // Resumen de texto (cantidades por cliente y por producto) para el mensaje de "Cargar ventas".
 function resumenCarga(lineas: LineaCarga[]): string {
   const claveProd = [...ALL.map(p=>({key:p.key as keyof LineaCarga & string, label:p.label, u:'u'})), {key:'rucula_kg' as const,label:'Rúcula',u:'kg'}, {key:'lechuga_kg_crespa' as const,label:'Lechuga Crespa',u:'kg'}, {key:'lechuga_kg_roble' as const,label:'Lechuga Roble',u:'kg'}];
@@ -53,7 +55,12 @@ function resumenCarga(lineas: LineaCarga[]): string {
   const lineasProducto = Array.from(porProducto.entries()).sort((a,b)=>b[1]-a[1]).map(([p,t])=>`· ${p}: ${fmt(t)}`).join('\n');
   return `\n${bloquesCliente}\n\nTotal por producto:\n${lineasProducto}`;
 }
-type PK = 'rucula'|'lechuga_crespa'|'hoja_roble'|'bandeja_rucula'|'albahaca';
+// Las claves que se pueden cargar hoy. Derivadas del catálogo: antes era una unión escrita
+// a mano y cada Record<PK,...> de abajo había que actualizarlo a mano también.
+type PK = string;
+// Un registro vacío con todas las claves activas. Reemplaza los seis objetos literales que
+// había que mantener en paralelo.
+const vacio = <T,>(v: T): Record<PK, T> => Object.fromEntries(KEYS_UNIDAD.map(k => [k, v])) as Record<PK, T>;
 type SV = { rucula:number; lechuga_crespa:number; hoja_roble:number };
 // lechuga_kg (legacy, sin distinguir variedad) sigue en el shape porque calcStats la
 // sigue sumando para no perder historial, aunque esta pantalla ya no la usa.
@@ -66,7 +73,7 @@ type Ctds = Record<string, Record<PK,string>>;
 type KGK = 'rucula_kg'|'lechuga_kg_crespa'|'lechuga_kg_roble';
 type CKG = Record<string, Record<KGK,string>>;
 type Ests = Record<string, Record<PK,'idle'|'saving'|'saved'|'error'>>;
-const EQ: Record<PK,string> = { rucula:'',lechuga_crespa:'',hoja_roble:'',bandeja_rucula:'',albahaca:'' };
+const EQ: Record<PK,string> = vacio('');
 const EQ_KG: Record<KGK,string> = { rucula_kg:'', lechuga_kg_crespa:'', lechuga_kg_roble:'' };
 
 function mkFilas(cs: ClienteVenta[], freq: Record<string,number>): Fila[] {
@@ -98,7 +105,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   const [fc,setFc]=useState<Record<string,string>>({});
   const [ctds,setCtds]=useState<Ctds>({});
   const [ests,setEsts]=useState<Ests>({});
-  const [disp,setDisp]=useState<Record<PK,string>>({rucula:'',lechuga_crespa:'',hoja_roble:'',bandeja_rucula:'',albahaca:''});
+  const [disp,setDisp]=useState<Record<PK,string>>(vacio(''));
   const [extras,setExtras]=useState(false);
   const [loading,setLoading]=useState(false);
   const [exp,setExp]=useState(false);
@@ -176,7 +183,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       const c:Ctds={}; const ckg:CKG={};
       for(const v of data){
         const key=`${v.id_control}__${v.sucursal}`;
-        c[key]={rucula:String(v.rucula||''),lechuga_crespa:String(v.lechuga_crespa||''),hoja_roble:String(v.hoja_roble||''),bandeja_rucula:String(v.bandeja_rucula||''),albahaca:String(v.albahaca||'')};
+        c[key]=Object.fromEntries(KEYS_UNIDAD.map(k=>[k,String((v as any)[k]||'')])) as Record<PK,string>;
         ckg[key]={rucula_kg:String(v.rucula_kg||''),lechuga_kg_crespa:String(v.lechuga_kg_crespa||''),lechuga_kg_roble:String(v.lechuga_kg_roble||'')};
       }
       // Pedidos fijos de ese día de la semana: pre-cargan solo lo que todavía no tiene
@@ -190,7 +197,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
         if (c[key]) continue;
         const vals = {...EQ};
         let tieneAlgo = false;
-        for (const k of ['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca'] as PK[]) {
+        for (const k of KEYS_UNIDAD) {
           const n = Number((pf as any)[k]) || 0;
           if (n > 0) { vals[k] = String(n); tieneAlgo = true; nuevoPrefijo.add(`${key}__${k}`); }
         }
@@ -251,7 +258,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
     if(q(f.id_control,f.sucursal,k)==='')return;
     se(f.id_control,f.sucursal,k,'saving');
     try{
-      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:Number(q(f.id_control,f.sucursal,'rucula'))||0,lechuga_crespa:Number(q(f.id_control,f.sucursal,'lechuga_crespa'))||0,hoja_roble:Number(q(f.id_control,f.sucursal,'hoja_roble'))||0,bandeja_rucula:Number(q(f.id_control,f.sucursal,'bandeja_rucula'))||0,albahaca:Number(q(f.id_control,f.sucursal,'albahaca'))||0}]})});
+      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0]))}]})});
       if(!r.ok)throw new Error();
       se(f.id_control,f.sucursal,k,'saved');setTimeout(()=>se(f.id_control,f.sucursal,k,'idle'),2000);
       cargarVentasSemana();
@@ -274,7 +281,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
     const lkgR=Number(domRefs?.lechuga_kg_roble?.value)||0;
     KGK_ALL.forEach(k=>seKg(f.id_control,f.sucursal,k,'saving'));
     try{
-      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:rkg,lechuga_kg_crespa:lkgC,lechuga_kg_roble:lkgR}]})});
+      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...vacio(0),rucula_kg:rkg,lechuga_kg_crespa:lkgC,lechuga_kg_roble:lkgR}]})});
       if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error((j as any).error||'Error');};
       KGK_ALL.forEach(k=>{seKg(f.id_control,f.sucursal,k,'saved');setTimeout(()=>seKg(f.id_control,f.sucursal,k,'idle'),2000);});
       cargarVentasSemana();
@@ -290,9 +297,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       Object.values(tmrs.current).forEach(t=>clearTimeout(t));
       // Flush de todas las cantidades cargadas (igual que en exportar)
       const todasLineas = [
-        ...filasNormales.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:Number(q(f.id_control,f.sucursal,'rucula'))||0,lechuga_crespa:Number(q(f.id_control,f.sucursal,'lechuga_crespa'))||0,hoja_roble:Number(q(f.id_control,f.sucursal,'hoja_roble'))||0,bandeja_rucula:Number(q(f.id_control,f.sucursal,'bandeja_rucula'))||0,albahaca:Number(q(f.id_control,f.sucursal,'albahaca'))||0,rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
-        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg_crespa:Number(dr?.lechuga_kg_crespa?.value)||0,lechuga_kg_roble:Number(dr?.lechuga_kg_roble?.value)||0};}),
-      ].filter(l=>l.rucula>0||l.lechuga_crespa>0||l.hoja_roble>0||l.bandeja_rucula>0||l.albahaca>0||l.rucula_kg>0||l.lechuga_kg_crespa>0||l.lechuga_kg_roble>0);
+        ...filasNormales.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
+        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...vacio(0),rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg_crespa:Number(dr?.lechuga_kg_crespa?.value)||0,lechuga_kg_roble:Number(dr?.lechuga_kg_roble?.value)||0};}),
+      ].filter((l:LineaCarga)=>[...KEYS_UNIDAD,...KEYS_KG].some(k=>Number(l[k])>0));
       const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:todasLineas})});
       if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar ventas');}
       const r=await fetch('/api/ventas/cargar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha})});
@@ -318,10 +325,10 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       // Cancelar timers pendientes y guardar TODO en UN solo request antes de exportar
       Object.values(tmrs.current).forEach(t=>clearTimeout(t));
       const todasLineas = [
-        ...filasNormales.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:Number(q(f.id_control,f.sucursal,'rucula'))||0,lechuga_crespa:Number(q(f.id_control,f.sucursal,'lechuga_crespa'))||0,hoja_roble:Number(q(f.id_control,f.sucursal,'hoja_roble'))||0,bandeja_rucula:Number(q(f.id_control,f.sucursal,'bandeja_rucula'))||0,albahaca:Number(q(f.id_control,f.sucursal,'albahaca'))||0,rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
-        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0,rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg_crespa:Number(dr?.lechuga_kg_crespa?.value)||0,lechuga_kg_roble:Number(dr?.lechuga_kg_roble?.value)||0};}),
+        ...filasNormales.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
+        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...vacio(0),rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg_crespa:Number(dr?.lechuga_kg_crespa?.value)||0,lechuga_kg_roble:Number(dr?.lechuga_kg_roble?.value)||0};}),
       // Solo enviar líneas con al menos una cantidad > 0
-      ].filter(l=>l.rucula>0||l.lechuga_crespa>0||l.hoja_roble>0||l.bandeja_rucula>0||l.albahaca>0||l.rucula_kg>0||l.lechuga_kg_crespa>0||l.lechuga_kg_roble>0);
+      ].filter((l:LineaCarga)=>[...KEYS_UNIDAD,...KEYS_KG].some(k=>Number(l[k])>0));
       const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:todasLineas})});
       if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar ventas');}
       const r=await fetch('/api/ventas/exportar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,fechasCliente:fc,correlaA:Number(correlaA),correlaB:Number(correlaB),enviarEmail})});
@@ -341,7 +348,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
 
   const filasNormales = filas.filter(f=>f.unidad!=='kg');
   const filasKg = filas.filter(f=>f.unidad==='kg');
-  const tots:Record<PK,number>={rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0};
+  const tots:Record<PK,number>=vacio(0);
   for(const f of filasNormales)for(const p of ALL)tots[p.key]+=Number(q(f.id_control,f.sucursal,p.key))||0;
   const totsKg={rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0};
   for(const f of filasKg)for(const k of KGK_ALL) totsKg[k]+=Number(qKg(f.id_control,f.sucursal,k))||0;
@@ -352,22 +359,22 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   function total7d(id_control:string, sucursal:string): number {
     const v = ventas7.find(v=>String(v.id_control)===String(id_control)&&v.sucursal===sucursal);
     if(!v) return 0;
-    return (['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca'] as PK[])
+    return KEYS_UNIDAD
       .reduce((acc,k)=>acc+Number((v as any)[k]||0),0);
   }
   function totalHoy(id_control:string, sucursal:string): number {
     return (prods as any[]).reduce((acc:number,p:any)=>acc+Number(q(id_control,sucursal,p.key))||0, 0);
   }
   const totalHoyGlobal = filas.reduce((acc,f)=>acc+totalHoy(f.id_control,f.sucursal),0);
-  const total7dGlobal = ventas7.reduce((acc,v)=>acc+(['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca'] as PK[]).reduce((a,k)=>a+Number((v as any)[k]||0),0),0);
+  const total7dGlobal = ventas7.reduce((acc,v)=>acc+KEYS_UNIDAD.reduce((a,k)=>a+Number((v as any)[k]||0),0),0);
 
   // Lo ya facturado (exportado) hoy para un cliente — el fetch normal de la fecha solo
   // trae lo NO facturado, así que esto es lo único que muestra que ya se cargó algo.
-  const PK_ALL: PK[] = ['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca'];
+  const PK_ALL: PK[] = KEYS_UNIDAD;
   function facturadoDe(id_control:string, sucursal:string): { sum: Record<PK,number>; total: number } | null {
     const rows = facturadasHoy.filter(v=>String(v.id_control)===String(id_control)&&v.sucursal===sucursal);
     if(!rows.length) return null;
-    const sum = {rucula:0,lechuga_crespa:0,hoja_roble:0,bandeja_rucula:0,albahaca:0} as Record<PK,number>;
+    const sum = vacio(0);
     for(const r of rows) for(const k of PK_ALL) sum[k]+=Number((r as any)[k])||0;
     const total = PK_ALL.reduce((a,k)=>a+sum[k],0);
     return total>0 ? { sum, total } : null;

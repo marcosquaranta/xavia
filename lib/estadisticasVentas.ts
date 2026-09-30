@@ -10,7 +10,7 @@ export const GR_PAQ_LECHUGA = 330;
 
 const MESES_CORTO = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sept', 'oct', 'nov', 'dic'];
 // lechuga_kg queda (legacy) para no perder ventas por kg cargadas antes del split crespa/roble.
-const PROD_KEYS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
+import { PROD_KEYS, KEYS_UNIDAD_HISTORICAS } from './articulos';
 
 function mesKey(fecha: string): string { return String(fecha || '').slice(0, 7); } // YYYY-MM
 function mesLabel(mk: string): string {

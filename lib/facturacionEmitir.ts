@@ -5,9 +5,12 @@ import type { ClienteVenta, PrecioVenta, VentaDia } from './types';
 import { getClientesXubio, matchClienteXubio, emitirFactura, ultimaFechaPorLetra, PRODUCTO_CODIGO } from './xubio';
 
 // lechuga_kg queda para no perder ventas por kg cargadas antes del split crespa/roble.
-const PROD_KEYS = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
+import { PROD_KEYS, LABELS_LARGOS } from './articulos';
 
 const NOMBRE_PROD: Record<string, string> = {
+  // El catálogo primero como red: lo de abajo lo pisa donde haga falta un nombre más
+  // específico que el genérico (acá se aclara la unidad, que en una factura importa).
+  ...LABELS_LARGOS,
   rucula: 'Rúcula (paquetes)',
   lechuga_crespa: 'Lechuga Crespa',
   hoja_roble: 'Lechuga Hoja de Roble',

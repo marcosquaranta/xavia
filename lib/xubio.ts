@@ -1,3 +1,4 @@
+import { PRODUCTO_XUBIO } from './articulos';
 // Cliente de la API de Xubio (https://xubio.com/API/1.1/)
 // OAuth2 client-credentials. Token válido 1h, cacheado a nivel de módulo.
 
@@ -553,18 +554,7 @@ export const PV_ID_B = 123457; // PV 00001 — Factura B, sin CAE
 // Mapeo de nuestros productos al NOMBRE de producto en Xubio (no hay un código aparte
 // cargado en el catálogo — la conexión con Xubio siempre fue por nombre de producto,
 // igual que con el cliente en matchClienteXubio más abajo).
-export const PRODUCTO_CODIGO: Record<string, string> = {
-  rucula: 'RUCULA_HIDROPONICA',
-  lechuga_crespa: 'LECHUGA_CRESPA_HIDROPONICA',
-  hoja_roble: 'LECHUGA_HOJA_DE_ROBLE_VERDE_HIDROPONICA',
-  bandeja_rucula: 'BANDEJA_RUCULA_HIDROPONICA',
-  albahaca: 'ALBAHACA_HIDROPONICA',
-  rucula_kg: 'RUCULA_HIDROPONICA_KG',
-  lechuga_kg: 'LECHUGA_HIDROPONICA_KG', // legacy, ventas cargadas antes del split crespa/roble
-  // Nombres reales confirmados por el usuario, tal cual figuran en Xubio.
-  lechuga_kg_crespa: 'KG Lechuga Crespa',
-  lechuga_kg_roble: 'KG Lechuga Hoja de Roble',
-};
+export const PRODUCTO_CODIGO = PRODUCTO_XUBIO;
 
 async function xubioPost<T = any>(path: string, body: any): Promise<{ ok: boolean; status: number; data: T; crudo: string }> {
   const token = await getToken();

@@ -4,16 +4,12 @@ import { useRouter } from 'next/navigation';
 import type { ClienteVenta, PedidoFijo } from '@/lib/types';
 import { nombreClienteVisible } from '@/lib/clientes';
 
+import { ARTICULOS_UNIDAD, KEYS_UNIDAD } from '@/lib/articulos';
 interface Props { clientes: ClienteVenta[]; pedidos: PedidoFijo[]; }
 
 const DIAS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-const PRODUCTOS = [
-  { key: 'rucula', label: 'Rúcula' },
-  { key: 'lechuga_crespa', label: 'Crespa' },
-  { key: 'hoja_roble', label: 'Hoja Roble' },
-  { key: 'bandeja_rucula', label: 'Bandeja' },
-  { key: 'albahaca', label: 'Albahaca' },
-] as const;
+const PRODUCTOS = ARTICULOS_UNIDAD.map((a) => ({ key: a.key, label: a.label }));
+const CANT_VACIA = () => Object.fromEntries(KEYS_UNIDAD.map((k) => [k, ''])) as Record<string, string>;
 
 interface FilaCliente { id_control: string; nombre_cliente: string; sucursal: string; nombre_display: string }
 
@@ -34,7 +30,7 @@ export default function PedidosFijosManager({ clientes, pedidos }: Props) {
   const [mostrarForm, setMostrarForm] = useState(false);
   const [filaSel, setFilaSel] = useState(filas[0] ? `${filas[0].id_control}__${filas[0].sucursal}` : '');
   const [dia, setDia] = useState(1); // lunes por defecto
-  const [cant, setCant] = useState<Record<string, string>>({ rucula: '', lechuga_crespa: '', hoja_roble: '', bandeja_rucula: '', albahaca: '' });
+  const [cant, setCant] = useState<Record<string, string>>(CANT_VACIA());
   const [notas, setNotas] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +54,7 @@ export default function PedidosFijosManager({ clientes, pedidos }: Props) {
         }),
       });
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || 'Error'); }
-      setCant({ rucula: '', lechuga_crespa: '', hoja_roble: '', bandeja_rucula: '', albahaca: '' });
+      setCant(CANT_VACIA());
       setNotas('');
       setMostrarForm(false);
       router.refresh();

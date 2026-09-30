@@ -14,10 +14,7 @@
 import type { VentaDia, PrecioVenta, ClienteVenta } from './types';
 import { nombreClienteVisible } from './clientes';
 
-const PROD_KEYS = [
-  'rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca',
-  'rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble',
-] as const;
+import { PROD_KEYS } from './articulos';
 
 // Desde cuántos días de atraso deja de ser "lo de hoy todavía sin facturar" y pasa a ser un
 // problema. Dos días cubre el fin de semana sin gritar por algo normal.

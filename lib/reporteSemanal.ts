@@ -8,6 +8,7 @@ import { POSPAQ } from './planificacion'; // 3 posiciones (plantas) por paquete 
 import { ventasPorCultivoUltimasSemanas, resumenMesActual, ventasEnRango, GR_PAQ_RUCULA, GR_PAQ_LECHUGA, type PuntoVentaCultivoSemana, type VentasRango, type ResumenMesActual } from './estadisticasVentas';
 import { plantasPerdidasPorSubocupacion, type PlantasPerdidasSubocupacion } from './kpisOperativos';
 import { getComprobantes } from './xubio';
+import { KEYS_UNIDAD_HISTORICAS } from './articulos';
 import { controlFacturacion, compararFacturado, DIAS_ATRASO_AVISO, DIF_MINIMA_PESOS, type ControlFacturacion, type ComparacionFacturado } from './controlFacturacion';
 import { leerConfigProtocolo, tareasVencidas, tareasDelDia as tareasProtocoloDelDia, cumplimientoProtocolo, type InstanciaTarea } from './protocoloTareas';
 import { fechaArgentinaHoy } from './ocupacion';
@@ -30,7 +31,10 @@ const esRuculaV = (v: string) => { const x = String(v || '').toLowerCase(); retu
 // paquete-equivalente con el mismo factor que el resto de la app) — para comparar
 // clientes en volumen real, no en kg crudo (que los haría ver artificialmente chicos).
 function unidadesVentaFila(v: VentaDia): number {
-  const directas = (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0) + (Number(v.lechuga_crespa) || 0) + (Number(v.hoja_roble) || 0) + (Number(v.albahaca) || 0);
+  // Todos los artículos por unidad, incluidos los dados de baja: es volumen vendido, y una
+  // venta vieja de bandeja de rúcula fue volumen igual. Al salir del catálogo, un artículo
+  // nuevo entra solo en vez de quedar sin contar hasta que alguien se acuerde.
+  const directas = KEYS_UNIDAD_HISTORICAS.reduce((a, k) => a + (Number((v as any)[k]) || 0), 0);
   const kgR = ((Number(v.rucula_kg) || 0) * 1000) / GR_PAQ_RUCULA;
   const kgL = (((Number(v.lechuga_kg) || 0) + (Number(v.lechuga_kg_crespa) || 0) + (Number(v.lechuga_kg_roble) || 0)) * 1000) / GR_PAQ_LECHUGA;
   return directas + kgR + kgL;

@@ -192,8 +192,10 @@ export interface PedidoFijo {
   rucula: number | string;
   lechuga_crespa: number | string;
   hoja_roble: number | string;
-  bandeja_rucula: number | string;
+  bandeja_rucula: number | string;  // dado de baja: sigue por los pedidos fijos ya cargados
   albahaca: number | string;
+  ensalada_rucula_parmesano: number | string;
+  ensalada_clasica: number | string;
   activo: 'SI' | 'NO';
   notas: string;
 }
@@ -205,8 +207,10 @@ export interface PrecioVenta {
   rucula: string;
   lechuga_crespa: string;
   hoja_roble: string;
-  bandeja_rucula: string;
+  bandeja_rucula: string;  // dado de baja: se conserva para valorizar ventas viejas
   albahaca: string;
+  ensalada_rucula_parmesano: string;
+  ensalada_clasica: string;
   rucula_kg: string;   // precio por KG de rúcula (para clientes unidad=kg)
   lechuga_kg: string;  // LEGACY — precio por KG de lechuga sin distinguir variedad. Ya no se
                         // edita desde el admin (ver KG_LABELS en ClientesVentaManager); se
@@ -225,8 +229,10 @@ export interface VentaDia {
   rucula: string;
   lechuga_crespa: string;
   hoja_roble: string;
-  bandeja_rucula: string;
+  bandeja_rucula: string;  // dado de baja: se conserva para no perder las ventas cargadas
   albahaca: string;
+  ensalada_rucula_parmesano: string;
+  ensalada_clasica: string;
   rucula_kg: string;
   lechuga_kg: string;  // LEGACY — ver comentario en PrecioVenta. Las cargas nuevas usan
                         // lechuga_kg_crespa/lechuga_kg_roble; esta columna sigue existiendo

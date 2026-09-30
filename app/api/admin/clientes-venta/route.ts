@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
-import { appendRow, asegurarColumna, readSheet, updateRow } from '@/lib/sheets';
+import { appendRow, asegurarColumna, readSheet, updateRow, appendRowObj } from '@/lib/sheets';
 import type { ClienteVenta } from '@/lib/types';
 
+import { asegurarColumnasArticulos } from '@/lib/articulosSheets';
+import { PROD_KEYS } from '@/lib/articulos';
 export async function PATCH(req: NextRequest) {
   if (!(await isAdmin())) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
   try {
@@ -40,18 +42,16 @@ export async function POST(req: NextRequest) {
       alias || '', tipo_factura, punto_venta, sucursales || '', 'SI',
     ]);
 
-    // Agregar precios: id_control, nombre_cliente, sucursal_obs, rucula, lechuga_crespa, hoja_roble, bandeja_rucula, albahaca
+    // Por nombre de columna y no por posición: con appendRow había que acertarle al orden
+    // exacto del header, y cada artículo nuevo corría todo lo que venía después.
     if (precios) {
-      await appendRow('Precios', [
-        idControl,
-        nombre_xubio,
-        nombre_display || nombre_xubio,
-        precios.rucula || 0,
-        precios.lechuga_crespa || 0,
-        precios.hoja_roble || 0,
-        precios.bandeja_rucula || 0,
-        precios.albahaca || 0,
-      ]);
+      await asegurarColumnasArticulos();
+      await appendRowObj('Precios', {
+        id_control: idControl,
+        nombre_cliente: nombre_xubio,
+        sucursal_obs: nombre_display || nombre_xubio,
+        ...Object.fromEntries(PROD_KEYS.map((k: string) => [k, precios[k] || 0])),
+      });
     }
 
     return NextResponse.json({ ok: true, id_control: idControl });

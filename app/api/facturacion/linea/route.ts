@@ -2,16 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet, updateRow } from '@/lib/sheets';
 import type { VentaDia } from '@/lib/types';
+import { PROD_KEYS } from '@/lib/articulos';
 
 export const dynamic = 'force-dynamic';
 
 // Los productos que puede tener una venta. La lista está acá explícita —y no se acepta
 // cualquier nombre de columna— para que este endpoint no sirva para escribir en cualquier
 // campo de la hoja Ventas.
-const PROD_KEYS = [
-  'rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca',
-  'rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble',
-];
+// El catálogo manda: un artículo nuevo entra solo, y los de baja siguen editables porque
+// una venta vieja mal cargada también hay que poder corregirla.
+const CAMPOS_EDITABLES: string[] = [...PROD_KEYS];
 
 // Corrige un renglón de una venta PENDIENTE: cambia la cantidad de un producto, o la borra
 // mandando 0. Solo toca ventas pendientes de facturar — una vez emitida la factura, esto ya
@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
   try {
     const { id_venta, campo, cantidad } = await req.json();
     if (!id_venta || !campo) return NextResponse.json({ error: 'id_venta y campo son obligatorios' }, { status: 400 });
-    if (!PROD_KEYS.includes(String(campo))) return NextResponse.json({ error: `Producto desconocido: ${campo}` }, { status: 400 });
+    if (!CAMPOS_EDITABLES.includes(String(campo))) return NextResponse.json({ error: `Producto desconocido: ${campo}` }, { status: 400 });
 
     const cant = Number(cantidad);
     if (!Number.isFinite(cant) || cant < 0) return NextResponse.json({ error: 'La cantidad tiene que ser un número de 0 o más' }, { status: 400 });

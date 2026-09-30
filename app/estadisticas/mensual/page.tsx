@@ -22,6 +22,7 @@ import { GraficoVentaPorArticulo, GraficoVentaPorCliente, GraficoPrecioPromedio 
 import GraficoValorComercial from '@/app/ventas/GraficoValorComercial';
 import { ultimaSubaPorClienteRecord } from '@/lib/preciosHistoricoServer';
 import CopiarInformeBoton from './CopiarInformeBoton';
+import { PROD_KEYS } from '@/lib/articulos';
 export const dynamic = 'force-dynamic';
 
 const esRuculaV = (v: string) => { const x = String(v || '').toLowerCase(); return x.includes('rucula') || x.includes('rúcula'); };
@@ -127,7 +128,7 @@ function evolucionDescartes(lotes: Lote[], b: Buckets) {
 // Unidades vendidas por cliente en el mes seleccionado, con variación % vs. el mes
 // anterior y % que representa sobre el total vendido ese mes — para el cuadro que
 // acompaña a "Evolución de precio promedio".
-const PROD_KEYS_CLI = ['rucula', 'lechuga_crespa', 'hoja_roble', 'bandeja_rucula', 'albahaca', 'rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
+const PROD_KEYS_CLI = PROD_KEYS;
 function totalVenta(v: VentaDia): number { return PROD_KEYS_CLI.reduce((a, k) => a + (Number((v as any)[k]) || 0), 0); }
 function sumaPorClienteEnMes(ventas: VentaDia[], anio: number, mes: number): Map<string, number> {
   const mk = `${anio}-${String(mes).padStart(2, '0')}`;

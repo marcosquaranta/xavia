@@ -4,19 +4,14 @@ import { readSheet, updateRow, batchUpdateRows } from '@/lib/sheets';
 import type { ClienteVenta, PrecioVenta, VentaDia, ConfigItem, Lote } from '@/lib/types';
 import { nombreClienteVisible } from '@/lib/clientes';
 import * as XLSX from 'xlsx';
+import { ARTICULOS, PROD_KEYS } from '@/lib/articulos';
 // Email via Resend API (sin dependencias extra)
 
 const COLS = ['NUMERODECONTROL','CLIENTE','TIPO','NUMERO','FECHA','VENCIMIENTODELCOBRO',
   'COMPROBANTEASOCIADO','MONEDA','COTIZACION','OBSERVACIONES','PRODUCTOSERVICIO',
   'CENTRODECOSTO','PRODUCTOOBSERVACION','CANTIDAD','PRECIO','DESCUENTO','IMPORTE','IVA'];
 
-const PRODS = [
-  { key: 'rucula',         xubio: 'Rucula Hidropónica' },
-  { key: 'lechuga_crespa', xubio: 'Lechuga Crespa Hidropónica' },
-  { key: 'hoja_roble',     xubio: 'Lechuga Hoja de Roble Verde Hidropónica' },
-  { key: 'bandeja_rucula', xubio: 'Rucula Bandeja' },
-  { key: 'albahaca',       xubio: 'Albahaca Hidropónica' },
-] as const;
+const PRODS = ARTICULOS.filter((a) => a.unidad === 'unidad').map((a) => ({ key: a.key, xubio: a.xubio }));
 
 // Productos por KG (clientes que facturan por cajón, ej. Select Food). lechuga_kg queda
 // para no perder ventas cargadas antes del split crespa/roble.
@@ -157,7 +152,7 @@ export async function POST(req: NextRequest) {
 
       // Verificar si hay alguna cantidad > 0 (paquetes o KG)
       const tieneVentas = lineas.some(l =>
-        ['rucula','lechuga_crespa','hoja_roble','bandeja_rucula','albahaca','rucula_kg','lechuga_kg','lechuga_kg_crespa','lechuga_kg_roble']
+        PROD_KEYS
           .some(k => Number((l as any)[k]) > 0)
       );
       if (!tieneVentas) continue;

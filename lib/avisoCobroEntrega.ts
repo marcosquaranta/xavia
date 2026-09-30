@@ -1,3 +1,4 @@
+import { LABELS_LARGOS } from './articulos';
 // ── Aviso: entregas que se cobran en el momento ──────────────────────────────────────
 //
 // Hay sucursales que le pagan al repartidor contra entrega. Si Marcos no se entera de que
@@ -20,6 +21,7 @@ const norm = (s: any) => String(s || '')
   .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
 const PROD_LABELS: Record<string, string> = {
+  ...LABELS_LARGOS,
   rucula: 'Rúcula', lechuga_crespa: 'Lechuga crespa', hoja_roble: 'Hoja de roble',
   bandeja_rucula: 'Bandeja de rúcula', albahaca: 'Albahaca',
   rucula_kg: 'Rúcula (kg)', lechuga_kg: 'Lechuga (kg)',
