@@ -106,7 +106,11 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   const [ctds,setCtds]=useState<Ctds>({});
   const [ests,setEsts]=useState<Ests>({});
   const [disp,setDisp]=useState<Record<PK,string>>(vacio(''));
-  const [extras,setExtras]=useState(false);
+  // El tilde de "extras" arranca PRENDIDO si algún cliente ya tiene precio cargado en
+  // alguno de esos artículos, o sea si de verdad se venden. Cuando se agregaron las
+  // ensaladas quedaron atrás de este tilde —que además seguía diciendo "Bandeja +
+  // Albahaca"— y desde la pantalla de carga no había forma de saber que estaban ahí.
+  const [extras,setExtras]=useState(()=>PE.some(a=>precios.some(p=>Number((p as any)[a.key])>0)));
   const [loading,setLoading]=useState(false);
   const [exp,setExp]=useState(false);
   const [msg,setMsg]=useState<{t:'ok'|'err';s:string}|null>(null);
@@ -626,7 +630,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
           <input type="date" value={fecha} onChange={ev=>setFecha(ev.target.value)} style={{fontSize:'14px',fontWeight:600,border:'1px solid #e5e7eb',borderRadius:'7px',padding:'6px 10px'}}/>
         </div>
         <label style={{display:'flex',alignItems:'center',gap:'5px',fontSize:'11px',color:'#6b7280',cursor:'pointer',userSelect:'none',marginBottom:'2px'}}>
-          <input type="checkbox" checked={extras} onChange={ev=>setExtras(ev.target.checked)}/> Bandeja + Albahaca
+          <input type="checkbox" checked={extras} onChange={ev=>setExtras(ev.target.checked)}/> {PE.map(a=>a.label).join(' + ')}
         </label>
         <button onClick={()=>limpiarDia(false)} disabled={limpiando}
           style={{background:'none',border:'1px solid #fca5a5',borderRadius:'8px',padding:'8px 12px',fontWeight:600,fontSize:'12px',cursor:'pointer',color:'#dc2626',marginTop:'14px'}}>
