@@ -331,14 +331,19 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
             la contabilidad queda como está. Se puede deshacer.
           </p>
           <div style={{ marginTop: '10px' }}>
-            {/* Todos los clientes, no solo los del recordatorio: marcar facturas viejas como
-                saldadas es justamente lo que hay que poder hacer con un cliente que no se
-                está reclamando. Y sin precarga: las facturas se piden al elegir el cliente.
-                Precargar unas pocas no ahorraba nada —igual hay que pedir las de los demás—
-                y hacía que un cliente se viera al instante y otro tardara, sin razón
-                aparente desde afuera. */}
+            {/* Solo los clientes con recordatorio prendido. La lista completa son todos los
+                clientes que existieron alguna vez, y buscar entre ellos al que se quiere
+                limpiar es peor que no tener la lista. Lo que importa es lo que se reclama:
+                una factura vieja de un cliente al que no se le manda nada no molesta a
+                nadie, y si alguna vez hay que limpiarla, alcanza con prenderle el
+                recordatorio un rato.
+
+                Sin precarga: las facturas se piden al elegir el cliente. Precargar unas
+                pocas no ahorraba nada —igual hay que pedir las de los demás— y hacía que un
+                cliente se viera al instante y otro tardara, sin razón aparente. */}
             <FacturasViejas
               clientes={clientes
+                .filter((c) => conRecordatorio.has(String(c.id_control)))
                 .map((c) => ({ id_control: String(c.id_control), nombre: nombreClienteVisible(c) }))
                 .sort((a, b) => a.nombre.localeCompare(b.nombre))}
               facturasPorCliente={{}}
