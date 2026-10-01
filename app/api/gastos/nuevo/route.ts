@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
   if (!(await isAdmin())) return NextResponse.json({ error: 'solo_admin' }, { status: 403 });
 
   try {
-    const { fecha, descripcion, categoria, monto, medio_pago, medio_pago_destino, id_articulo, cantidad } = await req.json();
+    const { fecha, descripcion, categoria, monto, medio_pago, medio_pago_destino, id_articulo, cantidad, empleado } = await req.json();
     if (!fecha || !descripcion || !medio_pago || monto === undefined) {
       return NextResponse.json({ error: 'datos_incompletos' }, { status: 400 });
     }
@@ -26,7 +26,14 @@ export async function POST(req: NextRequest) {
     }
     const cantidadNum = Number(cantidad) || 0;
 
+    // Un adelanto sin empleado no se puede descontar del sueldo de nadie, que es para lo
+    // único que sirve registrarlo aparte de los sueldos.
+    if (categoria === 'adelanto_sueldo' && !String(empleado || '').trim()) {
+      return NextResponse.json({ error: 'falta_empleado' }, { status: 400 });
+    }
+
     await asegurarColumna('Gastos', 'medio_pago_destino');
+    await asegurarColumna('Gastos', 'empleado');
     const gastos = await readSheet<Gasto>('Gastos');
     const maxId = gastos
       .map((g) => parseInt(String(g.id_gasto).replace('GAS-', '') || '0'))
@@ -41,6 +48,7 @@ export async function POST(req: NextRequest) {
       monto: montoNum,
       medio_pago,
       medio_pago_destino: categoria === 'movimiento_interno' ? medio_pago_destino : '',
+      empleado: categoria === 'adelanto_sueldo' ? String(empleado).trim() : '',
       usuario: user.email,
       fecha_carga: new Date().toISOString().split('T')[0],
       id_articulo: id_articulo || '',

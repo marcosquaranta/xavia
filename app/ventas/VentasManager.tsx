@@ -316,7 +316,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       // Flush de todas las cantidades cargadas (igual que en exportar)
       const todasLineas = [
         ...filasNormales.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
-        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...vacio(0),rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg_crespa:Number(dr?.lechuga_kg_crespa?.value)||0,lechuga_kg_roble:Number(dr?.lechuga_kg_roble?.value)||0};}),
+        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg_crespa:Number(dr?.lechuga_kg_crespa?.value)||0,lechuga_kg_roble:Number(dr?.lechuga_kg_roble?.value)||0};}),
       ].filter((l:LineaCarga)=>[...KEYS_UNIDAD,...KEYS_KG].some(k=>Number(l[k])>0));
       const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:todasLineas})});
       if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar ventas');}
@@ -344,7 +344,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       Object.values(tmrs.current).forEach(t=>clearTimeout(t));
       const todasLineas = [
         ...filasNormales.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
-        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...vacio(0),rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg_crespa:Number(dr?.lechuga_kg_crespa?.value)||0,lechuga_kg_roble:Number(dr?.lechuga_kg_roble?.value)||0};}),
+        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg_crespa:Number(dr?.lechuga_kg_crespa?.value)||0,lechuga_kg_roble:Number(dr?.lechuga_kg_roble?.value)||0};}),
       // Solo enviar líneas con al menos una cantidad > 0
       ].filter((l:LineaCarga)=>[...KEYS_UNIDAD,...KEYS_KG].some(k=>Number(l[k])>0));
       const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:todasLineas})});
@@ -370,7 +370,10 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   for(const f of filasNormales)for(const p of ALL)tots[p.key]+=Number(q(f.id_control,f.sucursal,p.key))||0;
   const totsKg={rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0};
   for(const f of filasKg)for(const k of KGK_ALL) totsKg[k]+=Number(qKg(f.id_control,f.sucursal,k))||0;
-  const hayV=Object.values(tots).some(v=>v>0)||Object.values(totsKg).some(v=>v>0);
+  // Las ensaladas cuentan para habilitar "Cargar ventas". Al quedar fuera de `tots` —que
+  // sale de la grilla de paquetes— un día de solo ensaladas dejaba el botón apagado y no
+  // había forma de facturarlas.
+  const hayV=Object.values(tots).some(v=>v>0)||Object.values(totsKg).some(v=>v>0)||Object.values(totsEnsalada).some(v=>v>0);
   const diasSemana = ventasCargadasSemana(ventasSemana, clientes);
 
   // Total por cliente hace 7 días (para comparación)
@@ -924,8 +927,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
               <tbody>
                 {filasEnsalada.map((f,i)=>(
                   <tr key={`${f.id_control}__${f.sucursal}`} style={{borderTop:'1px solid #f1f5f9',background:i%2?'#fafafa':'white'}}>
+                    {/* El alias, no la razón social: "NAF SRL" no le dice nada a quien carga. */}
                     <td style={{padding:'5px 12px',fontWeight:600}}>
-                      {f.nombre_cliente}
+                      {f.nombre_display||f.nombre_cliente}
                       {f.sucursal&&<span style={{color:'#9ca3af',fontWeight:400}}> · {f.sucursal}</span>}
                     </td>
                     {ENSALADAS.map(a=>{
@@ -961,6 +965,20 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
                 </tr>
               </tbody>
             </table>
+            {/* Botón propio: el de arriba está lejos, abajo de la grilla de paquetes, y en un
+                día de solo ensaladas no hay razón para pasar por ahí. Llama a la MISMA
+                función, así que carga todo lo que haya pendiente del día —ensaladas,
+                paquetes y kg—. Dos botones que cargaran cosas distintas serían una trampa:
+                el segundo parecería no hacer nada, o duplicaría. */}
+            <div style={{padding:'8px 12px',background:'#f0fdfa',borderTop:'1px solid #99f6e4',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
+              <button onClick={()=>{ if(hayV&&!exp) cargarVentas(); }} disabled={!hayV||exp}
+                style={{background:hayV&&!exp?'#0f766e':'#e5e7eb',color:hayV&&!exp?'white':'#9ca3af',border:'none',borderRadius:'8px',padding:'7px 16px',fontWeight:700,fontSize:'12.5px',cursor:hayV&&!exp?'pointer':'not-allowed',display:'flex',alignItems:'center',gap:'5px'}}>
+                <span>📥</span>{exp?'Cargando…':'Cargar ventas'}
+              </button>
+              <span style={{fontSize:'10.5px',color:'#0d9488'}}>
+                Es el mismo botón de arriba: carga todo lo que haya cargado hoy, no solo las ensaladas.
+              </span>
+            </div>
           </div>
           ):(
             <p style={{marginTop:'14px',fontSize:'11.5px',color:'#92400e',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'8px',padding:'8px 12px'}}>

@@ -32,12 +32,18 @@ function minDeHora(hhmm: string): number {
   return (Number(h) || 0) * 60 + (Number(m) || 0);
 }
 
-// Quincena 1: días 1-15. Quincena 2: 16 al último día del mes. begin_time/end_time con
-// offset -03:00 explícito (Argentina no tiene horario de verano) para que CrossChex
-// devuelva exactamente el rango del día en hora local, sin importar la zona del server.
-export function rangoQuincena(anio: number, mes: number, quincena: 1 | 2): { desde: string; hasta: string; diasDesde: number; diasHasta: number } {
+// Período 0: el mes entero (es el que se usa desde que se paga por mes). Quincena 1:
+// días 1-15. Quincena 2: 16 al último día. begin_time/end_time con offset -03:00 explícito
+// (Argentina no tiene horario de verano) para que CrossChex devuelva exactamente el rango
+// del día en hora local, sin importar la zona del server.
+//
+// Se mantienen las quincenas y no se borran: los meses ya liquidados así están guardados
+// con su número de quincena, y una liquidación vieja tiene que poder volver a mirarse tal
+// como se pagó.
+export type PeriodoPago = 0 | 1 | 2;
+export function rangoQuincena(anio: number, mes: number, quincena: PeriodoPago): { desde: string; hasta: string; diasDesde: number; diasHasta: number } {
   const ultimoDia = new Date(anio, mes, 0).getDate();
-  const diasDesde = quincena === 1 ? 1 : 16;
+  const diasDesde = quincena === 2 ? 16 : 1;
   const diasHasta = quincena === 1 ? 15 : ultimoDia;
   const pad = (n: number) => String(n).padStart(2, '0');
   return {
@@ -153,6 +159,8 @@ export interface AjusteQuincena {
   presentismoManual?: 'SI' | 'NO' | '';
   extras?: number;
   horasExtras?: number;
+  // Si las horas extra se pagan en este período. Por defecto NO.
+  pagarExtras?: 'SI' | 'NO' | '';
 }
 
 export interface ResumenEmpleado {
@@ -172,9 +180,13 @@ export interface ResumenEmpleado {
   horasExtras: number;         // las que se pagan (la manual si se cargó, si no la calculada)
   horasExtrasCalculadas: number; // horas trabajadas por encima de la teoría de los días CON datos
   horasExtrasManual: boolean;  // true = el número lo puso alguien a mano y pisa al calculado
+  pagarExtras: boolean;        // si las horas extra de este período se liquidan
   sueldoTeorico: number;       // horas teóricas × sueldo/hora + presentismo
-  sueldoExtras: number;        // extras $ + horas extra × sueldo/hora
-  sueldoAPagar: number;        // teórico + extras
+  sueldoExtras: number;        // extras $ + (horas extra × sueldo/hora, solo si se pagan)
+  horasExtrasImporte: number;  // lo que valdrían las horas extra, se paguen o no
+  adelantos: number;           // adelantos de sueldo ya entregados en el período
+  sueldoAPagar: number;        // teórico + extras, ANTES de descontar adelantos
+  sueldoFinal: number;         // lo que queda por pagar: sueldoAPagar − adelantos
   diasSinDatos: number;
   tardanzas: number;
   diasIncompletos: number;
@@ -194,8 +206,9 @@ const DOW_LABEL = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 // Sueldo a pagar = horas TEÓRICAS × sueldo/hora, + presentismo (si corresponde: manual si
 // se cargó, si no automático según tardanzas), + extras $ sueltos, + horas extra × sueldo/hora.
 export function calcularResumenQuincena(
-  registros: RegistroCrossChex[], empleados: Empleado[], anio: number, mes: number, quincena: 1 | 2,
-  ajustes: Record<string, AjusteQuincena> = {} // key: workno
+  registros: RegistroCrossChex[], empleados: Empleado[], anio: number, mes: number, quincena: PeriodoPago,
+  ajustes: Record<string, AjusteQuincena> = {}, // key: workno
+  adelantosPorWorkno: Record<string, number> = {},
 ): ResumenEmpleado[] {
   const { diasDesde, diasHasta } = rangoQuincena(anio, mes, quincena);
   const porEmpleadoDia = agruparPorEmpleadoYDia(registros);
@@ -313,6 +326,16 @@ export function calcularResumenQuincena(
     // escribirlo, es porque sabe algo que la cuenta no.
     const horasExtrasManual = Number(ajuste.horasExtras) > 0;
     const horasExtras = horasExtrasManual ? Number(ajuste.horasExtras) : horasExtrasCalculadas;
+
+    // Las horas extra NO se pagan salvo que alguien lo diga para ese período. Antes entraban
+    // solas al sueldo, así que una semana con mucho movimiento se liquidaba sin que nadie lo
+    // hubiera decidido. Se siguen calculando y mostrando: la información está, lo que cambió
+    // es que pagarlas es una decisión.
+    const pagarExtras = ajuste.pagarExtras === 'SI';
+    const horasExtrasImporte = Math.round(horasExtras * sueldoHora * 100) / 100;
+    const importeExtrasPagado = pagarExtras ? horasExtrasImporte : 0;
+    const adelantos = Math.round((Number(adelantosPorWorkno[workno]) || 0) * 100) / 100;
+    const sueldoAPagar = Math.round((horasTeoricas * sueldoHora + presentismoAplicado + extras + importeExtrasPagado) * 100) / 100;
     resultados.push({
       workno, nombre: emp?.nombre || nombresCrossChex.get(workno) || workno,
       dias, horasReales, horasTeoricas,
@@ -323,9 +346,15 @@ export function calcularResumenQuincena(
       extras, horasExtras, horasExtrasCalculadas, horasExtrasManual,
       // El sueldo se muestra partido: lo teórico (lo que cobra por su horario) y lo extra
       // (lo que se suma por encima). Antes era un solo número y no se veía de dónde salía.
+      pagarExtras,
       sueldoTeorico: Math.round((horasTeoricas * sueldoHora + presentismoAplicado) * 100) / 100,
-      sueldoExtras: Math.round((extras + horasExtras * sueldoHora) * 100) / 100,
-      sueldoAPagar: Math.round((horasTeoricas * sueldoHora + presentismoAplicado + extras + horasExtras * sueldoHora) * 100) / 100,
+      sueldoExtras: Math.round((extras + importeExtrasPagado) * 100) / 100,
+      horasExtrasImporte,
+      adelantos,
+      sueldoAPagar,
+      // Lo que falta pagar. Un adelanto ya salió de la caja: volver a pagarlo entero a fin
+      // de mes es pagar dos veces.
+      sueldoFinal: Math.round((sueldoAPagar - adelantos) * 100) / 100,
       diasSinDatos: dias.filter((d) => d.sinDatosAun).length,
       tardanzas,
       diasIncompletos: dias.filter((d) => d.incompleto).length,

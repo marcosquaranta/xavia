@@ -17,9 +17,14 @@ const UMBRAL_DETALLE = 200000;
 const fmtDiaMes = (f: string) => { const [, m, d] = f.split('-'); return d && m ? `${d}/${m}` : f; };
 const fmtFecha = (s: string) => { const [y, m, d] = String(s || '').split(/[T ]/)[0].split('-'); return d && m ? `${d}/${m}` : s; };
 
-interface Props { gastos: Gasto[]; articulos: Articulo[]; usuario: string }
+interface Props {
+  gastos: Gasto[]; articulos: Articulo[]; usuario: string;
+  // Para elegir a quién se le adelantó el sueldo. Opcional: si la hoja de empleados no se
+  // puede leer, el resto de la carga de gastos tiene que seguir funcionando igual.
+  empleados?: { workno: string; nombre: string }[];
+}
 
-export default function GastosManager({ gastos, articulos, usuario }: Props) {
+export default function GastosManager({ gastos, articulos, usuario, empleados = [] }: Props) {
   const router = useRouter();
   const [anio, setAnio] = useState(HOY.getFullYear());
   const [mes, setMes] = useState(HOY.getMonth() + 1);
@@ -30,6 +35,9 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
   const [categoria, setCategoria] = useState<CategoriaGasto>('gastos_generales');
   const [medioDestino, setMedioDestino] = useState('');
   const esMovimiento = categoria === 'movimiento_interno';
+  // Un adelanto se carga como gasto —la plata salió de una caja— pero atado a un empleado,
+  // que es lo que después permite descontarlo del sueldo a fin de mes.
+  const esAdelanto = categoria === 'adelanto_sueldo';
   const aceptaNegativo = admiteMontoNegativo(categoria);
   const [monto, setMonto] = useState(0);
   const [medioPago, setMedioPago] = useState<string>(MEDIOS[0]);
@@ -43,6 +51,7 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
 
   // Edición inline
   const [editId, setEditId] = useState<string | null>(null);
+  const [empleadoAdelanto, setEmpleadoAdelanto] = useState('');
   const [editVals, setEditVals] = useState<{ fecha: string; descripcion: string; categoria: CategoriaGasto; monto: number; medio_pago: string } | null>(null);
   const [borrando, setBorrando] = useState<string | null>(null);
   const [exportando, setExportando] = useState(false);
@@ -107,6 +116,7 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
     if (monto === 0) { setError('Ingresá un monto'); return; }
     if (monto < 0 && !aceptaNegativo) { setError('Ingresá un monto mayor a 0'); return; }
     if (esMovimiento && !medioDestino) { setError('Elegí a qué cuenta entra la plata'); return; }
+    if (esAdelanto && !empleadoAdelanto) { setError('Elegí a qué empleado se le adelantó'); return; }
     setGuardando(true);
     try {
       const res = await fetch('/api/gastos/nuevo', {
@@ -114,12 +124,14 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
         body: JSON.stringify({
           fecha, descripcion, categoria, monto, medio_pago: medioPago,
           ...(esMovimiento ? { medio_pago_destino: medioDestino } : {}),
+          ...(esAdelanto ? { empleado: empleadoAdelanto } : {}),
           ...(categoria === 'insumos' ? { id_articulo: idArticulo, cantidad } : {}),
         }),
       });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || 'Error al guardar');
-      setDescripcion(''); setMonto(0); setFecha(hoyISO()); setCategoria('gastos_generales'); setMedioPago(MEDIOS[0]); setMedioDestino('');
+      setDescripcion('');
+      setEmpleadoAdelanto(''); setMonto(0); setFecha(hoyISO()); setCategoria('gastos_generales'); setMedioPago(MEDIOS[0]); setMedioDestino('');
       setIdArticulo(''); setCantidad('');
       router.refresh();
     } catch (err: any) {
@@ -280,6 +292,16 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
               {MEDIOS.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
+          {esAdelanto && (
+            <div>
+              <label style={{ color: empleadoAdelanto ? undefined : '#dc2626' }}>¿A quién?</label>
+              <select value={empleadoAdelanto} onChange={(e) => setEmpleadoAdelanto(e.target.value)} disabled={guardando}
+                style={{ borderColor: empleadoAdelanto ? undefined : '#dc2626' }}>
+                <option value="">Elegí el empleado…</option>
+                {empleados.map((e) => <option key={e.workno} value={e.workno}>{e.nombre}</option>)}
+              </select>
+            </div>
+          )}
           {esMovimiento && (
             <div>
               <label style={{ color: medioDestino ? undefined : '#dc2626' }}>Entra a</label>
@@ -291,6 +313,14 @@ export default function GastosManager({ gastos, articulos, usuario }: Props) {
             </div>
           )}
         </div>
+
+        {esAdelanto && (
+          <p style={{ margin: '0 0 12px', fontSize: '11.5px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '8px 10px' }}>
+            El adelanto queda registrado como gasto —la plata salió— y además se descuenta solo del sueldo de esa
+            persona en Control de personal, en el mes de la fecha que pongas arriba. A fin de mes vas a ver cuánto
+            le queda por cobrar.
+          </p>
+        )}
 
         {esMovimiento && (
           <p style={{ margin: '0 0 12px', fontSize: '11.5px', color: '#6b7280', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '8px 10px' }}>

@@ -100,7 +100,7 @@ export interface StockMes {
 // gasto y no pasen por Stocks — el cierre las toma de acá y NO de la planilla de stock, para
 // no contarlas dos veces si además existiera un artículo de esa categoría.
 export type CategoriaGasto =
-  | 'insumos' | 'gastos_generales' | 'sueldos' | 'mantenimiento'
+  | 'insumos' | 'gastos_generales' | 'sueldos' | 'adelanto_sueldo' | 'mantenimiento'
   | 'inversion_equipamiento' | 'inversion_nave3' | 'abonos' | 'impuestos'
   | 'alquiler' | 'staff' | 'fletes_combustible' | 'energia_agua' | 'cultivos_reventa'
   | 'otros_ingresos' | 'movimiento_interno';
@@ -111,6 +111,10 @@ export const CATEGORIAS_GASTO: { value: CategoriaGasto; label: string }[] = [
   { value: 'energia_agua', label: 'Energía y agua' },
   { value: 'cultivos_reventa', label: 'Cultivos de reventa' },
   { value: 'sueldos', label: 'Sueldos' },
+  // Un adelanto no es un gasto nuevo del mes: es parte del sueldo, pagada antes. Se carga
+  // como gasto igual —la plata salió de una caja y tiene que figurar— pero va con categoría
+  // propia para poder descontarlo del sueldo a fin de mes y no contarlo dos veces.
+  { value: 'adelanto_sueldo', label: 'Adelanto de sueldo' },
   { value: 'mantenimiento', label: 'Mantenimiento' },
   { value: 'alquiler', label: 'Alquiler' },
   { value: 'staff', label: 'Staff (contador, marketing, asesoramiento)' },
@@ -150,6 +154,10 @@ export interface Gasto {
   // tiene dos puntas —sale de Macro, entra a VISA— y con una sola no se puede reconstruir
   // ningún saldo: la plata desaparecería de un lado sin aparecer del otro.
   medio_pago_destino: MedioPagoGasto | string;
+  // Solo para categoria 'adelanto_sueldo': a qué empleado se le adelantó (su workno). Es lo
+  // que permite descontarlo del sueldo de esa persona a fin de mes; sin esto el adelanto
+  // sería un gasto suelto que nadie ata a nadie.
+  empleado: string;
   usuario: string;
   fecha_carga: string;
   aplicado_stock: 'SI' | 'NO' | '';  // 'SI' = ya confirmado (o descartado) como compra de Stocks, no debe volver a sugerirse
@@ -356,6 +364,9 @@ export interface PersonalQuincena {
   presentismo_manual: 'SI' | 'NO' | '';
   extras: number | string;
   horas_extras: number | string;
+  // Si las horas extra de ese período se pagan. Vacío = NO: por defecto las horas de más
+  // quedan informadas pero no se liquidan, y pagarlas es una decisión explícita mes a mes.
+  pagar_extras: 'SI' | 'NO' | '';
 }
 
 // Registro del protocolo de aplicaciones (ver lib/protocoloTareas.ts). Una fila por
