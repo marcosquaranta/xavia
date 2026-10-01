@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
-import { appendRowObj, asegurarHoja, readSheet, updateRow } from '@/lib/sheets';
+import { appendRowObj, asegurarHoja, asegurarColumna, readSheet, updateRow } from '@/lib/sheets';
 import type { PersonalQuincena } from '@/lib/types';
 
-const HEADERS = ['id', 'workno', 'anio', 'mes', 'quincena', 'presentismo_manual', 'extras', 'horas_extras'];
+const HEADERS = ['id', 'workno', 'anio', 'mes', 'quincena', 'presentismo_manual', 'extras', 'horas_extras', 'pagar_extras'];
 
 // Upsert: un registro por empleado+quincena (ajustes puntuales, no permanentes del
 // empleado — presentismo manual, extras $, horas extra).
@@ -12,14 +12,20 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { workno, anio, mes, quincena } = body;
-    if (!workno || !anio || !mes || !quincena) return NextResponse.json({ error: 'datos_incompletos' }, { status: 400 });
+    // `quincena` puede ser 0 (el mes entero), así que no alcanza con chequear que sea
+    // truthy: con 0 el guardado se rechazaba y los ajustes del mes no se grababan nunca.
+    if (!workno || !anio || !mes || quincena === undefined || quincena === null) {
+      return NextResponse.json({ error: 'datos_incompletos' }, { status: 400 });
+    }
     const id = `${workno}-${anio}-${mes}-${quincena}`;
     await asegurarHoja('PersonalQuincena', HEADERS);
+    await asegurarColumna('PersonalQuincena', 'pagar_extras');
     const existentes = await readSheet<PersonalQuincena>('PersonalQuincena');
     const fields = {
       presentismo_manual: body.presentismo_manual ?? '',
       extras: Number(body.extras) || 0,
       horas_extras: Number(body.horas_extras) || 0,
+      pagar_extras: body.pagar_extras === 'SI' ? 'SI' : '',
     };
     if (existentes.some((e) => String(e.id) === id)) {
       await updateRow('PersonalQuincena', 'id', id, fields);

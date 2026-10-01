@@ -2,9 +2,9 @@
 import { Fragment, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Empleado } from '@/lib/types';
-import { horasTeoricasAuto, rangoQuincena, type ResumenEmpleado } from '@/lib/personal';
+import { horasTeoricasAuto, rangoQuincena, type ResumenEmpleado, type PeriodoPago } from '@/lib/personal';
 
-interface Props { resumen: ResumenEmpleado[]; empleados: Empleado[]; anio: number; mes: number; quincena: 1 | 2; }
+interface Props { resumen: ResumenEmpleado[]; empleados: Empleado[]; anio: number; mes: number; quincena: PeriodoPago; }
 
 const fmtN = (n: number) => n.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
@@ -36,7 +36,8 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
       hora_salida_esperada: emp?.hora_salida_esperada || '17:00',
       presentismo_manual: r.presentismoManual || '',
       extras: String(r.extras || 0),
-      horas_extras: String(r.horasExtras || 0),
+      horas_extras: String(r.horasExtrasManual ? r.horasExtras : 0),
+      pagar_extras: r.pagarExtras ? 'SI' : '',
     });
     setEditando(r.workno);
     setError(null);
@@ -97,6 +98,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
           presentismo_manual: form.presentismo_manual || '',
           extras: Number(form.extras) || 0,
           horas_extras: Number(form.horas_extras) || 0,
+          pagar_extras: form.pagar_extras || '',
         }),
       });
       if (!resAjuste.ok) { const j = await resAjuste.json().catch(() => ({})); throw new Error(j.error || 'Error guardando ajustes de la quincena'); }
@@ -124,9 +126,11 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                   sacó no se perdió — horas de más/de menos, sueldo/hora y el detalle del
                   presentismo están en el desplegable de cada empleado. */}
               <th>Empleado</th>
+              <th style={{ textAlign: 'right' }}>$ / hora</th>
               <th style={{ textAlign: 'right' }}>Horas<br /><span style={{ fontWeight: 400, fontSize: '10px', color: '#9ca3af' }}>reales / teóricas</span></th>
               <th style={{ textAlign: 'right' }}>Sueldo teórico<br /><span style={{ fontWeight: 400, fontSize: '10px', color: '#9ca3af' }}>por horas teóricas</span></th>
-              <th style={{ textAlign: 'right' }}>Extras<br /><span style={{ fontWeight: 400, fontSize: '10px', color: '#9ca3af' }}>hs. de más y $</span></th>
+              <th style={{ textAlign: 'right' }}>Hs. de más<br /><span style={{ fontWeight: 400, fontSize: '10px', color: '#9ca3af' }}>se pagan solo si se marca</span></th>
+              <th style={{ textAlign: 'right' }}>Adelantos</th>
               <th style={{ textAlign: 'right' }}>A pagar</th>
               <th style={{ textAlign: 'center' }}>Tardanzas</th>
               <th></th>
@@ -153,7 +157,9 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                 ? (() => {
                     const cumplioPreview = form.presentismo_manual === 'SI' ? true : form.presentismo_manual === 'NO' ? false : (r.tardanzas < 2 && r.faltas === 0);
                     const presentismoPreview = cumplioPreview ? (Number(form.presentismo) || 0) : 0;
-                    return horasTeoricasPreview * (Number(form.sueldo_hora) || 0) + presentismoPreview + (Number(form.extras) || 0) + (Number(form.horas_extras) || 0) * (Number(form.sueldo_hora) || 0);
+                    // Las horas extra solo entran si se marcó pagarlas, igual que en el servidor.
+                    const extrasHoras = form.pagar_extras === 'SI' ? (Number(form.horas_extras) || r.horasExtrasCalculadas) * (Number(form.sueldo_hora) || 0) : 0;
+                    return horasTeoricasPreview * (Number(form.sueldo_hora) || 0) + presentismoPreview + (Number(form.extras) || 0) + extrasHoras;
                   })()
                 : r.sueldoAPagar;
               const diasTarde = r.dias.filter((d) => d.esTardanza);
@@ -176,6 +182,17 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                       )}
                       {emp && <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#9ca3af' }}>Horario esperado: {emp.hora_entrada_esperada || '—'} a {emp.hora_salida_esperada || '—'}{emp.hora_entrada_esperada_sabado ? ' · sáb. desde ' + emp.hora_entrada_esperada_sabado : ''}</p>}
                     </td>
+                    {/* El valor hora, a la vista y no escondido en el desplegable: es el
+                        número con el que se arma todo lo demás. */}
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {editandoEsta ? (
+                        <input type="number" min={0} value={form.sueldo_hora} onChange={(e) => setForm((f) => ({ ...f, sueldo_hora: e.target.value }))}
+                          style={{ width: '90px', textAlign: 'right', fontSize: '12px' }} title="Sueldo por hora" />
+                      ) : r.sueldoHora > 0 ? (
+                        <span style={{ fontWeight: 600 }}>{fmt$(r.sueldoHora)}</span>
+                      ) : <span style={{ color: '#dc2626', fontSize: '11px' }}>sin cargar</span>}
+                    </td>
+
                     {/* Horas: reales sobre teóricas, con la diferencia como delta chico */}
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <span style={{ fontWeight: 600 }}>{fmtN(r.horasReales)}</span>
@@ -204,8 +221,6 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                       </span>
                       {editandoEsta && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-end', marginTop: '3px' }}>
-                          <input type="number" min={0} value={form.sueldo_hora} onChange={(e) => setForm((f) => ({ ...f, sueldo_hora: e.target.value }))}
-                            style={{ width: '80px', textAlign: 'right', fontSize: '11px' }} placeholder="$/hora" title="Sueldo por hora" />
                           <input type="number" min={0} value={form.presentismo} onChange={(e) => setForm((f) => ({ ...f, presentismo: e.target.value }))}
                             style={{ width: '80px', textAlign: 'right', fontSize: '11px' }} placeholder="presentismo" title="Presentismo" />
                           <select value={form.presentismo_manual} onChange={(e) => setForm((f) => ({ ...f, presentismo_manual: e.target.value }))} style={{ fontSize: '10px' }}>
@@ -225,20 +240,51 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                             style={{ width: '70px', textAlign: 'right', fontSize: '11px' }} placeholder="hs extra" title={`Vacío = usa las calculadas (${fmtN(r.horasExtrasCalculadas)} hs)`} />
                           <input type="number" value={form.extras} onChange={(e) => setForm((f) => ({ ...f, extras: e.target.value }))}
                             style={{ width: '80px', textAlign: 'right', fontSize: '11px' }} placeholder="extras $" title="Extras en pesos" />
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10.5px', color: form.pagar_extras === 'SI' ? '#d97706' : '#6b7280', cursor: 'pointer', fontWeight: 600 }}>
+                            <input type="checkbox" checked={form.pagar_extras === 'SI'}
+                              onChange={(e) => setForm((f) => ({ ...f, pagar_extras: e.target.checked ? 'SI' : '' }))} />
+                            pagar las hs. de más
+                          </label>
                         </div>
-                      ) : r.sueldoExtras === 0 ? <span style={{ color: '#9ca3af' }}>—</span> : (
+                      ) : (r.horasExtras === 0 && r.extras === 0) ? <span style={{ color: '#9ca3af' }}>—</span> : (
                         <>
-                          <span style={{ fontWeight: 600, color: '#d97706' }}>{fmt$(r.sueldoExtras)}</span>
-                          <span style={{ display: 'block', fontSize: '10px', color: '#9ca3af' }}>
-                            {r.horasExtras > 0 && `${fmtN(r.horasExtras)} hs${r.horasExtrasManual ? ' (manual)' : ''}`}
-                            {r.horasExtras > 0 && r.extras !== 0 && ' · '}
-                            {r.extras !== 0 && `${fmt$(r.extras)} sueltos`}
-                          </span>
+                          {r.horasExtras > 0 && (
+                            <>
+                              {/* Tachado cuando no se pagan: la información sigue —hizo esas
+                                  horas— pero se ve de un vistazo que no están en el sueldo. */}
+                              <span style={{ fontWeight: 600, color: r.pagarExtras ? '#d97706' : '#9ca3af', textDecoration: r.pagarExtras ? 'none' : 'line-through' }}>
+                                {fmt$(r.horasExtrasImporte)}
+                              </span>
+                              <span style={{ display: 'block', fontSize: '10px', color: '#9ca3af' }}>
+                                {fmtN(r.horasExtras)} hs{r.horasExtrasManual ? ' (manual)' : ''}
+                                {!r.pagarExtras && ' · no se pagan'}
+                              </span>
+                            </>
+                          )}
+                          {r.extras !== 0 && (
+                            <span style={{ display: 'block', fontSize: '10px', color: '#d97706', fontWeight: 600 }}>
+                              + {fmt$(r.extras)} sueltos
+                            </span>
+                          )}
                         </>
                       )}
                     </td>
 
-                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmt$(sueldoPreview)}</td>
+                    {/* Adelantos ya entregados en el período: salen de Gastos. */}
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {r.adelantos > 0
+                        ? <span style={{ fontWeight: 600, color: '#dc2626' }}>− {fmt$(r.adelantos)}</span>
+                        : <span style={{ color: '#9ca3af' }}>—</span>}
+                    </td>
+
+                    <td style={{ textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                      {fmt$(sueldoPreview - (editandoEsta ? 0 : r.adelantos))}
+                      {r.adelantos > 0 && !editandoEsta && (
+                        <span style={{ display: 'block', fontSize: '10px', fontWeight: 400, color: '#9ca3af' }}>
+                          {fmt$(r.sueldoAPagar)} − adelantos
+                        </span>
+                      )}
+                    </td>
                     <td style={{ textAlign: 'center' }}>
                       {r.tardanzas > 0 ? (
                         <button onClick={() => toggle(r.workno, 'tardanzas')} style={{ color: '#dc2626', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', fontSize: '13px' }}>
@@ -361,7 +407,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
         </table>
       </div>
       <p style={{ margin: '10px 0 0', fontSize: '11px', color: '#9ca3af' }}>
-        Entrada = primer fichaje del día · Salida = último fichaje del día. Tolerancia de 15 min para tardanzas (quedan siempre en minutos, sin redondear); un ingreso pasadas las 11 no cuenta (día raro/franco). "Hs. de más"/"Hs. de menos" comparan contra lo esperado ese día según horario configurado (o turno de 8hs si no hay horario cargado) — de más solo cuenta si supera 1 hora, y ambas se redondean a horas enteras. Los domingos no son día programado: cualquier hora trabajada un domingo cuenta directo como "de más" (marcada "domingo"). "Sueldo a pagar" = horas teóricas × sueldo/hora + presentismo (si corresponde) + extras + horas extra × sueldo/hora. Presentismo se pierde por falta o por 2 o más tardanzas en la quincena. "Hs. teóricas (auto)" se calcula sola del calendario si el empleado tiene "horas por día" configuradas; si no, es el número manual de siempre.
+        Entrada = primer fichaje del día · Salida = último fichaje del día. Tolerancia de 15 min para tardanzas (quedan siempre en minutos, sin redondear); un ingreso pasadas las 11 no cuenta (día raro/franco). "Hs. de más"/"Hs. de menos" comparan contra lo esperado ese día según horario configurado (o turno de 8hs si no hay horario cargado) — de más solo cuenta si supera 1 hora, y ambas se redondean a horas enteras. Los domingos no son día programado: cualquier hora trabajada un domingo cuenta directo como "de más" (marcada "domingo"). "A pagar" = horas teóricas × sueldo/hora + presentismo (si corresponde) + extras $ − adelantos. Las horas de más NO se pagan salvo que se tilde "pagar las hs. de más" en ese mes: se calculan y se muestran, pero liquidarlas es una decisión. Los adelantos salen de Gastos, con categoría "Adelanto de sueldo" y el empleado elegido. Presentismo se pierde por falta o por 2 o más tardanzas en el período. "Hs. teóricas (auto)" se calcula sola del calendario si el empleado tiene "horas por día" configuradas; si no, es el número manual de siempre.
       </p>
     </div>
   );

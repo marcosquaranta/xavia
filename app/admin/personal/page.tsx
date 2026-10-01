@@ -3,8 +3,9 @@ import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { leerFichajesCache, diasEnCache } from '@/lib/fichajesCache';
-import { calcularResumenQuincena, rangoQuincena, hoyArg, type AjusteQuincena, type ResumenEmpleado } from '@/lib/personal';
-import type { Empleado, PersonalQuincena } from '@/lib/types';
+import { calcularResumenQuincena, rangoQuincena, hoyArg, type AjusteQuincena, type ResumenEmpleado, type PeriodoPago } from '@/lib/personal';
+import type { Empleado, PersonalQuincena, Gasto } from '@/lib/types';
+import { adelantosPorEmpleado, adelantosSinAsignar } from '@/lib/adelantos';
 import Header from '@/components/Header';
 import PersonalManager from './PersonalManager';
 import SincronizarFichajes from './SincronizarFichajes';
@@ -24,22 +25,27 @@ export default async function PersonalPage({ searchParams }: { searchParams: { a
   const hoy = new Date();
   const anio = Number(searchParams.anio) || hoy.getFullYear();
   const mes = Number(searchParams.mes) || hoy.getMonth() + 1;
-  const quincena = (searchParams.q === '2' ? 2 : 1) as 1 | 2;
+  // 0 = el mes entero. Desde que se paga por mes es el período normal; las quincenas
+  // siguen accesibles por URL (?q=1 / ?q=2) para poder volver a mirar un mes ya liquidado
+  // tal como se pagó.
+  const quincena = (searchParams.q === '1' ? 1 : searchParams.q === '2' ? 2 : 0) as PeriodoPago;
 
   let empleados: Empleado[] = [];
   let resumen: ResumenEmpleado[] = [];
+  let adelantosHuerfanos: Gasto[] = [];
   let err: string | null = null;
   const diasSinSincronizar: string[] = [];
   try {
-    const [empleadosData, ajustesData] = await Promise.all([
+    const [empleadosData, ajustesData, gastos] = await Promise.all([
       readSheet<Empleado>('Empleados').catch(() => []),
       readSheet<PersonalQuincena>('PersonalQuincena').catch(() => []),
+      readSheet<Gasto>('Gastos').catch(() => []),
     ]);
     empleados = empleadosData;
     const ajustesDeEstaQuincena = ajustesData.filter((a) => String(a.anio) === String(anio) && String(a.mes) === String(mes) && String(a.quincena) === String(quincena));
     const ajustes: Record<string, AjusteQuincena> = {};
     for (const a of ajustesDeEstaQuincena) {
-      ajustes[String(a.workno)] = { presentismoManual: a.presentismo_manual, extras: Number(a.extras) || 0, horasExtras: Number(a.horas_extras) || 0 };
+      ajustes[String(a.workno)] = { presentismoManual: a.presentismo_manual, extras: Number(a.extras) || 0, horasExtras: Number(a.horas_extras) || 0, pagarExtras: a.pagar_extras || '' };
     }
     const { desde, hasta } = rangoQuincena(anio, mes, quincena);
     // Lee la caché local de fichajes (hoja FichajesDiarios) en vez de pedirle a CrossChex,
@@ -48,7 +54,10 @@ export default async function PersonalPage({ searchParams }: { searchParams: { a
     // rango a mano para sincronizar una quincena vieja que todavía no esté guardada.
     const desdeDia = desde.slice(0, 10), hastaDia = hasta.slice(0, 10);
     const registros = await leerFichajesCache(desdeDia, hastaDia);
-    resumen = calcularResumenQuincena(registros, empleados, anio, mes, quincena, ajustes);
+    // Los adelantos del período, para descontarlos de lo que queda por pagar.
+    const adelantos = adelantosPorEmpleado(gastos, desdeDia, hastaDia);
+    adelantosHuerfanos = adelantosSinAsignar(gastos, desdeDia, hastaDia);
+    resumen = calcularResumenQuincena(registros, empleados, anio, mes, quincena, ajustes, adelantos);
     // Días de la quincena (hasta hoy) que todavía no tienen ningún fichaje guardado — para
     // avisar en pantalla en vez de mostrar una quincena en cero como si nadie hubiera venido.
     const cacheados = await diasEnCache();
@@ -62,28 +71,35 @@ export default async function PersonalPage({ searchParams }: { searchParams: { a
     err = e?.message || 'Error leyendo los fichajes guardados';
   }
 
-  // Navegación mes/quincena anterior-siguiente, preservando la otra dimensión.
-  function url(a: number, m: number, q: 1 | 2) {
+  // Navegación. En mensual se mueve de mes en mes; en quincenal se mantiene el paso de
+  // media en media, para que un mes viejo se siga pudiendo recorrer como se liquidó.
+  function url(a: number, m: number, q: PeriodoPago) {
     let aa = a, mm = m;
     if (mm < 1) { mm = 12; aa--; }
     if (mm > 12) { mm = 1; aa++; }
-    return `/admin/personal?anio=${aa}&mes=${mm}&q=${q}`;
+    return `/admin/personal?anio=${aa}&mes=${mm}${q ? `&q=${q}` : ''}`;
   }
-  const mesAnteriorHref = quincena === 1 ? url(anio, mes - 1, 2) : url(anio, mes, 1);
-  const mesSiguienteHref = quincena === 2 ? url(anio, mes + 1, 1) : url(anio, mes, 2);
+  const mesAnteriorHref = quincena === 0 ? url(anio, mes - 1, 0) : quincena === 1 ? url(anio, mes - 1, 2) : url(anio, mes, 1);
+  const mesSiguienteHref = quincena === 0 ? url(anio, mes + 1, 0) : quincena === 2 ? url(anio, mes + 1, 1) : url(anio, mes, 2);
 
   return (
     <>
       <Header user={user} current="admin" />
       <div className="container">
         <h1 className="page-title">Control de personal</h1>
-        <p className="page-subtitle">Horas, tardanzas y sueldo por quincena — fichajes desde CrossChex</p>
+        <p className="page-subtitle">
+          Horas, tardanzas y sueldo {quincena === 0 ? 'por mes' : 'por quincena'} — fichajes desde CrossChex
+        </p>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
           <Link href={mesAnteriorHref} className="btn secondary" style={{ fontSize: '13px' }}>← Anterior</Link>
           <span style={{ fontWeight: 700, fontSize: '14px' }}>
-            {MESES[mes - 1]} {anio} · {quincena === 1 ? '1ra quincena (1-15)' : `2da quincena (16-${new Date(anio, mes, 0).getDate()})`}
+            {MESES[mes - 1]} {anio}
+            {quincena !== 0 && ` · ${quincena === 1 ? '1ra quincena (1-15)' : `2da quincena (16-${new Date(anio, mes, 0).getDate()})`}`}
           </span>
+          {quincena !== 0 && (
+            <Link href={url(anio, mes, 0)} style={{ fontSize: '11.5px', color: '#2563eb' }}>Ver el mes completo →</Link>
+          )}
           <Link href={mesSiguienteHref} className="btn secondary" style={{ fontSize: '13px' }}>Siguiente →</Link>
         </div>
 
@@ -98,6 +114,13 @@ export default async function PersonalPage({ searchParams }: { searchParams: { a
 
         {!err && diasSinSincronizar.length > 0 && (
           <SincronizarFichajes desde={diasSinSincronizar[0]} hasta={diasSinSincronizar[diasSinSincronizar.length - 1]} dias={diasSinSincronizar} />
+        )}
+
+        {!err && adelantosHuerfanos.length > 0 && (
+          <div className="alert-box" style={{ marginBottom: '14px', background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e' }}>
+            <strong>{adelantosHuerfanos.length} adelanto(s) sin empleado asignado</strong> — no se le descuentan a nadie.
+            Están cargados en Gastos como adelanto pero sin decir a quién: {adelantosHuerfanos.map((g) => `${g.fecha} ${g.descripcion}`).join(' · ')}
+          </div>
         )}
 
         {!err && <PersonalManager resumen={resumen} empleados={empleados} anio={anio} mes={mes} quincena={quincena} />}
