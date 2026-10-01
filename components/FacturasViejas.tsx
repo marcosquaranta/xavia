@@ -32,11 +32,12 @@ const diasDesde = (f: string) => {
 };
 
 export default function FacturasViejas({
-  clientes, facturasPorCliente, saldadas,
+  clientes, facturasPorCliente, saldadas, diasVentana = 365,
 }: {
   clientes: ClienteFacturas[];
   facturasPorCliente: Record<string, FacturaCliente[]>;
   saldadas: SaldadaUI[];
+  diasVentana?: number;
 }) {
   const router = useRouter();
   const [idControl, setIdControl] = useState('');
@@ -49,15 +50,38 @@ export default function FacturasViejas({
   // todo: si una factura que se cobró desde la app igual aparece como abierta, lo único que
   // lo delata es verlas juntas con su estado al lado.
   const [verTodas, setVerTodas] = useState(false);
+  // Las facturas de los clientes que no vienen precargados se piden al elegirlos.
+  //
+  // La página precarga solo los clientes con recordatorio prendido, para no mandarle al
+  // navegador el detalle de todos. Pero acá hacen falta TODOS: marcar facturas viejas como
+  // saldadas es justamente lo que hay que poder hacer con un cliente al que no se le está
+  // reclamando. Sin esto, elegir uno de esos decía "no tiene facturas", que era mentira.
+  const [traidas, setTraidas] = useState<Record<string, FacturaCliente[]>>({});
+  const [cargando, setCargando] = useState(false);
+
+  async function traer(id: string) {
+    if (!id || facturasPorCliente[id] || traidas[id]) return;
+    setCargando(true);
+    try {
+      const r = await fetch(`/api/cobranzas/facturas?id_control=${encodeURIComponent(id)}&dias=${diasVentana}`);
+      const j = await r.json();
+      if (r.ok) setTraidas((p) => ({ ...p, [id]: j.facturas || [] }));
+      else setMsg({ ok: false, texto: j?.error || 'No se pudieron traer las facturas.' });
+    } catch (e: any) {
+      setMsg({ ok: false, texto: e?.message || 'No se pudieron traer las facturas.' });
+    } finally {
+      setCargando(false);
+    }
+  }
 
   // Solo lo que sigue abierto: lo ya imputado por la app no se ofrece, y lo ya marcado a
   // mano tampoco (se ve abajo, con su motivo). De la más vieja a la más nueva, porque son
   // justamente las viejas las que hay que limpiar.
   const todas = useMemo(() => {
-    return (facturasPorCliente[idControl] || [])
+    return (facturasPorCliente[idControl] || traidas[idControl] || [])
       .slice()
       .sort((a, b) => a.fecha.localeCompare(b.fecha));
-  }, [facturasPorCliente, idControl]);
+  }, [facturasPorCliente, traidas, idControl]);
 
   const abiertas = useMemo(() => todas.filter((f) => !f.yaCobrada && !f.saldadaManual && !f.cubierta), [todas]);
   const visibles = verTodas ? todas : abiertas;
@@ -137,16 +161,20 @@ export default function FacturasViejas({
     <div>
       <select
         value={idControl}
-        onChange={(e) => { setIdControl(e.target.value); setElegidas(new Set()); setMsg(null); }}
+        onChange={(e) => { setIdControl(e.target.value); setElegidas(new Set()); setMsg(null); traer(e.target.value); }}
         style={{ width: '100%', maxWidth: '320px', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px' }}
       >
         <option value="">Elegí un cliente…</option>
         {clientes.map((c) => <option key={c.id_control} value={c.id_control}>{c.nombre}</option>)}
       </select>
 
-      {idControl && (todas.length === 0 ? (
+      {idControl && cargando && (
+        <p style={{ margin: '12px 0 0', fontSize: '13px', color: '#6b7280' }}>Buscando las facturas del cliente…</p>
+      )}
+
+      {idControl && !cargando && (todas.length === 0 ? (
         <p style={{ margin: '12px 0 0', fontSize: '13px', color: '#6b7280' }}>
-          Este cliente no tiene facturas en los últimos 120 días.
+          Este cliente no tiene facturas en los últimos {diasVentana} días.
         </p>
       ) : abiertas.length === 0 && !verTodas ? (
         <p style={{ margin: '12px 0 0', fontSize: '13px', color: '#059669' }}>

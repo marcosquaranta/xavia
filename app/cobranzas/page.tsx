@@ -283,12 +283,15 @@ export default async function CobranzasPage() {
             la contabilidad queda como está. Se puede deshacer.
           </p>
           <div style={{ marginTop: '10px' }}>
+            {/* Todos los clientes, no solo los del recordatorio: marcar facturas viejas como
+                saldadas es justamente lo que hay que poder hacer con un cliente que no se
+                está reclamando. Las que no vienen precargadas se piden al elegirlo. */}
             <FacturasViejas
               clientes={clientes
-                .filter((c) => conRecordatorio.has(String(c.id_control)))
                 .map((c) => ({ id_control: String(c.id_control), nombre: nombreClienteVisible(c) }))
                 .sort((a, b) => a.nombre.localeCompare(b.nombre))}
               facturasPorCliente={facturasCliente}
+              diasVentana={DIAS_PAGINA}
               saldadas={saldadas
                 .filter((f) => String(f.estado) !== 'revertida')
                 .map((f) => ({

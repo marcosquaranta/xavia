@@ -8,6 +8,10 @@ import { HOJA_RECORDATORIOS, type RecordatorioCobro } from '@/lib/recordatoriosC
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 import type { ClienteVenta } from '@/lib/types';
 
+import { getCobranzas, importeCobranza } from '@/lib/xubio';
+import { leerSaldadas, numerosSaldados } from '@/lib/facturasSaldadas';
+import { claveComprobante } from '@/lib/comprobantes';
+import { cubrirConCobrosDeXubio } from '@/lib/facturasCliente';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
@@ -31,11 +35,14 @@ export async function GET(req: NextRequest) {
 
     const hoy = fechaArgentinaHoy();
     const desde = sumarDias(hoy, -dias);
-    const [comps, cobros, reclamos] = await Promise.all([
+    const [comps, cobros, reclamos, cobranzas, saldadasFilas] = await Promise.all([
       getComprobantes(desde, hoy),
       readSheet<CobroRegistrado>(HOJA_COBROS).catch(() => [] as CobroRegistrado[]),
       readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => [] as RecordatorioCobro[]),
+      getCobranzas(desde, hoy).catch(() => [] as any[]),
+      leerSaldadas(),
     ]);
+    const saldadas = numerosSaldados(saldadasFilas);
 
     const k = norm(cli.nombre_xubio || cli.nombre_display);
     const facturas = comps
@@ -54,14 +61,24 @@ export async function GET(req: NextRequest) {
       .filter((c: any) => Number(c?.tipo) === 3 && norm(nombreClienteComprobante(c)) === k)
       .reduce((a: number, c: any) => a + (Number(c?.importetotal) || 0), 0);
 
+    // Por CLAVE y no por texto literal, igual que la precarga: el mismo comprobante escrito
+    // distinto no se reconocía y una factura ya cobrada se seguía ofreciendo como abierta.
     const yaCobradas = new Set<string>();
     for (const c of cobros) {
       if (String(c.estado) === 'anulado') continue;
       for (const n of String((c as any).comprobantes || '').split(',')) {
-        const t = n.trim();
-        if (t) yaCobradas.add(t);
+        const k2 = claveComprobante(n);
+        if (k2) yaCobradas.add(k2);
       }
     }
+
+    // Cuánto cobró este cliente según Xubio, para dar por cubiertas las más viejas — misma
+    // reconstrucción que usa la pantalla de Cobranzas. Sin esto, pedir las facturas de un
+    // cliente a mano devolvía como abiertas las que la precarga ya daba por cubiertas, y
+    // los dos caminos mostraban cosas distintas para el mismo cliente.
+    const cobradoTotal = cobranzas
+      .filter((cob: any) => norm(nombreClienteComprobante(cob)) === k)
+      .reduce((a: number, cob: any) => a + importeCobranza(cob), 0);
 
     // Cuándo se reclamó cada factura (si se reclamó): al armar un reclamo manual es el
     // dato que evita mandar dos veces lo mismo sin darse cuenta.
@@ -79,11 +96,14 @@ export async function GET(req: NextRequest) {
       ok: true,
       cliente: cli.nombre_display || cli.nombre_xubio,
       dias,
-      facturas: facturas.map((f) => ({
-        ...f,
-        yaCobrada: yaCobradas.has(f.numero),
-        reclamadaEl: reclamadas.get(f.numero) || '',
-      })),
+      facturas: cubrirConCobrosDeXubio(
+        facturas.map((f) => ({
+          ...f,
+          yaCobrada: yaCobradas.has(claveComprobante(f.numero)),
+          saldadaManual: saldadas.has(claveComprobante(f.numero)),
+        })),
+        cobradoTotal,
+      ).map((f) => ({ ...f, reclamadaEl: reclamadas.get(f.numero) || '' })),
       notasCredito: Math.round(notasCredito),
     });
   } catch (err: any) {
