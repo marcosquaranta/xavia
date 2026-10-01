@@ -120,6 +120,16 @@ export function generarAlertas(lotes: Lote[], tubosMesadas: any[], ciclosRealesM
 
 function numAP(v: any): number { const n = Number(v); return isNaN(n) ? 0 : n; }
 
+// Vacío no es cero. Es la distinción que hace toda la diferencia en estas alertas: una
+// celda sin cargar significa "todavía no se contó", y leerla como 0 hace que la app crea
+// que no queda nada y avise de reponer insumos que están llenos. Pasa todos los meses, en
+// los primeros días, hasta que alguien carga el cierre del mes anterior.
+function cargado(v: any): boolean {
+  if (v === null || v === undefined) return false;
+  const t = String(v).trim();
+  return t !== '' && !isNaN(Number(t));
+}
+
 // 🔴 Insumos con stock estimado por debajo de N días de uso — mismo motor que "Uso Teórico"
 // de Stocks (calcularUsoTeorico + drivers de producción/venta), pero acá se usa para proyectar
 // el stock ACTUAL (a hoy, no a fin de mes) y compararlo contra el ritmo de consumo diario.
@@ -161,16 +171,37 @@ export function alertasStockBajo(
 
     const actualRow = stockDelArticulo.find((s) => String(s.anio) === String(anioActual) && String(s.mes) === String(mesActual));
     const anteriorRow = stockDelArticulo.find((s) => String(s.anio) === String(anioAnteriorNum) && String(s.mes) === String(mesAnteriorNum));
-    const ini = actualRow ? numAP(actualRow.stock_inicial) : numAP(anteriorRow?.stock_final);
     const comp = numAP(actualRow?.compras);
     const finManual = numAP(actualRow?.stock_final);
     const factor = Number(art.factor_uso) || 0;
+
+    // ── De dónde sale el stock del que se parte ──
+    //
+    // El stock inicial del mes es, por definición, el final del mes anterior. Mientras ese
+    // cierre no esté cargado la celda está vacía, y leerla como 0 hacía que estas alertas
+    // salieran todas juntas los primeros días de cada mes diciendo que no queda nada de
+    // nada. Son alertas al pedo y, peor, entrenan a ignorar el bloque entero justo donde
+    // también aparecen las de verdad.
+    //
+    // Si el inicial no está cargado se busca el último cierre real que haya, de cualquier
+    // mes, y se descuenta el uso teórico desde entonces. Si no hay ningún cierre real en
+    // toda la historia del artículo, no se avisa nada: no se puede proyectar un stock a
+    // partir de un número que nadie contó nunca.
+    const iniCargado = cargado(actualRow?.stock_inicial) || cargado(anteriorRow?.stock_final);
+    const ini = actualRow && cargado(actualRow.stock_inicial)
+      ? numAP(actualRow.stock_inicial)
+      : numAP(anteriorRow?.stock_final);
+
+    // El último mes con cierre contado, para poder estimar cuando falta el inicial.
+    const ultimoCierre = iniCargado ? null : [...stockDelArticulo]
+      .filter((r) => cargado(r.stock_final) && numAP(r.stock_final) > 0)
+      .sort((a, b) => (Number(b.anio) - Number(a.anio)) || (Number(b.mes) - Number(a.mes)))[0];
+    if (!iniCargado && !ultimoCierre) continue;
 
     // Stock "del momento": si ya hay un conteo manual cargado este mes se usa ese (más preciso
     // que cualquier estimación); si no, se proyecta inicial + compras − uso teórico acumulado
     // en lo que va del mes (drivers reales a la fecha, no proyectados).
     const usoTeoricoActual = calcularUsoTeorico(art.formula_uso, factor, driversActual);
-    const stockActual = finManual > 0 ? finManual : Math.max(0, ini + comp - (usoTeoricoActual ?? 0));
 
     // Ritmo diario: preferimos el mes pasado COMPLETO (más estable) y sólo si no hay uso ahí
     // (insumo nuevo, estacional, etc.) caemos al ritmo parcial de lo que va del mes actual.
@@ -179,6 +210,24 @@ export function alertasStockBajo(
     if (usoTeoricoMesAnterior && usoTeoricoMesAnterior > 0 && diasEnMesAnterior > 0) usoPorDia = usoTeoricoMesAnterior / diasEnMesAnterior;
     else if (usoTeoricoActual && usoTeoricoActual > 0 && diasTranscurridos > 0) usoPorDia = usoTeoricoActual / diasTranscurridos;
     if (!usoPorDia || usoPorDia <= 0) continue;
+
+    // Stock "del momento". Por orden de confianza: un conteo manual de este mes, después el
+    // inicial cargado menos el uso teórico de lo que va del mes, y por último —cuando el
+    // cierre del mes anterior todavía no se cargó— el último cierre real descontándole el
+    // uso estimado de todos los días transcurridos desde entonces.
+    let stockActual: number;
+    let estimado = false;
+    if (finManual > 0) {
+      stockActual = finManual;
+    } else if (iniCargado) {
+      stockActual = Math.max(0, ini + comp - (usoTeoricoActual ?? 0));
+    } else {
+      // Días desde el cierre de ese mes hasta hoy.
+      const finDeAquelMes = new Date(Number(ultimoCierre!.anio), Number(ultimoCierre!.mes), 0);
+      const dias = Math.max(0, Math.round((Date.now() - finDeAquelMes.getTime()) / 86400000));
+      stockActual = Math.max(0, numAP(ultimoCierre!.stock_final) + comp - usoPorDia * dias);
+      estimado = true;
+    }
 
     const diasDeUso = stockActual / usoPorDia;
     const umbralArticulo = diasSeguridadDeArticulo(art, umbralDias);
@@ -191,7 +240,9 @@ export function alertasStockBajo(
       // cargado, de una fórmula de uso teórico desviada, o si es real.
       const cuenta = finManual > 0
         ? `stock final cargado ${fmt(finManual)} ${u} (conteo manual)`
-        : `stock inicial ${fmt(ini)} ${u}${comp > 0 ? ` + compras ${fmt(comp)} ${u}` : ''} − uso teórico al día ${diasTranscurridos} (${fmt(usoTeoricoActual ?? 0)} ${u}) = stock teórico ${fmt(stockActual)} ${u}`;
+        : estimado
+          ? `estimado desde el último cierre contado (${ultimoCierre!.mes}/${ultimoCierre!.anio}: ${fmt(numAP(ultimoCierre!.stock_final))} ${u}) = ~${fmt(stockActual)} ${u} — falta cargar el cierre del mes anterior`
+          : `stock inicial ${fmt(ini)} ${u}${comp > 0 ? ` + compras ${fmt(comp)} ${u}` : ''} − uso teórico al día ${diasTranscurridos} (${fmt(usoTeoricoActual ?? 0)} ${u}) = stock teórico ${fmt(stockActual)} ${u}`;
       alertas.push({
         tipo: 'error',
         msg: `${art.articulo}: ${cuenta} · ritmo ${fmt(usoPorDia)} ${u}/día → dura ~${diasTxt}d más (mínimo ${umbralArticulo}d) — reponer`,
