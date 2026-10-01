@@ -103,12 +103,31 @@ export default async function CobranzasPage() {
   // persona está esperando para decidir.
   const saldadasSet = numerosSaldados(saldadas);
 
+  // Solo se traen las facturas de los clientes con el recordatorio prendido.
+  //
+  // Antes se armaba el detalle de TODOS los clientes de un año entero y se mandaba al
+  // navegador tres veces —lo necesitan la bandeja, el resumen de impagas y la limpieza de
+  // facturas viejas—, y eso es lo que hacía que la página tardara una eternidad: el peso no
+  // estaba en calcularlo sino en transferirlo.
+  //
+  // No se pierde nada: si entra un cobro de un cliente sin recordatorio, al abrir esa fila
+  // de la bandeja sus facturas se piden en el momento, que es como funcionaba antes de
+  // precargarlas.
+  const conRecordatorio = new Set(
+    clientes
+      .filter((c) => String((c as any)[COL_ACTIVO] || '').trim().toUpperCase() === 'SI')
+      .map((c) => String(c.id_control)),
+  );
+
   let facturasCliente: Record<string, FacturaCliente[]> = {};
   let cuentasXubio: CuentaXubio[] = [];
   let errorCuentas: string | null = null;
   try {
     const [comps, cobs] = await pedidoXubio;
-    facturasCliente = facturasPorCliente(comps, cobros, clientes, saldadasSet, cobs);
+    const todas = facturasPorCliente(comps, cobros, clientes, saldadasSet, cobs);
+    for (const id of Object.keys(todas)) {
+      if (conRecordatorio.has(String(id))) facturasCliente[id] = todas[id];
+    }
     cuentasXubio = (await getCuentas(cobs)).cuentas;
     if (!cuentasXubio.length) errorCuentas = 'Xubio no devolvió ninguna cuenta donde imputar el cobro.';
   } catch (e: any) {
@@ -187,16 +206,19 @@ export default async function CobranzasPage() {
         <div className="card" style={{ marginBottom: '14px' }}>
           <p className="card-title">Facturas impagas por cliente</p>
           <p className="card-sub">
-            Todo lo facturado en los últimos {DIAS_PAGINA} días que no figura cobrado: ni imputado desde la app
-            ni dado por saldado a mano. Es exactamente lo que se le reclama a cada cliente en el recordatorio.
+            Todo lo facturado en los últimos {DIAS_PAGINA} días que no figura cobrado: ni imputado desde la app,
+            ni dado por saldado a mano, ni cubierto por los cobros que el cliente tiene en Xubio. Es exactamente
+            lo que se le reclama a cada cliente en el recordatorio. <strong>Solo los clientes con el recordatorio
+            prendido</strong> — el resto no se trae, para que la página abra rápido.
           </p>
           <div style={{ marginTop: '10px' }}>
             <ResumenImpagas
               clientes={clientes
+                .filter((c) => conRecordatorio.has(String(c.id_control)))
                 .map((c) => ({ id_control: String(c.id_control), nombre: nombreClienteVisible(c) }))
                 .sort((a, b) => a.nombre.localeCompare(b.nombre))}
               facturasPorCliente={facturasCliente}
-              conRecordatorio={filas.filter((f) => f.activo).map((f) => String(f.id_control))}
+              conRecordatorio={[...conRecordatorio]}
             />
           </div>
         </div>
@@ -208,7 +230,8 @@ export default async function CobranzasPage() {
             Subís el resumen del banco y acá quedan los movimientos de entrada, uno por uno, con el cliente
             propuesto y qué facturas podrían ser. Nada se registra en Xubio hasta que lo confirmás.
             Cuando elegís el cliente a mano, la app se guarda cómo aparece ese pagador en el resumen y la
-            próxima vez lo reconoce sola.
+            próxima vez lo reconoce sola. Las facturas vienen precargadas solo para los clientes con el
+            recordatorio prendido; para el resto se piden al abrir la fila y tarda unos segundos.
           </p>
           <div style={{ marginTop: '10px' }}>
             <BandejaCobranzas
@@ -262,6 +285,7 @@ export default async function CobranzasPage() {
           <div style={{ marginTop: '10px' }}>
             <FacturasViejas
               clientes={clientes
+                .filter((c) => conRecordatorio.has(String(c.id_control)))
                 .map((c) => ({ id_control: String(c.id_control), nombre: nombreClienteVisible(c) }))
                 .sort((a, b) => a.nombre.localeCompare(b.nombre))}
               facturasPorCliente={facturasCliente}

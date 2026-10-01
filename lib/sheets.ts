@@ -338,6 +338,28 @@ export async function asegurarHoja(nombre: string, headers: string[]): Promise<v
 // Agrega una columna al final del encabezado de una hoja YA EXISTENTE si todavía no
 // está — para sumarle un campo nuevo a una hoja vieja sin pedirle al usuario que edite
 // la planilla a mano. Idempotente (no hace nada si la columna ya existe).
+// Varias columnas de una sola vez: UNA lectura del header y UNA escritura, en vez de una
+// de cada por columna.
+//
+// Llamar a asegurarColumna en un bucle de once columnas por tres hojas son treinta y tres
+// lecturas seguidas, y Google corta por cuota por minuto. Pasó de verdad: al guardar una
+// venta la pantalla devolvía "Google Sheets cortó por límite de consultas".
+export async function asegurarColumnas(nombre: string, columnas: string[]): Promise<void> {
+  if (!columnas.length) return;
+  const sheets = getClient();
+  const resp = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${nombre}!1:1` });
+  const headers: string[] = (resp.data.values?.[0] as string[]) || [];
+  const faltan = columnas.filter((c) => !headers.includes(c));
+  if (!faltan.length) return;
+  // Se escriben contiguas a partir de la primera libre, en una sola llamada.
+  const desde = colLetter(headers.length + 1);
+  const hasta = colLetter(headers.length + faltan.length);
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SHEET_ID, range: `${nombre}!${desde}1:${hasta}1`,
+    valueInputOption: 'RAW', requestBody: { values: [faltan] },
+  });
+}
+
 export async function asegurarColumna(nombre: string, columna: string): Promise<void> {
   const sheets = getClient();
   const resp = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${nombre}!1:1` });
