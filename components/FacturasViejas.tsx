@@ -57,6 +57,9 @@ export default function FacturasViejas({
   // saldadas es justamente lo que hay que poder hacer con un cliente al que no se le está
   // reclamando. Sin esto, elegir uno de esos decía "no tiene facturas", que era mentira.
   const [traidas, setTraidas] = useState<Record<string, FacturaCliente[]>>({});
+  // Lo que se marcó en esta pantalla, encima de lo que vino del servidor: hasta que el
+  // servidor se ponga al día, lo recién marcado tiene que verse marcado.
+  const [locales, setLocales] = useState<Record<string, FacturaCliente[]>>({});
   const [cargando, setCargando] = useState(false);
 
   async function traer(id: string) {
@@ -78,10 +81,10 @@ export default function FacturasViejas({
   // mano tampoco (se ve abajo, con su motivo). De la más vieja a la más nueva, porque son
   // justamente las viejas las que hay que limpiar.
   const todas = useMemo(() => {
-    return (facturasPorCliente[idControl] || traidas[idControl] || [])
+    return (locales[idControl] || facturasPorCliente[idControl] || traidas[idControl] || [])
       .slice()
       .sort((a, b) => a.fecha.localeCompare(b.fecha));
-  }, [facturasPorCliente, traidas, idControl]);
+  }, [facturasPorCliente, traidas, locales, idControl]);
 
   const abiertas = useMemo(() => todas.filter((f) => !f.yaCobrada && !f.saldadaManual && !f.cubierta), [todas]);
   const visibles = verTodas ? todas : abiertas;
@@ -128,6 +131,13 @@ export default function FacturasViejas({
         return;
       }
       setMsg({ ok: true, texto: j.mensaje });
+      // Se marcan acá mismo, sin esperar a que el servidor rearme la página: la plata ya
+      // quedó guardada y lo que falta es que la pantalla lo muestre. El refresh sigue
+      // yendo, pero por detrás — si tarda, no se nota.
+      const marcadas = new Set(elegidas);
+      const marcar = (fs: FacturaCliente[]) => fs.map((f) => marcadas.has(f.numero) ? { ...f, saldadaManual: true } : f);
+      setTraidas((p) => (p[idControl] ? { ...p, [idControl]: marcar(p[idControl]) } : p));
+      setLocales((p) => ({ ...p, [idControl]: marcar(facturasPorCliente[idControl] || p[idControl] || []) }));
       setElegidas(new Set());
       setMotivo('');
       router.refresh();
@@ -149,7 +159,12 @@ export default function FacturasViejas({
       });
       const j = await res.json();
       setMsg({ ok: res.ok, texto: res.ok ? j.mensaje : (j?.error || 'No se pudo deshacer.') });
-      if (res.ok) router.refresh();
+      if (res.ok) {
+        const volver = (fs: FacturaCliente[]) => fs.map((f) => f.numero === numero ? { ...f, saldadaManual: false } : f);
+        setTraidas((p) => (p[idControl] ? { ...p, [idControl]: volver(p[idControl]) } : p));
+        setLocales((p) => ({ ...p, [idControl]: volver(facturasPorCliente[idControl] || p[idControl] || []) }));
+        router.refresh();
+      }
     } catch (e: any) {
       setMsg({ ok: false, texto: e?.message || 'No se pudo deshacer.' });
     } finally {

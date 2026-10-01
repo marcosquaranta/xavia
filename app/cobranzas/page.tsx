@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import {
@@ -23,6 +24,7 @@ import ReclamoManual from '@/components/ReclamoManual';
 import FacturasViejas from '@/components/FacturasViejas';
 import ResumenImpagas from '@/components/ResumenImpagas';
 import { leerSaldadas, numerosSaldados, type FacturaSaldada } from '@/lib/facturasSaldadas';
+import { leerRevisiones, ultimaRevisionPorCliente, DIAS_REVISION_VIEJA, type RevisionCliente } from '@/lib/revisionCliente';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,7 +44,7 @@ const fmtFechaHora = (iso: string) => {
   return d ? `${d}/${m} ${(h || '').slice(0, 5)}` : '—';
 };
 
-export default async function CobranzasPage() {
+export default async function CobranzasPage({ searchParams }: { searchParams: { ver?: string } }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
   if (user.rol !== 'admin') redirect('/panel');
@@ -52,6 +54,7 @@ export default async function CobranzasPage() {
   let bandeja: ItemBandeja[] = [];
   let aliasRows: AliasCobranza[] = [];
   let saldadas: FacturaSaldada[] = [];
+  let revisiones: RevisionCliente[] = [];
   // Xubio arranca junto con las planillas, no después. Son las dos consultas más lentas de
   // la página y ninguna depende de la otra: esperarlas en serie hacía que entrar a
   // Cobranzas tardara la suma de las dos. Se lanzan acá y se esperan más abajo.
@@ -63,7 +66,7 @@ export default async function CobranzasPage() {
   ]).catch(() => [[], []] as [any[], any[]]);
 
   try {
-    [clientes, enviados, configRows, cobros, bandeja, aliasRows, saldadas] = await Promise.all([
+    [clientes, enviados, configRows, cobros, bandeja, aliasRows, saldadas, revisiones] = await Promise.all([
       readSheet<ClienteVenta>('Clientes').catch(() => []),
       readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => []),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
@@ -73,6 +76,8 @@ export default async function CobranzasPage() {
       readSheet<AliasCobranza>(HOJA_ALIAS).catch(() => []),
       // La hoja no existe hasta que se marca la primera factura a mano.
       leerSaldadas(),
+      // La hoja no existe hasta la primera revisión registrada.
+      leerRevisiones(),
     ]);
   } catch {}
 
@@ -103,6 +108,20 @@ export default async function CobranzasPage() {
   // persona está esperando para decidir.
   const saldadasSet = numerosSaldados(saldadas);
 
+  // Qué sección pesada se pidió ver. Plegar con <details> esconde pero NO ahorra: el
+  // servidor arma el contenido igual y lo manda. Lo que hace lenta esta página es
+  // justamente eso —el detalle de facturas de un año, serializado y transferido—, así que
+  // las secciones que no son el trabajo del día no se arman hasta que se piden.
+  const ver = String(searchParams?.ver || '');
+
+  // La última revisión de cada cliente, para la columna "Revisado" del resumen.
+  const revisionesUI = Object.fromEntries(
+    Object.entries(ultimaRevisionPorCliente(revisiones)).map(([id, r]) => [id, {
+      id_control: String(r.id_control), fecha: String(r.fecha), usuario: String(r.usuario || ''),
+      facturas_abiertas: Number(r.facturas_abiertas) || 0, monto_abierto: Number(r.monto_abierto) || 0,
+    }]),
+  );
+
   // Solo se traen las facturas de los clientes con el recordatorio prendido.
   //
   // Antes se armaba el detalle de TODOS los clientes de un año entero y se mandaba al
@@ -120,13 +139,23 @@ export default async function CobranzasPage() {
   );
 
   let facturasCliente: Record<string, FacturaCliente[]> = {};
+  // Separado del anterior a propósito: uno es lo poco que la bandeja necesita siempre, el
+  // otro es el detalle completo que solo se arma cuando se abre el resumen.
+  const impagasCliente: Record<string, FacturaCliente[]> = {};
   let cuentasXubio: CuentaXubio[] = [];
   let errorCuentas: string | null = null;
   try {
     const [comps, cobs] = await pedidoXubio;
     const todas = facturasPorCliente(comps, cobros, clientes, saldadasSet, cobs);
-    for (const id of Object.keys(todas)) {
-      if (conRecordatorio.has(String(id))) facturasCliente[id] = todas[id];
+    // Para la bandeja alcanza con los clientes que TIENEN algo pendiente de imputar, que
+    // son un puñado: es lo único que se mira al abrir la pantalla. El resumen de impagas,
+    // que sí necesita a todos, se arma aparte y solo cuando se lo pide.
+    const deLaBandeja = new Set(itemsBandeja.map((i) => String(i.id_control)).filter(Boolean));
+    for (const id of deLaBandeja) if (todas[id]) facturasCliente[id] = todas[id];
+    if (ver === 'impagas') {
+      for (const id of Object.keys(todas)) {
+        if (conRecordatorio.has(String(id))) impagasCliente[id] = todas[id];
+      }
     }
     cuentasXubio = (await getCuentas(cobs)).cuentas;
     if (!cuentasXubio.length) errorCuentas = 'Xubio no devolvió ninguna cuenta donde imputar el cobro.';
@@ -203,13 +232,25 @@ export default async function CobranzasPage() {
         </p>
 
         {/* ══ QUIÉN DEBE QUÉ ══ */}
+        {ver !== 'impagas' ? (
+          <div className="card" style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+            <div>
+              <p className="card-title" style={{ margin: 0 }}>Facturas impagas por cliente</p>
+              <p className="card-sub" style={{ margin: '2px 0 0' }}>Quién debe qué, desde cuándo y hace cuánto que no se revisa.</p>
+            </div>
+            <Link href="/cobranzas?ver=impagas" className="btn secondary" style={{ fontSize: '13px', whiteSpace: 'nowrap' }}>Ver →</Link>
+          </div>
+        ) : (
         <div className="card" style={{ marginBottom: '14px' }}>
-          <p className="card-title">Facturas impagas por cliente</p>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+            <p className="card-title" style={{ margin: 0 }}>Facturas impagas por cliente</p>
+            <Link href="/cobranzas" style={{ fontSize: '12px', color: '#2563eb' }}>Ocultar</Link>
+          </div>
           <p className="card-sub">
             Todo lo facturado en los últimos {DIAS_PAGINA} días que no figura cobrado: ni imputado desde la app,
             ni dado por saldado a mano, ni cubierto por los cobros que el cliente tiene en Xubio. Es exactamente
             lo que se le reclama a cada cliente en el recordatorio. <strong>Solo los clientes con el recordatorio
-            prendido</strong> — el resto no se trae, para que la página abra rápido.
+            prendido</strong>.
           </p>
           <div style={{ marginTop: '10px' }}>
             <ResumenImpagas
@@ -217,11 +258,14 @@ export default async function CobranzasPage() {
                 .filter((c) => conRecordatorio.has(String(c.id_control)))
                 .map((c) => ({ id_control: String(c.id_control), nombre: nombreClienteVisible(c) }))
                 .sort((a, b) => a.nombre.localeCompare(b.nombre))}
-              facturasPorCliente={facturasCliente}
+              facturasPorCliente={impagasCliente}
               conRecordatorio={[...conRecordatorio]}
+              revisiones={revisionesUI}
+              diasRevisionVieja={DIAS_REVISION_VIEJA}
             />
           </div>
         </div>
+        )}
 
         {/* ══ BANDEJA ══ */}
         <div className="card" style={{ marginBottom: '14px' }}>
@@ -247,8 +291,10 @@ export default async function CobranzasPage() {
         </div>
 
         {/* ══ REGISTRAR UN COBRO ══ */}
-        <div className="card" style={{ marginBottom: '14px' }}>
-          <p className="card-title">Registrar un cobro en Xubio</p>
+        <details className="card" style={{ marginBottom: '14px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '14px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
+            Registrar un cobro a mano en Xubio
+          </summary>
           <p className="card-sub">
             Lo que cargues acá se crea en Xubio como cobranza del cliente. Entra a su cuenta corriente
             como cobro a cuenta: la API de Xubio no permite imputarlo a una factura puntual, eso sigue
@@ -271,11 +317,13 @@ export default async function CobranzasPage() {
                 }))}
             />
           </div>
-        </div>
+        </details>
 
         {/* ══ LIMPIAR FACTURAS VIEJAS ══ */}
-        <div className="card" style={{ marginBottom: '14px' }}>
-          <p className="card-title">Facturas que ya están cobradas pero siguen apareciendo</p>
+        <details className="card" style={{ marginBottom: '14px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '14px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
+            Marcar facturas como saldadas (sin tocar Xubio)
+          </summary>
           <p className="card-sub">
             Para las que se cobraron por fuera de la app —un cheque, una compensación, un cobro cargado
             a mano en Xubio— o las que ya no se van a cobrar. Se dan por saldadas y dejan de aparecer al
@@ -285,12 +333,15 @@ export default async function CobranzasPage() {
           <div style={{ marginTop: '10px' }}>
             {/* Todos los clientes, no solo los del recordatorio: marcar facturas viejas como
                 saldadas es justamente lo que hay que poder hacer con un cliente que no se
-                está reclamando. Las que no vienen precargadas se piden al elegirlo. */}
+                está reclamando. Y sin precarga: las facturas se piden al elegir el cliente.
+                Precargar unas pocas no ahorraba nada —igual hay que pedir las de los demás—
+                y hacía que un cliente se viera al instante y otro tardara, sin razón
+                aparente desde afuera. */}
             <FacturasViejas
               clientes={clientes
                 .map((c) => ({ id_control: String(c.id_control), nombre: nombreClienteVisible(c) }))
                 .sort((a, b) => a.nombre.localeCompare(b.nombre))}
-              facturasPorCliente={facturasCliente}
+              facturasPorCliente={{}}
               diasVentana={DIAS_PAGINA}
               saldadas={saldadas
                 .filter((f) => String(f.estado) !== 'revertida')
@@ -301,11 +352,13 @@ export default async function CobranzasPage() {
                 }))}
             />
           </div>
-        </div>
+        </details>
 
         {/* ══ RECLAMO PUNTUAL ══ */}
-        <div className="card" style={{ marginBottom: '14px' }}>
-          <p className="card-title">Reclamar facturas a un cliente</p>
+        <details className="card" style={{ marginBottom: '14px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '14px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
+            Reclamar facturas a un cliente
+          </summary>
           <p className="card-sub">
             Para mandar un reclamo puntual sin tocar la configuración del recordatorio automático.
             Elegís el cliente, marcás desde qué fecha (o tildás las facturas una por una) y se manda.
@@ -313,15 +366,17 @@ export default async function CobranzasPage() {
           <div style={{ marginTop: '10px' }}>
             <ReclamoManual clientes={filas.map((f) => ({ id_control: f.id_control, nombre: f.nombre }))} />
           </div>
-        </div>
+        </details>
 
-        <div className="card" style={{ marginBottom: '14px' }}>
-          <p className="card-title">Clientes con recordatorio</p>
+        <details className="card" style={{ marginBottom: '14px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '14px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
+            Clientes con recordatorio
+          </summary>
           <p className="card-sub">{prendidos === 0 ? 'Ninguno prendido todavía' : `${prendidos} prendido${prendidos > 1 ? 's' : ''}`}</p>
           <div style={{ marginTop: '10px' }}>
             <ClientesRecordatorio clientes={filas} />
           </div>
-        </div>
+        </details>
 
         {/* Los datos de pago se editan una vez por año: van plegados. */}
         <details className="card" style={{ marginBottom: '14px' }}>

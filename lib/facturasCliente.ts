@@ -71,6 +71,71 @@ export function cubrirConCobrosDeXubio(
   return facturas.map((f) => ({ ...f, cubierta: cubiertas.has(f.numero) }));
 }
 
+// ── Del nombre que trae el comprobante al cliente ────────────────────────────────────
+//
+// El nombre va en DOS pasadas, y el orden importa. Antes se recorría cliente por cliente
+// probando nombre_xubio y nombre_display juntos, y el primero que llegaba se quedaba con la
+// clave. Si un cliente tenía como nombre_display el nombre_xubio de OTRO —"Heroica Alto"
+// mostrándose como "Heroica", por ejemplo— le robaba los comprobantes al verdadero
+// "Heroica", que pasaba a figurar sin ninguna factura. Y no había forma de notarlo: uno de
+// los dos se veía perfecto y el otro parecía un cliente sin actividad.
+//
+// Ahora primero se asignan TODOS los nombre_xubio —que es el nombre que de verdad aparece
+// en el comprobante— y recién después los nombre_display, y solo si la clave quedó libre.
+function indicePorNombre(clientes: ClienteVenta[]): Map<string, string> {
+  const porNombre = new Map<string, string>();
+  for (const cli of clientes || []) {
+    const k = norm(cli.nombre_xubio);
+    if (k && !porNombre.has(k)) porNombre.set(k, String(cli.id_control));
+  }
+  for (const cli of clientes || []) {
+    const k = norm(cli.nombre_display);
+    if (k && !porNombre.has(k)) porNombre.set(k, String(cli.id_control));
+  }
+  return porNombre;
+}
+
+export interface ColisionNombre {
+  clave: string;
+  gana: string;      // nombre del cliente que se queda con los comprobantes
+  pierden: string[]; // los que quedan sin ninguno por culpa de la colisión
+}
+
+// Clientes distintos que comparten el mismo nombre normalizado. Es un problema de datos que
+// hay que ver, no algo que la app pueda resolver sola: mientras exista, uno de los dos va a
+// figurar sin facturas aunque las tenga.
+export function colisionesDeNombre(clientes: ClienteVenta[]): ColisionNombre[] {
+  const porClave = new Map<string, { id: string; nombre: string; esXubio: boolean }[]>();
+  for (const cli of clientes || []) {
+    for (const [nom, esXubio] of [[cli.nombre_xubio, true], [cli.nombre_display, false]] as const) {
+      const k = norm(nom);
+      if (!k) continue;
+      const lista = porClave.get(k) || [];
+      // El mismo cliente con los dos nombres iguales no es una colisión.
+      if (!lista.some((x) => x.id === String(cli.id_control))) {
+        lista.push({ id: String(cli.id_control), nombre: nombreDe(cli), esXubio });
+        porClave.set(k, lista);
+      }
+    }
+  }
+  const out: ColisionNombre[] = [];
+  for (const [clave, lista] of porClave) {
+    if (lista.length < 2) continue;
+    // Gana el que lo tiene como nombre_xubio (primera pasada del índice).
+    const ganador = lista.find((x) => x.esXubio) || lista[0];
+    out.push({
+      clave,
+      gana: ganador.nombre,
+      pierden: lista.filter((x) => x.id !== ganador.id).map((x) => x.nombre),
+    });
+  }
+  return out;
+}
+
+function nombreDe(c: ClienteVenta): string {
+  return String(c.nombre_display || c.nombre_xubio || c.id_control || '').trim();
+}
+
 // `cobranzas` son las de Xubio: de ahí sale cuánto pagó cada cliente.
 export function facturasPorCliente(
   comprobantes: any[], cobros: any[], clientes: ClienteVenta[], saldadas?: Set<string>,
@@ -90,15 +155,7 @@ export function facturasPorCliente(
     }
   }
 
-  // Índice del nombre normalizado de Xubio al id_control, para no recorrer los clientes
-  // por cada comprobante.
-  const porNombre = new Map<string, string>();
-  for (const cli of clientes || []) {
-    for (const nom of [cli.nombre_xubio, cli.nombre_display]) {
-      const k = norm(nom);
-      if (k && !porNombre.has(k)) porNombre.set(k, String(cli.id_control));
-    }
-  }
+  const porNombre = indicePorNombre(clientes);
 
   const out: Record<string, FacturaCliente[]> = {};
   for (const c of comprobantes || []) {

@@ -1,5 +1,6 @@
 'use client';
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { FacturaCliente } from '@/lib/facturasCliente';
 
 // ── Quién debe qué ───────────────────────────────────────────────────────────────────
@@ -13,6 +14,15 @@ import type { FacturaCliente } from '@/lib/facturasCliente';
 
 export interface ClienteImpagas { id_control: string; nombre: string }
 
+// La última vez que se controló la cuenta de cada cliente, con la foto de lo que había.
+export interface RevisionUI {
+  id_control: string;
+  fecha: string;
+  usuario: string;
+  facturas_abiertas: number;
+  monto_abierto: number;
+}
+
 const fmt = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 const fmtFecha = (f: string) => {
   const [y, m, d] = String(f || '').split('-');
@@ -24,15 +34,40 @@ const diasDesde = (f: string) => {
 };
 
 export default function ResumenImpagas({
-  clientes, facturasPorCliente, conRecordatorio = [],
+  clientes, facturasPorCliente, conRecordatorio = [], revisiones = {}, diasRevisionVieja = 30,
 }: {
   clientes: ClienteImpagas[];
   facturasPorCliente: Record<string, FacturaCliente[]>;
   // Los que tienen el recordatorio prendido. Se marcan porque cambia qué hacer con la
   // deuda: si el cliente no recibe recordatorio, esa plata no se está reclamando sola.
   conRecordatorio?: string[];
+  revisiones?: Record<string, RevisionUI>;
+  diasRevisionVieja?: number;
 }) {
+  const router = useRouter();
   const [abierto, setAbierto] = useState<string | null>(null);
+  const [marcando, setMarcando] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  // Dejar asentado que se controló esta cuenta. Guarda además cuántas facturas abiertas
+  // había y por cuánto: sin esa foto, el sello solo dice cuándo alguien afirmó que estaba
+  // bien, y no hay forma de ver qué cambió después.
+  async function marcarRevisado(id: string, nombre: string, facturas: number, monto: number) {
+    setMarcando(id); setMsg(null);
+    try {
+      const r = await fetch('/api/cobranzas/revision', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_control: id, cliente: nombre, facturasAbiertas: facturas, montoAbierto: monto }),
+      });
+      const j = await r.json();
+      setMsg(r.ok ? `✓ ${nombre}: revisión registrada.` : (j?.error || 'No se pudo registrar.'));
+      if (r.ok) router.refresh();
+    } catch (e: any) {
+      setMsg(e?.message || 'No se pudo registrar.');
+    } finally {
+      setMarcando(null);
+    }
+  }
 
   const prendidos = useMemo(() => new Set(conRecordatorio.map(String)), [conRecordatorio]);
 
@@ -44,17 +79,20 @@ export default function ResumenImpagas({
           .slice()
           .sort((a, b) => a.fecha.localeCompare(b.fecha));
         const total = impagas.reduce((a, f) => a + f.importe, 0);
+        const rev = revisiones[String(c.id_control)];
         return {
           ...c,
           impagas,
           total,
           masVieja: impagas[0]?.fecha || '',
           reclama: prendidos.has(String(c.id_control)),
+          rev,
+          diasRev: rev ? diasDesde(rev.fecha) : null,
         };
       })
       .filter((f) => f.impagas.length > 0)
       .sort((a, b) => b.total - a.total);
-  }, [clientes, facturasPorCliente, prendidos]);
+  }, [clientes, facturasPorCliente, prendidos, revisiones]);
 
   const totalGeneral = filas.reduce((a, f) => a + f.total, 0);
   const sinReclamo = filas.filter((f) => !f.reclama);
@@ -74,6 +112,7 @@ export default function ResumenImpagas({
               <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600 }}>Facturas</th>
               <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600 }}>Total</th>
               <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>La más vieja</th>
+              <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>Revisado</th>
             </tr>
           </thead>
           <tbody>
@@ -98,6 +137,18 @@ export default function ResumenImpagas({
                   <td style={{ padding: '6px 8px', color: dias > 60 ? '#b45309' : '#6b7280' }}>
                     {fmtFecha(f.masVieja)} <span style={{ fontSize: '11px', color: '#9ca3af' }}>({dias} días)</span>
                   </td>
+                  {/* Hace cuánto que nadie controla esta cuenta. En ámbar pasado el plazo y
+                      en rojo al doble: una cuenta sin revisar hace dos meses es donde se
+                      esconden los errores de imputación. */}
+                  <td style={{ padding: '6px 8px', fontSize: '12px' }}>
+                    {f.diasRev === null ? (
+                      <span style={{ color: '#b45309' }}>nunca</span>
+                    ) : (
+                      <span style={{ color: f.diasRev > diasRevisionVieja * 2 ? '#dc2626' : f.diasRev > diasRevisionVieja ? '#b45309' : '#059669' }}>
+                        hace {f.diasRev} {f.diasRev === 1 ? 'día' : 'días'}
+                      </span>
+                    )}
+                  </td>
                 </tr>
               );
             })}
@@ -107,6 +158,7 @@ export default function ResumenImpagas({
                 {filas.reduce((a, f) => a + f.impagas.length, 0)}
               </td>
               <td style={{ padding: '8px', textAlign: 'right', fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmt(totalGeneral)}</td>
+              <td />
               <td />
             </tr>
           </tbody>
@@ -120,7 +172,32 @@ export default function ResumenImpagas({
         if (!f) return null;
         return (
           <div style={{ marginTop: '10px', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 10px' }}>
-            <p style={{ margin: '0 0 6px', fontSize: '12px', fontWeight: 700 }}>{f.nombre} — {f.impagas.length} impagas</p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px', marginBottom: '6px' }}>
+              <p style={{ margin: 0, fontSize: '12px', fontWeight: 700 }}>{f.nombre} — {f.impagas.length} impagas</p>
+              <button
+                type="button"
+                onClick={() => marcarRevisado(f.id_control, f.nombre, f.impagas.length, f.total)}
+                disabled={marcando === f.id_control}
+                style={{ fontSize: '11.5px', fontWeight: 700, padding: '4px 12px', borderRadius: '6px', border: '1px solid #bbf7d0', background: '#f0fdf4', color: '#166534', cursor: 'pointer' }}
+              >
+                {marcando === f.id_control ? 'Guardando…' : '✓ Marcar como revisado'}
+              </button>
+            </div>
+            {/* Qué cambió desde la última revisión. Es lo que convierte el sello en algo
+                verificable: sin esto solo dice cuándo alguien dijo que estaba bien. */}
+            {f.rev && (
+              <p style={{ margin: '0 0 6px', fontSize: '11.5px', color: '#6b7280', background: '#f8fafc', borderRadius: '6px', padding: '5px 8px' }}>
+                Revisado el {fmtFecha(f.rev.fecha)} por {f.rev.usuario}: en ese momento {f.rev.facturas_abiertas} impagas
+                por {fmt(f.rev.monto_abierto)}.
+                {(f.impagas.length !== f.rev.facturas_abiertas || Math.round(f.total) !== Math.round(f.rev.monto_abierto)) && (
+                  <strong style={{ color: '#b45309' }}>
+                    {' '}Desde entonces: {f.impagas.length - f.rev.facturas_abiertas >= 0 ? '+' : ''}
+                    {f.impagas.length - f.rev.facturas_abiertas} facturas, {Math.round(f.total - f.rev.monto_abierto) >= 0 ? '+' : '−'}
+                    {fmt(Math.abs(f.total - f.rev.monto_abierto))}.
+                  </strong>
+                )}
+              </p>
+            )}
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
               <tbody>
                 {f.impagas.map((x) => (
@@ -136,6 +213,8 @@ export default function ResumenImpagas({
           </div>
         );
       })()}
+
+      {msg && <p style={{ margin: '8px 0 0', fontSize: '12px', fontWeight: 600, color: msg.startsWith('✓') ? '#059669' : '#dc2626' }}>{msg}</p>}
 
       {sinReclamo.length > 0 && (
         <p style={{ margin: '8px 0 0', fontSize: '11.5px', color: '#92400e' }}>
