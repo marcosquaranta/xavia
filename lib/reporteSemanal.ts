@@ -16,6 +16,7 @@ import { germinacionYSupervivenciaMes } from './germinacion';
 import { productividadDeMes, plantasCosechadasEnRango } from './productividad';
 import { kmEnRango, VEHICULO_PARTNER } from './kilometraje';
 
+import { comprobantesParaMirar } from './xubioLectura';
 const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
 function lunesDe(d: Date): Date {
@@ -463,7 +464,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   // que las diferencias que se quieren encontrar. Si Xubio no responde, la comparación
   // queda marcada como no disponible y el resto del reporte sale igual.
   const desde30 = fmtISO(new Date(hoy.getTime() - 29 * 86400000));
-  const comprobantesXubio = await getComprobantes(desde30, hastaHoy).catch((e: any) => {
+  const comprobantesXubio = await comprobantesParaMirar(desde30, hastaHoy).catch((e: any) => {
     console.error('[reporteSemanal] no se pudieron leer los comprobantes de Xubio:', e);
     return null;
   });

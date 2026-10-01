@@ -12,6 +12,7 @@ import { getCobranzas, importeCobranza } from '@/lib/xubio';
 import { leerSaldadas, numerosSaldados } from '@/lib/facturasSaldadas';
 import { claveComprobante } from '@/lib/comprobantes';
 import { cubrirConCobrosDeXubio } from '@/lib/facturasCliente';
+import { comprobantesParaMirar, cobranzasParaMirar } from '@/lib/xubioLectura';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
@@ -36,10 +37,10 @@ export async function GET(req: NextRequest) {
     const hoy = fechaArgentinaHoy();
     const desde = sumarDias(hoy, -dias);
     const [comps, cobros, reclamos, cobranzas, saldadasFilas] = await Promise.all([
-      getComprobantes(desde, hoy),
+      comprobantesParaMirar(desde, hoy),
       readSheet<CobroRegistrado>(HOJA_COBROS).catch(() => [] as CobroRegistrado[]),
       readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => [] as RecordatorioCobro[]),
-      getCobranzas(desde, hoy).catch(() => [] as any[]),
+      cobranzasParaMirar(desde, hoy),
       leerSaldadas(),
     ]);
     const saldadas = numerosSaldados(saldadasFilas);

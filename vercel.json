@@ -9,6 +9,10 @@
       "schedule": "0 13 * * *"
     },
     {
+      "path": "/api/cron/xubio-diario",
+      "schedule": "0 9 * * *"
+    },
+    {
       "path": "/api/cron/backup-datos",
       "schedule": "0 6 * * 0"
     },

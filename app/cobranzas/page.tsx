@@ -2,6 +2,9 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
+import { comprobantesParaMirar, cobranzasParaMirar } from '@/lib/xubioLectura';
+import { HOJA_COMPROBANTES } from '@/lib/xubioCache';
+import ActualizarXubio from '@/components/ActualizarXubio';
 import {
   HOJA_RECORDATORIOS, COL_ACTIVO, COL_EMAIL, CONFIG_DATOS_PAGO, DATOS_PAGO_DEFAULT,
   ANTIGUEDAD_DEFAULT, ANTIGUEDAD_HASTA_DEFAULT, COL_ANTIGUEDAD, COL_ANTIGUEDAD_HASTA, type RecordatorioCobro,
@@ -55,18 +58,22 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   let aliasRows: AliasCobranza[] = [];
   let saldadas: FacturaSaldada[] = [];
   let revisiones: RevisionCliente[] = [];
+  let cacheXubio: { actualizado?: string }[] = [];
   // Xubio arranca junto con las planillas, no después. Son las dos consultas más lentas de
   // la página y ninguna depende de la otra: esperarlas en serie hacía que entrar a
   // Cobranzas tardara la suma de las dos. Se lanzan acá y se esperan más abajo.
   const hoyF = fechaArgentinaHoy();
   const desdeF = sumarDiasISO(hoyF, -DIAS_PAGINA);
+  // De la caché local, no de Xubio: ver lib/xubioLectura.ts. Las cuentas donde imputar sí
+  // se le piden a Xubio —son pocas y tienen que ser las de ahora—, pero el año de
+  // comprobantes y cobranzas sale de la hoja que llena el cron.
   const pedidoXubio = Promise.all([
-    getComprobantes(desdeF, hoyF).catch(() => [] as any[]),
-    getCobranzas(desdeF, hoyF).catch(() => [] as any[]),
+    comprobantesParaMirar(desdeF, hoyF),
+    cobranzasParaMirar(desdeF, hoyF),
   ]).catch(() => [[], []] as [any[], any[]]);
 
   try {
-    [clientes, enviados, configRows, cobros, bandeja, aliasRows, saldadas, revisiones] = await Promise.all([
+    [clientes, enviados, configRows, cobros, bandeja, aliasRows, saldadas, revisiones, cacheXubio] = await Promise.all([
       readSheet<ClienteVenta>('Clientes').catch(() => []),
       readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => []),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
@@ -78,6 +85,8 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
       leerSaldadas(),
       // La hoja no existe hasta la primera revisión registrada.
       leerRevisiones(),
+      // Solo para saber de cuándo son los datos de Xubio que se están mostrando.
+      readSheet<{ actualizado?: string }>(HOJA_COMPROBANTES).catch(() => []),
     ]);
   } catch {}
 
@@ -113,6 +122,20 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   // justamente eso —el detalle de facturas de un año, serializado y transferido—, así que
   // las secciones que no son el trabajo del día no se arman hasta que se piden.
   const ver = String(searchParams?.ver || '');
+
+  // Cuándo se trajo lo último de Xubio. Mostrarlo importa: la pantalla lee una foto local,
+  // y una foto sin fecha a la vista se lee como si fuera el estado de ahora.
+  const actualizadoXubio = (() => {
+    const iso = cacheXubio
+      .map((f) => String(f.actualizado || ''))
+      .filter(Boolean)
+      .sort()
+      .pop();
+    if (!iso) return '';
+    const [f, h] = iso.split('T');
+    const [y, m, d] = (f || '').split('-');
+    return d ? `${d}/${m} ${(h || '').slice(0, 5)}` : '';
+  })();
 
   // La última revisión de cada cliente, para la columna "Revisado" del resumen.
   const revisionesUI = Object.fromEntries(
@@ -230,6 +253,8 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
           Registrar cobros en Xubio · recordatorios semanales a los clientes elegidos (salen los lunes a la mañana)
           con todo lo que les figura impago
         </p>
+
+        <ActualizarXubio actualizado={actualizadoXubio} />
 
         {/* ══ QUIÉN DEBE QUÉ ══ */}
         {ver !== 'impagas' ? (
