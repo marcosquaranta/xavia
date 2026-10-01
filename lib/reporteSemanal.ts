@@ -422,6 +422,8 @@ export interface ReporteSemanalData {
   // Protocolo de aplicaciones: lo que quedó sin registrar (la semana pasa y una aplicación
   // que no se hizo no se recupera, así que el reporte del viernes es el último momento útil
   // para verlo) y el cumplimiento de las últimas 4 semanas.
+  kmSemana: number;
+  kmSemanaAnterior: number;
   protocoloPendientes: InstanciaTarea[];
   protocoloHoy: InstanciaTarea[];
   // Indicadores de gestión del MES (no de la semana): germinación, supervivencia,
@@ -470,6 +472,12 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const desdeAnt = fmtISO(new Date(hoy.getTime() - 13 * 86400000));
   const ventasSemana = ventasEnRango(ventas, precios, clientes, desdeSemana, hastaHoy);
   const ventasSemanaAnterior = ventasEnRango(ventas, precios, clientes, desdeAnt, hastaAnt);
+
+  // ── Kilómetros de la semana ──
+  // La lectura del odómetro se pide los jueves, un día antes de este reporte, justamente
+  // para que el número de la semana esté cargado cuando el reporte se arma.
+  const kmSemana = kmEnRango(registrosKm, VEHICULO_PARTNER, desdeSemana, hastaHoy);
+  const kmSemanaAnterior = kmEnRango(registrosKm, VEHICULO_PARTNER, desdeAnt, hastaAnt);
 
   // ── Ventas del mes en curso: acumulado a hoy, proyección a fin de mes y total real del mes pasado ──
   const ventasMesActual = resumenMesActual(ventas, precios, clientes, hoy);
@@ -655,6 +663,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     cicloSemana, cicloSemanaAnterior, cicloMesAnterior,
     pesoSemana, pesoMesAnterior,
     ocupacion, diasOcupacion, mesadasBajas, mesadasVacias, plantasPerdidasSubocupacion, ventasSemanas,
+    kmSemana, kmSemanaAnterior,
     protocoloPendientes, protocoloHoy, protocoloCumplimiento, indicadoresMes,
     facturacion: controlFacturacion(ventas, precios, clientes, hastaHoy),
     comparacion: compararFacturado(ventas, precios, clientes, comprobantesXubio, desde30, hastaHoy),
@@ -954,6 +963,48 @@ export function construirHtml(d: ReporteSemanalData): string {
             </table>
             <p style="margin:6px 0 0;font-size:11px;color:#9ca3af;line-height:1.5">La app mide por fecha de entrega y Xubio por fecha del comprobante, así que en los bordes del período siempre hay algo de corrimiento. En positivo: se vendió más de lo que está facturado. En negativo: en Xubio hay más de lo que la app registró (puede ser una factura cargada a mano allá).</p>`}`;
 
+  // ── Kilómetros vs. unidades vendidas ──
+  //
+  // El reparto es el costo que más crece sin que nadie lo mire: la camioneta sale igual con
+  // el camión lleno que con tres cajones. Lo que dice si una semana fue eficiente no son los
+  // km sueltos ni las unidades sueltas, sino cuántas unidades se repartieron por kilómetro.
+  //
+  // Sin lectura cargada no se inventa nada: se dice que falta y se explica cómo cargarla.
+  const kmHtml = (() => {
+    const unidades = d.ventasSemana.rucula.unidades + d.ventasSemana.lechuga.unidades + d.ventasSemana.albahaca.unidades;
+    const unidadesAnt = d.ventasSemanaAnterior.rucula.unidades + d.ventasSemanaAnterior.lechuga.unidades + d.ventasSemanaAnterior.albahaca.unidades;
+    if (!(d.kmSemana > 0)) {
+      return `<p style="margin:12px 0 4px;font-size:13px;font-weight:600;color:#111">Camioneta</p>
+        <p style="margin:0;font-size:12px;color:#9ca3af">Sin lectura del odómetro esta semana. Se pide los jueves desde el Panel; sin ese número no se puede saber cuánto se recorrió.</p>`;
+    }
+    const porKm = Math.round((unidades / d.kmSemana) * 10) / 10;
+    const porKmAnt = d.kmSemanaAnterior > 0 && unidadesAnt > 0
+      ? Math.round((unidadesAnt / d.kmSemanaAnterior) * 10) / 10
+      : null;
+    const delta = porKmAnt !== null && porKmAnt > 0 ? Math.round(((porKm - porKmAnt) / porKmAnt) * 100) : null;
+    // Más unidades por km es mejor: se repartió más con el mismo recorrido.
+    const color = delta === null ? '#6b7280' : delta >= 0 ? '#059669' : '#b45309';
+    return `<p style="margin:12px 0 4px;font-size:13px;font-weight:600;color:#111">Camioneta</p>
+      <table style="border-collapse:collapse;width:100%;font-size:12.5px">
+        <tr>
+          <td style="padding:4px 8px">Kilómetros recorridos</td>
+          <td style="padding:4px 8px;text-align:right;font-weight:700">${fmtN(d.kmSemana)} km</td>
+          <td style="padding:4px 8px;text-align:right;color:#9ca3af">${d.kmSemanaAnterior > 0 ? `semana pasada ${fmtN(d.kmSemanaAnterior)} km` : ''}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 8px">Unidades repartidas</td>
+          <td style="padding:4px 8px;text-align:right;font-weight:700">${fmtN(unidades)} u</td>
+          <td style="padding:4px 8px;text-align:right;color:#9ca3af">${unidadesAnt > 0 ? `semana pasada ${fmtN(unidadesAnt)} u` : ''}</td>
+        </tr>
+        <tr style="border-top:1px solid #f3f4f6">
+          <td style="padding:6px 8px;font-weight:700">Unidades por km</td>
+          <td style="padding:6px 8px;text-align:right;font-weight:800;color:${color}">${porKm.toLocaleString('es-AR')} u/km</td>
+          <td style="padding:6px 8px;text-align:right;color:${color};font-weight:600">${delta === null ? '' : `${delta >= 0 ? '+' : ''}${delta}% vs. semana pasada`}</td>
+        </tr>
+      </table>
+      <p style="margin:6px 0 0;font-size:11px;color:#9ca3af;line-height:1.5">Cuántas unidades se repartieron por kilómetro recorrido. Más es mejor: el mismo viaje rindió más. La lectura del odómetro se carga los jueves desde el Panel.</p>`;
+  })();
+
   const controlFactHtml = `
     <div style="margin:18px 0 0;padding:12px 14px;border:1px solid ${d.facturacion.hayProblema ? '#fecaca' : '#e5e7eb'};border-radius:8px;background:${d.facturacion.hayProblema ? '#fef2f2' : '#fafafa'}">
       <h3 style="margin:0 0 6px;font-size:14px">Control de facturación <span style="font-weight:400;color:#9ca3af">(ventas cargadas que todavía no se facturaron)</span></h3>
@@ -961,6 +1012,7 @@ export function construirHtml(d: ReporteSemanalData): string {
         ? `<p style="margin:0;font-size:13px;color:#059669">✓ No quedó ninguna venta sin facturar.</p>`
         : `<p style="margin:0 0 6px;font-size:13px;color:#111">Sin facturar: <strong>${fmtMoneda(d.facturacion.montoPendiente)}</strong>. La mercadería ya salió: mientras no se facture no se puede cobrar ni reclamar.</p>
            ${tablaSinFacturar('En la cola de facturación', '— esperando que se emitan, o fallaron al emitir', d.facturacion.pendientes)}`}
+      ${kmHtml}
       ${comparacionHtml}
     </div>`;
 
@@ -1206,6 +1258,12 @@ export function construirTexto(d: ReporteSemanalData): string {
   }
   L.push('');
 
+  if (d.kmSemana > 0) {
+    const u = d.ventasSemana.rucula.unidades + d.ventasSemana.lechuga.unidades + d.ventasSemana.albahaca.unidades;
+    L.push(`  Camioneta: ${fmtN(d.kmSemana)} km · ${fmtN(u)} u repartidas · ${(Math.round((u / d.kmSemana) * 10) / 10).toLocaleString('es-AR')} u/km`);
+  } else {
+    L.push('  Camioneta: sin lectura del odómetro esta semana (se pide los jueves).');
+  }
   if (d.comparacion.disponible) {
     L.push(`  App vs Xubio (30 días): ${fmtMoneda(d.comparacion.totalApp)} vs ${fmtMoneda(d.comparacion.totalXubio)}`);
     if (!d.comparacion.porCliente.length) L.push(`  ✓ Ningún cliente con diferencias importantes.`);

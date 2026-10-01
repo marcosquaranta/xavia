@@ -10,37 +10,43 @@ const fmtISO = (d: Date) => {
   return `${y}-${m}-${day}`;
 };
 
-// Viernes más reciente (hoy incluido si hoy es viernes) — punto de referencia de "esta
-// semana" para el recordatorio: se pide el kilometraje los viernes (antes era sábados —
-// cambiado a pedido explícito), y como no hay que sacarlo hasta que se cargue, sigue
-// apuntando al mismo viernes (o al que venga después, si pasan varias semanas sin
-// cargarlo) hasta que haya una lectura posterior.
-function viernesDeReferencia(hoy: Date): Date {
+// Jueves más reciente (hoy incluido si hoy es jueves) — punto de referencia de "esta
+// semana" para el recordatorio.
+//
+// Se pide el JUEVES, un día antes del reporte semanal del viernes: pedirlo el mismo viernes
+// hacía que el reporte saliera con el kilometraje de la semana pasada, porque se armaba
+// antes de que alguien cargara el número. (Antes eran sábados, después viernes; este es el
+// tercer ajuste y el motivo ahora es ese, no la comodidad del día.)
+//
+// Como no hay que sacarlo hasta que se cargue, sigue apuntando al mismo jueves —o al que
+// venga después, si pasan varias semanas sin cargarlo— hasta que haya una lectura posterior.
+const DOW_PEDIDO = 4; // 0=domingo … 4=jueves
+function juevesDeReferencia(hoy: Date): Date {
   const d = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
-  const dow = d.getDay(); // 0=domingo..6=sábado
-  const diff = (dow - 5 + 7) % 7; // días desde el último viernes (0 si hoy es viernes)
+  const diff = (d.getDay() - DOW_PEDIDO + 7) % 7; // días desde el último jueves
   d.setDate(d.getDate() - diff);
   return d;
 }
 
-// El recordatorio sale SOLO viernes y sábado (a pedido): la carga se puede hacer cualquier
-// día y a cualquier hora, pero el aviso que aparece todos los días deja de leerse. El día
-// se calcula en huso de Argentina — con el del servidor (UTC) el aviso aparecería y
+// El recordatorio sale SOLO jueves y viernes: la carga se puede hacer cualquier día y a
+// cualquier hora, pero el aviso que aparece todos los días deja de leerse. El viernes queda
+// como segunda oportunidad —si el jueves no se cargó, el reporte sale sin el dato—. El día
+// se calcula en huso de Argentina: con el del servidor (UTC) el aviso aparecería y
 // desaparecería tres horas antes de tiempo.
 export function esDiaDeAvisoKm(hoy: Date = new Date()): boolean {
   const fechaArg = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(hoy);
-  const dow = new Date(fechaArg + 'T12:00:00').getDay(); // 0=dom … 5=vie, 6=sáb
-  return dow === 5 || dow === 6;
+  const dow = new Date(fechaArg + 'T12:00:00').getDay(); // 0=dom … 4=jue, 5=vie
+  return dow === DOW_PEDIDO || dow === DOW_PEDIDO + 1;
 }
 
 // True si todavía no se cargó ninguna lectura desde el último viernes — el recordatorio en
 // el Panel se muestra mientras esto sea true, cualquier día de la semana, no solo viernes,
 // y deja de mostrarse apenas se carga una lectura (activo solo si falta cargar).
 export function faltaCargarEstaSemana(registros: KilometrajeVehiculo[], vehiculo: string, hoy: Date = new Date()): boolean {
-  const vieStr = fmtISO(viernesDeReferencia(hoy));
-  return !registros.some((r) => r.vehiculo === vehiculo && String(r.fecha || '').slice(0, 10) >= vieStr);
+  const refStr = fmtISO(juevesDeReferencia(hoy));
+  return !registros.some((r) => r.vehiculo === vehiculo && String(r.fecha || '').slice(0, 10) >= refStr);
 }
 
 // Última lectura conocida (para mostrar de referencia en el formulario y validar que la

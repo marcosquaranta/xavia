@@ -438,9 +438,9 @@ export default async function PanelPage() {
     : null; // null = nunca se hizo un conteo
   const esDiaStockCamara = horaArg >= 12 && (diasSinStock === null || diasSinStock >= DIAS_SIN_STOCK_PARA_AVISAR);
 
-  // Recordatorio de kilometraje del Partner — se pide los viernes, y queda pendiente
+  // Recordatorio de kilometraje del Partner — se pide los jueves, y queda pendiente
   // (se sigue mostrando) todos los días de la semana hasta que se cargue una lectura.
-  // Pendiente de cargar, y además día de avisar (viernes o sábado): son dos cosas
+  // Pendiente de cargar, y además día de avisar (jueves o viernes): son dos cosas
   // distintas. La carga está siempre disponible; el banner grande solo esos dos días.
   const faltaKm = faltaCargarEstaSemana(registrosKm, VEHICULO_PARTNER, hoy) && esDiaDeAvisoKm(hoy);
   const ultimaLecturaKm = ultimaLectura(registrosKm, VEHICULO_PARTNER);
