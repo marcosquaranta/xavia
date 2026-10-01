@@ -372,7 +372,16 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
           <summary style={{ cursor: 'pointer', fontSize: '14px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
             Clientes con recordatorio
           </summary>
-          <p className="card-sub">{prendidos === 0 ? 'Ninguno prendido todavía' : `${prendidos} prendido${prendidos > 1 ? 's' : ''}`}</p>
+          <p className="card-sub">
+            {prendidos === 0 ? 'Ninguno prendido todavía' : `${prendidos} prendido${prendidos > 1 ? 's' : ''}`}
+            {' · '}
+            {/* El mail también está en la ficha del cliente, que es donde se lo busca cuando
+                hay que actualizar un contacto. Es la misma columna: se edite donde se edite,
+                es el mismo dato. */}
+            <Link href="/admin/clientes-venta" style={{ color: '#2563eb' }}>
+              también se edita en la ficha de cada cliente →
+            </Link>
+          </p>
           <div style={{ marginTop: '10px' }}>
             <ClientesRecordatorio clientes={filas} />
           </div>

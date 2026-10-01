@@ -116,6 +116,11 @@ function ClienteRow({ c, precios, cambios, onSaved }: { c: ClienteVenta; precios
     unidad: String(c.unidad || 'paq'),
     orden: String(c.orden || ''),
     facturar_por_sucursal: c.facturar_por_sucursal === 'SI' ? 'SI' : 'NO',
+    // Datos de cobranza. Estaban solo en la pantalla de Cobranzas y acá es donde alguien va
+    // a buscarlos cuando quiere saber "qué sé de este cliente".
+    email: String((c as any).email || ''),
+    email_cobranza: String((c as any).email_cobranza || ''),
+    recordatorio_cobro: (c as any).recordatorio_cobro === 'SI' ? 'SI' : 'NO',
   });
 
   const sucursalesArr = fields.sucursales ? fields.sucursales.split('|').map(s => s.trim()).filter(Boolean) : [];
@@ -223,6 +228,31 @@ function ClienteRow({ c, precios, cambios, onSaved }: { c: ClienteVenta; precios
                 <div>
                   <label style={{ fontSize: '11px' }}>Orden en carga de Ventas</label>
                   <input type="number" value={fields.orden} onChange={e => setFields(f => ({ ...f, orden: e.target.value }))} disabled={saving} placeholder="sin fijar = por frecuencia" />
+                </div>
+              </div>
+
+              {/* ── Cobranza ──
+                  El mail al que se le reclama vive acá, con el resto de los datos del
+                  cliente, y no en una pantalla aparte: cuando hay que actualizar un
+                  contacto, el lugar donde se lo busca es la ficha del cliente. Se sigue
+                  pudiendo editar desde Cobranzas — es la misma columna de la misma hoja. */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: '8px', marginBottom: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '11px' }}>Mail general</label>
+                  <input type="email" value={fields.email} onChange={e => setFields(f => ({ ...f, email: e.target.value }))} disabled={saving} placeholder="contacto@cliente.com" />
+                </div>
+                <div>
+                  <label style={{ fontSize: '11px' }}>Mail de cobranzas</label>
+                  <input type="email" value={fields.email_cobranza} onChange={e => setFields(f => ({ ...f, email_cobranza: e.target.value }))} disabled={saving}
+                    placeholder={fields.email ? `${fields.email} (el general)` : 'administracion@cliente.com'} />
+                  <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#9ca3af' }}>Si está vacío se usa el general.</p>
+                </div>
+                <div>
+                  <label style={{ fontSize: '11px' }}>Recordatorio de cobranza</label>
+                  <select value={fields.recordatorio_cobro} onChange={e => setFields(f => ({ ...f, recordatorio_cobro: e.target.value }))} disabled={saving}>
+                    <option value="NO">No le mandamos</option>
+                    <option value="SI">Sí, todos los lunes</option>
+                  </select>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center' }}>

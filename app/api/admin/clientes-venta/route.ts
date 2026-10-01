@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
-import { appendRow, asegurarColumna, readSheet, updateRow, appendRowObj } from '@/lib/sheets';
+import { appendRow, asegurarColumna, asegurarColumnas, readSheet, updateRow, appendRowObj } from '@/lib/sheets';
 import type { ClienteVenta } from '@/lib/types';
 
 import { asegurarColumnasArticulos } from '@/lib/articulosSheets';
@@ -14,6 +14,10 @@ export async function PATCH(req: NextRequest) {
     // guardado la primera vez que se usan.
     if ('orden' in fields) await asegurarColumna('Clientes', 'orden');
     if ('facturar_por_sucursal' in fields) await asegurarColumna('Clientes', 'facturar_por_sucursal');
+    // Datos de cobranza, editables desde la ficha del cliente además de desde Cobranzas: es
+    // la misma columna de la misma hoja, así que no hay dos verdades posibles.
+    const columnasCobranza = ['email', 'email_cobranza', 'recordatorio_cobro'].filter((k) => k in fields);
+    if (columnasCobranza.length) await asegurarColumnas('Clientes', columnasCobranza);
     const updated = await updateRow('Clientes', 'id_control', String(id_control), fields);
     if (!updated) return NextResponse.json({ error: 'cliente_no_encontrado' }, { status: 404 });
     return NextResponse.json({ ok: true });
