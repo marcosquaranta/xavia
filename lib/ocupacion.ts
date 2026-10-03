@@ -361,7 +361,14 @@ export function mesadasVaciasEnLaSemana(
 export const DIAS_HUECO_PERDONADOS = 1;
 
 export interface OcupacionSemanaNave { nave: number; pct: number; diasConDato: number }
-export interface MesadaBajaSemana { nombre: string; nave: number; pct: number; diasVacia: number }
+export interface MesadaBajaSemana {
+  nombre: string; nave: number; pct: number; diasVacia: number;
+  // Cuántos de los días con datos estuvo POR DEBAJO del umbral, y cuántos días hubo.
+  // El promedio solo no alcanza para decidir: un 60% puede ser un día de recambio metido
+  // entre cinco días llenos, o seis días a media máquina. Son dos problemas distintos y uno
+  // de los dos no es un problema.
+  diasBajo: number; diasConDatos: number;
+}
 
 interface DiaMesada { fecha: string; tot: number; ocu: number }
 
@@ -434,7 +441,10 @@ export function mesadasBajasSemana(
     const tubosProm = tot / m.dias.length;
     if (tubosProm <= minTubos) continue; // mesadas chicas: el % se mueve demasiado
     const pct = tot > 0 ? Math.round((ocu / tot) * 100) : 0;
-    if (pct < umbralPct) out.push({ nombre: m.nombre, nave: m.nave, pct, diasVacia: m.diasVacia });
+    const diasBajo = m.dias.filter((d) => d.tot > 0 && (d.ocu / d.tot) * 100 < umbralPct).length;
+    if (pct < umbralPct) {
+      out.push({ nombre: m.nombre, nave: m.nave, pct, diasVacia: m.diasVacia, diasBajo, diasConDatos: m.dias.length });
+    }
   }
   return out.sort((a, b) => a.pct - b.pct);
 }

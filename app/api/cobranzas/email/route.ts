@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { crearItemDesdeAviso, htmlATexto } from '@/lib/bandejaMail';
-import type { PdfAdjunto } from '@/lib/extraerAvisoIA';
+import type { AdjuntoIA } from '@/lib/extraerAvisoIA';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -51,11 +51,28 @@ async function contenidoDelMail(emailId: string): Promise<{ texto: string; asunt
 // Resend no manda el contenido en el webhook —solo metadatos, para no arrastrar archivos
 // grandes— sino un `download_url` que dura una hora. Se bajan acá, en el momento.
 //
-// Solo PDF: son los que el modelo puede leer como documento. Un adjunto de imagen o una
-// planilla se ignoran, y el acuse lo dice para que se cargue a mano.
+// PDF e IMÁGENES: el modelo lee las dos cosas. Antes solo se bajaban PDF, y como la mitad
+// de los avisos llegan como foto o captura del comprobante, esos entraban vacíos —sin
+// importe y sin facturas— y había que cargarlos a mano. Una planilla adjunta se sigue
+// ignorando.
 const MAX_PDF_MB = 25;
+const TIPOS_OK = ['pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
-async function pdfsDelMail(emailId: string): Promise<PdfAdjunto[]> {
+function tipoDeAdjunto(a: any): string {
+  const declarado = String(a?.content_type || '').toLowerCase();
+  if (declarado) return declarado;
+  // Algunos clientes de correo no declaran el tipo: se deduce de la extensión, que es mejor
+  // que descartar un comprobante por un dato que el remitente no mandó.
+  const nombre = String(a?.filename || '').toLowerCase();
+  if (nombre.endsWith('.pdf')) return 'application/pdf';
+  if (nombre.endsWith('.png')) return 'image/png';
+  if (nombre.endsWith('.gif')) return 'image/gif';
+  if (nombre.endsWith('.webp')) return 'image/webp';
+  if (nombre.endsWith('.jpg') || nombre.endsWith('.jpeg')) return 'image/jpeg';
+  return '';
+}
+
+async function pdfsDelMail(emailId: string): Promise<AdjuntoIA[]> {
   const key = process.env.RESEND_API_KEY;
   if (!key || !emailId) return [];
   try {
@@ -69,11 +86,11 @@ async function pdfsDelMail(emailId: string): Promise<PdfAdjunto[]> {
     }
     const j: any = await res.json();
     const lista: any[] = Array.isArray(j?.data) ? j.data : Array.isArray(j) ? j : [];
-    const out: PdfAdjunto[] = [];
+    const out: AdjuntoIA[] = [];
     for (const a of lista.slice(0, 5)) {
-      const tipo = String(a?.content_type || '').toLowerCase();
-      const nombre = String(a?.filename || 'adjunto.pdf');
-      if (!tipo.includes('pdf') && !nombre.toLowerCase().endsWith('.pdf')) continue;
+      const tipo = tipoDeAdjunto(a);
+      const nombre = String(a?.filename || 'adjunto');
+      if (!TIPOS_OK.some((t) => tipo.includes(t))) continue;
       const url = String(a?.download_url || '');
       if (!url) continue;
       try {
@@ -84,7 +101,7 @@ async function pdfsDelMail(emailId: string): Promise<PdfAdjunto[]> {
           console.error('[cobranzas/email] adjunto demasiado grande:', nombre, buf.length);
           continue;
         }
-        out.push({ nombre, base64: buf.toString('base64') });
+        out.push({ nombre, base64: buf.toString('base64'), tipo });
       } catch (e) {
         console.error('[cobranzas/email] no se pudo bajar el adjunto', nombre, e);
       }

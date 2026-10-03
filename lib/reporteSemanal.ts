@@ -10,7 +10,7 @@ import { plantasPerdidasPorSubocupacion, type PlantasPerdidasSubocupacion } from
 import { getComprobantes } from './xubio';
 import { KEYS_UNIDAD_HISTORICAS } from './articulos';
 import { controlFacturacion, compararFacturado, DIAS_ATRASO_AVISO, DIF_MINIMA_PESOS, type ControlFacturacion, type ComparacionFacturado } from './controlFacturacion';
-import { leerConfigProtocolo, tareasVencidas, tareasDelDia as tareasProtocoloDelDia, cumplimientoProtocolo, type InstanciaTarea } from './protocoloTareas';
+import { leerConfigProtocolo, tareasVencidas, tareasDelDia as tareasProtocoloDelDia, cumplimientoProtocolo, detalleFueraDeRango, type InstanciaTarea, type FueraDeRangoDetalle } from './protocoloTareas';
 import { fechaArgentinaHoy } from './ocupacion';
 import { germinacionYSupervivenciaMes } from './germinacion';
 import { productividadDeMes, plantasCosechadasEnRango } from './productividad';
@@ -80,11 +80,17 @@ export interface DescarteFaseReporte {
 // combinada, mismo criterio esRuculaV que el resto de este reporte) Y por la etapa donde
 // se pierde — Plantín→F1, F1→F2 (Movimientos tipo "trasplante") y F2→Cosecha (Movimientos
 // tipo "cosecha") — para poder ver DÓNDE se concentra la pérdida, no solo cuánta hay.
-function descartePorFaseUltimasSemanas(lotes: Lote[], movimientos: Movimiento[], nSemanas = 4): DescarteFaseReporte[] {
+function descartePorFaseUltimasSemanas(
+  lotes: Lote[], movimientos: Movimiento[], nSemanas = 4,
+  // Rango explícito, para poder pedir una semana puntual o un mes en vez de "las últimas N
+  // semanas". El descarte se venía mirando solo por mes, y un mes esconde la semana que se
+  // fue de rango: para cuando el promedio mensual se mueve, el problema ya pasó.
+  rango?: { desde: Date; hasta: Date },
+): DescarteFaseReporte[] {
   const hoy = new Date();
   const lunesActual = lunesDe(hoy);
-  const inicio = new Date(lunesActual); inicio.setDate(inicio.getDate() - (nSemanas - 1) * 7);
-  const fin = new Date(hoy); fin.setHours(23, 59, 59);
+  const inicio = rango ? rango.desde : (() => { const d = new Date(lunesActual); d.setDate(d.getDate() - (nSemanas - 1) * 7); return d; })();
+  const fin = rango ? rango.hasta : (() => { const d = new Date(hoy); d.setHours(23, 59, 59); return d; })();
   const lotesMap = new Map(lotes.map(l => [l.id_lote, l]));
   const cero = () => ({
     plantinF1: 0, f1F2: 0, f2Cosecha: 0, basePlantinF1: 0, baseF1F2: 0, baseF2Cosecha: 0,
@@ -299,10 +305,29 @@ function destacadosDeLaSemana(d: Omit<ReporteSemanalData, 'destacados'>): Destac
       const p = Math.round((desc / base) * 1000) / 10;
       if (p < UMBRAL_DESCARTE_PCT) continue;
       const lotesTxt = lotes.length ? ` Lotes: ${lotes.join(', ')}.` : '';
+      // El mismo porcentaje en las otras dos ventanas, para saber si este número es un pico
+      // de esta semana o viene así. Sin eso, "29% de descarte" no dice si hay que correr a
+      // ver qué pasó el martes o si es el nivel de siempre y el problema es estructural.
+      const pctDe = (lista: DescarteFaseReporte[], campo: 'plantinF1' | 'f1F2' | 'f2Cosecha') => {
+        const x = lista.find((y) => y.cultivo === f.cultivo);
+        if (!x) return null;
+        const b = campo === 'plantinF1' ? x.basePlantinF1 : campo === 'f1F2' ? x.baseF1F2 : x.baseF2Cosecha;
+        if (b <= 0) return null;
+        return Math.round((x[campo] / b) * 1000) / 10;
+      };
+      const campo = fase === 'Plantín→F1' ? 'plantinF1' : fase === 'F1→F2' ? 'f1F2' : 'f2Cosecha';
+      const pSem = pctDe(d.descarteSemana, campo);
+      const pAnt = pctDe(d.descarteSemanaAnterior, campo);
+      const pMes = pctDe(d.descarteMes, campo);
+      const comparacion = [
+        pSem !== null ? `esta semana ${pSem}%` : null,
+        pAnt !== null ? `la anterior ${pAnt}%` : null,
+        pMes !== null ? `el mes ${pMes}%` : null,
+      ].filter(Boolean).join(' · ');
       out.push({
         tono: 'malo',
         titulo: `Descarte alto en ${f.cultivo} — ${fase}: ${p}%`,
-        detalle: `${fmtN(desc)} plantas descartadas de ${fmtN(base)} que pasaron por esa fase (últimas 4 semanas).${lotesTxt}`,
+        detalle: `${fmtN(desc)} plantas descartadas de ${fmtN(base)} que pasaron por esa fase (últimas 4 semanas).${comparacion ? ` ${comparacion}.` : ''}${lotesTxt}`,
       });
     }
   }
@@ -383,7 +408,11 @@ function destacadosDeLaSemana(d: Omit<ReporteSemanalData, 'destacados'>): Destac
     out.push({
       tono: 'malo',
       titulo: `${muyBajas.length} mesada(s) por debajo del 70% de ocupación`,
-      detalle: muyBajas.map((m) => `N${m.nave} ${m.nombre} (${m.pct}%)`).join(' · '),
+      // Con los días, no solo el promedio: un 60% de un día suelto de recambio y un 60%
+      // sostenido toda la semana se ven igual en el promedio y no son lo mismo.
+      detalle: muyBajas
+        .map((m) => `N${m.nave} ${m.nombre} (${m.pct}%${m.diasConDatos ? `, ${m.diasBajo} de ${m.diasConDatos} días` : ''})`)
+        .join(' · '),
     });
   }
 
@@ -412,7 +441,7 @@ export interface ReporteSemanalData {
   // Promedio de la SEMANA, no la foto del día que se genera el reporte.
   ocupacion: { nave: number; pct: number }[];
   diasOcupacion: number;  // sobre cuántos días se promedió (0 = es la foto de hoy)
-  mesadasBajas: { nombre: string; nave: number; pct: number }[];
+  mesadasBajas: { nombre: string; nave: number; pct: number; diasBajo?: number; diasConDatos?: number }[];
   mesadasVacias: MesadaVacia[];
   plantasPerdidasSubocupacion: PlantasPerdidasSubocupacion;
   ventasSemanas: PuntoVentaCultivoSemana[];
@@ -423,6 +452,9 @@ export interface ReporteSemanalData {
   // Protocolo de aplicaciones: lo que quedó sin registrar (la semana pasa y una aplicación
   // que no se hizo no se recupera, así que el reporte del viernes es el último momento útil
   // para verlo) y el cumplimiento de las últimas 4 semanas.
+  descarteSemana: DescarteFaseReporte[];
+  descarteSemanaAnterior: DescarteFaseReporte[];
+  descarteMes: DescarteFaseReporte[];
   kmSemana: number;
   kmSemanaAnterior: number;
   protocoloPendientes: InstanciaTarea[];
@@ -431,6 +463,9 @@ export interface ReporteSemanalData {
   // productividad y plantas por km se miden mes contra mes — una semana suelta de estos
   // números es ruido. Van igual en el reporte semanal porque es lo que se lee cada viernes.
   indicadoresMes: { label: string; valor: string; pct: number | null; mejorSiSube: boolean; detalle?: string }[];
+  // Qué midió y contra qué, para cada registro fuera de rango de la semana. El contador
+  // solo no deja decidir: no distingue un pH una décima arriba de una conductividad al triple.
+  protocoloFueraDeRango: FueraDeRangoDetalle[];
   protocoloCumplimiento: { nombre: string; correspondian: number; cerradas: number; pendientes: number; fueraDeRango: number; pct: number | null }[];
   // Ventas cargadas que no llegaron a la factura. Va en el reporte del viernes porque es
   // el último momento en que todavía se puede corregir la semana.
@@ -473,6 +508,27 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const desdeAnt = fmtISO(new Date(hoy.getTime() - 13 * 86400000));
   const ventasSemana = ventasEnRango(ventas, precios, clientes, desdeSemana, hastaHoy);
   const ventasSemanaAnterior = ventasEnRango(ventas, precios, clientes, desdeAnt, hastaAnt);
+
+  // ── Descarte: esta semana, la anterior y el mes ──
+  //
+  // Se venía mirando solo el acumulado de cuatro semanas, y ese promedio tapa justo lo que
+  // hay que ver: una semana mala se diluye entre tres buenas, y para cuando el acumulado se
+  // mueve el problema ya pasó. Las tres ventanas juntas dicen si el número de esta semana es
+  // un pico o la tendencia.
+  const diaDe = (iso: string, finDelDia = false) => {
+    const d = new Date(iso + (finDelDia ? 'T23:59:59' : 'T00:00:00'));
+    return d;
+  };
+  const descarteSemana = descartePorFaseUltimasSemanas(lotes, movimientos, 1, {
+    desde: diaDe(desdeSemana), hasta: diaDe(hastaHoy, true),
+  });
+  const descarteSemanaAnterior = descartePorFaseUltimasSemanas(lotes, movimientos, 1, {
+    desde: diaDe(desdeAnt), hasta: diaDe(hastaAnt, true),
+  });
+  const descarteMes = descartePorFaseUltimasSemanas(lotes, movimientos, 1, {
+    desde: new Date(hoy.getFullYear(), hoy.getMonth(), 1),
+    hasta: diaDe(hastaHoy, true),
+  });
 
   // ── Kilómetros de la semana ──
   // La lectura del odómetro se pide los jueves, un día antes de este reporte, justamente
@@ -611,7 +667,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     return { nave: n.nave, pct: tot > 0 ? Math.round((ocu / tot) * 100) : 0 };
   });
   const mesadasBajas = hayHistorialSemana
-    ? mesadasBajasSem.map(m => ({ nombre: m.nombre, nave: m.nave, pct: m.pct }))
+    ? mesadasBajasSem.map(m => ({ nombre: m.nombre, nave: m.nave, pct: m.pct, diasBajo: m.diasBajo, diasConDatos: m.diasConDatos }))
     : tubosMesadas.flatMap((n: any) => (n.mesadas || [])
         .filter((m: any) => m.sector_fase !== 'fase_1' && m.tubos_totales > 10 && m.ocupacion_pct < 90)
         .map((m: any) => ({ nombre: String(m.nombre).replace(/^Nave \d+ - /, ''), nave: n.nave, pct: m.ocupacion_pct })))
@@ -664,8 +720,10 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     cicloSemana, cicloSemanaAnterior, cicloMesAnterior,
     pesoSemana, pesoMesAnterior,
     ocupacion, diasOcupacion, mesadasBajas, mesadasVacias, plantasPerdidasSubocupacion, ventasSemanas,
+    descarteSemana, descarteSemanaAnterior, descarteMes,
     kmSemana, kmSemanaAnterior,
     protocoloPendientes, protocoloHoy, protocoloCumplimiento, indicadoresMes,
+    protocoloFueraDeRango: detalleFueraDeRango(registrosProtocolo, desdeSemana, hastaHoy),
     facturacion: controlFacturacion(ventas, precios, clientes, hastaHoy),
     comparacion: compararFacturado(ventas, precios, clientes, comprobantesXubio, desde30, hastaHoy),
     stock, faltanteSemana, faltanteMes, descartePorFase,
@@ -830,7 +888,7 @@ export function construirHtml(d: ReporteSemanalData): string {
   const mesadasBajasHtml = d.mesadasBajas.length === 0
     ? '<p style="color:#059669;font-size:13px;margin:10px 0 0">✓ Ninguna mesada F2 por debajo del 90%.</p>'
     : `<ul style="margin:10px 0 0;padding-left:18px;font-size:13px;color:#374151">${d.mesadasBajas.map(m =>
-        `<li style="margin-bottom:4px">N${m.nave} · ${m.nombre}: <strong style="color:${m.pct < 70 ? '#dc2626' : '#d97706'}">${m.pct}%</strong></li>`
+        `<li style="margin-bottom:4px">N${m.nave} · ${m.nombre}: <strong style="color:${m.pct < 70 ? '#dc2626' : '#d97706'}">${m.pct}%</strong>${m.diasConDatos ? ` <span style="color:#9ca3af;font-size:11.5px">— ${m.diasBajo} de ${m.diasConDatos} días por debajo</span>` : ''}</li>`
       ).join('')}</ul>`;
   // La foto de arriba (mesadasBajas) es HOY. Esto es la semana: qué mesada estuvo sin una
   // sola planta varios días seguidos, aunque para el momento del reporte ya se haya vuelto
@@ -869,13 +927,32 @@ export function construirHtml(d: ReporteSemanalData): string {
     const peso = pct >= 10 ? '700' : '400';
     return `${fmtN(desc)} <span style="color:${color};font-weight:${peso}">(${pct}%)</span> <span style="color:#c8c8c8;font-size:11px">de ${fmtN(base)}</span>`;
   };
+  // Cada cultivo lleva, debajo de su fila de 4 semanas, los mismos porcentajes para esta
+  // semana, la anterior y el mes. El acumulado de 4 semanas solo dice el nivel; estas tres
+  // dicen si está subiendo, bajando o si lo de esta semana fue un pico aislado — que es lo
+  // único que define si hay que ir a mirar algo hoy.
+  const filaVentana = (etiqueta: string, lista: DescarteFaseReporte[], cultivo: string) => {
+    const x = lista.find((y) => y.cultivo === cultivo);
+    if (!x) return '';
+    const pct = (desc: number, base: number) => base > 0 ? `${Math.round((desc / base) * 1000) / 10}%` : '—';
+    return `<tr style="font-size:11.5px;color:#9ca3af">
+      <td style="padding:2px 10px 2px 22px;border-bottom:1px solid #f7f7f7">${etiqueta}</td>
+      <td style="padding:2px 10px;border-bottom:1px solid #f7f7f7;text-align:right">${pct(x.plantinF1, x.basePlantinF1)}</td>
+      <td style="padding:2px 10px;border-bottom:1px solid #f7f7f7;text-align:right">${pct(x.f1F2, x.baseF1F2)}</td>
+      <td style="padding:2px 10px;border-bottom:1px solid #f7f7f7;text-align:right">${pct(x.f2Cosecha, x.baseF2Cosecha)}</td>
+      <td style="padding:2px 10px;border-bottom:1px solid #f7f7f7;text-align:right">${fmtN(x.total)}</td>
+    </tr>`;
+  };
   const descarteFaseFilas = d.descartePorFase.map((f) => `<tr>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">${f.cultivo}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${celdaFaseHtml(f.plantinF1, f.basePlantinF1)}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${celdaFaseHtml(f.f1F2, f.baseF1F2)}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${celdaFaseHtml(f.f2Cosecha, f.baseF2Cosecha)}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:800">${fmtN(f.total)}${esRuculaFila(f.cultivo) ? ` <span style="font-weight:400;color:#9ca3af">(${enPaq(f.total)})</span>` : ''}</td>
-    </tr>`).join('');
+      <td style="padding:6px 10px;font-weight:600">${f.cultivo}</td>
+      <td style="padding:6px 10px;text-align:right">${celdaFaseHtml(f.plantinF1, f.basePlantinF1)}</td>
+      <td style="padding:6px 10px;text-align:right">${celdaFaseHtml(f.f1F2, f.baseF1F2)}</td>
+      <td style="padding:6px 10px;text-align:right">${celdaFaseHtml(f.f2Cosecha, f.baseF2Cosecha)}</td>
+      <td style="padding:6px 10px;text-align:right;font-weight:800">${fmtN(f.total)}${esRuculaFila(f.cultivo) ? ` <span style="font-weight:400;color:#9ca3af">(${enPaq(f.total)})</span>` : ''}</td>
+    </tr>
+    ${filaVentana('esta semana', d.descarteSemana, f.cultivo)}
+    ${filaVentana('semana anterior', d.descarteSemanaAnterior, f.cultivo)}
+    ${filaVentana('mes en curso', d.descarteMes, f.cultivo)}`).join('');
 
   // ── Indicadores del mes ──
   const indicadoresHtml = d.indicadoresMes.length === 0 ? '' : `
@@ -1037,6 +1114,17 @@ export function construirHtml(d: ReporteSemanalData): string {
           <strong>${p.tarea.nombre}</strong> — ${p.estado === 'sin_decidir' ? 'falta que Marcelo defina qué se aplica' : 'pendiente de hoy'}
         </li>`).join('')}
       </ul>`;
+  // El detalle de lo que se fue de rango, con el valor y el límite. Va debajo de la tabla:
+  // la tabla dice cuántos, esto dice cuáles y cuánto.
+  const fueraDeRangoHtml = d.protocoloFueraDeRango.length === 0 ? '' : `
+    <p style="margin:10px 0 4px;font-size:12px;font-weight:600;color:#b45309">Mediciones fuera de rango esta semana</p>
+    <ul style="margin:0;padding-left:18px;font-size:12.5px;color:#374151;line-height:1.6">
+      ${d.protocoloFueraDeRango.map((f) => `<li>
+        <strong>${fmtDiaCorto(f.fecha)} · ${f.tarea}</strong>${f.responsable ? ` <span style="color:#9ca3af">(${f.responsable})</span>` : ''}:
+        ${f.motivos.join(' · ')}
+      </li>`).join('')}
+    </ul>`;
+
   const protoCumpFilas = d.protocoloCumplimiento.map((c) => `<tr>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">${c.nombre}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${c.cerradas}/${c.correspondian}</td>
@@ -1057,6 +1145,7 @@ export function construirHtml(d: ReporteSemanalData): string {
       </tr></thead>
       <tbody>${protoCumpFilas}</tbody>
     </table>` : ''}
+    ${fueraDeRangoHtml}
   `;
 
   // Lo que se salió de lo normal esta semana, arriba de todo: si algo aparece acá es
@@ -1286,6 +1375,12 @@ export function construirTexto(d: ReporteSemanalData): string {
   } else {
     for (const p of d.protocoloPendientes) L.push(`  ✕ ${p.tarea.nombre} — sin registrar del ${fmtDiaCorto(p.fecha)}`);
     for (const p of d.protocoloHoy) L.push(`  • ${p.tarea.nombre} — ${p.estado === 'sin_decidir' ? 'falta que Marcelo defina' : 'pendiente de hoy'}`);
+  }
+  if (d.protocoloFueraDeRango.length) {
+    L.push('  Fuera de rango:');
+    for (const f of d.protocoloFueraDeRango) {
+      L.push(`    ${fmtDiaCorto(f.fecha)} ${f.tarea}: ${f.motivos.join(' · ')}`);
+    }
   }
   for (const c of d.protocoloCumplimiento) {
     L.push(`  ${c.nombre}: ${c.cerradas}/${c.correspondian} (${c.pct === null ? '—' : c.pct + '%'})${c.fueraDeRango > 0 ? ` · ${c.fueraDeRango} fuera de rango` : ''}`);

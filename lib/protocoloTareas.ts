@@ -689,6 +689,66 @@ export function alarmaOsmosis(conductividad: any, ph: any): { alarma: boolean; m
   return { alarma: motivos.length > 0, motivos };
 }
 
+// ── Qué estuvo fuera de rango, con el número y el límite ─────────────────────────────
+//
+// El reporte semanal decía "2 fuera de rango" y nada más. Un contador no sirve para decidir:
+// no se sabe si fue el pH por una décima o la conductividad al triple, y hasta que alguien
+// entra a la pantalla a buscarlo, la información existe pero nadie la tiene.
+//
+// Se reusan las mismas funciones que evalúan en vivo (alarmaOsmosis, evaluarInstrumental,
+// los límites foliares) en vez de reescribir los umbrales acá: dos listas de límites que se
+// pueden desincronizar es peor que no tener la segunda.
+export interface FueraDeRangoDetalle {
+  fecha: string;
+  tarea: string;
+  responsable: string;
+  motivos: string[]; // "pH 8.2 (límite 7.8)" — el valor y contra qué se compara
+}
+
+export function detalleFueraDeRango(
+  registros: RegistroProtocolo[], desde: string, hasta: string,
+): FueraDeRangoDetalle[] {
+  const out: FueraDeRangoDetalle[] = [];
+  for (const r of registros || []) {
+    const fecha = String(r?.fecha || '').slice(0, 10);
+    if (!fecha || fecha < desde || fecha > hasta) continue;
+    if (String((r as any).fuera_de_rango || '').toUpperCase() !== 'SI') continue;
+
+    const tarea = tareaPorId(String(r.id_tarea));
+    const motivos: string[] = [];
+
+    // Agua de ósmosis: conductividad y pH contra sus límites.
+    motivos.push(...alarmaOsmosis((r as any).conductividad, (r as any).ph).motivos);
+
+    // Instrumental: desvío de cada buffer contra su valor nominal.
+    if (String(r.id_tarea) === 'control_instrumental') {
+      motivos.push(...evaluarInstrumental({
+        ph4: (r as any).ph4, ph7: (r as any).ph7, conductividad_patron: (r as any).conductividad_patron,
+      }).motivos);
+    }
+
+    // Foliares: condiciones ambientales al momento de aplicar.
+    const t = numeroDeMedicion((r as any).temperatura);
+    const h = numeroDeMedicion((r as any).humedad);
+    if (t !== null && (t < COND_TEMP_MIN || t > COND_TEMP_MAX)) {
+      motivos.push(`temperatura ${t} °C (tenía que estar entre ${COND_TEMP_MIN} y ${COND_TEMP_MAX})`);
+    }
+    if (h !== null && (h < COND_HUM_MIN || h > COND_HUM_MAX)) {
+      motivos.push(`humedad ${h}% (tenía que estar entre ${COND_HUM_MIN} y ${COND_HUM_MAX})`);
+    }
+
+    out.push({
+      fecha,
+      tarea: tarea?.nombreCorto || String(r.id_tarea),
+      responsable: String(r.responsable || ''),
+      // Si quedó marcado fuera de rango pero ninguna regla lo explica, se dice: esconderlo
+      // haría parecer que el registro está bien cuando alguien decidió que no lo estaba.
+      motivos: motivos.length ? motivos : ['marcado fuera de rango al cargarlo'],
+    });
+  }
+  return out.sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+
 // ── Alertas del protocolo para el Panel ──────────────────────────────────────────────
 //
 // El tablero es el lugar donde esto tiene que estar: un mail se pierde, se lee en el

@@ -46,8 +46,17 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   );
 
   const hoy = new Date();
-  const anio = Number(searchParams.anio) || hoy.getFullYear();
-  const mes = Number(searchParams.mes) || (hoy.getMonth() + 1);
+  // Por defecto, el ÚLTIMO MES CERRADO y no el actual.
+  //
+  // Un EERR del mes en curso siempre está mal y de la peor manera: muestra ingresos de
+  // media docena de días contra gastos fijos que ya se pagaron enteros, así que el
+  // resultado da negativo y parece una alarma. Cada vez que alguien entra a mirar "cómo
+  // venimos" lo primero que ve es un número que no significa nada.
+  //
+  // El mes en curso se sigue pudiendo ver: está a un click del botón de siguiente.
+  const cerrado = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+  const anio = Number(searchParams.anio) || cerrado.getFullYear();
+  const mes = Number(searchParams.mes) || (cerrado.getMonth() + 1);
   let mesPrev = mes - 1, anioPrev = anio;
   if (mesPrev === 0) { mesPrev = 12; anioPrev--; }
 

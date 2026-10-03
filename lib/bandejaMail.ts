@@ -11,7 +11,7 @@
 
 import { appendRowObj, asegurarHoja, readSheet } from './sheets';
 import { parsearAvisoPago } from './avisosPago';
-import { extraerAvisoConIA, type PdfAdjunto, type ClienteParaIA } from './extraerAvisoIA';
+import { extraerAvisoConIA, type AdjuntoIA, type ClienteParaIA } from './extraerAvisoIA';
 import { hashMovimiento } from './importacionBanco';
 import { fechaArgentinaHoy } from './ocupacion';
 import {
@@ -86,7 +86,7 @@ export async function crearItemDesdeAviso(args: {
   usuario: string;
   importeForzado?: number;
   fechaForzada?: string;
-  pdfs?: PdfAdjunto[];
+  pdfs?: AdjuntoIA[];
 }): Promise<ResultadoItemAviso> {
   const texto = String(args.texto || '');
   const asunto = String(args.asunto || '');
