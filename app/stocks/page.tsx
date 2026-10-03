@@ -9,6 +9,7 @@ import { calcularDriversMes } from '@/lib/usoTeorico';
 import { alertasStockBajo } from '@/lib/alertasPanel';
 import { leerDescartes, sinDescartadas } from '@/lib/alertasDescartadas';
 import DescartarAlerta from '@/components/DescartarAlerta';
+import ComprasDelMes from '@/components/ComprasDelMes';
 export const dynamic = 'force-dynamic';
 
 export default async function StocksPage() {
@@ -55,6 +56,28 @@ export default async function StocksPage() {
   // de compra en el panel de carga (el usuario confirma la cantidad real o descarta).
   const gastosSugeridos = gastos.filter((g) => g.categoria === 'insumos' && g.aplicado_stock !== 'SI');
 
+  // Las compras del mes: los gastos que tienen un artículo asociado. No se filtra por
+  // categoría —una compra de insumos puede estar cargada como "gastos generales" si quien
+  // la cargó eligió mal— porque el artículo es el dato que de verdad la define como compra.
+  const nombreArt = new Map(articulos.map((a) => [String(a.id_articulo), a]));
+  const compras = gastos
+    .filter((g) => String(g.id_articulo || '').trim())
+    .map((g) => {
+      const art = nombreArt.get(String(g.id_articulo).trim());
+      return {
+        id_gasto: String(g.id_gasto),
+        fecha: String(g.fecha || '').split(/[T ]/)[0],
+        descripcion: String(g.descripcion || ''),
+        id_articulo: String(g.id_articulo || ''),
+        articuloNombre: art?.articulo || String(g.id_articulo || ''),
+        unidad: art?.unidad_medida || '',
+        cantidad: Number(g.cantidad) || 0,
+        monto: Number(g.monto) || 0,
+        medio_pago: String(g.medio_pago || ''),
+        categoria: String(g.categoria || 'insumos'),
+      };
+    });
+
   return (
     <>
       <Header user={user} current="stocks" />
@@ -77,6 +100,8 @@ export default async function StocksPage() {
             </div>
           </div>
         )}
+
+        <ComprasDelMes compras={compras} anioActual={hoy.getFullYear()} mesActual={hoy.getMonth() + 1} />
 
         <StocksManager
           articulos={articulos.filter((a) => a.activo === 'SI')}
