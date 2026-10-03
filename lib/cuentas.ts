@@ -1,7 +1,7 @@
 import { asegurarHoja, readSheet, appendRowObj, updateRow, deleteRow } from './sheets';
 import { MEDIOS_PAGO, type MedioPagoGasto, type Gasto } from './types';
 
-import { soloPagados } from './proveedores';
+import { pagadosEnRango } from './proveedores';
 // ── Cobranzas y saldos de cuentas ─────────────────────────────────────────────────────
 //
 // Con esto la app puede decir cuánta plata hay en cada cuenta y en cada caja, que es lo
@@ -123,8 +123,9 @@ export function saldosDelMes(
   if (mesPrev === 0) { mesPrev = 12; anioPrev--; }
 
   const delMes = <T extends { fecha: any }>(xs: T[]) => xs.filter((x) => { const f = dia(x.fecha); return f >= desde && f <= hasta; });
-  // Solo lo pagado: un saldo de caja no se mueve por una factura que todavía no se pagó.
-  const gastosMes = delMes(soloPagados(gastos));
+  // Por fecha de PAGO, no de compra: un saldo de caja no se mueve cuando se compra sino
+  // cuando sale la plata. Lo pendiente no mueve nada todavía.
+  const gastosMes = pagadosEnRango(gastos, desde, hasta);
   const cobranzasMes = delMes(cobranzas);
 
   return MEDIOS_PAGO.map((medio: MedioPagoGasto) => {

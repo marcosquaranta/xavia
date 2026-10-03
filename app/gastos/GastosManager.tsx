@@ -68,12 +68,13 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
     const ini = `${anio}-${String(mes).padStart(2, '0')}-01`;
     const finDia = new Date(anio, mes, 0).getDate();
     const fin = `${anio}-${String(mes).padStart(2, '0')}-${String(finDia).padStart(2, '0')}`;
-    // Solo lo pagado: una compra a crédito todavía no es plata que salió, y sumarla a los
-    // totales del mes diría que se gastó algo que no se gastó. Las pendientes se ven arriba,
-    // en Deuda a proveedores, hasta que se marcan pagadas.
+    // Todo lo del mes, pagado o no: el gasto pertenece al mes en que se compró. Es el mismo
+    // criterio con el que el EERR arma el resultado, así que los dos números coinciden —que
+    // es justamente para lo que se mira esta pantalla—. Lo pendiente va marcado, y lo que
+    // falta pagar se totaliza aparte.
     return gastos.filter((g) => {
       const f = String(g.fecha || '').split(/[T ]/)[0];
-      return f >= ini && f <= fin && estaPagado(g);
+      return f >= ini && f <= fin;
     });
   }, [gastos, anio, mes]);
 
@@ -84,6 +85,9 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
   }, [delMes]);
 
   const totalGeneral = delMes.reduce((a, g) => a + (Number(g.monto) || 0), 0);
+  // Cuánto de ese total todavía no salió de la caja. Sin esto, el total del mes se lee como
+  // plata gastada cuando puede incluir compras a crédito que se pagan el mes que viene.
+  const pendienteDelMes = delMes.filter((g) => !estaPagado(g)).reduce((a, g) => a + (Number(g.monto) || 0), 0);
 
   // Resumen por categoría para mandar por mail: solo concepto y monto, de mayor a menor.
   // Los movimientos entre medios de pago quedan afuera — no son gasto, es plata que va de

@@ -163,6 +163,10 @@ export interface Gasto {
   estado_pago: string;
   proveedor: string;
   vencimiento: string;
+  // Cuándo salió la plata. Distinta de `fecha`, que es cuándo se compró: el resultado del
+  // mes usa la de compra y los saldos de caja usan esta. Vacío en las filas viejas, que se
+  // cargaban recién al pagarse — para ellas vale `fecha`.
+  fecha_pago: string;
   usuario: string;
   fecha_carga: string;
   aplicado_stock: 'SI' | 'NO' | '';  // 'SI' = ya confirmado (o descartado) como compra de Stocks, no debe volver a sugerirse

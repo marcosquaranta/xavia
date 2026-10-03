@@ -13,6 +13,9 @@ import CuentasEditor from './CuentasEditor';
 import { nombreClienteVisible } from '@/lib/clientes';
 import { pasosDelCierre, resumenChecklist } from '@/lib/cierreChecklist';
 import ChecklistCierre from './ChecklistCierre';
+import OrigenAplicacionCard from '@/components/OrigenAplicacion';
+import { origenYAplicacion, deudaProveedoresAlCierre } from '@/lib/origenAplicacion';
+import { calcularValorizacionMes as valorizacionDelMes } from '@/lib/valorizacionStock';
 export const dynamic = 'force-dynamic';
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -75,6 +78,35 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   const saldos = saldosDelMes(gastos, cobranzas, saldosGuardados, anio, mes);
   const pasos = pasosDelCierre({ eerr: act, gastos, stocks, articulos, cobranzas: cobranzasMes, saldos, hayPrevision: !!guardada, anio, mes });
   const resumenPasos = resumenChecklist(pasos);
+
+  // ── Origen y aplicación de fondos ──
+  //
+  // El puente entre el resultado y la caja. Cada pieza se calcula con el dato que ya existe:
+  // la variación de deudores sale de lo facturado menos lo cobrado DEL MES (exacto con un
+  // mes de datos, a diferencia del saldo, que necesitaría toda la historia), la de
+  // proveedores de las compras que al cierre de cada mes todavía no estaban pagadas, y la de
+  // stock de la valorización que ya se calcula para el EERR.
+  const mmPrev = String(mesPrev).padStart(2, '0');
+  const finMesPrev = `${anioPrev}-${mmPrev}-${String(new Date(anioPrev, mesPrev, 0).getDate()).padStart(2, '0')}`;
+  const valorAct = valorizacionDelMes(articulos, stocks, anio, mes);
+  const valorPrev = valorizacionDelMes(articulos, stocks, anioPrev, mesPrev);
+  const sumaSaldos = (xs: typeof saldos, campo: 'inicial' | 'calculado') =>
+    xs.reduce((a, x) => a + (campo === 'inicial' ? x.inicial : (x.real ?? x.calculado)), 0);
+  // Solo se compara contra la caja si hay saldos reales cargados: con los calculados, la
+  // diferencia daría cero siempre y el bloque diría que todo cierra cuando no se sabe.
+  const hayCajaReal = saldos.some((x) => x.real !== null) && saldos.some((x) => x.hayInicial);
+
+  const fondos = origenYAplicacion({
+    resultado: act.resultado,
+    facturadoMes: act.ventas.total,
+    cobradoMes: cobranzasMes.reduce((a, c) => a + (Number(c.monto) || 0), 0),
+    deudaProveedoresInicio: deudaProveedoresAlCierre(gastos, finMesPrev),
+    deudaProveedoresFin: deudaProveedoresAlCierre(gastos, hastaMes),
+    stockInicio: valorPrev.total ?? null,
+    stockFin: valorAct.total ?? null,
+    cajaInicio: hayCajaReal ? sumaSaldos(saldos, 'inicial') : null,
+    cajaFin: hayCajaReal ? sumaSaldos(saldos, 'calculado') : null,
+  });
 
   const esMesActual = anio === hoy.getFullYear() && mes === (hoy.getMonth() + 1);
   const hrefMes = (a: number, m: number) => `/eerr?anio=${a}&mes=${m}`;
@@ -140,6 +172,8 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
             } : null}
           />
         </div>
+
+        <OrigenAplicacionCard datos={fondos} nombreMes={nombre} />
 
         <div className="card" style={{ marginTop: '12px' }}>
           <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>

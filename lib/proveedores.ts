@@ -7,16 +7,22 @@
 // Ahora una compra se puede cargar como PENDIENTE, con proveedor y vencimiento, y marcarse
 // pagada después. Eso es lo que convierte "gastos" en "cuenta corriente de proveedores".
 //
-// ── Por qué lo pendiente no toca ningún número existente ──
+// ── Dos fechas, dos preguntas distintas ──
 //
-// Un gasto pendiente NO entra en el EERR, ni en los saldos de caja, ni en los totales de
-// Gastos: para todo eso sigue valiendo lo mismo que antes, que es la plata que salió. Es
-// deliberado y es conservador: meterlo cambiaría resultados de meses ya cerrados según un
-// criterio contable (devengado vs. caja) que todavía no está definido, y un EERR que cambia
-// solo es peor que uno incompleto.
+// Una compra a crédito tiene dos momentos y los dos importan, pero para cosas distintas:
 //
-// Cuando se marca pagada, la compra pasa a ser un gasto normal con la fecha en que se pagó,
-// y a partir de ahí entra en todo como siempre.
+//   `fecha`      → cuándo se compró. Es la que usa el RESULTADO (EERR): el costo pertenece
+//                  al mes en que entró la mercadería, se haya pagado o no. Criterio
+//                  devengado, definido por Marcos.
+//   `fecha_pago` → cuándo salió la plata. Es la que usan los SALDOS DE CAJA y la cuenta
+//                  corriente: una caja no se mueve por una factura que todavía no se pagó.
+//
+// Mezclarlas es el error clásico: si al pagar se moviera `fecha`, una compra de septiembre
+// pagada en octubre saldría del resultado de septiembre y aparecería en el de octubre, y
+// los dos meses quedarían mal. Por eso `fecha` NO se toca nunca al pagar.
+//
+// Las filas viejas no tienen `fecha_pago`: para ellas vale `fecha`, que es correcto porque
+// se cargaban recién cuando se pagaban.
 
 import type { Gasto } from './types';
 
@@ -31,6 +37,22 @@ export function estaPagado(g: Gasto): boolean {
 
 export function soloPagados(gastos: Gasto[]): Gasto[] {
   return (gastos || []).filter(estaPagado);
+}
+
+// Cuándo salió la plata de este gasto. Null si todavía no salió.
+export function fechaDeCaja(g: Gasto): string | null {
+  if (!estaPagado(g)) return null;
+  const pago = String((g as any)?.fecha_pago || '').split(/[T ]/)[0];
+  return pago || String(g?.fecha || '').split(/[T ]/)[0] || null;
+}
+
+// Los gastos que movieron caja dentro de un rango, mirando la fecha del PAGO y no la de la
+// compra. Es lo que necesita cualquier saldo de cuenta.
+export function pagadosEnRango(gastos: Gasto[], desde: string, hasta: string): Gasto[] {
+  return (gastos || []).filter((g) => {
+    const f = fechaDeCaja(g);
+    return !!f && f >= desde && f <= hasta;
+  });
 }
 
 export interface DeudaProveedor {

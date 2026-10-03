@@ -2,7 +2,6 @@ import type { Articulo, StockMes, Gasto, VentaDia, PrecioVenta, ClienteVenta, Ca
 import { ventasEnRango } from './estadisticasVentas';
 import { precioUltimoConocido } from './valorizacionStock';
 
-import { soloPagados } from './proveedores';
 // ── Estado de resultados del mes ──────────────────────────────────────────────────────
 //
 // Reemplaza al Excel que se armaba a mano copiando el mes anterior. Acá no se copia nada:
@@ -136,8 +135,10 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
     consumoPorCat.set(linea, (consumoPorCat.get(linea) || 0) + consumo * precio);
   }
 
-  // Solo lo pagado: una compra a crédito todavía no es plata que salió. Ver lib/proveedores.
-  const gastosMes = soloPagados(d.gastos).filter((g) => {
+  // TODO lo del mes, esté pagado o no: el costo pertenece al mes en que se compró. Criterio
+  // devengado, definido por Marcos. Una compra a 30 días es un costo de este mes aunque la
+  // plata salga el que viene; lo que se mueve con el pago son los saldos de caja, no esto.
+  const gastosMes = d.gastos.filter((g) => {
     const f = String(g.fecha || '').split(/[T ]/)[0];
     return f >= desde && f <= hasta;
   });
