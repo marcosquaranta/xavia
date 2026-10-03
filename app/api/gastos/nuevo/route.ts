@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, isAdmin } from '@/lib/auth';
-import { readSheet, appendRowObj, asegurarColumna } from '@/lib/sheets';
+import { readSheet, appendRowObj, asegurarColumna, asegurarColumnas } from '@/lib/sheets';
 import { CATEGORIAS_GASTO, admiteMontoNegativo, type Gasto } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
   if (!(await isAdmin())) return NextResponse.json({ error: 'solo_admin' }, { status: 403 });
 
   try {
-    const { fecha, descripcion, categoria, monto, medio_pago, medio_pago_destino, id_articulo, cantidad, empleado } = await req.json();
+    const { fecha, descripcion, categoria, monto, medio_pago, medio_pago_destino, id_articulo, cantidad, empleado, pendiente, proveedor, vencimiento } = await req.json();
     if (!fecha || !descripcion || !medio_pago || monto === undefined) {
       return NextResponse.json({ error: 'datos_incompletos' }, { status: 400 });
     }
@@ -32,8 +32,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'falta_empleado' }, { status: 400 });
     }
 
+    // Una compra pendiente sin proveedor no se le puede reclamar a nadie ni agrupar: la
+    // deuda quedaría como un monto suelto que nadie sabe a quién corresponde.
+    if (pendiente && !String(proveedor || '').trim()) {
+      return NextResponse.json({ error: 'falta_proveedor' }, { status: 400 });
+    }
+
     await asegurarColumna('Gastos', 'medio_pago_destino');
     await asegurarColumna('Gastos', 'empleado');
+    await asegurarColumnas('Gastos', ['estado_pago', 'proveedor', 'vencimiento']);
     const gastos = await readSheet<Gasto>('Gastos');
     const maxId = gastos
       .map((g) => parseInt(String(g.id_gasto).replace('GAS-', '') || '0'))
@@ -49,6 +56,9 @@ export async function POST(req: NextRequest) {
       medio_pago,
       medio_pago_destino: categoria === 'movimiento_interno' ? medio_pago_destino : '',
       empleado: categoria === 'adelanto_sueldo' ? String(empleado).trim() : '',
+      estado_pago: pendiente ? 'pendiente' : '',
+      proveedor: pendiente ? String(proveedor).trim() : '',
+      vencimiento: pendiente ? String(vencimiento || '').trim() : '',
       usuario: user.email,
       fecha_carga: new Date().toISOString().split('T')[0],
       id_articulo: id_articulo || '',

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { CATEGORIAS_GASTO, MEDIOS_PAGO, admiteMontoNegativo, type Gasto, type CategoriaGasto, type Articulo } from '@/lib/types';
 import NumberInput from '@/components/NumberInput';
 
+import { estaPagado } from '@/lib/proveedores';
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const MEDIOS = MEDIOS_PAGO;
 const LABEL_CAT: Record<string, string> = Object.fromEntries(CATEGORIAS_GASTO.map((c) => [c.value, c.label]));
@@ -38,6 +39,11 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
   // Un adelanto se carga como gasto —la plata salió de una caja— pero atado a un empleado,
   // que es lo que después permite descontarlo del sueldo a fin de mes.
   const esAdelanto = categoria === 'adelanto_sueldo';
+  // Compra a crédito: la plata todavía no salió. No cuenta como gasto hasta que se marque
+  // pagada desde Deuda a proveedores.
+  const [pendiente, setPendiente] = useState(false);
+  const [proveedor, setProveedor] = useState('');
+  const [vencimiento, setVencimiento] = useState('');
   const aceptaNegativo = admiteMontoNegativo(categoria);
   const [monto, setMonto] = useState(0);
   const [medioPago, setMedioPago] = useState<string>(MEDIOS[0]);
@@ -62,7 +68,13 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
     const ini = `${anio}-${String(mes).padStart(2, '0')}-01`;
     const finDia = new Date(anio, mes, 0).getDate();
     const fin = `${anio}-${String(mes).padStart(2, '0')}-${String(finDia).padStart(2, '0')}`;
-    return gastos.filter((g) => { const f = String(g.fecha || '').split(/[T ]/)[0]; return f >= ini && f <= fin; });
+    // Solo lo pagado: una compra a crédito todavía no es plata que salió, y sumarla a los
+    // totales del mes diría que se gastó algo que no se gastó. Las pendientes se ven arriba,
+    // en Deuda a proveedores, hasta que se marcan pagadas.
+    return gastos.filter((g) => {
+      const f = String(g.fecha || '').split(/[T ]/)[0];
+      return f >= ini && f <= fin && estaPagado(g);
+    });
   }, [gastos, anio, mes]);
 
   const porCategoria = useMemo(() => {
@@ -117,6 +129,7 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
     if (monto < 0 && !aceptaNegativo) { setError('Ingresá un monto mayor a 0'); return; }
     if (esMovimiento && !medioDestino) { setError('Elegí a qué cuenta entra la plata'); return; }
     if (esAdelanto && !empleadoAdelanto) { setError('Elegí a qué empleado se le adelantó'); return; }
+    if (pendiente && !proveedor.trim()) { setError('Poné a qué proveedor se le debe'); return; }
     setGuardando(true);
     try {
       const res = await fetch('/api/gastos/nuevo', {
@@ -125,13 +138,15 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
           fecha, descripcion, categoria, monto, medio_pago: medioPago,
           ...(esMovimiento ? { medio_pago_destino: medioDestino } : {}),
           ...(esAdelanto ? { empleado: empleadoAdelanto } : {}),
+          ...(pendiente ? { pendiente: true, proveedor: proveedor.trim(), vencimiento } : {}),
           ...(categoria === 'insumos' ? { id_articulo: idArticulo, cantidad } : {}),
         }),
       });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || 'Error al guardar');
       setDescripcion('');
-      setEmpleadoAdelanto(''); setMonto(0); setFecha(hoyISO()); setCategoria('gastos_generales'); setMedioPago(MEDIOS[0]); setMedioDestino('');
+      setEmpleadoAdelanto('');
+      setPendiente(false); setProveedor(''); setVencimiento(''); setMonto(0); setFecha(hoyISO()); setCategoria('gastos_generales'); setMedioPago(MEDIOS[0]); setMedioDestino('');
       setIdArticulo(''); setCantidad('');
       router.refresh();
     } catch (err: any) {
@@ -313,6 +328,37 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
             </div>
           )}
         </div>
+
+        {/* Compra a crédito. No se ofrece para movimientos entre cuentas ni adelantos: esos,
+            por definición, son plata que ya se movió. */}
+        {!esMovimiento && !esAdelanto && (
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#374151', cursor: 'pointer', fontWeight: 600 }}>
+              <input type="checkbox" checked={pendiente} onChange={(e) => setPendiente(e.target.checked)} disabled={guardando} />
+              Todavía no lo pagué (queda como deuda a un proveedor)
+            </label>
+            {pendiente && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: '8px', marginTop: '8px' }}>
+                <div>
+                  <label style={{ color: proveedor.trim() ? undefined : '#dc2626' }}>Proveedor</label>
+                  <input type="text" value={proveedor} onChange={(e) => setProveedor(e.target.value)} disabled={guardando}
+                    placeholder="A quién se le debe" style={{ borderColor: proveedor.trim() ? undefined : '#dc2626' }} />
+                </div>
+                <div>
+                  <label>Vence el</label>
+                  <input type="date" value={vencimiento} onChange={(e) => setVencimiento(e.target.value)} disabled={guardando} />
+                </div>
+              </div>
+            )}
+            {pendiente && (
+              <p style={{ margin: '8px 0 0', fontSize: '11.5px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '8px 10px' }}>
+                Esta compra NO va a contar como gasto hasta que la marques pagada en <strong>Deuda a proveedores</strong>.
+                Mientras tanto figura como deuda, y el medio de pago que elegiste arriba se va a poder cambiar al pagarla
+                —que es cuando se sabe de dónde salió la plata—.
+              </p>
+            )}
+          </div>
+        )}
 
         {esAdelanto && (
           <p style={{ margin: '0 0 12px', fontSize: '11.5px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '8px 10px' }}>

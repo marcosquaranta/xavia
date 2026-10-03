@@ -158,6 +158,11 @@ export interface Gasto {
   // que permite descontarlo del sueldo de esa persona a fin de mes; sin esto el adelanto
   // sería un gasto suelto que nadie ata a nadie.
   empleado: string;
+  // Compra a crédito: mientras `estado_pago` sea 'pendiente', la plata todavía no salió.
+  // Vacío = pagado, que es como se cargó siempre y lo que hay en las filas viejas.
+  estado_pago: string;
+  proveedor: string;
+  vencimiento: string;
   usuario: string;
   fecha_carga: string;
   aplicado_stock: 'SI' | 'NO' | '';  // 'SI' = ya confirmado (o descartado) como compra de Stocks, no debe volver a sugerirse

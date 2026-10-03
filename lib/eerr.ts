@@ -2,6 +2,7 @@ import type { Articulo, StockMes, Gasto, VentaDia, PrecioVenta, ClienteVenta, Ca
 import { ventasEnRango } from './estadisticasVentas';
 import { precioUltimoConocido } from './valorizacionStock';
 
+import { soloPagados } from './proveedores';
 // ── Estado de resultados del mes ──────────────────────────────────────────────────────
 //
 // Reemplaza al Excel que se armaba a mano copiando el mes anterior. Acá no se copia nada:
@@ -135,7 +136,8 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
     consumoPorCat.set(linea, (consumoPorCat.get(linea) || 0) + consumo * precio);
   }
 
-  const gastosMes = d.gastos.filter((g) => {
+  // Solo lo pagado: una compra a crédito todavía no es plata que salió. Ver lib/proveedores.
+  const gastosMes = soloPagados(d.gastos).filter((g) => {
     const f = String(g.fecha || '').split(/[T ]/)[0];
     return f >= desde && f <= hasta;
   });
