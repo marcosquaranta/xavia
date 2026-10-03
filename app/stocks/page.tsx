@@ -59,6 +59,22 @@ export default async function StocksPage() {
   // Las compras del mes: los gastos que tienen un artículo asociado. No se filtra por
   // categoría —una compra de insumos puede estar cargada como "gastos generales" si quien
   // la cargó eligió mal— porque el artículo es el dato que de verdad la define como compra.
+  // El movimiento de stock por mes, para poder mostrar la cuenta del consumo abierta:
+  // había + compró − quedó. Vacío NO es cero: sin recuento final el consumo no se puede
+  // calcular, y decir 0 sería afirmar que se consumió todo.
+  const movimientosStock: Record<string, { id_articulo: string; inicial: number; compras: number; final: number; tieneFinal: boolean }[]> = {};
+  for (const st of stocks) {
+    const clave = `${st.anio}-${Number(st.mes)}`;
+    const crudo = String((st as any).stock_final ?? '').trim();
+    (movimientosStock[clave] ||= []).push({
+      id_articulo: String(st.id_articulo),
+      inicial: Number(st.stock_inicial) || 0,
+      compras: Number(st.compras) || 0,
+      final: Number(st.stock_final) || 0,
+      tieneFinal: crudo !== '' && !isNaN(Number(crudo)),
+    });
+  }
+
   const nombreArt = new Map(articulos.map((a) => [String(a.id_articulo), a]));
   const compras = gastos
     .filter((g) => String(g.id_articulo || '').trim())
@@ -101,7 +117,12 @@ export default async function StocksPage() {
           </div>
         )}
 
-        <ComprasDelMes compras={compras} anioActual={hoy.getFullYear()} mesActual={hoy.getMonth() + 1} />
+        <ComprasDelMes
+          compras={compras}
+          movimientos={movimientosStock}
+          anioActual={hoy.getFullYear()}
+          mesActual={hoy.getMonth() + 1}
+        />
 
         <StocksManager
           articulos={articulos.filter((a) => a.activo === 'SI')}

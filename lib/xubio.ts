@@ -103,13 +103,18 @@ export interface CuentaXubio { id: number; nombre: string; codigo: string }
 // la cuenta existía en Xubio y simplemente no aparecía, sin ningún error que lo explicara.
 // Por eso, si ninguno de los nombres conocidos sirve, se busca cualquier campo numérico
 // cuyo nombre termine en "id".
+//
+// Y vale CUALQUIER id distinto de cero, incluidos los NEGATIVOS. Xubio usa ids negativos
+// para sus cuentas de sistema (Ajuste de Capital es la -40), y pedir `id > 0` descartaba 47
+// de las 78 cuentas del plan en silencio. Era una suposición, no un dato: el cero sí hay
+// que descartarlo porque es lo que devuelve Number() cuando no encontró ningún id.
 function idDeCuenta(c: any): number {
   const directo = Number(c?.cuentaId ?? c?.ID ?? c?.id ?? 0);
-  if (directo > 0) return directo;
+  if (Number.isFinite(directo) && directo !== 0) return directo;
   for (const [k, v] of Object.entries(c || {})) {
     if (!/id$/i.test(k)) continue;
     const n = Number(v);
-    if (Number.isFinite(n) && n > 0) return n;
+    if (Number.isFinite(n) && n !== 0) return n;
   }
   return 0;
 }
@@ -173,7 +178,7 @@ export async function getCuentas(cobranzasFallback: any[] = []): Promise<{ cuent
   for (const path of PATHS_CUENTAS) {
     try {
       const raw = await xubioGet<any[]>(path);
-      const cuentas = (Array.isArray(raw) ? raw : []).map(mapCuenta).filter((c) => c.id > 0 && c.nombre);
+      const cuentas = (Array.isArray(raw) ? raw : []).map(mapCuenta).filter((c) => c.id !== 0 && c.nombre);
       if (!cuentas.length) continue;
       let nuevas = 0;
       for (const c of cuentas) if (!porId.has(c.id)) { porId.set(c.id, c); nuevas++; }
@@ -221,22 +226,29 @@ export async function diagnosticoCuentas(): Promise<string> {
         // que Xubio no la tenga, que la devuelva con otro nombre de campo, o que esté
         // escrita de una forma que la app no reconoce.
         const mapeadas = raw.map(mapCuenta);
-        const usables = mapeadas.filter((c) => c.id > 0 && c.nombre);
+        const usables = mapeadas.filter((c) => c.id !== 0 && c.nombre);
         const pega = usables
           .filter((c) => /macro|caja|brubank|banco|efectivo/i.test(c.nombre))
           .map((c) => c.nombre).slice(0, 25);
+        // Sobre el CRUDO, sin filtrar por usable: es la única forma de contestar "¿esta
+        // cuenta existe en Xubio o no existe?" sin que la respuesta dependa de si la app
+        // supo mapearla.
+        const buscadas = raw
+          .map((x: any) => String(x?.nombre || x?.descripcion || ''))
+          .filter((n: string) => /macro|caja ?mq|cajamq/i.test(n));
         // Un ejemplo de fila DESCARTADA, no solo de una buena. Con 47 de 78 filas cayéndose
         // por "sin id o sin nombre", el ejemplo de una que sí funciona no sirve para nada:
         // lo que hay que ver es la forma de las que no, que son las que podrían estar
         // escondiendo la cuenta que falta.
         const descartadas = raw.filter((x: any) => {
           const c = mapCuenta(x);
-          return !(c.id > 0 && c.nombre);
+          return !(c.id !== 0 && c.nombre);
         });
         partes.push([
           `${path}: ${raw.length} filas`,
           `${usables.length} usables${raw.length - usables.length ? ` (${raw.length - usables.length} sin id o sin nombre)` : ''}`,
           pega.length ? `cuentas de plata: ${pega.join(', ')}` : 'ninguna cuenta de plata reconocible',
+          `buscando Macro/Caja MQ en el crudo: ${buscadas.length ? buscadas.join(', ') : 'NO ESTÁN'}`,
           descartadas.length ? `DESCARTADAS, ej: ${descartadas.slice(0, 2).map((x: any) => JSON.stringify(x).slice(0, 200)).join(' || ')}` : '',
           raw.length ? `ok, ej: ${JSON.stringify(raw[0]).slice(0, 160)}` : '',
         ].filter(Boolean).join(' · '));

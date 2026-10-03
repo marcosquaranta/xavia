@@ -30,8 +30,22 @@ const fmtN = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: 2
 const fmtDia = (f: string) => { const [, m, d] = String(f || '').split('-'); return d ? `${d}/${m}` : f; };
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-export default function ComprasDelMes({ compras, anioActual, mesActual }: {
+// El movimiento de stock de un artículo en un mes. Es la cuenta del CMV:
+//   consumo = lo que había + lo que se compró − lo que quedó
+// Nada de esto se calcula acá: la app ya la lleva así en la hoja Stocks y en el EERR. Lo
+// que faltaba era poder VERLA, que es distinto — sin eso, "consumí 40 bolsas" es un número
+// que hay que creer, y con las cuatro columnas al lado es un número que se puede revisar.
+export interface MovimientoStockUI {
+  id_articulo: string;
+  inicial: number;
+  compras: number;
+  final: number;
+  tieneFinal: boolean; // vacío no es cero: sin recuento, el consumo no se puede calcular
+}
+
+export default function ComprasDelMes({ compras, movimientos = {}, anioActual, mesActual }: {
   compras: CompraUI[];
+  movimientos?: Record<string, MovimientoStockUI[]>; // clave "anio-mes"
   anioActual: number;
   mesActual: number;
 }) {
@@ -55,20 +69,37 @@ export default function ComprasDelMes({ compras, anioActual, mesActual }: {
 
   const total = delMes.reduce((a, c) => a + c.monto, 0);
 
-  // Lo mismo agrupado por artículo: comprar tres veces el mismo insumo en el mes es normal,
-  // y el total por artículo es lo que se compara contra el consumo.
+  // Lo mismo agrupado por artículo, con el movimiento de stock al lado: comprar tres veces
+  // el mismo insumo en el mes es normal, y lo que importa no es cuánto se compró sino
+  // cuánto se consumió y cuánto queda para el mes que viene.
   const porArticulo = useMemo(() => {
-    const map = new Map<string, { nombre: string; unidad: string; cantidad: number; monto: number; veces: number }>();
+    const movs = movimientos[`${anio}-${mes}`] || [];
+    const porId = new Map(movs.map((m) => [String(m.id_articulo), m]));
+    const map = new Map<string, { id: string; nombre: string; unidad: string; cantidad: number; monto: number; veces: number }>();
     for (const c of delMes) {
       const k = c.id_articulo || c.articuloNombre;
-      const prev = map.get(k) || { nombre: c.articuloNombre, unidad: c.unidad, cantidad: 0, monto: 0, veces: 0 };
+      const prev = map.get(k) || { id: c.id_articulo, nombre: c.articuloNombre, unidad: c.unidad, cantidad: 0, monto: 0, veces: 0 };
       prev.cantidad += c.cantidad;
       prev.monto += c.monto;
       prev.veces += 1;
       map.set(k, prev);
     }
-    return [...map.values()].sort((a, b) => b.monto - a.monto);
-  }, [delMes]);
+    return [...map.values()]
+      .map((a) => {
+        const m = porId.get(String(a.id));
+        return {
+          ...a,
+          inicial: m?.inicial ?? null,
+          final: m && m.tieneFinal ? m.final : null,
+          // Se usa la compra que figura en Stocks, no la suma de los gastos: puede haber una
+          // compra cargada en Stocks que nunca se cargó como gasto, y el consumo del mes
+          // sale de la hoja de Stocks, no de la de Gastos.
+          comprasStock: m?.compras ?? null,
+          consumo: m && m.tieneFinal ? m.inicial + m.compras - m.final : null,
+        };
+      })
+      .sort((a, b) => b.monto - a.monto);
+  }, [delMes, movimientos, anio, mes]);
 
   function mover(n: number) {
     let m = mes + n, a = anio;
@@ -219,26 +250,55 @@ export default function ComprasDelMes({ compras, anioActual, mesActual }: {
           </div>
 
           {/* El mismo mes agrupado: es lo que se compara contra el consumo del artículo. */}
-          {porArticulo.length > 1 && (
+          {porArticulo.length > 0 && (
             <div style={{ marginTop: '14px', borderTop: '1px solid #f3f4f6', paddingTop: '10px' }}>
-              <p style={{ margin: '0 0 6px', fontSize: '11.5px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' }}>Total por artículo</p>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
-                <tbody>
-                  {porArticulo.map((a) => (
-                    <tr key={a.nombre} style={{ borderTop: '1px solid #f9fafb' }}>
-                      <td style={{ padding: '4px 8px' }}>{a.nombre}</td>
-                      <td style={{ padding: '4px 8px', textAlign: 'right', color: '#6b7280' }}>
-                        {fmtN(a.cantidad)} {a.unidad}
-                        {a.veces > 1 && <span style={{ color: '#9ca3af', fontSize: '11px' }}> · {a.veces} compras</span>}
-                      </td>
-                      <td style={{ padding: '4px 8px', textAlign: 'right', color: '#6b7280' }}>
-                        {a.cantidad > 0 ? `${fmt$(a.monto / a.cantidad)} / ${a.unidad || 'u'}` : ''}
-                      </td>
-                      <td style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 700 }}>{fmt$(a.monto)}</td>
+              <p style={{ margin: '0 0 2px', fontSize: '11.5px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' }}>Total por artículo y consumo del mes</p>
+              <p style={{ margin: '0 0 6px', fontSize: '10.5px', color: '#9ca3af' }}>
+                Consumo = lo que había + lo que se compró − lo que quedó. Es la misma cuenta con la que el EERR
+                calcula el costo de insumos: acá está abierta para poder revisarla.
+              </p>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', minWidth: '600px' }}>
+                  <thead>
+                    <tr style={{ color: '#9ca3af', fontSize: '10.5px' }}>
+                      <th style={{ textAlign: 'left', padding: '3px 8px', fontWeight: 600 }}>Artículo</th>
+                      <th style={{ textAlign: 'right', padding: '3px 8px', fontWeight: 600 }}>Había</th>
+                      <th style={{ textAlign: 'right', padding: '3px 8px', fontWeight: 600 }}>Compró</th>
+                      <th style={{ textAlign: 'right', padding: '3px 8px', fontWeight: 600 }}>Quedó</th>
+                      <th style={{ textAlign: 'right', padding: '3px 8px', fontWeight: 600 }}>Consumió</th>
+                      <th style={{ textAlign: 'right', padding: '3px 8px', fontWeight: 600 }}>$ compras</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {porArticulo.map((a) => (
+                      <tr key={a.nombre} style={{ borderTop: '1px solid #f9fafb' }}>
+                        <td style={{ padding: '4px 8px' }}>
+                          {a.nombre}
+                          {a.veces > 1 && <span style={{ color: '#9ca3af', fontSize: '10.5px' }}> · {a.veces} compras</span>}
+                          <span style={{ display: 'block', fontSize: '10.5px', color: '#9ca3af' }}>
+                            {a.cantidad > 0 ? `${fmt$(a.monto / a.cantidad)} / ${a.unidad || 'u'}` : ''}
+                          </span>
+                        </td>
+                        <td style={{ padding: '4px 8px', textAlign: 'right', color: '#6b7280' }}>{a.inicial === null ? '—' : fmtN(a.inicial)}</td>
+                        <td style={{ padding: '4px 8px', textAlign: 'right', color: '#6b7280' }}>{a.comprasStock === null ? fmtN(a.cantidad) : fmtN(a.comprasStock)}</td>
+                        <td style={{ padding: '4px 8px', textAlign: 'right', color: a.final === null ? '#b45309' : '#6b7280' }}>
+                          {a.final === null ? 'sin contar' : fmtN(a.final)}
+                        </td>
+                        <td style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 700, color: a.consumo === null ? '#d1d5db' : '#111827' }}>
+                          {a.consumo === null ? '—' : `${fmtN(a.consumo)} ${a.unidad}`}
+                        </td>
+                        <td style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 700 }}>{fmt$(a.monto)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {porArticulo.some((a) => a.final === null) && (
+                <p style={{ margin: '6px 0 0', fontSize: '10.5px', color: '#b45309' }}>
+                  Los que dicen "sin contar" no tienen el stock final cargado de ese mes, así que su consumo no se
+                  puede calcular — y por eso tampoco entran en el costo de insumos del EERR.
+                </p>
+              )}
             </div>
           )}
         </>
