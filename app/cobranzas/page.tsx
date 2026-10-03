@@ -5,6 +5,8 @@ import { readSheet } from '@/lib/sheets';
 import { comprobantesParaMirar, cobranzasParaMirar } from '@/lib/xubioLectura';
 import { HOJA_COMPROBANTES } from '@/lib/xubioCache';
 import ActualizarXubio from '@/components/ActualizarXubio';
+import MovimientosCobranza from '@/components/MovimientosCobranza';
+import { HOJA_COBRANZAS_CACHE, type CobranzaCache } from '@/lib/xubioCache';
 import {
   HOJA_RECORDATORIOS, COL_ACTIVO, COL_EMAIL, CONFIG_DATOS_PAGO, DATOS_PAGO_DEFAULT,
   ANTIGUEDAD_DEFAULT, ANTIGUEDAD_HASTA_DEFAULT, COL_ANTIGUEDAD, COL_ANTIGUEDAD_HASTA, type RecordatorioCobro,
@@ -59,6 +61,7 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   let saldadas: FacturaSaldada[] = [];
   let revisiones: RevisionCliente[] = [];
   let cacheXubio: { actualizado?: string }[] = [];
+  let cobranzasCache: CobranzaCache[] = [];
   // Xubio arranca junto con las planillas, no después. Son las dos consultas más lentas de
   // la página y ninguna depende de la otra: esperarlas en serie hacía que entrar a
   // Cobranzas tardara la suma de las dos. Se lanzan acá y se esperan más abajo.
@@ -73,7 +76,7 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   ]).catch(() => [[], []] as [any[], any[]]);
 
   try {
-    [clientes, enviados, configRows, cobros, bandeja, aliasRows, saldadas, revisiones, cacheXubio] = await Promise.all([
+    [clientes, enviados, configRows, cobros, bandeja, aliasRows, saldadas, revisiones, cacheXubio, cobranzasCache] = await Promise.all([
       readSheet<ClienteVenta>('Clientes').catch(() => []),
       readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => []),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
@@ -87,6 +90,8 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
       leerRevisiones(),
       // Solo para saber de cuándo son los datos de Xubio que se están mostrando.
       readSheet<{ actualizado?: string }>(HOJA_COMPROBANTES).catch(() => []),
+      // Las cobranzas tal como están en Xubio, para el movimiento del mes.
+      readSheet<CobranzaCache>(HOJA_COBRANZAS_CACHE).catch(() => []),
     ]);
   } catch {}
 
@@ -255,6 +260,40 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
         </p>
 
         <ActualizarXubio actualizado={actualizadoXubio} />
+
+        {/* ══ COBRANZAS DEL MES ══ */}
+        {ver !== 'movimientos' ? (
+          <div className="card" style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+            <div>
+              <p className="card-title" style={{ margin: 0 }}>Cobranzas del mes</p>
+              <p className="card-sub" style={{ margin: '2px 0 0' }}>Lo que entró, por medio de cobro y por cliente.</p>
+            </div>
+            <Link href="/cobranzas?ver=movimientos" className="btn secondary" style={{ fontSize: '13px', whiteSpace: 'nowrap' }}>Ver →</Link>
+          </div>
+        ) : (
+        <div className="card" style={{ marginBottom: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+            <p className="card-title" style={{ margin: 0 }}>Cobranzas del mes</p>
+            <Link href="/cobranzas" style={{ fontSize: '12px', color: '#2563eb' }}>Ocultar</Link>
+          </div>
+          <p className="card-sub">
+            Todas las cobranzas que hay en Xubio, no solo las que se registraron desde la app.
+          </p>
+          <div style={{ marginTop: '10px' }}>
+            <MovimientosCobranza
+              cobranzas={cobranzasCache.map((c) => ({
+                fecha: String(c.fecha || '').slice(0, 10),
+                cliente: String(c.cliente || ''),
+                importe: Number(c.importe) || 0,
+                cuenta: String(c.cuenta || ''),
+                numero: String(c.numero || ''),
+              }))}
+              anioActual={new Date(hoyF + 'T12:00:00').getFullYear()}
+              mesActual={new Date(hoyF + 'T12:00:00').getMonth() + 1}
+            />
+          </div>
+        </div>
+        )}
 
         {/* ══ QUIÉN DEBE QUÉ ══ */}
         {ver !== 'impagas' ? (

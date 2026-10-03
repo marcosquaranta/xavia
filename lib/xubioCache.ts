@@ -21,7 +21,7 @@
 // Se guarda lo mínimo que usan las pantallas, no el bean entero: el resto es ruido que
 // engorda la planilla y hace más lenta justamente la lectura que se quiere rápida.
 
-import { asegurarHoja, readSheet, appendRowsObj, batchUpdateRows } from './sheets';
+import { asegurarHoja, asegurarColumnas, readSheet, appendRowsObj, batchUpdateRows } from './sheets';
 import { getComprobantes, getCobranzas, importeCobranza } from './xubio';
 import { nombreClienteComprobante } from './recordatoriosCobro';
 
@@ -29,7 +29,7 @@ export const HOJA_COMPROBANTES = 'XubioComprobantes';
 export const HEADERS_COMPROBANTES = ['transaccionid', 'fecha', 'cliente', 'tipo', 'numero', 'importe', 'actualizado'];
 
 export const HOJA_COBRANZAS_CACHE = 'XubioCobranzas';
-export const HEADERS_COBRANZAS_CACHE = ['transaccionid', 'fecha', 'cliente', 'importe', 'actualizado'];
+export const HEADERS_COBRANZAS_CACHE = ['transaccionid', 'fecha', 'cliente', 'importe', 'cuenta', 'numero', 'actualizado'];
 
 export interface ComprobanteCache {
   transaccionid: string | number;
@@ -46,7 +46,25 @@ export interface CobranzaCache {
   fecha: string;
   cliente: string;
   importe: number | string;
+  // Dónde entró la plata. Es el "medio de cobro" con el que se quiere filtrar después, y no
+  // se puede reconstruir del importe: una cobranza puede tener varios instrumentos (parte
+  // en efectivo, parte transferencia) y en ese caso van los dos nombres.
+  cuenta: string;
+  numero: string;  // número de recibo, para poder encontrarlo en Xubio
   actualizado: string;
+}
+
+// El nombre de la cuenta donde entró una cobranza, tal como viene del bean.
+export function cuentaDeCobranza(cob: any): string {
+  const items = cob?.transaccionInstrumentoDeCobro;
+  if (!Array.isArray(items)) return '';
+  const nombres: string[] = [];
+  for (const i of items) {
+    const c = i?.cuenta;
+    const n = String(typeof c === 'string' ? c : (c?.nombre || c?.name || '')).trim();
+    if (n && !nombres.includes(n)) nombres.push(n);
+  }
+  return nombres.join(' + ');
 }
 
 const soloFecha = (v: any) => String(v || '').split(/[T ]/)[0];
@@ -81,9 +99,10 @@ export function cobranzasDesdeCache(filas: CobranzaCache[], desde: string, hasta
       transaccionid: Number(f.transaccionid) || 0,
       fecha: soloFecha(f.fecha),
       cliente: { nombre: String(f.cliente || '') },
+      numeroDocumento: String(f.numero || ''),
       // El importe ya viene sumado de los instrumentos de cobro. Se devuelve con la misma
       // forma que la API para que importeCobranza() siga dando lo mismo sobre el caché.
-      transaccionInstrumentoDeCobro: [{ importe: Number(f.importe) || 0 }],
+      transaccionInstrumentoDeCobro: [{ importe: Number(f.importe) || 0, cuenta: { nombre: String(f.cuenta || '') } }],
     }));
 }
 
@@ -108,6 +127,9 @@ export interface ResultadoSnapshot {
 export async function guardarSnapshotXubio(desde: string, hasta: string): Promise<ResultadoSnapshot> {
   await asegurarHoja(HOJA_COMPROBANTES, HEADERS_COMPROBANTES);
   await asegurarHoja(HOJA_COBRANZAS_CACHE, HEADERS_COBRANZAS_CACHE);
+  // Columnas agregadas después de la primera versión: las filas ya guardadas las completan
+  // solas la próxima vez que esa fecha entre en la ventana del snapshot.
+  await asegurarColumnas(HOJA_COBRANZAS_CACHE, ['cuenta', 'numero']);
   const ahora = new Date().toISOString();
 
   const [comps, cobs, filasComp, filasCob] = await Promise.all([
@@ -152,6 +174,8 @@ export async function guardarSnapshotXubio(desde: string, hasta: string): Promis
       fecha: soloFecha(c?.fecha),
       cliente: nombreClienteComprobante(c),
       importe: importeCobranza(c),
+      cuenta: cuentaDeCobranza(c),
+      numero: String(c?.numeroDocumento || '').trim(),
       actualizado: ahora,
     };
     if (yaCob.has(id)) { updCob.push({ keyValue: id, updates: fila }); res.cobranzas.actualizados++; }
