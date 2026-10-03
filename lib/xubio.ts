@@ -225,11 +225,20 @@ export async function diagnosticoCuentas(): Promise<string> {
         const pega = usables
           .filter((c) => /macro|caja|brubank|banco|efectivo/i.test(c.nombre))
           .map((c) => c.nombre).slice(0, 25);
+        // Un ejemplo de fila DESCARTADA, no solo de una buena. Con 47 de 78 filas cayéndose
+        // por "sin id o sin nombre", el ejemplo de una que sí funciona no sirve para nada:
+        // lo que hay que ver es la forma de las que no, que son las que podrían estar
+        // escondiendo la cuenta que falta.
+        const descartadas = raw.filter((x: any) => {
+          const c = mapCuenta(x);
+          return !(c.id > 0 && c.nombre);
+        });
         partes.push([
           `${path}: ${raw.length} filas`,
           `${usables.length} usables${raw.length - usables.length ? ` (${raw.length - usables.length} sin id o sin nombre)` : ''}`,
           pega.length ? `cuentas de plata: ${pega.join(', ')}` : 'ninguna cuenta de plata reconocible',
-          raw.length ? `ej: ${JSON.stringify(raw[0]).slice(0, 160)}` : '',
+          descartadas.length ? `DESCARTADAS, ej: ${descartadas.slice(0, 2).map((x: any) => JSON.stringify(x).slice(0, 200)).join(' || ')}` : '',
+          raw.length ? `ok, ej: ${JSON.stringify(raw[0]).slice(0, 160)}` : '',
         ].filter(Boolean).join(' · '));
       } else {
         partes.push(`${path}: respondió ${typeof raw} (no una lista)`);
