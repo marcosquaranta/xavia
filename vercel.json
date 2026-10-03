@@ -5,6 +5,10 @@
       "schedule": "0 11 * * 5"
     },
     {
+      "path": "/api/reportes/facturacion",
+      "schedule": "0 13 * * 1"
+    },
+    {
       "path": "/api/cron/crosschex-diario",
       "schedule": "0 13 * * *"
     },

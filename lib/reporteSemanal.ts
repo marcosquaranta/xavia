@@ -9,7 +9,7 @@ import { ventasPorCultivoUltimasSemanas, resumenMesActual, ventasEnRango, GR_PAQ
 import { plantasPerdidasPorSubocupacion, type PlantasPerdidasSubocupacion } from './kpisOperativos';
 import { getComprobantes } from './xubio';
 import { KEYS_UNIDAD_HISTORICAS } from './articulos';
-import { controlFacturacion, compararFacturado, DIAS_ATRASO_AVISO, DIF_MINIMA_PESOS, type ControlFacturacion, type ComparacionFacturado } from './controlFacturacion';
+import { controlFacturacion, DIAS_ATRASO_AVISO, type ControlFacturacion } from './controlFacturacion';
 import { leerConfigProtocolo, tareasVencidas, tareasDelDia as tareasProtocoloDelDia, cumplimientoProtocolo, detalleFueraDeRango, type InstanciaTarea, type FueraDeRangoDetalle } from './protocoloTareas';
 import { fechaArgentinaHoy } from './ocupacion';
 import { germinacionYSupervivenciaMes } from './germinacion';
@@ -344,37 +344,9 @@ function destacadosDeLaSemana(d: Omit<ReporteSemanalData, 'destacados'>): Destac
     });
   }
 
-  // ── Diferencia entre lo facturado según la app y lo que hay en Xubio ──
-  if (d.comparacion.disponible && d.comparacion.porCliente.length > 0) {
-    const c = d.comparacion;
-    // Cada cliente con EL DÍA donde está la diferencia y, si Xubio tiene comprobantes ese
-    // día, los últimos 4 dígitos del número. Antes el aviso era solo un total por cliente,
-    // y un total no se puede revisar: obligaba a comparar un mes de ventas contra un mes de
-    // comprobantes para encontrar dónde estaba el desfasaje. Con el día, es abrir una
-    // factura. Se nombran hasta dos días por cliente; el resto se cuenta.
-    const frase = (x: typeof c.porCliente[number]) => {
-      const signo = x.diferencia > 0 ? '+' : '−';
-      const cab = `${x.cliente} ${signo}${fmtMoneda(Math.abs(x.diferencia))}`;
-      if (!x.dias.length) return `${cab} (sin poder ubicar el día)`;
-      const nombrados = x.dias.slice(0, 2).map((dia) => {
-        const nros = dia.comprobantes.map((n) => n.slice(-4)).join(', ');
-        const cuales = nros ? `, factura ${nros}` : ', sin factura en Xubio';
-        return `${fmtDiaCorto(dia.fecha)} ${dia.diferencia > 0 ? '+' : '−'}${fmtMoneda(Math.abs(dia.diferencia))}${cuales}`;
-      }).join(' y ');
-      const resto = x.dias.length > 2 ? ` y ${x.dias.length - 2} ${x.dias.length - 2 === 1 ? 'día' : 'días'} más` : '';
-      return `${cab}: el ${nombrados}${resto}`;
-    };
-    const top = c.porCliente.slice(0, 3).map(frase).join(' · ');
-    const otros = c.porCliente.length - Math.min(3, c.porCliente.length);
-    const cola = otros > 0
-      ? ` Quedan ${otros} ${otros === 1 ? 'cliente' : 'clientes'} más con diferencias, en la tabla App vs. Xubio de más abajo.`
-      : '';
-    out.push({
-      tono: 'malo',
-      titulo: `${c.porCliente.length} ${c.porCliente.length === 1 ? 'cliente no cuadra' : 'clientes no cuadran'} contra Xubio (más de ${fmtMoneda(DIF_MINIMA_PESOS)})`,
-      detalle: `${top}.${cola} En positivo, la app dice que se vendió más de lo que hay facturado en Xubio; en negativo, en Xubio hay más de lo que la app registró como vendido.`,
-    });
-  }
+  // La comparación contra Xubio salió de acá: tiene su propio informe semanal
+  // (lib/informeFacturacion.ts). Mezclada con producción se leía por encima y nunca se
+  // accionaba, que es lo que pasa con un dato que exige ir a corregir algo en otro sistema.
 
   // ── Protocolo de aplicaciones sin registrar ──
   // Una aplicación que no se hizo no se recupera: si el lunes no se aplicó Calborón, ese
@@ -471,7 +443,6 @@ export interface ReporteSemanalData {
   // el último momento en que todavía se puede corregir la semana.
   facturacion: ControlFacturacion;
   // Lo facturado según la app contra lo que hay en Xubio, últimos 30 días.
-  comparacion: ComparacionFacturado;
 }
 
 export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> {
@@ -494,15 +465,9 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
 
   // ── Ventas: últimos 7 días vs los 7 días anteriores a esos ──
   const hastaHoy = fmtISO(hoy);
-  // Contraste con Xubio sobre 30 días y no sobre la semana: la fecha del comprobante puede
-  // ser posterior a la de la entrega, y en una ventana de 7 días ese corrimiento pesa más
-  // que las diferencias que se quieren encontrar. Si Xubio no responde, la comparación
-  // queda marcada como no disponible y el resto del reporte sale igual.
-  const desde30 = fmtISO(new Date(hoy.getTime() - 29 * 86400000));
-  const comprobantesXubio = await comprobantesParaMirar(desde30, hastaHoy).catch((e: any) => {
-    console.error('[reporteSemanal] no se pudieron leer los comprobantes de Xubio:', e);
-    return null;
-  });
+  // El contraste contra Xubio se fue a su propio informe (lib/informeFacturacion.ts), así
+  // que este reporte dejó de pedirle comprobantes: era lo más lento que hacía.
+
   const desdeSemana = fmtISO(new Date(hoy.getTime() - 6 * 86400000));
   const hastaAnt = fmtISO(new Date(hoy.getTime() - 7 * 86400000));
   const desdeAnt = fmtISO(new Date(hoy.getTime() - 13 * 86400000));
@@ -725,7 +690,6 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     protocoloPendientes, protocoloHoy, protocoloCumplimiento, indicadoresMes,
     protocoloFueraDeRango: detalleFueraDeRango(registrosProtocolo, desdeSemana, hastaHoy),
     facturacion: controlFacturacion(ventas, precios, clientes, hastaHoy),
-    comparacion: compararFacturado(ventas, precios, clientes, comprobantesXubio, desde30, hastaHoy),
     stock, faltanteSemana, faltanteMes, descartePorFase,
   };
   return { ...datosSinDestacados, destacados: destacadosDeLaSemana(datosSinDestacados) };
@@ -1004,42 +968,6 @@ export function construirHtml(d: ReporteSemanalData): string {
       </tr></thead>
       <tbody>${filas.map(filaSinFacturar).join('')}</tbody>
     </table>`;
-  // Contraste con Xubio. Se muestra siempre que se haya podido leer: cuando da bien también
-  // es información — quiere decir que lo facturado cierra contra lo vendido.
-  const comparacionHtml = !d.comparacion.disponible
-    ? `<p style="margin:10px 0 0;font-size:12px;color:#9ca3af">No se pudo leer Xubio para contrastar lo facturado.</p>`
-    : `<p style="margin:12px 0 4px;font-size:13px;font-weight:600;color:#111">App vs. Xubio <span style="font-weight:400;color:#9ca3af">— últimos 30 días: ${fmtMoneda(d.comparacion.totalApp)} según la app, ${fmtMoneda(d.comparacion.totalXubio)} en Xubio${d.comparacion.pct === null ? '' : ` (${d.comparacion.pct > 0 ? '+' : ''}${d.comparacion.pct}%)`}</span></p>
-       ${!d.comparacion.porCliente.length
-         ? `<p style="margin:0;font-size:13px;color:#059669">✓ No hay ningún cliente con diferencias importantes.</p>`
-         : `<table style="border-collapse:collapse;width:100%;font-size:12.5px">
-              <thead><tr style="background:#f9fafb;color:#6b7280">
-                <th style="padding:4px 8px;text-align:left">Cliente</th>
-                <th style="padding:4px 8px;text-align:right">Según la app</th>
-                <th style="padding:4px 8px;text-align:right">En Xubio</th>
-                <th style="padding:4px 8px;text-align:right">Diferencia</th>
-              </tr></thead>
-              <tbody>${d.comparacion.porCliente.map((x) => `<tr>
-                <td style="padding:4px 8px;border-bottom:${x.dias.length ? 'none' : '1px solid #f3f4f6'}">${x.cliente}</td>
-                <td style="padding:4px 8px;border-bottom:${x.dias.length ? 'none' : '1px solid #f3f4f6'};text-align:right">${fmtMoneda(x.app)}</td>
-                <td style="padding:4px 8px;border-bottom:${x.dias.length ? 'none' : '1px solid #f3f4f6'};text-align:right">${fmtMoneda(x.xubio)}</td>
-                <td style="padding:4px 8px;border-bottom:${x.dias.length ? 'none' : '1px solid #f3f4f6'};text-align:right;font-weight:700;color:${x.diferencia > 0 ? '#dc2626' : '#b45309'}">${x.diferencia > 0 ? '+' : '−'}${fmtMoneda(Math.abs(x.diferencia))}${x.pct === null ? '' : ` (${x.pct}%)`}</td>
-              </tr>
-              ${/* Los días donde está la diferencia, con el número de factura de Xubio: sin
-                    esto el total por cliente no se puede revisar. */''}
-              ${x.dias.slice(0, 4).map((dia, i, arr) => {
-                const ultimo = i === arr.length - 1 && x.dias.length <= 4;
-                const borde = ultimo ? '1px solid #f3f4f6' : 'none';
-                const nros = dia.comprobantes.map((n) => n.slice(-4)).join(', ');
-                return `<tr style="color:#9ca3af;font-size:11.5px">
-                  <td style="padding:1px 8px 1px 20px;border-bottom:${borde}">${fmtDiaCorto(dia.fecha)}${nros ? ` · factura ${nros}` : ' · sin factura en Xubio'}</td>
-                  <td style="padding:1px 8px;border-bottom:${borde};text-align:right">${fmtMoneda(dia.app)}</td>
-                  <td style="padding:1px 8px;border-bottom:${borde};text-align:right">${fmtMoneda(dia.xubio)}</td>
-                  <td style="padding:1px 8px;border-bottom:${borde};text-align:right">${dia.diferencia > 0 ? '+' : '−'}${fmtMoneda(Math.abs(dia.diferencia))}</td>
-                </tr>`;
-              }).join('')}
-              ${x.dias.length > 4 ? `<tr style="color:#9ca3af;font-size:11.5px"><td colspan="4" style="padding:1px 8px 1px 20px;border-bottom:1px solid #f3f4f6">y ${x.dias.length - 4} días más con diferencias</td></tr>` : ''}`).join('')}</tbody>
-            </table>
-            <p style="margin:6px 0 0;font-size:11px;color:#9ca3af;line-height:1.5">La app mide por fecha de entrega y Xubio por fecha del comprobante, así que en los bordes del período siempre hay algo de corrimiento. En positivo: se vendió más de lo que está facturado. En negativo: en Xubio hay más de lo que la app registró (puede ser una factura cargada a mano allá).</p>`}`;
 
   // ── Kilómetros vs. unidades vendidas ──
   //
@@ -1091,7 +1019,6 @@ export function construirHtml(d: ReporteSemanalData): string {
         : `<p style="margin:0 0 6px;font-size:13px;color:#111">Sin facturar: <strong>${fmtMoneda(d.facturacion.montoPendiente)}</strong>. La mercadería ya salió: mientras no se facture no se puede cobrar ni reclamar.</p>
            ${tablaSinFacturar('En la cola de facturación', '— esperando que se emitan, o fallaron al emitir', d.facturacion.pendientes)}`}
       ${kmHtml}
-      ${comparacionHtml}
     </div>`;
 
   // ── Protocolo de aplicaciones ──
@@ -1353,18 +1280,6 @@ export function construirTexto(d: ReporteSemanalData): string {
     L.push(`  Camioneta: ${fmtN(d.kmSemana)} km · ${fmtN(u)} u repartidas · ${(Math.round((u / d.kmSemana) * 10) / 10).toLocaleString('es-AR')} u/km`);
   } else {
     L.push('  Camioneta: sin lectura del odómetro esta semana (se pide los jueves).');
-  }
-  if (d.comparacion.disponible) {
-    L.push(`  App vs Xubio (30 días): ${fmtMoneda(d.comparacion.totalApp)} vs ${fmtMoneda(d.comparacion.totalXubio)}`);
-    if (!d.comparacion.porCliente.length) L.push(`  ✓ Ningún cliente con diferencias importantes.`);
-    for (const x of d.comparacion.porCliente) {
-      L.push(`  ≠ ${x.cliente}: app ${fmtMoneda(x.app)} vs Xubio ${fmtMoneda(x.xubio)} — ${x.diferencia > 0 ? '+' : '−'}${fmtMoneda(Math.abs(x.diferencia))}`);
-      for (const dia of x.dias.slice(0, 4)) {
-        const nros = dia.comprobantes.map((n) => n.slice(-4)).join(', ');
-        L.push(`      ${fmtDiaCorto(dia.fecha)}: ${dia.diferencia > 0 ? '+' : '−'}${fmtMoneda(Math.abs(dia.diferencia))}${nros ? ` (factura ${nros})` : ' (sin factura en Xubio)'}`);
-      }
-      if (x.dias.length > 4) L.push(`      y ${x.dias.length - 4} días más`);
-    }
   }
   L.push('');
   L.push(`🧪 *Protocolo de aplicaciones*`);

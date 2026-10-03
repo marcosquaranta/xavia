@@ -162,6 +162,28 @@ export interface ComparacionFacturado {
 export const DIF_MINIMA_PESOS = 50_000;
 export const DIF_MINIMA_PCT = 2;
 
+// IVA que Xubio le agrega a la factura A. La app valoriza NETO —precio por unidad, sin
+// impuesto— y Xubio factura con el IVA adentro, así que comparar los dos números crudos daba
+// una diferencia del 10,5% en todos los clientes A y hacía ver un problema donde no lo hay:
+// en el informe de septiembre, de $3,9 millones de "diferencia", casi todo era esto.
+export const IVA_FACTURA_A = 0.105;
+
+// Cuánto se puede correr la fecha del comprobante respecto de la entrega. Pasa seguido que
+// lo entregado un día se factura al siguiente; sin esta ventana cada uno de esos días
+// aparecía dos veces en el informe —uno "de más" y el otro "de menos"— por el mismo importe.
+export const DIAS_CORRIMIENTO = 1;
+
+function llevaIva(cliente: ClienteVenta | undefined): boolean {
+  return String(cliente?.tipo_factura || '').trim().toUpperCase() === 'A';
+}
+
+// Corre un día una fecha YYYY-MM-DD.
+function diaMas(fecha: string, n: number): string {
+  const d = new Date(fecha + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 const norm = (s: any) => String(s || '')
   .normalize('NFD').replace(/[̀-ͯ]/g, '')
   .toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -201,6 +223,9 @@ export function compararFacturado(
       monto += qty * precioDe(precios, String(v.id_control), v.sucursal, key, cliente?.sucursales);
     }
     if (monto <= 0) continue;
+    // Se le suma el IVA a los clientes con factura A, que es como sale en Xubio. Compararlo
+    // sin el impuesto mostraba un 10,5% de diferencia en cada uno de ellos, todos los meses.
+    if (llevaIva(cliente)) monto = monto * (1 + IVA_FACTURA_A);
     const prev = porClienteApp.get(clave);
     if (prev) prev.monto += monto;
     else porClienteApp.set(clave, { nombre: nombreClienteVisible(cliente) || String(v.nombre_cliente || clave), monto });
@@ -254,6 +279,25 @@ export function compararFacturado(
       if (Math.abs(dDif) < DIF_MINIMA_DIA) continue;
       dias.push({ fecha: f, app: dApp, xubio: dXu, diferencia: dDif, comprobantes: porDiaXubio.get(`${k}||${f}`)?.comprobantes || [] });
     }
+    // Se compensan los días consecutivos de signo opuesto antes de reportarlos: lo
+    // entregado un día y facturado al siguiente aparecía como dos diferencias del mismo
+    // importe, una en más y otra en menos, y las dos eran la misma cosa contada dos veces.
+    dias.sort((a, b) => a.fecha.localeCompare(b.fecha));
+    for (let i = 0; i < dias.length; i++) {
+      for (let n = 1; n <= DIAS_CORRIMIENTO; n++) {
+        const vecino = dias.find((x) => x.fecha === diaMas(dias[i].fecha, n));
+        if (!vecino) continue;
+        // Solo si apuntan para lados distintos: dos días que faltan los dos no se cancelan.
+        if (Math.sign(dias[i].diferencia) === Math.sign(vecino.diferencia)) continue;
+        const compensa = Math.min(Math.abs(dias[i].diferencia), Math.abs(vecino.diferencia));
+        dias[i].diferencia -= Math.sign(dias[i].diferencia) * compensa;
+        vecino.diferencia -= Math.sign(vecino.diferencia) * compensa;
+      }
+    }
+    // Lo que quedó por debajo del umbral después de compensar ya no es una diferencia.
+    const diasReales = dias.filter((x) => Math.abs(x.diferencia) >= DIF_MINIMA_DIA);
+    dias.length = 0;
+    dias.push(...diasReales);
     dias.sort((a, b) => Math.abs(b.diferencia) - Math.abs(a.diferencia));
     porCliente.push({
       cliente: porClienteApp.get(k)?.nombre || porClienteXubio.get(k)?.nombre || k,
