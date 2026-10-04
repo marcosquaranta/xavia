@@ -51,9 +51,10 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev }: {
     );
   }
 
-  function Fila({ label, monto, anterior, nivel, invertido, seccion, cantidad }: {
+  function Fila({ label, monto, anterior, nivel, invertido, seccion, cantidad, compras, variacionStock }: {
     label: string; monto: number; anterior: number;
     nivel: 'total' | 'detalle' | 'resultado'; invertido?: boolean; seccion?: string; cantidad?: string;
+    compras?: number; variacionStock?: number;
   }) {
     const esTotal = nivel === 'total', esRes = nivel === 'resultado';
     const clickeable = !!seccion;
@@ -80,6 +81,16 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev }: {
           {$(monto)}
         </td>
         <td style={{ ...celNum, fontSize: '12px', color: '#6b7280' }}>{fmtPeso(pesoPct(monto, act.ventas.total))}</td>
+        {/* Compró y quedó en stock: solo tienen sentido en las líneas que salen de stock.
+            El costo del mes es el CONSUMO, no la compra — un mes se puede comprar el triple
+            de lo que se consume y el costo no se mueve. Verlas al lado es lo que evita que
+            alguien lea la compra como si fuera el costo. */}
+        <td style={{ ...celNum, fontSize: '12px', color: '#9ca3af' }}>
+          {compras === undefined ? '' : compras ? $(compras) : '—'}
+        </td>
+        <td style={{ ...celNum, fontSize: '12px', color: variacionStock && variacionStock > 0 ? '#b45309' : '#9ca3af' }}>
+          {variacionStock === undefined ? '' : variacionStock ? `${variacionStock > 0 ? '+' : '−'}${$(Math.abs(variacionStock))}` : '—'}
+        </td>
         <td style={{ ...celNum, fontSize: '12px', color: '#9ca3af' }}>{$(anterior)}</td>
         <td style={{ ...celNum, fontSize: '12px' }}><Delta monto={monto} anterior={anterior} invertido={invertido} /></td>
       </tr>
@@ -93,10 +104,10 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev }: {
       <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '620px' }}>
         <thead>
           <tr style={{ background: '#fafaf9' }}>
-            {['Concepto', nombre, '% s/ventas', nombrePrev, 'Δ % s/ventas'].map((h, i) => (
+            {['Concepto', nombre, '% s/ventas', 'Compró', 'Quedó en stock', nombrePrev, 'Δ % s/ventas'].map((h, i) => (
               <th key={h} style={{
                 ...cel, textAlign: i === 0 ? 'left' : 'right', fontSize: '11px',
-                color: i === 3 || i === 4 ? '#9ca3af' : '#6b7280',
+                color: i >= 3 ? '#9ca3af' : '#6b7280',
                 textTransform: 'uppercase', letterSpacing: '0.4px', whiteSpace: 'nowrap',
               }}>{h}</th>
             ))}
@@ -125,9 +136,12 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev }: {
               nivel="detalle" invertido cantidad={`${Math.round(c.unidades).toLocaleString('es-AR')} u`} />
           ))}
 
-          <Fila label="Costo variable" monto={act.costoVariable.total} anterior={ant.costoVariable.total} nivel="total" seccion="variable" />
+          <Fila label="Costo variable" monto={act.costoVariable.total} anterior={ant.costoVariable.total} nivel="total" seccion="variable"
+            compras={act.costoVariable.lineas.reduce((a, l) => a + (l.compras || 0), 0)}
+            variacionStock={act.costoVariable.lineas.reduce((a, l) => a + (l.variacionStock || 0), 0)} />
           {abierto.variable && act.costoVariable.lineas.map((l) => (
-            <Fila key={l.label} label={l.label} monto={l.monto} anterior={montoAnt(l.label, ant.costoVariable.lineas)} nivel="detalle" />
+            <Fila key={l.label} label={l.label} monto={l.monto} anterior={montoAnt(l.label, ant.costoVariable.lineas)} nivel="detalle"
+              compras={l.compras} variacionStock={l.variacionStock} />
           ))}
 
           <Fila label="Costos fijos" monto={act.costosFijos.total} anterior={ant.costosFijos.total} nivel="total" seccion="fijos" />

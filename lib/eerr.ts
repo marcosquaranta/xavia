@@ -76,7 +76,17 @@ function lineaDeCategoria(categoria: string): string {
   return 'Varios';
 }
 
-export interface LineaEERR { label: string; monto: number; fuente: 'stock' | 'gastos' }
+export interface LineaEERR {
+  label: string;
+  monto: number;
+  fuente: 'stock' | 'gastos';
+  // Solo en las líneas de stock: lo que se COMPRÓ en el mes y lo que quedó inmovilizado.
+  // El costo del mes es el consumo —había + compró − quedó— y ese es `monto`. Las compras
+  // van al lado porque son dos números distintos que la gente confunde todo el tiempo: un
+  // mes se puede comprar el triple de lo que se consume y el costo no se mueve.
+  compras?: number;
+  variacionStock?: number;  // positivo = quedó más stock que al empezar
+}
 export interface LineaVenta { label: string; unidades: number; monto: number }
 
 export interface EERR {
@@ -126,6 +136,8 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
   const avisos: string[] = [];
   const activos = d.articulos.filter((a) => a.activo === 'SI');
   const consumoPorCat = new Map<string, number>();
+  const comprasPorCat = new Map<string, number>();
+  const stockPorCat = new Map<string, number>();
   let sinPrecio = 0, sinStockFinal = 0;
 
   for (const art of activos) {
@@ -141,6 +153,8 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
     if (precio === null) { if (consumo !== 0) sinPrecio++; continue; }
     const linea = lineaDeCategoria(art.categoria);
     consumoPorCat.set(linea, (consumoPorCat.get(linea) || 0) + consumo * precio);
+    comprasPorCat.set(linea, (comprasPorCat.get(linea) || 0) + comp * precio);
+    stockPorCat.set(linea, (stockPorCat.get(linea) || 0) + (fin - ini) * precio);
   }
 
   // TODO lo del mes, esté pagado o no: el costo pertenece al mes en que se compró. Criterio
@@ -156,7 +170,13 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
   const lineasVariable: LineaEERR[] = LINEAS_VARIABLE.map((l) => (
     l.cat
       ? { label: l.label, monto: sumaCats([l.cat]), fuente: 'gastos' as const }
-      : { label: l.label, monto: consumoPorCat.get(l.label) || 0, fuente: 'stock' as const }
+      : {
+          label: l.label,
+          monto: consumoPorCat.get(l.label) || 0,
+          fuente: 'stock' as const,
+          compras: comprasPorCat.get(l.label) || 0,
+          variacionStock: stockPorCat.get(l.label) || 0,
+        }
   ));
   const totalVariable = lineasVariable.reduce((a, l) => a + l.monto, 0);
 
