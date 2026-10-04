@@ -13,6 +13,7 @@ import CuentasEditor from './CuentasEditor';
 import { nombreClienteVisible } from '@/lib/clientes';
 import { pasosDelCierre, resumenChecklist } from '@/lib/cierreChecklist';
 import ChecklistCierre from './ChecklistCierre';
+import { leerPasosManuales, marcadosDelMes } from '@/lib/cierreManual';
 import OrigenAplicacionCard from '@/components/OrigenAplicacion';
 import { origenYAplicacion, deudaProveedoresAlCierre, causasDeLaDiferencia } from '@/lib/origenAplicacion';
 import { calcularValorizacionMes as valorizacionDelMes } from '@/lib/valorizacionStock';
@@ -95,6 +96,8 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   const saldos = saldosDelMes(gastos, cobranzas, saldosGuardados, anio, mes);
   const pasos = pasosDelCierre({ eerr: act, gastos, stocks, articulos, cobranzas: cobranzasMes, saldos, hayPrevision: !!guardada, anio, mes });
   const resumenPasos = resumenChecklist(pasos);
+  // Los pasos que alguien marcó a mano. La hoja no existe hasta el primer marcado.
+  const marcados = marcadosDelMes(await leerPasosManuales(), anio, mes);
 
   // ── Origen y aplicación de fondos ──
   //
@@ -170,7 +173,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
           </div>
         )}
 
-        <ChecklistCierre pasos={pasos} {...resumenPasos} />
+        <ChecklistCierre pasos={pasos} {...resumenPasos} anio={anio} mes={mes} marcados={[...marcados]} />
 
         <TablaEERR act={act} ant={ant} nombre={nombre} nombrePrev={nombrePrev} />
 

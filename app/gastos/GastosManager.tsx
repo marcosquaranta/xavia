@@ -5,6 +5,7 @@ import { CATEGORIAS_GASTO, MEDIOS_PAGO, admiteMontoNegativo, type Gasto, type Ca
 import NumberInput from '@/components/NumberInput';
 
 import { estaPagado } from '@/lib/proveedores';
+import { avisoMontoSospechoso } from '@/lib/montoSospechoso';
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const MEDIOS = MEDIOS_PAGO;
 const LABEL_CAT: Record<string, string> = Object.fromEntries(CATEGORIAS_GASTO.map((c) => [c.value, c.label]));
@@ -134,6 +135,10 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
     if (esMovimiento && !medioDestino) { setError('Elegí a qué cuenta entra la plata'); return; }
     if (esAdelanto && !empleadoAdelanto) { setError('Elegí a qué empleado se le adelantó'); return; }
     if (pendiente && !proveedor.trim()) { setError('Poné a qué proveedor se le debe'); return; }
+    // Un monto muy fuera de escala casi siempre son ceros de más. Se pregunta, no se bloquea:
+    // el día que haya una compra grande de verdad tiene que poder cargarse igual.
+    const aviso = avisoMontoSospechoso(Number(monto), gastos.map((g) => Number(g.monto) || 0));
+    if (aviso && !window.confirm(aviso)) return;
     setGuardando(true);
     try {
       const res = await fetch('/api/gastos/nuevo', {

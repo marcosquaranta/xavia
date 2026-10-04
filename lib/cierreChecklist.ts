@@ -16,10 +16,16 @@ import type { Cobranza, SaldoMes } from './cuentas';
 export type EstadoPaso = 'listo' | 'pendiente' | 'recordatorio';
 
 export interface PasoCierre {
+  // Identificador estable del paso. No es el índice: si mañana se agrega un paso en el
+  // medio, un marcado manual guardado como "paso 4" pasaría a tildar otra cosa.
+  id: string;
   titulo: string;
   estado: EstadoPaso;
   detalle: string;
   href?: string;
+  // true = la app no puede verificarlo sola, así que se marca a mano. Un tilde puesto por
+  // adivinanza es peor que ninguno: das por hecho algo que no pasó.
+  manual?: boolean;
 }
 
 export function pasosDelCierre(args: {
@@ -82,12 +88,15 @@ export function pasosDelCierre(args: {
   const pasos: PasoCierre[] = [];
 
   pasos.push({
+    id: 'banco_resumenes',
     titulo: 'Conciliar los resúmenes del banco',
     estado: 'recordatorio',
+    manual: true,
     detalle: 'Bajá Macro y Brubank. De ahí salen los tres pasos que siguen: los gastos que faltan, el total cobrado y los saldos reales.',
   });
 
   pasos.push({
+    id: 'stock_final',
     titulo: 'Cargar el stock final de todos los artículos',
     estado: !hayAlgunStockDelMes ? 'pendiente' : sinContar > 0 ? 'pendiente' : 'listo',
     detalle: !hayAlgunStockDelMes
@@ -99,6 +108,7 @@ export function pasosDelCierre(args: {
   });
 
   pasos.push({
+    id: 'insumos_stock',
     titulo: 'Aplicar a Stocks las compras de insumos',
     estado: insumosDelMes.length === 0 ? 'recordatorio' : insumosSinAplicar > 0 ? 'pendiente' : 'listo',
     detalle: insumosDelMes.length === 0
@@ -110,6 +120,7 @@ export function pasosDelCierre(args: {
   });
 
   pasos.push({
+    id: 'gastos_banco',
     titulo: 'Conciliación bancaria: cargar sueldos, impuestos y demás',
     estado: eerr.masaSalarial > 0 ? 'listo' : 'pendiente',
     detalle: eerr.masaSalarial > 0
@@ -119,6 +130,7 @@ export function pasosDelCierre(args: {
   });
 
   pasos.push({
+    id: 'tarjeta_desglose',
     titulo: 'Desglosar el resumen de la tarjeta',
     estado: conTarjeta > 0 ? 'listo' : 'recordatorio',
     detalle: conTarjeta > 0
@@ -128,6 +140,7 @@ export function pasosDelCierre(args: {
   });
 
   pasos.push({
+    id: 'movimientos_cuentas',
     titulo: 'Cargar los movimientos entre cuentas',
     estado: transferenciasMes.length > 0 ? 'listo' : 'pendiente',
     detalle: transferenciasMes.length > 0
@@ -137,6 +150,7 @@ export function pasosDelCierre(args: {
   });
 
   pasos.push({
+    id: 'pago_tarjeta',
     titulo: 'Registrar el pago de la tarjeta del mes anterior',
     // Sin consumo el mes pasado no hay nada que pagar este mes: marcarlo pendiente ahí sería
     // un falso positivo que nadie puede resolver.
@@ -150,6 +164,7 @@ export function pasosDelCierre(args: {
   });
 
   pasos.push({
+    id: 'cobrado_banco',
     titulo: 'Cargar el total cobrado por banco',
     estado: cobranzas.length > 0 ? 'listo' : 'pendiente',
     detalle: cobranzas.length > 0
@@ -158,6 +173,7 @@ export function pasosDelCierre(args: {
   });
 
   pasos.push({
+    id: 'saldos_reales',
     titulo: 'Cargar el saldo real de cada cuenta',
     estado: sinSaldoReal === 0 ? 'listo' : sinSaldoReal === MEDIOS_PAGO.length ? 'pendiente' : 'pendiente',
     detalle: sinSaldoReal === 0
@@ -166,6 +182,7 @@ export function pasosDelCierre(args: {
   });
 
   pasos.push({
+    id: 'conciliacion_ok',
     titulo: 'Que la conciliación dé ✓ en todas las cuentas',
     estado: sinSaldoReal > 0 ? 'recordatorio' : conDiferencia > 0 ? 'pendiente' : 'listo',
     detalle: sinSaldoReal > 0
@@ -176,17 +193,32 @@ export function pasosDelCierre(args: {
   });
 
   pasos.push({
+    id: 'previsiones',
     titulo: 'Guardar previsiones y cuentas corrientes',
     estado: hayPrevision ? 'listo' : 'pendiente',
+    href: `/eerr?anio=${anio}&mes=${mes}#previsiones`,
     detalle: hayPrevision
-      ? 'Guardadas para este mes.'
-      : 'Despidos y SAC se calculan solos sobre la masa salarial, pero hay que guardarlos para que el mes quede fijo.',
+      ? 'Guardadas para este mes. Restan del resultado y vuelven en el puente de caja: es plata comprometida que todavía está en la cuenta.'
+      : 'Despidos y SAC se calculan solos sobre la masa salarial, pero hay que GUARDARLOS para que el mes quede fijo: hasta que no se guardan no restan del resultado. Se cargan más abajo, en esta misma pantalla.',
   });
 
   pasos.push({
+    id: 'comparar_excel',
     titulo: 'Comparar contra tu Excel',
     estado: 'recordatorio',
+    manual: true,
     detalle: 'Armalo como siempre y contrastá línea por línea. Donde no dé, o falta un dato o está mal el cálculo — las dos cosas sirven.',
+  });
+
+  // Último paso a propósito: es el que dice que el mes está cerrado. Que sea manual no es
+  // una limitación —es una decisión que tiene que tomar una persona mirando los números, no
+  // una verificación automática que podría dar ✓ sobre datos cargados a medias.
+  pasos.push({
+    id: 'cierre_validado',
+    titulo: 'Dar el mes por cerrado',
+    estado: 'recordatorio',
+    manual: true,
+    detalle: 'Cuando los pasos de arriba estén y el resultado tenga sentido, marcá acá. A partir de ahí el mes queda como revisado.',
   });
 
   return pasos;

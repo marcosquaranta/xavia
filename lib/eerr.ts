@@ -25,6 +25,7 @@ import { precioUltimoConocido } from './valorizacionStock';
 // plata del banco a la tarjeta, no genera un gasto nuevo) y el medio de pago 'Aporte socios'
 // (es financiamiento).
 
+import { lineasImposibles } from './montoSospechoso';
 const num = (v: any) => { const n = Number(v); return isNaN(n) ? 0 : n; };
 
 // Las líneas del EERR son las MISMAS que las del Excel y en el mismo orden, aunque en el mes
@@ -178,6 +179,12 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
   if (insumosSinAplicar.length) {
     const monto = insumosSinAplicar.reduce((a, g) => a + num(g.monto), 0);
     avisos.push(`${insumosSinAplicar.length} gasto(s) de insumos por $${Math.round(monto).toLocaleString('es-AR')} sin aplicar a Stocks: esa compra no está en el costo de ningún lado.`);
+  }
+  // Una línea de costo mayor que las ventas del mes no puede ser real: significaría que cada
+  // peso vendido costó más de un peso solo en ese renglón. Casi siempre es un gasto con ceros
+  // de más, y hasta que alguien lo nota el resultado del mes está mal.
+  for (const l of lineasImposibles([...lineasVariable, ...lineasFijas], totalVentas)) {
+    avisos.push(`"${l.label}" da $${Math.round(l.monto).toLocaleString('es-AR')}, más que todas las ventas del mes. Revisá si hay un gasto cargado con ceros de más.`);
   }
   if (sinStockFinal) avisos.push(`${sinStockFinal} artículo(s) con movimiento pero sin stock final cargado: su consumo no se puede calcular y falta en el costo variable.`);
   if (sinPrecio) avisos.push(`${sinPrecio} artículo(s) consumidos sin precio de compra conocido: su consumo no se puede valorizar.`);

@@ -5,6 +5,7 @@ import type { Gasto, Articulo, Empleado } from '@/lib/types';
 import Header from '@/components/Header';
 import GastosManager from './GastosManager';
 import DeudaProveedores from '@/components/DeudaProveedores';
+import ResumenTarjeta from '@/components/ResumenTarjeta';
 import { deudaProveedores } from '@/lib/proveedores';
 import { MEDIOS_PAGO } from '@/lib/types';
 
@@ -40,6 +41,15 @@ export default async function GastosPage() {
       <div className="container">
         <h1 className="page-title">Gastos</h1>
         <p className="page-subtitle">Registro de gastos e insumos · carga y exportación mensual</p>
+        {!err && (
+          <ResumenTarjeta
+            categoriasPrevias={gastos
+              .filter((g) => String(g.descripcion || '').trim() && g.categoria)
+              .slice(-800)
+              .map((g) => ({ descripcion: String(g.descripcion), categoria: String(g.categoria) }))}
+          />
+        )}
+
         {!err && deuda.length > 0 && (
           <div className="card" style={{ marginBottom: '14px' }}>
             <p className="card-title">Deuda a proveedores</p>

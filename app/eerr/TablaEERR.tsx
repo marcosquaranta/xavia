@@ -15,7 +15,10 @@ import type { EERR } from '@/lib/eerr';
 const $ = (n: number) => `$${Math.round(n).toLocaleString('es-AR')}`;
 const pesoPct = (monto: number, ventas: number) => (ventas > 0 ? (monto / ventas) * 100 : null);
 const fmtPeso = (p: number | null) => (p === null ? '—' : `${p.toFixed(1)}%`);
-const fmtPP = (d: number) => `${d > 0 ? '+' : d < 0 ? '−' : ''}${Math.abs(d).toFixed(1)} p.p.`;
+// En % y no en "p.p." a pedido de Marcos. Es la misma cuenta —cuánto cambió el PESO de esa
+// línea sobre las ventas— y el encabezado de la columna lo aclara; "p.p." es más preciso
+// pero obliga a traducir mentalmente cada vez que se lee el informe.
+const fmtPP = (d: number) => `${d > 0 ? '+' : d < 0 ? '−' : ''}${Math.abs(d).toFixed(1)}%`;
 
 const cel: React.CSSProperties = { padding: '5px 10px', fontSize: '13px' };
 const celNum: React.CSSProperties = { ...cel, textAlign: 'right', fontVariantNumeric: 'tabular-nums' };
@@ -90,7 +93,7 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev }: {
       <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '620px' }}>
         <thead>
           <tr style={{ background: '#fafaf9' }}>
-            {['Concepto', nombre, '% s/ventas', nombrePrev, 'Δ p.p. s/ventas'].map((h, i) => (
+            {['Concepto', nombre, '% s/ventas', nombrePrev, 'Δ % s/ventas'].map((h, i) => (
               <th key={h} style={{
                 ...cel, textAlign: i === 0 ? 'left' : 'right', fontSize: '11px',
                 color: i === 3 || i === 4 ? '#9ca3af' : '#6b7280',
