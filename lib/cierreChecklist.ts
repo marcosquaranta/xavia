@@ -135,7 +135,7 @@ export function pasosDelCierre(args: {
     estado: conTarjeta > 0 ? 'listo' : 'recordatorio',
     detalle: conTarjeta > 0
       ? `${conTarjeta} consumo(s) con VISA cargados este mes. El pago del resumen va aparte, como transferencia entre cuentas.`
-      : 'No hay ningún consumo con VISA cargado este mes. Cada línea va con su fecha real de consumo; el pago del resumen no es un gasto nuevo.',
+      : 'Pegá el resumen entero en "Cargar resumen de tarjeta" y salen todos los consumos juntos, cada uno con su fecha y su categoría. El pago del resumen NO es un gasto nuevo: va como transferencia entre cuentas.',
     href: '/gastos',
   });
 
