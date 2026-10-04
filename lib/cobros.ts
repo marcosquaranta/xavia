@@ -10,6 +10,7 @@ export const HOJA_COBROS = 'CobrosRegistrados';
 export const HEADERS_COBROS = [
   'id_cobro', 'fecha_registro', 'id_control', 'cliente', 'fecha', 'importe',
   'cuenta_id', 'transaccionid', 'numero_recibo', 'comprobantes', 'observacion', 'estado', 'usuario',
+  'retencion',
 ];
 
 export interface CobroRegistrado {
@@ -22,6 +23,9 @@ export interface CobroRegistrado {
   cuenta_id: number | string;
   transaccionid: number | string;
   numero_recibo: string;
+  // Lo que el cliente retuvo. El `importe` es lo que entró a la cuenta: la factura se
+  // canceló por importe + retención.
+  retencion: number | string;
   // Facturas que el cobro cubre, separadas por coma. Xubio NO permite imputar por API, así
   // que esto no viaja a Xubio como imputación: queda acá para saber qué se cobró y para no
   // ofrecer dos veces la misma factura. En Xubio se refleja en la observación del recibo.
@@ -62,6 +66,11 @@ export interface PedidoCobro {
   observacion?: string;
   comprobantes?: string[];
   usuario: string;
+  // Lo que el cliente retuvo. El importe de arriba es lo que ENTRÓ a la cuenta; la factura
+  // se cancela por la suma de los dos. Sin esto, cada cobro con retención dejaba la factura
+  // figurando impaga por el monto retenido, para siempre.
+  retencion?: number;
+  cuentaRetencionId?: number;
 }
 
 export interface ResultadoCobro {
@@ -81,11 +90,18 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
   const cuentaId = Number(p.cuentaId);
   const observacion = String(p.observacion || '').trim();
   const comprobantes = (p.comprobantes || []).map(x => String(x).trim()).filter(Boolean);
+  const retencion = Math.round(Number(p.retencion) || 0);
+  const cuentaRetencionId = Number(p.cuentaRetencionId) || 0;
 
   if (!idControl) return { ok: false, error: 'Falta el cliente.', status: 400 };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return { ok: false, error: 'La fecha tiene que ser válida.', status: 400 };
   if (!(importe > 0)) return { ok: false, error: 'El importe tiene que ser mayor a 0.', status: 400 };
   if (!(cuentaId > 0)) return { ok: false, error: 'Elegí en qué cuenta entró la plata.', status: 400 };
+  // Una retención sin cuenta no se puede imputar, y mandarla a la cuenta bancaria diría que
+  // entró plata que no entró: el saldo del banco dejaría de cuadrar contra el extracto.
+  if (retencion > 0 && !cuentaRetencionId) {
+    return { ok: false, error: 'Elegí a qué cuenta va la retención.', status: 400 };
+  }
 
   const clientes = await readSheet<ClienteVenta>('Clientes');
   const cli = clientes.find((c) => String(c.id_control) === idControl);
@@ -144,6 +160,9 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
   }
 
   const r = await crearCobranza({ clienteId, fecha, importe, cuentaId, observacion: observacionXubio, circuitoId,
+    retenciones: retencion > 0
+      ? [{ cuentaId: cuentaRetencionId, importe: retencion, descripcion: 'Retención sufrida' }]
+      : [],
     moneda: datosMoneda.moneda,
     cotizacion: datosMoneda.cotizacion,
     utilizaMonedaExtranjera: datosMoneda.utilizaMonedaExtranjera,
@@ -153,6 +172,7 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
 
   await asegurarHoja(HOJA_COBROS, HEADERS_COBROS);
   await asegurarColumna(HOJA_COBROS, 'comprobantes'); // la hoja puede existir sin esta columna
+  await asegurarColumna(HOJA_COBROS, 'retencion');
   const previos = await readSheet<CobroRegistrado>(HOJA_COBROS).catch(() => []);
   const seq = previos.reduce((a, c) => Math.max(a, parseInt(String(c.id_cobro).replace(/\D/g, ''), 10) || 0), 0) + 1;
   const idCobro = `CO-${String(seq).padStart(5, '0')}`;
@@ -167,6 +187,7 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
     transaccionid: r.transaccionid || '',
     numero_recibo: r.numeroRecibo || '',
     comprobantes: comprobantes.join(', '),
+    retencion,
     observacion,
     estado: 'registrado',
     usuario: p.usuario,

@@ -458,21 +458,45 @@ export interface NuevaCobranza {
   utilizaMonedaExtranjera?: number;
   // Renglón de una cobranza anterior del que copiar la estructura (ver plantillaInstrumento).
   plantilla?: Record<string, any> | null;
+  // Retenciones que sufrió el cobro. Cada una va a su cuenta contable: el importe del cobro
+  // más las retenciones tienen que dar lo que decía la factura.
+  retenciones?: { cuentaId: number; importe: number; descripcion?: string }[];
 }
 
 export async function crearCobranza(args: NuevaCobranza):
   Promise<{ ok: boolean; transaccionid?: number; numeroRecibo?: string; error?: string }> {
+  // ── Las retenciones son parte del cobro ──
+  //
+  // Cuando un cliente retiene, la factura se cancela ENTERA pero a la cuenta entra menos: si
+  // la factura es 100 y retiene 5, deposita 95 y entrega un certificado por los otros 5. Si
+  // la cobranza se carga solo por los 95, esa factura queda figurando impaga por 5 para
+  // siempre, y el cliente aparece debiendo plata que ya pagó.
+  //
+  // En Xubio eso se resuelve con un instrumento más: la plata va a la cuenta bancaria y la
+  // retención a su cuenta contable propia ("Retención Ingresos Brutos Sufrida" y compañía,
+  // que están en el plan de cuentas). Los dos juntos suman el total de la factura.
+  const instrumentos: any[] = [{
+    // Sobre la plantilla del recibo real: así viajan los campos que Xubio necesita y que
+    // no están documentados. Sin plantilla se manda lo mínimo, que es como estaba antes.
+    ...(args.plantilla || {}),
+    cuenta: { ID: args.cuentaId },
+    importe: args.importe,
+    descripcion: args.observacion || 'Cobro registrado desde XaviaApp',
+  }];
+  for (const r of args.retenciones || []) {
+    if (!(Number(r?.importe) > 0) || !(Number(r?.cuentaId) !== 0)) continue;
+    instrumentos.push({
+      ...(args.plantilla || {}),
+      cuenta: { ID: r.cuentaId },
+      importe: Number(r.importe),
+      descripcion: r.descripcion || 'Retención',
+    });
+  }
+
   const body: any = {
     cliente: { ID: args.clienteId },
     fecha: args.fecha,
-    transaccionInstrumentoDeCobro: [{
-      // Sobre la plantilla del recibo real: así viajan los campos que Xubio necesita y que
-      // no están documentados. Sin plantilla se manda lo mínimo, que es como estaba antes.
-      ...(args.plantilla || {}),
-      cuenta: { ID: args.cuentaId },
-      importe: args.importe,
-      descripcion: args.observacion || 'Cobro registrado desde XaviaApp',
-    }],
+    transaccionInstrumentoDeCobro: instrumentos,
   };
   if (args.numeroRecibo) body.numeroRecibo = args.numeroRecibo;
   if (args.observacion) body.observacion = args.observacion;

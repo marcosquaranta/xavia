@@ -2,7 +2,7 @@
 import { Fragment, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { sugerirCombinaciones, toleranciaDe } from '@/lib/conciliacionCobro';
-import { cuentasElegibles, cuentaSugerida, cantidadPreferidas } from '@/lib/cuentasCobro';
+import { cuentasElegibles, cuentaSugerida, cantidadPreferidas, cuentasDeRetencion } from '@/lib/cuentasCobro';
 
 interface ItemUI {
   id_item: string;
@@ -54,6 +54,21 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
   // saltea cuando uno va rápido. Hasta que no haya una decisión —facturas elegidas, o
   // "a cuenta" dicho explícitamente— el botón de confirmar no se habilita.
   const [aCuenta, setACuenta] = useState(false);
+  // La retención que el cliente le descontó al pago. Viene propuesta de lo que la IA leyó
+  // del aviso: sin ella, la factura queda figurando impaga por el monto retenido para
+  // siempre, porque a la cuenta entró menos de lo que decía la factura.
+  const [retencion, setRetencion] = useState<string>(() => {
+    const m = String(item.descripcion || '').match(/retenci[oó]n\s+([\d.,]+)/i);
+    if (!m) return '';
+    const n = Number(m[1].replace(/\./g, '').replace(',', '.'));
+    return Number.isFinite(n) && n > 0 ? String(Math.round(n)) : '';
+  });
+  const cuentasRet = useMemo(() => cuentasDeRetencion(cuentas), [cuentas]);
+  const [cuentaRet, setCuentaRet] = useState(() => {
+    // Ingresos Brutos es la que más se ve en estos avisos; si no está, la primera que haya.
+    const iibb = cuentasDeRetencion(cuentas).find((c) => /ingresos\s*brutos/i.test(c.nombre));
+    return String((iibb || cuentasDeRetencion(cuentas)[0])?.id || '');
+  });
   // La lista completa para tildar de a una. Las sugerencias resuelven el caso normal, pero
   // cuando ninguna cierra —un pago parcial, una factura de hace seis meses, dos cobros que
   // cancelan la misma— la única salida era marcar "a cuenta" y perder el detalle.
@@ -116,6 +131,8 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
         body: JSON.stringify({
           id_item: item.id_item, accion,
           id_control: idControl, cuentaId: Number(cuentaId), comprobantes: elegidas,
+          retencion: Number(retencion) || 0,
+          cuentaRetencionId: Number(cuentaRet) || 0,
         }),
       });
       const j = await r.json();
@@ -209,6 +226,32 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
             <p style={{ margin: '0 0 8px', fontSize: '11.5px', color: '#6b7280', background: '#f9fafb', border: '1px solid #f3f4f6', borderRadius: '6px', padding: '6px 9px' }}>
               Buscando las facturas del cliente… el cobro no se puede confirmar hasta que terminen de cargar.
             </p>
+          )}
+
+          {/* Retención: lo que el cliente descontó del pago. La factura se cancela por la
+              suma de lo que entró más lo retenido, así que sin esto queda impaga la
+              diferencia. */}
+          {cuentasRet.length > 0 && (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '8px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '10px', color: '#6b7280', fontWeight: 600 }}>RETENCIÓN</label>
+                <input type="number" min={0} value={retencion} onChange={(e) => setRetencion(e.target.value)} disabled={trabajando}
+                  placeholder="0" style={{ ...inputStyle, width: '110px' }} />
+              </div>
+              {Number(retencion) > 0 && (
+                <>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '10px', color: '#6b7280', fontWeight: 600 }}>¿DE QUÉ?</label>
+                    <select value={cuentaRet} onChange={(e) => setCuentaRet(e.target.value)} disabled={trabajando} style={{ ...inputStyle, width: 'auto' }}>
+                      {cuentasRet.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                    </select>
+                  </div>
+                  <span style={{ fontSize: '11px', color: '#166534', paddingBottom: '6px' }}>
+                    Cancela {fmt$(item.importe + (Number(retencion) || 0))} de factura
+                  </span>
+                </>
+              )}
+            </div>
           )}
 
           {!!item.comprobantes && (

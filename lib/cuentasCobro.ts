@@ -136,3 +136,18 @@ export function extraerCuentaDeclarada(texto: string): string {
   if (i === -1) return '';
   return t.slice(i + MARCA_CUENTA.length).split('·')[0].trim().slice(0, 60);
 }
+
+// ── Las cuentas donde van las retenciones ────────────────────────────────────────────
+//
+// Xubio tiene una cuenta por tipo de retención sufrida (IVA, Ganancias, Ingresos Brutos,
+// Cargas Sociales). Son las "sufridas", no las "efectuadas": las efectuadas son las que
+// retenemos nosotros al pagarle a otro, y mandar una retención del cliente a esa cuenta la
+// dejaría del lado contable equivocado.
+export function cuentasDeRetencion<T extends CuentaOpcion>(cuentas: T[]): T[] {
+  return (cuentas || [])
+    .filter((c) => {
+      const n = norm(c.nombre);
+      return (n.includes('retencion') || n.includes('percepcion')) && n.includes('sufrid');
+    })
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+}
