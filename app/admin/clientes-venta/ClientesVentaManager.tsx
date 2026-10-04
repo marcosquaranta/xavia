@@ -121,6 +121,7 @@ function ClienteRow({ c, precios, cambios, onSaved }: { c: ClienteVenta; precios
     email: String((c as any).email || ''),
     email_cobranza: String((c as any).email_cobranza || ''),
     recordatorio_cobro: (c as any).recordatorio_cobro === 'SI' ? 'SI' : 'NO',
+    retencion_ganancias_pct: String((c as any).retencion_ganancias_pct || ''),
   });
 
   const sucursalesArr = fields.sucursales ? fields.sucursales.split('|').map(s => s.trim()).filter(Boolean) : [];
@@ -246,6 +247,14 @@ function ClienteRow({ c, precios, cambios, onSaved }: { c: ClienteVenta; precios
                   <input type="email" value={fields.email_cobranza} onChange={e => setFields(f => ({ ...f, email_cobranza: e.target.value }))} disabled={saving}
                     placeholder={fields.email ? `${fields.email} (el general)` : 'administracion@cliente.com'} />
                   <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#9ca3af' }}>Si está vacío se usa el general.</p>
+                </div>
+                <div>
+                  {/* Con esto la app propone sola cuánto retuvo en cada cobro. La cuenta no
+                      es "depósito × %": es sobre la factura, que es mayor que el depósito. */}
+                  <label style={{ fontSize: '11px' }}>Me retiene ganancias (%)</label>
+                  <input type="number" min={0} max={49} step="0.5" value={fields.retencion_ganancias_pct}
+                    onChange={e => setFields(f => ({ ...f, retencion_ganancias_pct: e.target.value }))} disabled={saving}
+                    placeholder="vacío = no retiene" />
                 </div>
                 <div>
                   <label style={{ fontSize: '11px' }}>Recordatorio de cobranza</label>

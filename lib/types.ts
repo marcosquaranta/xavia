@@ -195,6 +195,11 @@ export interface ClienteVenta {
   // sucursal aunque compartan CUIT. '' o 'NO' = comportamiento de siempre (combinado).
   // Ver emitirPendientes() en lib/facturacionEmitir.ts.
   facturar_por_sucursal: 'SI' | 'NO' | '';
+  // Porcentaje de retención de ganancias que este cliente aplica al pagar. Vacío o 0 = no
+  // retiene. Con esto la app propone sola cuánto retuvo en cada cobro, en vez de que haya
+  // que sacar la cuenta cada vez — y es una cuenta que se saca mal seguido (ver
+  // retencionDesdeImporte en lib/retenciones.ts).
+  retencion_ganancias_pct: number | string;
 }
 
 // Pedido recurrente de un cliente para un día fijo de la semana (0=domingo..6=sábado,

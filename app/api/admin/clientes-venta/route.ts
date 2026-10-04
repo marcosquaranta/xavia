@@ -16,7 +16,7 @@ export async function PATCH(req: NextRequest) {
     if ('facturar_por_sucursal' in fields) await asegurarColumna('Clientes', 'facturar_por_sucursal');
     // Datos de cobranza, editables desde la ficha del cliente además de desde Cobranzas: es
     // la misma columna de la misma hoja, así que no hay dos verdades posibles.
-    const columnasCobranza = ['email', 'email_cobranza', 'recordatorio_cobro'].filter((k) => k in fields);
+    const columnasCobranza = ['email', 'email_cobranza', 'recordatorio_cobro', 'retencion_ganancias_pct'].filter((k) => k in fields);
     if (columnasCobranza.length) await asegurarColumnas('Clientes', columnasCobranza);
     const updated = await updateRow('Clientes', 'id_control', String(id_control), fields);
     if (!updated) return NextResponse.json({ error: 'cliente_no_encontrado' }, { status: 404 });

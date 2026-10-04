@@ -344,7 +344,11 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
           <div style={{ marginTop: '10px' }}>
             <BandejaCobranzas
               items={itemsBandeja}
-              clientes={filas.map((f) => ({ id_control: f.id_control, nombre: f.nombre }))}
+              clientes={filas.map((f) => ({
+                id_control: f.id_control,
+                nombre: f.nombre,
+                retencionPct: Number(clientes.find((c) => String(c.id_control) === String(f.id_control))?.retencion_ganancias_pct) || 0,
+              }))}
               cuentas={cuentasXubio.map((c) => ({ id: c.id, nombre: c.nombre }))}
               cuentasFaltantes={cuentasFaltantes(cuentasXubio)}
               aliases={aliasAprendidos}

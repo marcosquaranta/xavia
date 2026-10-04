@@ -3,6 +3,7 @@ import { Fragment, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { sugerirCombinaciones, toleranciaDe } from '@/lib/conciliacionCobro';
 import { cuentasElegibles, cuentaSugerida, cantidadPreferidas, cuentasDeRetencion } from '@/lib/cuentasCobro';
+import { retencionDesdeImporte, cuentaParaRetencion } from '@/lib/retenciones';
 
 interface ItemUI {
   id_item: string;
@@ -15,7 +16,12 @@ interface ItemUI {
   origen: string;  // banco | mail | manual | setup
   comprobantes?: string; // las facturas que el propio aviso dice pagar (las lee la IA)
 }
-interface ClienteOpt { id_control: string; nombre: string }
+interface ClienteOpt {
+  id_control: string;
+  nombre: string;
+  // % que este cliente retiene al pagar. Se configura en Admin → Clientes de venta.
+  retencionPct?: number;
+}
 interface FacturaCliente { numero: string; fecha: string; importe: number; yaCobrada: boolean; saldadaManual?: boolean; cubierta?: boolean }
 
 const inputStyle: React.CSSProperties = {
@@ -58,17 +64,22 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
   // del aviso: sin ella, la factura queda figurando impaga por el monto retenido para
   // siempre, porque a la cuenta entró menos de lo que decía la factura.
   const [retencion, setRetencion] = useState<string>(() => {
+    // Primero lo que dijo el aviso: si el comprobante trae el número, ese manda sobre
+    // cualquier cuenta — puede haber un mínimo, un tope o un ajuste que el % no sabe.
     const m = String(item.descripcion || '').match(/retenci[oó]n\s+([\d.,]+)/i);
-    if (!m) return '';
-    const n = Number(m[1].replace(/\./g, '').replace(',', '.'));
-    return Number.isFinite(n) && n > 0 ? String(Math.round(n)) : '';
+    if (m) {
+      const n = Number(m[1].replace(/\./g, '').replace(',', '.'));
+      if (Number.isFinite(n) && n > 0) return String(Math.round(n));
+    }
+    // Si no, se calcula con el % del cliente sobre lo que ENTRÓ.
+    const pct = clientes.find((c) => c.id_control === (item.id_control || ''))?.retencionPct || 0;
+    const calc = retencionDesdeImporte(item.importe, pct);
+    return calc > 0 ? String(calc) : '';
   });
   const cuentasRet = useMemo(() => cuentasDeRetencion(cuentas), [cuentas]);
-  const [cuentaRet, setCuentaRet] = useState(() => {
-    // Ingresos Brutos es la que más se ve en estos avisos; si no está, la primera que haya.
-    const iibb = cuentasDeRetencion(cuentas).find((c) => /ingresos\s*brutos/i.test(c.nombre));
-    return String((iibb || cuentasDeRetencion(cuentas)[0])?.id || '');
-  });
+  // Siempre ganancias: es la única retención que aplica hoy. El desplegable sigue estando
+  // por si algún cliente retiene otra cosa, pero no hay que elegir nada en el caso normal.
+  const [cuentaRet, setCuentaRet] = useState(() => String(cuentaParaRetencion(cuentas)?.id || ''));
   // La lista completa para tildar de a una. Las sugerencias resuelven el caso normal, pero
   // cuando ninguna cierra —un pago parcial, una factura de hace seis meses, dos cobros que
   // cancelan la misma— la única salida era marcar "a cuenta" y perder el detalle.
@@ -81,8 +92,19 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
     setElegidas((prev) => prev.includes(numero) ? prev.filter((n) => n !== numero) : [...prev, numero]);
   }
 
+  // Al cambiar de cliente se recalcula la retención: cada uno retiene un porcentaje distinto
+  // (o ninguno), y dejar el número del cliente anterior es peor que dejarlo vacío.
+  function recalcularRetencion(id: string) {
+    const yaLaDijoElAviso = /retenci[oó]n\s+[\d.,]+/i.test(String(item.descripcion || ''));
+    if (yaLaDijoElAviso) return;
+    const pct = clientes.find((c) => c.id_control === id)?.retencionPct || 0;
+    const calc = retencionDesdeImporte(item.importe, pct);
+    setRetencion(calc > 0 ? String(calc) : '');
+  }
+
   async function traerFacturas(id: string) {
     setFacturas([]); setElegidas([]); setACuenta(false);
+    recalcularRetencion(id);
     if (!id) return;
     // Si el cliente ya vino precargado, no hay nada que pedir.
     const ya = facturasPrecargadas?.[id];
@@ -248,6 +270,15 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
                   </div>
                   <span style={{ fontSize: '11px', color: '#166534', paddingBottom: '6px' }}>
                     Cancela {fmt$(item.importe + (Number(retencion) || 0))} de factura
+                    {(() => {
+                      // De dónde salió el número, para poder desconfiar: no es lo mismo que
+                      // lo diga el comprobante que que lo haya calculado la app.
+                      const pct = clientes.find((c) => c.id_control === idControl)?.retencionPct || 0;
+                      const delAviso = /retenci[oó]n\s+[\d.,]+/i.test(String(item.descripcion || ''));
+                      if (delAviso) return <span style={{ color: '#9ca3af' }}> · del aviso</span>;
+                      if (pct > 0) return <span style={{ color: '#9ca3af' }}> · calculada al {pct}%</span>;
+                      return null;
+                    })()}
                   </span>
                 </>
               )}
