@@ -51,6 +51,24 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev }: {
     );
   }
 
+  // La diferencia en plata contra el mes pasado. Va al lado del delta en peso y no en su
+  // lugar porque las dos responden cosas distintas: el peso dice si el negocio mejoró, la
+  // plata dice cuánto más salió de la caja. Un mes de ventas altas puede bajar el peso de
+  // un costo que igual costó medio millón más.
+  function DeltaMonto({ monto, anterior, invertido = false }: { monto: number; anterior: number; invertido?: boolean }) {
+    // Sin mes anterior no hay diferencia: mostrar el monto entero como si fuera el aumento
+    // sería un número alarmante e inventado.
+    if (!anterior) return <span style={{ color: '#d1d5db' }}>—</span>;
+    const d = Math.round(monto) - Math.round(anterior);
+    if (d === 0) return <span style={{ color: '#9ca3af' }}>·</span>;
+    const bueno = invertido ? d > 0 : d < 0;
+    return (
+      <span style={{ color: bueno ? '#059669' : '#dc2626', fontWeight: 700 }}>
+        {d > 0 ? '+' : '−'}{$(Math.abs(d))}
+      </span>
+    );
+  }
+
   function Fila({ label, monto, anterior, nivel, invertido, seccion, cantidad, compras, variacionStock }: {
     label: string; monto: number; anterior: number;
     nivel: 'total' | 'detalle' | 'resultado'; invertido?: boolean; seccion?: string; cantidad?: string;
@@ -92,6 +110,7 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev }: {
           {variacionStock === undefined ? '' : variacionStock ? `${variacionStock > 0 ? '+' : '−'}${$(Math.abs(variacionStock))}` : '—'}
         </td>
         <td style={{ ...celNum, fontSize: '12px', color: '#9ca3af' }}>{$(anterior)}</td>
+        <td style={{ ...celNum, fontSize: '12px' }}><DeltaMonto monto={monto} anterior={anterior} invertido={invertido} /></td>
         <td style={{ ...celNum, fontSize: '12px' }}><Delta monto={monto} anterior={anterior} invertido={invertido} /></td>
       </tr>
     );
@@ -104,7 +123,7 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev }: {
       <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '620px' }}>
         <thead>
           <tr style={{ background: '#fafaf9' }}>
-            {['Concepto', nombre, '% s/ventas', 'Compró', 'Quedó en stock', nombrePrev, 'Δ % s/ventas'].map((h, i) => (
+            {['Concepto', nombre, '% s/ventas', 'Compró', 'Quedó en stock', nombrePrev, 'Δ $', 'Δ % s/ventas'].map((h, i) => (
               <th key={h} style={{
                 ...cel, textAlign: i === 0 ? 'left' : 'right', fontSize: '11px',
                 color: i >= 3 ? '#9ca3af' : '#6b7280',
@@ -126,7 +145,10 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev }: {
             </td>
             <td style={{ ...celNum, fontWeight: 800 }}>{$(act.ventas.total)}</td>
             <td style={{ ...celNum, fontSize: '12px', color: '#6b7280' }}>100,0%</td>
+            {/* Ventas no sale de stock: las dos celdas van vacías, no corridas. */}
+            <td style={celNum} /><td style={celNum} />
             <td style={{ ...celNum, fontSize: '12px', color: '#9ca3af' }}>{$(ant.ventas.total)}</td>
+            <td style={{ ...celNum, fontSize: '12px' }}><DeltaMonto monto={act.ventas.total} anterior={ant.ventas.total} invertido /></td>
             <td style={{ ...celNum, fontSize: '12px', fontWeight: 700, color: varVentas === null ? '#d1d5db' : varVentas >= 0 ? '#059669' : '#dc2626' }}>
               {varVentas === null ? '—' : `${varVentas > 0 ? '+' : ''}${Math.round(varVentas)}%`}
             </td>
@@ -154,8 +176,10 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev }: {
         </tbody>
       </table>
       <p style={{ margin: 0, padding: '8px 10px', fontSize: '11px', color: '#9ca3af', borderTop: '1px solid #f3f4f6' }}>
-        La última columna es cuánto cambió el <strong>peso sobre las ventas</strong>, en puntos porcentuales: si semillas pesaba 5% y ahora pesa 4%, dice −1,0 p.p. en verde.
-        En Ventas muestra la variación en plata. El <strong>resultado sin inversión</strong> es el resultado devolviéndole lo gastado en equipamiento ({$(act.inversion)} este mes).
+        <strong>Δ $</strong> es cuánta plata más o menos que el mes pasado: en rojo si el costo subió.
+        <strong> Δ % s/ventas</strong> es cuánto cambió el <strong>peso sobre las ventas</strong>: si semillas pesaba 5% y ahora pesa 4%, dice −1,0% en verde.
+        Las dos pueden ir para lados distintos —un costo puede salir más caro y a la vez pesar menos, si las ventas subieron más que él— y por eso están las dos.
+        En Ventas la última columna es la variación en %. El <strong>resultado sin inversión</strong> es el resultado devolviéndole lo gastado en equipamiento ({$(act.inversion)} este mes).
       </p>
     </div>
   );
