@@ -56,10 +56,11 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev }: {
   // plata dice cuánto más salió de la caja. Un mes de ventas altas puede bajar el peso de
   // un costo que igual costó medio millón más.
   function DeltaMonto({ monto, anterior, invertido = false }: { monto: number; anterior: number; invertido?: boolean }) {
-    // Sin mes anterior no hay diferencia: mostrar el monto entero como si fuera el aumento
-    // sería un número alarmante e inventado.
-    if (!anterior) return <span style={{ color: '#d1d5db' }}>—</span>;
     const d = Math.round(monto) - Math.round(anterior);
+    // Una línea que no existía el mes pasado SÍ tiene diferencia en plata —son $500.000 más
+    // que salieron de la caja, y eso es cierto— aunque no tenga porcentaje. El que queda sin
+    // definir es el %, y ese es el que se muestra vacío en la otra columna.
+    if (!monto && !anterior) return <span style={{ color: '#d1d5db' }}>—</span>;
     if (d === 0) return <span style={{ color: '#9ca3af' }}>·</span>;
     const bueno = invertido ? d > 0 : d < 0;
     return (
