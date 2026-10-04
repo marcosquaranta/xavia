@@ -14,7 +14,7 @@ import { nombreClienteVisible } from '@/lib/clientes';
 import { pasosDelCierre, resumenChecklist } from '@/lib/cierreChecklist';
 import ChecklistCierre from './ChecklistCierre';
 import OrigenAplicacionCard from '@/components/OrigenAplicacion';
-import { origenYAplicacion, deudaProveedoresAlCierre } from '@/lib/origenAplicacion';
+import { origenYAplicacion, deudaProveedoresAlCierre, causasDeLaDiferencia } from '@/lib/origenAplicacion';
 import { calcularValorizacionMes as valorizacionDelMes } from '@/lib/valorizacionStock';
 export const dynamic = 'force-dynamic';
 
@@ -173,7 +173,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
           />
         </div>
 
-        <OrigenAplicacionCard datos={fondos} nombreMes={nombre} />
+        <OrigenAplicacionCard datos={fondos} causas={causasDeLaDiferencia(saldos)} nombreMes={nombre} />
 
         <div className="card" style={{ marginTop: '12px' }}>
           <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>

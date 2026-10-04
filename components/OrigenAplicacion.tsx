@@ -1,5 +1,5 @@
 'use client';
-import type { OrigenAplicacion } from '@/lib/origenAplicacion';
+import type { OrigenAplicacion, CausaDiferencia } from '@/lib/origenAplicacion';
 
 // ── A dónde se fue el resultado del mes ──────────────────────────────────────────────
 //
@@ -12,7 +12,7 @@ import type { OrigenAplicacion } from '@/lib/origenAplicacion';
 
 const fmt = (n: number) => (n < 0 ? '−' : '') + '$' + Math.abs(Math.round(n)).toLocaleString('es-AR');
 
-export default function OrigenAplicacionCard({ datos, nombreMes }: { datos: OrigenAplicacion; nombreMes: string }) {
+export default function OrigenAplicacionCard({ datos, causas = [], nombreMes }: { datos: OrigenAplicacion; causas?: CausaDiferencia[]; nombreMes: string }) {
   const { resultado, lineas, cajaEsperada, cajaReal, sinExplicar } = datos;
 
   return (
@@ -75,11 +75,46 @@ export default function OrigenAplicacionCard({ datos, nombreMes }: { datos: Orig
         </tbody>
       </table>
 
-      {cajaReal !== null && Math.abs(sinExplicar || 0) > 1000 && (
+      {/* Las causas CALCULADAS, con nombre y monto. Enumerar causas posibles obliga a salir a
+          buscar cuál; decir "Caja MQ: faltan $180.000" termina la búsqueda ahí mismo. */}
+      {causas.length > 0 && (
+        <div style={{ marginTop: '10px', borderTop: '1px solid #f3f4f6', paddingTop: '8px' }}>
+          <p style={{ margin: '0 0 6px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' }}>
+            De dónde sale la diferencia
+          </p>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+            <tbody>
+              {causas.map((c, i) => (
+                <tr key={`${c.cuenta}-${c.motivo}-${i}`} style={{ borderTop: '1px solid #f9fafb' }}>
+                  <td style={{ padding: '4px 8px', fontWeight: 600, whiteSpace: 'nowrap' }}>{c.cuenta}</td>
+                  <td style={{ padding: '4px 8px', color: '#6b7280' }}>{c.detalle}</td>
+                  <td style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', color: c.monto === 0 ? '#9ca3af' : c.monto > 0 ? '#059669' : '#dc2626' }}>
+                    {c.monto === 0 ? '—' : `${c.monto > 0 ? '+' : ''}${fmt(c.monto)}`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {(() => {
+            const explicado = causas.reduce((a, c) => a + c.monto, 0);
+            const resto = Math.round((sinExplicar || 0) - explicado);
+            if (Math.abs(resto) < 1000) return null;
+            // Lo que ni siquiera las cuentas explican. Casi siempre es un cobro o un gasto
+            // que pasó por una caja que no se está siguiendo.
+            return (
+              <p style={{ margin: '6px 0 0', fontSize: '11.5px', color: '#92400e' }}>
+                Quedan <strong>{fmt(resto)}</strong> que ninguna cuenta explica: suele ser plata que entró o salió
+                por un medio que no está en la lista de cuentas seguidas.
+              </p>
+            );
+          })()}
+        </div>
+      )}
+
+      {cajaReal !== null && Math.abs(sinExplicar || 0) > 1000 && causas.length === 0 && (
         <p style={{ margin: '8px 0 0', fontSize: '11.5px', color: '#92400e', lineHeight: 1.5 }}>
-          Esa diferencia no es un error de la cuenta: es algo que falta cargar. Lo más común, en orden: un saldo
-          de cuenta sin actualizar, un cobro que entró y no se registró, o un gasto pagado de una caja que no se
-          está siguiendo.
+          Todas las cuentas cuadran, así que la diferencia no está en los saldos: quedó un cobro o un gasto sin
+          registrar, o pasó por un medio de pago que no se está siguiendo.
         </p>
       )}
     </div>
