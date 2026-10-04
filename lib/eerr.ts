@@ -95,6 +95,13 @@ export interface DatosEERR {
   articulos: Articulo[];
   stocks: StockMes[];
   gastos: Gasto[];
+  // Previsiones del mes (despidos y SAC). Son costo del mes aunque la plata no salga: el SAC
+  // se paga en junio y diciembre, pero se gana todos los meses. Que la plata siga en la
+  // cuenta no la hace disponible, la hace comprometida.
+  //
+  // Solo despidos y SAC: alquiler y EPE también se cargan como previsión, pero esos SÍ se
+  // registran como gasto cuando se pagan, así que sumarlos acá los contaría dos veces.
+  previsiones?: { despidos: number; sac: number } | null;
   ventas: VentaDia[];
   precios: PrecioVenta[];
   clientes: ClienteVenta[];
@@ -155,6 +162,13 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
   // ── Costos fijos ──
   const lineasFijas: LineaEERR[] = FIJOS
     .map(({ label, cats }) => ({ label, monto: sumaCats(cats), fuente: 'gastos' as const }));
+
+  // Las previsiones, como una línea más de costo fijo. No salen de ningún gasto cargado:
+  // son plata que todavía está en la cuenta pero ya está comprometida.
+  const montoPrevisiones = Math.round((d.previsiones?.despidos || 0) + (d.previsiones?.sac || 0));
+  if (montoPrevisiones > 0) {
+    lineasFijas.push({ label: 'Previsiones (despidos y SAC)', monto: montoPrevisiones, fuente: 'gastos' as const });
+  }
   const totalFijos = lineasFijas.reduce((a, l) => a + l.monto, 0);
   const inversion = sumaCats(['inversion_equipamiento', 'inversion_nave3']);
   const masaSalarial = sumaCats(['sueldos']);

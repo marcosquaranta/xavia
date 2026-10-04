@@ -64,10 +64,27 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   if (mesPrev === 0) { mesPrev = 12; anioPrev--; }
 
   const datos = { articulos, stocks, gastos, ventas, precios, clientes };
-  const act = calcularEERR(datos, anio, mes);
-  const ant = calcularEERR(datos, anioPrev, mesPrev);
-  const prev = previsionesSugeridas(act.masaSalarial);
+  // Dos pasadas: la primera para conocer la masa salarial —que es la base de las
+  // previsiones— y la segunda ya con las previsiones adentro del resultado. Sin la primera
+  // habría que elegir entre no previsionar o previsionar sobre un número que todavía no se
+  // calculó.
+  const base = calcularEERR(datos, anio, mes);
   const guardada = previsionDelMes(previsiones, anio, mes);
+  const prev = previsionesSugeridas(base.masaSalarial);
+  // Manda lo guardado. La sugerencia solo se usa mientras nadie la confirmó: un mes cerrado
+  // no puede cambiar de números porque mañana se corrija un sueldo cargado tarde.
+  const previsionesDelMes = guardada
+    ? { despidos: Number(guardada.despidos) || 0, sac: Number(guardada.sac) || 0 }
+    : null;
+  const act = calcularEERR({ ...datos, previsiones: previsionesDelMes }, anio, mes);
+
+  const guardadaPrev = previsionDelMes(previsiones, anioPrev, mesPrev);
+  const ant = calcularEERR({
+    ...datos,
+    previsiones: guardadaPrev
+      ? { despidos: Number(guardadaPrev.despidos) || 0, sac: Number(guardadaPrev.sac) || 0 }
+      : null,
+  }, anioPrev, mesPrev);
 
   const mm = String(mes).padStart(2, '0');
   const desdeMes = `${anio}-${mm}-01`;
@@ -102,6 +119,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
     cobradoMes: cobranzasMes.reduce((a, c) => a + (Number(c.monto) || 0), 0),
     deudaProveedoresInicio: deudaProveedoresAlCierre(gastos, finMesPrev),
     deudaProveedoresFin: deudaProveedoresAlCierre(gastos, hastaMes),
+    previsionesMes: (previsionesDelMes?.despidos || 0) + (previsionesDelMes?.sac || 0),
     stockInicio: valorPrev.total ?? null,
     stockFin: valorAct.total ?? null,
     cajaInicio: hayCajaReal ? sumaSaldos(saldos, 'inicial') : null,

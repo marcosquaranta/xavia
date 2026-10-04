@@ -74,6 +74,9 @@ export interface EntradasFondos {
   cobradoMes: number;
   deudaProveedoresInicio: number;
   deudaProveedoresFin: number;
+  // Lo previsionado del mes (despidos y SAC). Es costo del mes y no salió de la caja, así
+  // que separa el resultado de la caja exactamente igual que una compra a crédito.
+  previsionesMes: number;
   stockInicio: number | null;
   stockFin: number | null;
   cajaInicio: number | null;
@@ -100,6 +103,15 @@ export function origenYAplicacion(e: EntradasFondos): OrigenAplicacion {
       // Deber más es plata que todavía está en la caja: suma.
       monto: deltaProveedores,
       detalle: `De ${fmt(e.deudaProveedoresInicio)} a ${fmt(e.deudaProveedoresFin)}`,
+    });
+  }
+
+  if (Math.round(e.previsionesMes) !== 0) {
+    lineas.push({
+      label: 'Se previsionó para despidos y SAC',
+      // Es un costo que restó del resultado y no sacó plata de la caja: la devuelve.
+      monto: Math.round(e.previsionesMes),
+      detalle: 'Plata comprometida que todavía está en la cuenta',
     });
   }
 
