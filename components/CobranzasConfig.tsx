@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { ventanaDemasiadoAngosta, VENTANA_MINIMA_DIAS } from '@/lib/cobranzasVentana';
 
 export interface ClienteFila {
@@ -32,6 +33,13 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
   const [verTodos, setVerTodos] = useState(false);
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; s: string } | null>(null);
   const [guardando, setGuardando] = useState<string | null>(null);
+  // El resultado de "Enviar ahora" se guarda POR CLIENTE y se muestra debajo de su fila.
+  // Antes iba a un mensaje único al pie de la tabla: en letra chica, lejos del botón que se
+  // acababa de apretar, y se pisaba al tocar el siguiente cliente. Cuando el motivo es "no
+  // corresponde reclamarle", ese mensaje es TODO lo que pasa — no se manda nada ni queda
+  // registrado en ningún lado— así que perderlo de vista es perder la respuesta entera.
+  const [resultado, setResultado] = useState<Record<string, { t: 'ok' | 'err'; s: string }>>({});
+  const router = useRouter();
 
   async function togglear(c: ClienteFila, activo: boolean) {
     setGuardando(c.id_control); setMsg(null);
@@ -71,6 +79,8 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
   // recordatorio a un cliente no se puede deshacer, así que se ve antes de mandarlo.
   async function enviarAhora(c: ClienteFila) {
     setGuardando(c.id_control); setMsg(null);
+    const decir = (t: 'ok' | 'err', str: string) => setResultado((p) => ({ ...p, [c.id_control]: { t, s: str } }));
+    decir('err', '');
     try {
       const sim = await fetch(`/api/cron/recordatorios-cobro?simular=1&cliente=${encodeURIComponent(c.id_control)}`);
       const js = await sim.json();
@@ -81,12 +91,12 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
 
       if (!det) {
         if ((js.sinEmail || []).length > 0) {
-          setMsg({ t: 'err', s: `${c.nombre}: falta cargarle el mail de cobranzas.` });
+          decir('err', 'No se mandó: falta cargarle el mail de cobranzas.');
           setGuardando(null); return;
         }
         const motivo = (js.omitidos || [])[0]?.motivo;
         if (motivo) {
-          setMsg({ t: 'err', s: `${c.nombre}: no se le manda — ${motivo}.` });
+          decir('err', `No se mandó — ${motivo}.`);
           setGuardando(null); return;
         }
 
@@ -98,7 +108,7 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
         const js2 = await sim2.json();
         det = (js2.detalle || [])[0];
         if (!det) {
-          setMsg({ t: 'err', s: `${c.nombre}: no le figura ninguna factura impaga de más de ${c.antiguedad} días.` });
+          decir('err', `No se mandó: no le figura ninguna factura impaga de más de ${c.antiguedad} días.`);
           setGuardando(null); return;
         }
         insistir = true;
@@ -112,14 +122,18 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
         + `Total: $${Math.round(det.total).toLocaleString('es-AR')}\n\n`
         + 'El mail sale al cliente con copia a administración. ¿Confirmás?'
       );
-      if (!ok) { setGuardando(null); return; }
+      if (!ok) { decir('err', 'Cancelado, no se mandó nada.'); setGuardando(null); return; }
 
       const env = await fetch(`/api/cron/recordatorios-cobro?cliente=${encodeURIComponent(c.id_control)}${insistir ? '&insistir=1' : ''}`);
       const je = await env.json();
       if (!env.ok || (je.errores || []).length) throw new Error((je.errores || []).join(' · ') || 'Error al enviar');
-      setMsg({ t: 'ok', s: `✓ ${insistir ? 'Re-enviado' : 'Enviado'} a ${c.nombre} — ${det.comprobantes}` });
+      decir('ok', `✓ ${insistir ? 'Re-enviado' : 'Enviado'} — ${det.comprobantes}`);
+      // Sin esto la tabla de "Recordatorios enviados" sigue mostrando lo de antes: se
+      // renderiza en el servidor y el envío pasó acá, en el navegador. El mail salía, pero
+      // desde la pantalla parecía que no había pasado nada.
+      router.refresh();
     } catch (e: any) {
-      setMsg({ t: 'err', s: e.message || 'Error al enviar' });
+      decir('err', e.message || 'Error al enviar');
     }
     setGuardando(null);
   }
@@ -165,7 +179,7 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
             </tr>
           </thead>
           <tbody>
-            {visibles.map((c) => (
+            {visibles.flatMap((c) => [
               <tr key={c.id_control} style={{ borderTop: '1px solid #f3f4f6', opacity: guardando === c.id_control ? 0.5 : 1 }}>
                 <td style={{ padding: '6px 8px', fontWeight: c.activo ? 700 : 400 }}>{c.nombre}</td>
                 <td style={{ padding: '6px 8px', textAlign: 'center' }}>
@@ -193,8 +207,20 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
                     </button>
                   )}
                 </td>
-              </tr>
-            ))}
+              </tr>,
+              resultado[c.id_control]?.s ? (
+                <tr key={`${c.id_control}-r`}>
+                  <td colSpan={5} style={{ padding: '0 8px 7px' }}>
+                    <span style={{
+                      display: 'inline-block', fontSize: '11.5px', fontWeight: 600, padding: '4px 8px', borderRadius: '5px',
+                      color: resultado[c.id_control].t === 'ok' ? '#166534' : '#991b1b',
+                      background: resultado[c.id_control].t === 'ok' ? '#f0fdf4' : '#fef2f2',
+                      border: `1px solid ${resultado[c.id_control].t === 'ok' ? '#bbf7d0' : '#fecaca'}`,
+                    }}>{resultado[c.id_control].s}</span>
+                  </td>
+                </tr>
+              ) : null,
+            ])}
           </tbody>
         </table>
       </div>
