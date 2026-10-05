@@ -8,6 +8,7 @@ import Header from '@/components/Header';
 import { leerPrevisiones, previsionDelMes } from '@/lib/previsiones';
 import PrevisionesEditor from './PrevisionesEditor';
 import TablaEERR from './TablaEERR';
+import EnviarInforme from './EnviarInforme';
 import { leerCobranzas, leerSaldos, saldosDelMes, type Cobranza, type SaldoCuenta } from '@/lib/cuentas';
 import CuentasEditor from './CuentasEditor';
 import { nombreClienteVisible } from '@/lib/clientes';
@@ -148,6 +149,9 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
             <h1 className="page-title">Cierre mensual</h1>
             <p className="page-subtitle">Estado de resultados — se calcula solo con lo que está cargado en la app</p>
           </div>
+          {/* El histórico responde otra pregunta ("cómo venimos", no "cómo dio este mes") y
+              cuesta más de calcular, así que es otra pantalla y no un bloque más de esta. */}
+          <Link href="/eerr/historico" className="btn secondary" style={{ fontSize: '12px' }}>Histórico mes a mes ›</Link>
         </div>
 
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', margin: '12px 0 14px', flexWrap: 'wrap' }}>
@@ -176,6 +180,16 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
         <ChecklistCierre pasos={pasos} {...resumenPasos} anio={anio} mes={mes} marcados={[...marcados]} />
 
         <TablaEERR act={act} ant={ant} nombre={nombre} nombrePrev={nombrePrev} />
+
+        {/* El mail del cierre se manda acá, a mano, cuando el mes ya está cargado. No hay
+            cron: un informe automático llegaría siempre antes de que estén el resumen de la
+            tarjeta, los stocks finales y las previsiones, o sea mostrando un mes a medias
+            como si fuera el cierre. En el mes en curso no se ofrece por lo mismo. */}
+        {!esMesActual && (
+          <div style={{ marginTop: '10px' }}>
+            <EnviarInforme anio={anio} mes={mes} label={nombre} />
+          </div>
+        )}
 
         <div className="card" style={{ marginTop: '12px' }}>
           <p style={{ margin: '0 0 6px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>

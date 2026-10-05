@@ -17,9 +17,6 @@ import { productividadDeMes, plantasCosechadasEnRango } from './productividad';
 import { kmEnRango, VEHICULO_PARTNER } from './kilometraje';
 
 import { comprobantesParaMirar } from './xubioLectura';
-import { calcularEERR } from './eerr';
-import { leerPrevisiones, previsionDelMes } from './previsiones';
-import type { Articulo, StockMes, Gasto } from './types';
 const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
 function lunesDe(d: Date): Date {
@@ -446,59 +443,6 @@ export interface ReporteSemanalData {
   // el último momento en que todavía se puede corregir la semana.
   facturacion: ControlFacturacion;
   // Lo facturado según la app contra lo que hay en Xubio, últimos 30 días.
-  // Costos fijos del último mes CERRADO contra el anterior. No del mes en curso: los fijos
-  // se cargan de golpe (el resumen de la tarjeta llega a fin de mes), así que medio mes
-  // contra medio mes no compara nada — daría caídas enormes que son solo gastos sin cargar.
-  // Cambia una vez por mes y no todos los viernes, y eso está bien: es el número del cierre.
-  costosFijosMes: {
-    nombre: string; nombrePrev: string;
-    total: number; totalPrev: number;
-    lineas: { label: string; monto: number; anterior: number }[];
-  } | null;
-}
-
-// Costos fijos del último mes cerrado contra el anterior.
-//
-// El % y la diferencia en plata van los dos: un costo puede subir 8% y eso ser $40.000 o
-// $900.000 según la línea, y al revés, una línea chica que se duplica da +100% y son dos
-// mangos. Con un solo número siempre hay que ir a buscar el otro.
-async function costosFijosUltimoMesCerrado(
-  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[],
-): Promise<ReporteSemanalData['costosFijosMes']> {
-  const [articulos, stocks, gastos, previsiones] = await Promise.all([
-    readSheet<Articulo>('Articulos').catch(() => [] as Articulo[]),
-    readSheet<StockMes>('Stocks').catch(() => [] as StockMes[]),
-    readSheet<Gasto>('Gastos').catch(() => [] as Gasto[]),
-    leerPrevisiones().catch(() => []),
-  ]);
-  if (!gastos.length) return null;
-
-  const hoy = new Date();
-  const cerrado = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
-  const previo = new Date(hoy.getFullYear(), hoy.getMonth() - 2, 1);
-  const datos = { articulos, stocks, gastos, ventas, precios, clientes };
-
-  // Solo la previsión GUARDADA, nunca la sugerida: el mail tiene que decir los mismos
-  // números que la pantalla del cierre, y ahí también manda lo guardado.
-  const conPrev = (d: Date) => {
-    const g = previsionDelMes(previsiones, d.getFullYear(), d.getMonth() + 1);
-    return calcularEERR({
-      ...datos,
-      previsiones: g ? { despidos: Number(g.despidos) || 0, sac: Number(g.sac) || 0 } : null,
-    }, d.getFullYear(), d.getMonth() + 1);
-  };
-  const act = conPrev(cerrado), ant = conPrev(previo);
-  if (!act.costosFijos.total && !ant.costosFijos.total) return null;
-
-  const mesNombre = (d: Date) => `${MESES_CORTO[d.getMonth()]} ${d.getFullYear()}`;
-  return {
-    nombre: mesNombre(cerrado), nombrePrev: mesNombre(previo),
-    total: act.costosFijos.total, totalPrev: ant.costosFijos.total,
-    lineas: act.costosFijos.lineas.map((l) => ({
-      label: l.label, monto: l.monto,
-      anterior: ant.costosFijos.lineas.find((x) => x.label === l.label)?.monto ?? 0,
-    })),
-  };
 }
 
 export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> {
@@ -747,9 +691,6 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     protocoloFueraDeRango: detalleFueraDeRango(registrosProtocolo, desdeSemana, hastaHoy),
     facturacion: controlFacturacion(ventas, precios, clientes, hastaHoy),
     stock, faltanteSemana, faltanteMes, descartePorFase,
-    // Si el cierre no se puede calcular, el bloque no sale y el resto del reporte va igual:
-    // ninguna sección puede tumbar el mail entero.
-    costosFijosMes: await costosFijosUltimoMesCerrado(ventas, precios, clientes).catch(() => null),
   };
   return { ...datosSinDestacados, destacados: destacadosDeLaSemana(datosSinDestacados) };
 }
@@ -1002,50 +943,6 @@ export function construirHtml(d: ReporteSemanalData): string {
       }).join('')}</tbody>
     </table>`;
 
-  // ── Costos fijos del último mes cerrado ──
-  //
-  // Las dos columnas de variación, no una: el % dice si la línea se movió mucho para su
-  // tamaño, la plata dice cuánto más salió de la caja. Un +8% de sueldos y un +80% de
-  // trámites pueden ser la misma plata, y la decisión que toma Marcos no es la misma.
-  const cf = d.costosFijosMes;
-  const filaCostoFijo = (l: { label: string; monto: number; anterior: number }, negrita = false) => {
-    const dif = Math.round(l.monto) - Math.round(l.anterior);
-    // Sin mes anterior no hay variación: mostrar el monto entero como aumento sería un
-    // número inventado y alarmante (una línea nueva arrancaría siempre en "+100%").
-    const hayRef = Math.round(l.anterior) !== 0;
-    const pctDif = hayRef ? Math.round((dif / Math.abs(Math.round(l.anterior))) * 100) : null;
-    const color = dif === 0 ? '#9ca3af' : dif > 0 ? '#dc2626' : '#059669';
-    const signo = dif > 0 ? '+' : '−';
-    const bd = `padding:6px 10px;border-bottom:1px solid #eee`;
-    return `<tr>
-      <td style="${bd};${negrita ? 'font-weight:800' : ''}">${l.label}</td>
-      <td style="${bd};text-align:right;font-weight:${negrita ? 800 : 600}">${fmtMoneda(l.monto)}</td>
-      <td style="${bd};text-align:right;color:#9ca3af">${fmtMoneda(l.anterior)}</td>
-      <td style="${bd};text-align:right;color:${color};font-weight:700">${!hayRef && !dif ? '—' : dif === 0 ? '·' : `${signo}${fmtMoneda(Math.abs(dif))}`}</td>
-      <td style="${bd};text-align:right;color:${color};font-weight:700">${pctDif === null ? '—' : pctDif === 0 ? '·' : `${pctDif > 0 ? '↑' : '↓'} ${Math.abs(pctDif)}%`}</td>
-    </tr>`;
-  };
-  const costosFijosHtml = !cf ? '' : `
-    <h3 style="margin:0 0 8px;font-size:14px">Costos fijos <span style="font-weight:400;color:#9ca3af">(${cf.nombre} cerrado vs. ${cf.nombrePrev})</span></h3>
-    <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:6px">
-      <thead><tr style="background:#f5f5f5">
-        <th style="padding:6px 10px;text-align:left">Línea</th>
-        <th style="padding:6px 10px;text-align:right">${cf.nombre}</th>
-        <th style="padding:6px 10px;text-align:right">${cf.nombrePrev}</th>
-        <th style="padding:6px 10px;text-align:right">Dif. $</th>
-        <th style="padding:6px 10px;text-align:right">Dif. %</th>
-      </tr></thead>
-      <tbody>
-        ${cf.lineas.map((l) => filaCostoFijo(l)).join('')}
-        ${filaCostoFijo({ label: 'Total costos fijos', monto: cf.total, anterior: cf.totalPrev }, true)}
-      </tbody>
-    </table>
-    <p style="margin:0 0 20px;font-size:11px;color:#9ca3af">
-      En rojo lo que subió. Es el último mes <strong>cerrado</strong>, no el mes en curso: los fijos se cargan de golpe
-      (el resumen de la tarjeta llega a fin de mes), así que medio mes contra medio mes mostraría caídas que son solo gastos sin cargar.
-      Van el % y la plata porque no dicen lo mismo: una línea chica que se duplica da +100% y son dos mangos, y un 5% de sueldos es mucha plata.
-    </p>`;
-
   // ── Control de facturación ──
   // Lo que se cargó y no se facturó, separado en los dos estados posibles: la cola de
   // facturación y el borrador. El borrador va primero porque es el que no se ve en
@@ -1266,7 +1163,6 @@ export function construirHtml(d: ReporteSemanalData): string {
 
     ${indicadoresHtml}
 
-    ${costosFijosHtml}
     ${controlFactHtml}
     ${protocoloHtml}
 
@@ -1364,25 +1260,6 @@ export function construirTexto(d: ReporteSemanalData): string {
     for (const i of d.indicadoresMes) {
       const flecha = i.pct === null ? '' : ` (${i.pct > 0 ? '↑' : i.pct < 0 ? '↓' : '·'}${Math.abs(i.pct)}%)`;
       L.push(`  ${i.label}: ${i.valor}${flecha}`);
-    }
-    L.push('');
-  }
-
-  // Costos fijos: el mismo bloque del mail, en texto. Solo las líneas que se movieron —en
-  // WhatsApp una tabla de ocho renglones donde seis dicen "·" se saltea entera.
-  if (d.costosFijosMes) {
-    const cf = d.costosFijosMes;
-    const movidas = cf.lineas
-      .map((l) => ({ ...l, dif: Math.round(l.monto) - Math.round(l.anterior) }))
-      .filter((l) => l.dif !== 0)
-      .sort((a, b) => Math.abs(b.dif) - Math.abs(a.dif));
-    L.push(`💸 *Costos fijos* (${cf.nombre} cerrado vs. ${cf.nombrePrev})`);
-    const difTot = Math.round(cf.total) - Math.round(cf.totalPrev);
-    const pctTot = cf.totalPrev ? Math.round((difTot / Math.abs(Math.round(cf.totalPrev))) * 100) : null;
-    L.push(`Total: ${fmtMoneda(cf.total)} (${difTot >= 0 ? '+' : '−'}${fmtMoneda(Math.abs(difTot))}${pctTot === null ? '' : `, ${pctTot > 0 ? '↑' : pctTot < 0 ? '↓' : '·'}${Math.abs(pctTot)}%`})`);
-    for (const l of movidas) {
-      const pctL = Math.round(l.anterior) ? Math.round((l.dif / Math.abs(Math.round(l.anterior))) * 100) : null;
-      L.push(`  ${l.label}: ${fmtMoneda(l.monto)} (${l.dif > 0 ? '+' : '−'}${fmtMoneda(Math.abs(l.dif))}${pctL === null ? '' : `, ${pctL > 0 ? '↑' : '↓'}${Math.abs(pctL)}%`})`);
     }
     L.push('');
   }

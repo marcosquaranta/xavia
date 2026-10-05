@@ -12,7 +12,7 @@ import type { EERR } from '@/lib/eerr';
 // ventas y no en variación de plata. En las líneas de costo, bajar es bueno (verde); en las
 // de resultado es al revés.
 
-const $ = (n: number) => `$${Math.round(n).toLocaleString('es-AR')}`;
+const $ = (n: number) => `${n < 0 ? '−' : ''}$${Math.abs(Math.round(n)).toLocaleString('es-AR')}`;
 const pesoPct = (monto: number, ventas: number) => (ventas > 0 ? (monto / ventas) * 100 : null);
 const fmtPeso = (p: number | null) => (p === null ? '—' : `${p.toFixed(1)}%`);
 // En % y no en "p.p." a pedido de Marcos. Es la misma cuenta —cuánto cambió el PESO de esa
