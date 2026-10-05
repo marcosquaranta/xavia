@@ -22,7 +22,20 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
   const [plantasQuedan, setPlantasQuedan] = useState(0);
 
   const plantasEst = Number(lote.plantas_estimadas_actual) || Number(lote.plantines_iniciales) || 0;
-  const descarteAuto = useMemo(() => !esPorPaquete ? Math.max(0, plantasEst - plantas) : 0, [esPorPaquete, plantasEst, plantas]);
+  // En una cosecha parcial, el descarte NO se mide contra todo el lote: las plantas que
+  // quedan en la mesada no se descartaron, se cosechan después. Lo que se bajó de la mesada
+  // esta vez es `plantasEst − plantasQuedan`, y ESA es la base.
+  //
+  // Sin esto, cosechar la mitad de un lote mostraba "descarte 50%" y frenaba el registro
+  // con una alerta roja — por una cosecha perfecta. (El servidor siempre calculó bien el
+  // descarte de una parcial; el que estaba mal era este número en pantalla, así que no hay
+  // ningún dato guardado mal.)
+  const parcialValida = parcial && plantasQuedan > 0 && plantasQuedan < plantasEst;
+  const plantasDeEstaTanda = parcialValida ? plantasEst - plantasQuedan : plantasEst;
+  const descarteAuto = useMemo(
+    () => !esPorPaquete ? Math.max(0, plantasDeEstaTanda - plantas) : 0,
+    [esPorPaquete, plantasDeEstaTanda, plantas],
+  );
   const esRucula = lote.variedad.toLowerCase().includes('rucula') || lote.variedad.toLowerCase().includes('rúcula');
 
   // Para rúcula: paquetes estimados = plantas / plantasPorPaqueteManual
@@ -33,8 +46,8 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
   // Alertas de calidad — mismo umbral que el Panel ("Desvíos y calidad de cosecha"):
   // lechuga con descarte > 5% de la cosecha del lote, o rúcula armada a más de 3
   // plantas por paquete.
-  const descartePct = plantasEst > 0 ? Math.round((descarteAuto / plantasEst) * 1000) / 10 : 0;
-  const descarteAlto = !esPorPaquete && plantasEst > 0 && descarteAuto / plantasEst > 0.05;
+  const descartePct = plantasDeEstaTanda > 0 ? Math.round((descarteAuto / plantasDeEstaTanda) * 1000) / 10 : 0;
+  const descarteAlto = !esPorPaquete && plantasDeEstaTanda > 0 && descarteAuto / plantasDeEstaTanda > 0.05;
   const densidadAlta = esPorPaquete && esRucula && plantasPorPaqReal > 3;
 
   async function handleSubmit(e: React.FormEvent) {
@@ -101,9 +114,14 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
           {plantas > 0 && (
             <div style={{ marginTop: '12px', padding: '10px 12px', background: '#f9fafb', borderRadius: '6px', fontSize: '12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#6b7280' }}>Plantas estimadas</span><span>{plantasEst}</span></div>
+              {parcialValida && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#1e40af' }}>
+                  <span>Se bajan de la mesada ahora</span><span>{plantasDeEstaTanda}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#6b7280' }}>Plantas cosechadas</span><span>{plantas}</span></div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 500, paddingTop: '6px', borderTop: '1px solid #e5e7eb', marginTop: '6px', color: descarteAuto > 0 ? '#dc2626' : '#059669' }}>
-                <span>Descarte automático</span><span>{descarteAuto}</span>
+                <span>Descarte automático{parcialValida ? ' (sobre esta tanda)' : ''}</span><span>{descarteAuto}</span>
               </div>
             </div>
           )}
