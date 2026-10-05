@@ -330,7 +330,11 @@ export interface StockCamara {
   // crespa/roble) — los nuevos conteos van directo a 'lechuga_crespa'/'lechuga_roble'.
   cultivo: 'rucula' | 'lechuga' | 'lechuga_crespa' | 'lechuga_roble' | 'albahaca';
   fecha: string;
-  tipo: 'inicial' | 'ajuste';
+  // 'descarte' es producto que se tiró en cámara. A diferencia de los otros dos, su
+  // `cantidad_paq` va en CERO y lo que vale es `descarte_paq`: no es un recuento del stock
+  // sino una baja. Por eso una fila 'descarte' nunca puede servir de base para calcular el
+  // stock — ver calcularCamara en lib/camara.ts.
+  tipo: 'inicial' | 'ajuste' | 'descarte';
   cantidad_paq: number | string;
   notas: string;
   usuario: string;

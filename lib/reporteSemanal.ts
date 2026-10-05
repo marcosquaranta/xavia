@@ -50,18 +50,54 @@ function sumaPorClienteEnRango(ventas: VentaDia[], desde: string, hasta: string)
   }
   return map;
 }
-export interface ClienteVariacionSemana { nombre: string; actual: number; anterior: number; deltaUnidades: number; deltaPct: number | null }
+export interface ClienteVariacionSemana {
+  nombre: string; actual: number; anterior: number; deltaUnidades: number; deltaPct: number | null;
+  // Cuántas facturas le corresponden a este cliente en la semana, y cuántas la semana
+  // pasada. Sirve para el control que no da ningún total: si un cliente que siempre tiene
+  // tres entregas esta semana tiene dos, probablemente faltó cargar una venta — y en
+  // unidades no se nota, porque una entrega de menos se confunde con una semana floja.
+  facturas: number; facturasAnterior: number;
+}
+
+// Una factura por cliente y por día de entrega — y además por sucursal cuando el cliente
+// factura separado. Es exactamente como agrupa la pantalla de facturación, para que el
+// número del reporte y el de la facturación real no digan cosas distintas.
+function facturasPorClienteEnRango(
+  ventas: VentaDia[], clientes: ClienteVenta[], desde: string, hasta: string,
+): Map<string, number> {
+  const porSucursal = new Set(
+    clientes.filter((c) => String((c as any).facturar_por_sucursal || '').trim().toUpperCase() === 'SI')
+      .map((c) => String(c.id_control)),
+  );
+  const claves = new Map<string, Set<string>>();
+  for (const v of ventas) {
+    const f = String(v.fecha || '').split(/[T ]/)[0];
+    if (!f || f < desde || f > hasta) continue;
+    if (unidadesVentaFila(v) <= 0) continue;
+    const id = String(v.id_control);
+    const k = porSucursal.has(id) ? `${f}||${v.sucursal || ''}` : f;
+    if (!claves.has(id)) claves.set(id, new Set());
+    claves.get(id)!.add(k);
+  }
+  return new Map([...claves.entries()].map(([id, set]) => [id, set.size]));
+}
 // Principales clientes de la semana (por volumen), con cuánto subieron/bajaron en
 // cantidad y % vs. la semana anterior — mismas ventanas de fecha que "Ventas — últimos 7 días".
 function clientesConVariacionSemana(ventas: VentaDia[], clientes: ClienteVenta[], desde: string, hasta: string, desdeAnt: string, hastaAnt: string, topN = 6): ClienteVariacionSemana[] {
   const actual = sumaPorClienteEnRango(ventas, desde, hasta);
   const anterior = sumaPorClienteEnRango(ventas, desdeAnt, hastaAnt);
+  const facturas = facturasPorClienteEnRango(ventas, clientes, desde, hasta);
+  const facturasAnt = facturasPorClienteEnRango(ventas, clientes, desdeAnt, hastaAnt);
   const nombreMap = new Map(clientes.map(c => [c.id_control, nombreClienteVisible(c)]));
   const filas = Array.from(actual.entries()).map(([id_control, act]) => {
     const ant = anterior.get(id_control) || 0;
     const deltaUnidades = Math.round(act - ant);
     const deltaPct = ant > 0 ? Math.round(((act - ant) / ant) * 100) : null;
-    return { nombre: nombreMap.get(id_control) || id_control, actual: Math.round(act), anterior: Math.round(ant), deltaUnidades, deltaPct };
+    return {
+      nombre: nombreMap.get(id_control) || id_control, actual: Math.round(act), anterior: Math.round(ant), deltaUnidades, deltaPct,
+      facturas: facturas.get(String(id_control)) || 0,
+      facturasAnterior: facturasAnt.get(String(id_control)) || 0,
+    };
   });
   return filas.sort((a, b) => b.actual - a.actual).slice(0, topN);
 }
@@ -403,6 +439,12 @@ export interface ReporteSemanalData {
   ventasMesAnteriorTotal: number;
   ventasMesAnteriorMonto: number;
   clientesVariacion: ClienteVariacionSemana[];
+  // Las dos ventanas que compara el reporte, en dd/mm. Van en los datos y no se arman en el
+  // HTML para que el mail diga exactamente el rango que se usó en la cuenta: "esta semana"
+  // son los últimos 7 días corridos contando hoy, no lunes a domingo, y eso cambia qué
+  // entra en cada columna.
+  rangoSemana: { desde: string; hasta: string };
+  rangoSemanaAnterior: { desde: string; hasta: string };
   proyeccionMesActual: { rucula: number; lechuga: number };
   cosechaRealMesAnterior: { rucula: number; lechuga: number };
   cicloSemana: { rucula: number; lechuga: number };
@@ -681,6 +723,8 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const datosSinDestacados = {
     fechaGenerado: fmtISO(hoy),
     ventasSemana, ventasSemanaAnterior, ventasMesActual, ventasMesAnteriorTotal, ventasMesAnteriorMonto, clientesVariacion,
+    rangoSemana: { desde: fmtDiaCorto(desdeSemana), hasta: fmtDiaCorto(hastaHoy) },
+    rangoSemanaAnterior: { desde: fmtDiaCorto(desdeAnt), hasta: fmtDiaCorto(hastaAnt) },
     proyeccionMesActual, cosechaRealMesAnterior,
     cicloSemana, cicloSemanaAnterior, cicloMesAnterior,
     pesoSemana, pesoMesAnterior,
@@ -766,8 +810,14 @@ function filaCliente(c: ClienteVariacionSemana): string {
   const deltaTxt = c.deltaPct !== null
     ? flechaHtml(c.deltaPct, true)
     : (c.deltaUnidades !== 0 ? flechaPaqHtml(c.deltaUnidades, true) : '<span style="color:#9ca3af">—</span>');
+  // Menos facturas que la semana pasada se marca: es el caso que hay que mirar, porque
+  // una entrega que no se cargó se ve igual que una semana floja si solo se miran unidades.
+  const menos = c.facturas < c.facturasAnterior;
   return `<tr>
     <td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">${c.nombre}</td>
+    <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;${menos ? 'color:#b45309;font-weight:700' : ''}">
+      ${c.facturas}${menos ? ` <span style="font-weight:400;font-size:11px">(tenía ${c.facturasAnterior})</span>` : ''}
+    </td>
     <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${fmtN(c.actual)} u</td>
     <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${c.deltaUnidades >= 0 ? '+' : ''}${c.deltaUnidades} u</td>
     <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${deltaTxt}</td>
@@ -1112,11 +1162,20 @@ export function construirHtml(d: ReporteSemanalData): string {
     <p style="margin:0 0 8px;font-size:12px;color:#6b7280">Ventas por cultivo — últimas 4 semanas:</p>
     <div style="margin-bottom:20px">${ventasSemanasChart}</div>
 
-    <h3 style="margin:0 0 8px;font-size:14px">Principales clientes <span style="font-weight:400;color:#9ca3af">(vs. semana anterior)</span></h3>
-    <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
-      <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cliente</th><th style="padding:6px 10px;text-align:right">Esta semana</th><th style="padding:6px 10px;text-align:right">Diferencia</th><th style="padding:6px 10px;text-align:right">vs. semana ant.</th></tr></thead>
-      <tbody>${clientesFilas || '<tr><td colspan="4" style="padding:10px;color:#9ca3af;text-align:center">Sin ventas cargadas esta semana.</td></tr>'}</tbody>
+    <h3 style="margin:0 0 2px;font-size:14px">Principales clientes</h3>
+    <p style="margin:0 0 8px;font-size:11.5px;color:#9ca3af">
+      Del <strong>${d.rangoSemana.desde}</strong> al <strong>${d.rangoSemana.hasta}</strong> (7 días, hoy incluido) ·
+      contra el <strong>${d.rangoSemanaAnterior.desde}</strong> al <strong>${d.rangoSemanaAnterior.hasta}</strong>.
+    </p>
+    <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:6px">
+      <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cliente</th><th style="padding:6px 10px;text-align:right">Facturas</th><th style="padding:6px 10px;text-align:right">Esta semana</th><th style="padding:6px 10px;text-align:right">Diferencia</th><th style="padding:6px 10px;text-align:right">vs. semana ant.</th></tr></thead>
+      <tbody>${clientesFilas || '<tr><td colspan="5" style="padding:10px;color:#9ca3af;text-align:center">Sin ventas cargadas esta semana.</td></tr>'}</tbody>
     </table>
+    <p style="margin:0 0 20px;font-size:11px;color:#9ca3af">
+      <strong>Facturas</strong> es una por día de entrega (y por sucursal en los clientes que facturan separado), igual que agrupa la pantalla
+      de facturación. Si a un cliente le bajaron las facturas respecto de la semana pasada va en ámbar y dice cuántas tenía: puede ser una
+      semana con menos entregas, o una venta que quedó sin cargar. En unidades esa diferencia no se ve.
+    </p>
 
     <h3 style="margin:0 0 8px;font-size:14px">Ventas — mes en curso</h3>
     <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">

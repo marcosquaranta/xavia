@@ -27,6 +27,12 @@ function CardCamara({ datos, cultivo, cultivoKey, onSaved }: {
   datos: ResultadoCamara; cultivo: string; cultivoKey: string; onSaved: () => void;
 }) {
   const [mostrarForm, setMostrarForm] = useState(false);
+  // Tirar producto es otra cosa que recontar la cámara, y tiene su propio formulario: para
+  // anotar 20 paquetes que se pudrieron no hace falta contar todo el stock. Obligar a
+  // recontar era la forma seguro de que el descarte no se cargara nunca.
+  const [mostrarDescarte, setMostrarDescarte] = useState(false);
+  const [descarteSolo, setDescarteSolo] = useState('');
+  const [motivo, setMotivo] = useState('');
   const [tipo, setTipo] = useState<'inicial' | 'ajuste'>('ajuste');
   const [cantidad, setCantidad] = useState('');
   const [descarte, setDescarte] = useState('');
@@ -46,6 +52,29 @@ function CardCamara({ datos, cultivo, cultivoKey, onSaved }: {
       });
       if (!res.ok) { const j = await res.json(); throw new Error(j.error); }
       setMostrarForm(false); setCantidad(''); setDescarte(''); setNotas('');
+      onSaved();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function guardarDescarte(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true); setError(null);
+    try {
+      const res = await fetch('/api/stocks/camara/descarte', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cultivo: datos.cultivo, fecha,
+          descarte_paq: Number(descarteSolo),
+          notas: [motivo, notas].filter(Boolean).join(' — '),
+        }),
+      });
+      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || 'Error al guardar'); }
+      setMostrarDescarte(false); setDescarteSolo(''); setMotivo(''); setNotas('');
       onSaved();
     } catch (err: any) {
       setError(err.message);
@@ -85,11 +114,63 @@ function CardCamara({ datos, cultivo, cultivoKey, onSaved }: {
         </p>
       )}
 
-      {!mostrarForm && (
-        <button type="button" className="btn" style={{ marginTop: '10px', width: '100%', fontSize: '12.5px', fontWeight: 700, padding: '7px 12px' }}
-          onClick={() => setMostrarForm(true)}>
-          📦 {datos.base ? 'Registrar ajuste' : 'Cargar stock inicial'}
-        </button>
+      {!mostrarForm && !mostrarDescarte && (
+        <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <button type="button" className="btn" style={{ width: '100%', fontSize: '12.5px', fontWeight: 700, padding: '7px 12px' }}
+            onClick={() => { setMostrarForm(true); setError(null); }}>
+            📦 {datos.base ? 'Registrar ajuste' : 'Cargar stock inicial'}
+          </button>
+          {datos.base && (
+            <button type="button" style={{ width: '100%', fontSize: '12px', fontWeight: 700, padding: '6px 12px', background: '#fff', color: '#991b1b', border: '1px solid #fecaca', borderRadius: '7px', cursor: 'pointer' }}
+              onClick={() => { setMostrarDescarte(true); setError(null); }}>
+              🗑️ Cargar descarte
+            </button>
+          )}
+        </div>
+      )}
+
+      {mostrarDescarte && (
+        <form onSubmit={guardarDescarte} style={{ marginTop: '12px', borderTop: '1px solid #f3f4f6', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {error && <p style={{ color: '#dc2626', fontSize: '12px', margin: 0 }}>{error}</p>}
+          <p style={{ margin: 0, fontSize: '11.5px', color: '#991b1b', fontWeight: 700 }}>Producto que se tiró</p>
+          <p style={{ margin: '-4px 0 0', fontSize: '10.5px', color: '#9ca3af' }}>
+            Sale del stock y cuenta como descarte de la etapa Cámara. No hace falta recontar nada.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(100px,1fr))', gap: '8px' }}>
+            <div>
+              <label style={{ fontSize: '11px' }}>Paquetes tirados</label>
+              <input type="number" value={descarteSolo} onChange={e => setDescarteSolo(e.target.value)} required min="1" step="any" disabled={loading} autoFocus />
+            </div>
+            <div>
+              <label style={{ fontSize: '11px' }}>Fecha</label>
+              <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} disabled={loading} />
+            </div>
+          </div>
+          <div>
+            <label style={{ fontSize: '11px' }}>Motivo</label>
+            <select value={motivo} onChange={e => setMotivo(e.target.value)} disabled={loading}>
+              <option value="">Sin especificar</option>
+              <option value="Podrido">Podrido</option>
+              <option value="Pasado">Pasado / amarillo</option>
+              <option value="Golpeado">Golpeado</option>
+              <option value="Devolución de cliente">Devolución de cliente</option>
+              <option value="Otro">Otro</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: '11px' }}>Notas</label>
+            <input type="text" value={notas} onChange={e => setNotas(e.target.value)} disabled={loading} placeholder="Opcional" />
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button type="submit" className="btn" disabled={loading} style={{ flex: 1, fontSize: '12.5px' }}>
+              {loading ? 'Guardando…' : 'Registrar descarte'}
+            </button>
+            <button type="button" className="btn secondary" disabled={loading} style={{ fontSize: '12.5px' }}
+              onClick={() => { setMostrarDescarte(false); setDescarteSolo(''); setMotivo(''); }}>
+              Cancelar
+            </button>
+          </div>
+        </form>
       )}
 
       {mostrarForm && (

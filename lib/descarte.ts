@@ -97,20 +97,36 @@ export function descartePorFaseMes(lotes: Lote[], movimientos: Movimiento[], reg
   return meses;
 }
 
+// Cuántas plantas hay en un paquete, por cultivo. En rúcula el paquete se arma con 3
+// plantas; en lechuga y albahaca el paquete ES una planta.
+//
+// Hace falta porque el descarte de cámara se carga en PAQUETES (es lo que se tira: paquetes
+// ya armados) y las otras tres etapas están en PLANTAS. Sumarlos sin convertir daba un
+// total que no es ninguna cantidad real — 3.000 "unidades" que son plantas y paquetes
+// mezclados— y además SUBESTIMABA el descarte de rúcula a un tercio de lo que fue.
+export const PLANTAS_POR_PAQUETE: Record<CultivoDescarte, number> = {
+  rucula: 3, lechuga_crespa: 1, lechuga_roble: 1, albahaca: 1,
+};
+
 export interface ResumenDescarteCultivo {
   cultivo: CultivoDescarte;
-  plantinF1: number; f1F2: number; f2Cosecha: number; camara: number; total: number;
-  basePlantinF1: number; baseF1F2: number; baseF2Cosecha: number;
+  plantinF1: number; f1F2: number; f2Cosecha: number; total: number;
+  camara: number;         // en PAQUETES, que es como se carga y como se cuenta la cámara
+  camaraPlantas: number;  // los mismos paquetes en plantas, para poder sumarlo al total
+  basePlantinF1: number; baseF1F2: number; baseF2Cosecha: number; baseCamara: number;
   // % de descarte SOBRE LO QUE PASÓ POR ESA FASE (no sobre el total de descarte) — null si
   // esa fase no tuvo movimientos en el período, para no mostrar un 0% engañoso.
   pctPlantinF1: number | null; pctF1F2: number | null; pctF2Cosecha: number | null;
+  pctCamara: number | null;
 }
 
 // Resumen del descarte de cada cultivo, sumado sobre todos los meses del gráfico. El % de
 // cada fase es sobre LO QUE PASÓ POR ESA FASE (descartado + lo que siguió vivo), que es lo
-// que dice si el descarte es grave o no. El `total` en cambio sigue siendo una suma que
-// mezcla plantas (las 3 etapas de producción) con paquetes (cámara): sirve de referencia
-// de volumen, no es una cantidad físicamente exacta.
+// que dice si el descarte es grave o no.
+//
+// El `total` ahora suma plantas con plantas: el descarte de cámara se convierte de paquetes
+// a plantas antes de entrar. Antes se sumaba en paquetes y el total no era ninguna cantidad
+// real; en rúcula además mostraba un tercio del descarte verdadero.
 export function resumenDescartePorCultivo(meses: DescarteFasesMes[]): ResumenDescarteCultivo[] {
   const cultivos: CultivoDescarte[] = ['rucula', 'lechuga_crespa', 'lechuga_roble', 'albahaca'];
   return cultivos.map((cultivo) => {
@@ -121,14 +137,20 @@ export function resumenDescartePorCultivo(meses: DescarteFasesMes[]): ResumenDes
     const basePlantinF1 = meses.reduce((a, m) => a + m[cultivo].basePlantinF1, 0);
     const baseF1F2 = meses.reduce((a, m) => a + m[cultivo].baseF1F2, 0);
     const baseF2Cosecha = meses.reduce((a, m) => a + m[cultivo].baseF2Cosecha, 0);
-    const total = plantinF1 + f1F2 + f2Cosecha + camara;
+    const camaraPlantas = camara * PLANTAS_POR_PAQUETE[cultivo];
+    const total = plantinF1 + f1F2 + f2Cosecha + camaraPlantas;
+    // Lo que pasó POR la cámara es lo que salió vivo de la cosecha: lo que entró a cosecha
+    // menos lo que se descartó ahí. Es la única base honesta que se puede armar con lo que
+    // hay cargado, y deja el % de cámara comparable con el de las otras etapas.
+    const baseCamara = Math.max(0, baseF2Cosecha - f2Cosecha);
     const pctDe = (desc: number, base: number) => base > 0 ? Math.round((desc / base) * 1000) / 10 : null;
     return {
-      cultivo, plantinF1, f1F2, f2Cosecha, camara, total,
-      basePlantinF1, baseF1F2, baseF2Cosecha,
+      cultivo, plantinF1, f1F2, f2Cosecha, camara, camaraPlantas, total,
+      basePlantinF1, baseF1F2, baseF2Cosecha, baseCamara,
       pctPlantinF1: pctDe(plantinF1, basePlantinF1),
       pctF1F2: pctDe(f1F2, baseF1F2),
       pctF2Cosecha: pctDe(f2Cosecha, baseF2Cosecha),
+      pctCamara: pctDe(camaraPlantas, baseCamara),
     };
   });
 }

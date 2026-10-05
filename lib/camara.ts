@@ -187,7 +187,9 @@ export function calcularCamara(
   // nada. Se desempata explícitamente por índice original (el cargado después gana).
   const base = registros
     .map((r, i) => ({ r, i }))
-    .filter(({ r }) => r.cultivo === cultivo)
+    // Una baja por descarte NO es un recuento: su cantidad_paq va en cero. Si entrara acá
+    // como base, el stock del cultivo se derrumbaría a cero apenas se cargue un descarte.
+    .filter(({ r }) => r.cultivo === cultivo && r.tipo !== 'descarte')
     .sort((a, b) => {
       const cmp = String(b.r.fecha).localeCompare(String(a.r.fecha));
       return cmp !== 0 ? cmp : b.i - a.i;
@@ -218,6 +220,25 @@ export function calcularCamara(
 
   const totalVendido = vendidoEntre(cultivo, ventas, lotes, fechaBase, hoy);
   const totalCosechado = cosechas.reduce((a, c) => a + c.cantidad, 0);
+  // Lo que se tiró desde el último recuento. Sale del stock igual que una venta: el
+  // producto ya no está. Sin esto, cada descarte reaparecería como un faltante inexplicable
+  // en el próximo conteo — que es justo el número que se usa para detectar problemas.
+  //
+  // Solo las filas tipo 'descarte'. El `descarte_paq` que se carga junto a un AJUSTE ya
+  // está contemplado en el recuento absoluto de ese ajuste: restarlo otra vez sería
+  // descontar dos veces el mismo producto.
+  const momentoBase = Number((base as any).momento_carga) || 0;
+  const totalDescartado = registros
+    .filter((r) => {
+      if (r.cultivo !== cultivo || r.tipo !== 'descarte') return false;
+      const f = parseDate(r.fecha);
+      if (!f) return false;
+      if (f > fechaBase) return true;
+      // Mismo día que el recuento: cuenta solo si se cargó DESPUÉS. Un descarte anotado a
+      // la mañana y un recuento al mediodía ya lo tiene adentro.
+      return f.getTime() === fechaBase.getTime() && (Number((r as any).momento_carga) || 0) > momentoBase;
+    })
+    .reduce((a, r) => a + (Number(r.descarte_paq) || 0), 0);
   // Redondeado: un paquete es una unidad discreta, y desde que vendidoEntre() convierte
   // ventas en kg a paquetes-equivalente (kg*1000/gramosPorPaquete) el resultado casi
   // nunca da un número entero exacto. Sin este redondeo, un stock de p.ej. 483.51 paquetes
@@ -225,7 +246,7 @@ export function calcularCamara(
   // decimal — y salía en pantalla como "483,51" pero interpretado a simple vista como
   // "483.514" con la coma de miles invertida (formato de EEUU), un salto disparatado que
   // no era ningún error de cálculo real, solo de formato.
-  const stockActual = Math.round(Math.max(0, cantidadBase + totalCosechado - totalVendido));
+  const stockActual = Math.round(Math.max(0, cantidadBase + totalCosechado - totalVendido - totalDescartado));
 
   // FIFO para días promedio
   // Cola: base primero, luego cosechas ordenadas por fecha ASC
