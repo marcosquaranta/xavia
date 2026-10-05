@@ -1,4 +1,4 @@
-import { asegurarHoja, asegurarColumna, readSheet, appendRowObj } from './sheets';
+import { asegurarHoja, asegurarColumna, readSheet, appendRowObj, appendRowsObj } from './sheets';
 import { getComprobantes, getCobranzas, importeCobranza } from './xubio';
 import { fechaArgentinaHoy } from './ocupacion';
 import type { ClienteVenta } from './types';
@@ -158,6 +158,7 @@ export interface EnvioRecordatorio {
 export interface EnvioOmitido {
   cliente: string;
   motivo: string;
+  id_control?: string;
 }
 
 // Nombre del cliente en un comprobante de Xubio (viene como objeto o como string según
@@ -243,13 +244,33 @@ export function calcularEnvios(
     // atrás entra todo lo que siga impago, hasta el tope general.
     const hastaFecha = sumarDias(hoy, -cliente.antiguedadDias);
     const desdeFecha = sumarDias(hoy, -MAX_DIAS_ATRAS);
-    const delCliente = comprobantes.filter((c) => {
+    // Primero por nombre y después por fecha, en dos pasos a propósito: así se puede
+    // distinguir "no le encontramos NINGUNA factura" —que casi siempre es el nombre de
+    // Xubio que no coincide— de "tiene facturas pero todavía están en plazo". Son dos
+    // problemas muy distintos y en un solo filtro se veían igual: el cliente no aparecía.
+    const todasDelCliente = comprobantes.filter((c) => {
       if (Number(c?.tipo) !== 1) return false; // solo facturas, no notas de crédito/débito
-      if (norm(nombreClienteComprobante(c)) !== k) return false;
+      return norm(nombreClienteComprobante(c)) === k;
+    });
+    if (!todasDelCliente.length) {
+      omitidos.push({
+        id_control: cliente.id_control, cliente: cliente.nombre,
+        motivo: `no se encontró ninguna factura a nombre de "${cliente.nombreXubio}" en Xubio — revisá que el nombre coincida exactamente`,
+      });
+      continue;
+    }
+    const delCliente = todasDelCliente.filter((c) => {
       const f = soloFecha(c?.fecha);
       return f >= desdeFecha && f <= hastaFecha;
     });
-    if (!delCliente.length) continue;
+    if (!delCliente.length) {
+      const masNueva = todasDelCliente.map((c) => soloFecha(c?.fecha)).sort().pop() || '';
+      omitidos.push({
+        id_control: cliente.id_control, cliente: cliente.nombre,
+        motivo: `sus ${todasDelCliente.length} factura(s) todavía están en plazo (no se reclama antes de ${cliente.antiguedadDias} días${masNueva ? `; la más reciente es del ${masNueva}` : ''})`,
+      });
+      continue;
+    }
 
     const facturas = delCliente
       .map((c) => ({
@@ -266,14 +287,20 @@ export function calcularEnvios(
         return true;
       })
       .sort((a, b) => a.fecha.localeCompare(b.fecha));
-    if (!facturas.length) continue;
+    if (!facturas.length) {
+      omitidos.push({
+        id_control: cliente.id_control, cliente: cliente.nombre,
+        motivo: `sus ${delCliente.length} factura(s) del período ya están cobradas o marcadas como saldadas`,
+      });
+      continue;
+    }
 
     // Guarda de saldo: si el cliente está al día en la ventana, no se le escribe. No
     // prueba que ESTA factura esté paga (Xubio no lo dice), pero evita el caso feo de
     // reclamarle a alguien que no debe nada.
     const saldo = saldos.has(k) ? Math.round(saldos.get(k)!) : null;
     if (saldo !== null && saldo <= 0) {
-      omitidos.push({ cliente: cliente.nombre, motivo: `sin saldo pendiente (facturado − cobrado = $${saldo.toLocaleString('es-AR')} en los últimos ${DIAS_VENTANA_SALDO} días)` });
+      omitidos.push({ id_control: cliente.id_control, cliente: cliente.nombre, motivo: `sin saldo pendiente (facturado − cobrado = $${saldo.toLocaleString('es-AR')} en los últimos ${DIAS_VENTANA_SALDO} días)` });
       continue;
     }
 
@@ -569,6 +596,30 @@ export async function correrRecordatoriosCobro(
       if (r.ok) base.enviados++;
       else base.errores.push(`${envio.cliente.nombre}: ${r.error}`);
     }
+
+    // Los que NO recibieron recordatorio, con el motivo, en la misma hoja que los enviados:
+    // es la única forma de que se vean después de una corrida automática. En una simulación
+    // no se escribe nada — simular no deja rastro, para eso es.
+    if (!soloSimular && omitidos.length) {
+      const filas = omitidos.map((o, i) => ({
+        id_recordatorio: `RC-${String(seq + i + 1).padStart(5, '0')}`,
+        fecha_envio: new Date().toISOString(),
+        id_control: o.id_control || '',
+        cliente: o.cliente,
+        comprobantes: '',
+        importe: 0,
+        fecha_factura: '',
+        destinatarios: '',
+        estado: 'omitido',
+        detalle: o.motivo,
+        usuario,
+      }));
+      seq += filas.length;
+      // En un solo write: son varias filas por corrida y la hoja tiene límite de escrituras
+      // por minuto.
+      await appendRowsObj(HOJA_RECORDATORIOS, filas);
+    }
+
     base.ok = base.errores.length === 0;
     return base;
   } catch (e: any) {

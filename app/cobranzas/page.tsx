@@ -493,8 +493,8 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
                       <td style={{ padding: '6px 8px', fontWeight: 600 }}>{r.cliente}</td>
                       <td style={{ padding: '6px 8px', fontFamily: 'monospace', fontSize: '11px' }}>{r.comprobantes}</td>
                       <td style={{ padding: '6px 8px', textAlign: 'right' }}>${Math.round(Number(r.importe) || 0).toLocaleString('es-AR')}</td>
-                      <td style={{ padding: '6px 8px', color: String(r.estado) === 'enviado' ? '#059669' : '#dc2626', fontWeight: 600 }}>
-                        {String(r.estado) === 'enviado' ? '✓ Enviado' : `✕ ${r.estado}`}
+                      <td style={{ padding: '6px 8px', color: String(r.estado) === 'enviado' ? '#059669' : String(r.estado) === 'omitido' ? '#b45309' : '#dc2626', fontWeight: 600 }}>
+                        {String(r.estado) === 'enviado' ? '✓ Enviado' : String(r.estado) === 'omitido' ? '— No se le reclamó' : `✕ ${r.estado}`}
                         {r.detalle && <span style={{ color: '#9ca3af', fontWeight: 400 }}> · {r.detalle}</span>}
                       </td>
                     </tr>
