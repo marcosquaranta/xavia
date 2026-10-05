@@ -1,4 +1,5 @@
 import { readSheet, batchUpdateRows } from './sheets';
+import { letraYPuntoDeVenta } from './controlLetra';
 import { registrarEmitidas } from './caePendientes';
 import { nombreClienteVisible } from './clientes';
 import type { ClienteVenta, PrecioVenta, VentaDia } from './types';
@@ -208,6 +209,10 @@ export interface FacturaEmitida {
   emailCliente?: 'enviado' | 'sin_email' | 'error';
   // Cuando la factura no pudo salir con la fecha de la venta (ver fechaDeFactura).
   fechaAjustada?: { venta: string; factura: string };
+  // Cuando Xubio devolvió una letra distinta a la configurada para el cliente. La app pide
+  // un punto de venta, pero la letra la decide Xubio con la condición de IVA que tiene
+  // cargada de ese cliente — ver lib/controlLetra.ts.
+  letraInesperada?: { esperada: string; emitida: string };
 }
 
 export interface FacturaConError {
@@ -404,6 +409,16 @@ export async function emitirPendientes(
     if (res.ok) {
       const emitida: FacturaEmitida = { ...datos, total: totalFactura, numero: res.numeroDocumento, cae: res.cae };
       if (fechaFactura !== fechaVenta) emitida.fechaAjustada = { venta: fechaVenta, factura: fechaFactura };
+      // La letra que pedimos no es necesariamente la que salió: nosotros elegimos el punto
+      // de venta y Xubio resuelve la letra con la condición de IVA del cliente en SU base.
+      // Si no coinciden hay que arreglarlo en alguno de los dos lados, pero primero hay que
+      // enterarse — antes la factura se guardaba sin mirar la letra.
+      const letraSalida = letraYPuntoDeVenta(res.numeroDocumento).letra;
+      const letraPedida = esA ? 'A' : 'B';
+      if (letraSalida && letraSalida !== letraPedida) {
+        emitida.letraInesperada = { esperada: letraPedida, emitida: letraSalida };
+        console.error(`[facturacionEmitir] ${nombre}: se pidió ${letraPedida} y Xubio emitió ${letraSalida} (${res.numeroDocumento})`);
+      }
       // La numeración avanzó: la próxima factura de este lote no puede ir más atrás.
       if (fechaFactura > (ultimaFecha[esA ? 'A' : 'B'] || '')) ultimaFecha[esA ? 'A' : 'B'] = fechaFactura;
 

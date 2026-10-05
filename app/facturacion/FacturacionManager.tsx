@@ -177,6 +177,7 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
     const nOk = result.emitidas.length;
     const nErr = result.errores.length;
     const ajustadas = result.emitidas.filter((e: any) => e.fechaAjustada);
+    const otraLetra = result.emitidas.filter((e: any) => e.letraInesperada);
 
     // Lo que hay que poder verificar de un vistazo: qué producto, cuánto y a qué sucursal.
     // El número de comprobante y el importe quedan en letra chica — al que carga no le
@@ -257,6 +258,12 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
             <p style={{ fontSize: '13px', fontWeight: 800, color: '#166534', margin: '0 0 6px' }}>
               Facturado ({nOk}) — controlá cantidades y sucursales
             </p>
+            {otraLetra.length > 0 && (
+              <div style={{ padding: '9px 11px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', marginBottom: '8px', fontSize: '12.5px', color: '#991b1b' }}>
+                <strong>{otraLetra.length === 1 ? 'Una factura salió' : `${otraLetra.length} facturas salieron`} con otra letra:</strong>{' '}
+                {otraLetra.map((e: any) => `${e.cliente} (salió ${e.letraInesperada.emitida}, esperaba ${e.letraInesperada.esperada})`).join(' · ')}
+              </div>
+            )}
             {result.emitidas.map((e: any, i: number) => (
               <div key={i} style={{ padding: '10px 12px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderLeft: '4px solid #16a34a', borderRadius: '6px', marginBottom: '8px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '6px' }}>
@@ -269,6 +276,17 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
                   </span>
                 </div>
                 <Mercaderia items={e.items} />
+                {/* La letra no la elige la app: la app manda el punto de venta y Xubio la
+                    resuelve con la condición de IVA que tiene cargada del cliente. Cuando no
+                    coinciden, el cliente recibe una factura que no esperaba — así que se
+                    avisa fuerte y acá mismo, no en letra chica con el resto. */}
+                {e.letraInesperada && (
+                  <div style={{ marginTop: '8px', padding: '7px 9px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '5px', fontSize: '12px', color: '#991b1b' }}>
+                    <strong>Salió factura {e.letraInesperada.emitida} y este cliente está configurado como {e.letraInesperada.esperada}.</strong>
+                    {' '}La letra la decide Xubio según la condición de IVA del cliente en su base. Revisá cuál de los dos está mal:
+                    la condición en Xubio o el tipo de factura acá. La factura ya emitida no se cambia desde la app.
+                  </div>
+                )}
                 {(e.emailCliente || e.fechaAjustada) && (
                   <div style={{ marginTop: '6px', fontSize: '11px' }}>
                     {e.emailCliente === 'enviado' && <span style={{ color: '#059669' }}>📧 detalle enviado al cliente</span>}
