@@ -11,6 +11,13 @@ export interface ClienteFila {
   emailGeneral: string;
   antiguedad: number;
   antiguedadHasta: number;
+  // Hace cuántos días se le mandó el último recordatorio que SALIÓ. null = nunca se le
+  // mandó ninguno, que no es lo mismo que "hace mucho": es que para ese cliente el
+  // recordatorio nunca funcionó, y eso es lo que hay que mirar primero.
+  diasSinReclamo: number | null;
+  deuda: number | null;        // lo que figura impago hoy; null = no se pudo calcular
+  deudaFacturas: number;
+  deudaDesde: string;          // la fecha de la factura impaga más vieja
 }
 
 const inputStyle: React.CSSProperties = {
@@ -39,6 +46,13 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
   // corresponde reclamarle", ese mensaje es TODO lo que pasa — no se manda nada ni queda
   // registrado en ningún lado— así que perderlo de vista es perder la respuesta entera.
   const [resultado, setResultado] = useState<Record<string, { t: 'ok' | 'err'; s: string }>>({});
+  // La confirmación se hace DENTRO de la página y no con el confirm() del navegador.
+  //
+  // El confirm() nativo se puede bloquear: después de varios seguidos, el navegador ofrece
+  // "no permitir más diálogos" y a partir de ahí devuelve `false` sin mostrar nada. O sea
+  // que apretar "Enviar ahora" varias veces en una sesión —que es exactamente lo que se
+  // hace acá, cliente por cliente— termina en envios que no salen y no avisan.
+  const [pendiente, setPendiente] = useState<Record<string, { comprobantes: string; total: number; insistir: boolean }>>({});
   const router = useRouter();
 
   async function togglear(c: ClienteFila, activo: boolean) {
@@ -77,10 +91,12 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
 
   // Envío puntual, sin esperar al lunes. Primero simula y muestra qué saldría: un
   // recordatorio a un cliente no se puede deshacer, así que se ve antes de mandarlo.
+  // Paso 1: calcular qué saldría. No manda nada — deja el detalle a la vista para confirmar.
   async function enviarAhora(c: ClienteFila) {
     setGuardando(c.id_control); setMsg(null);
     const decir = (t: 'ok' | 'err', str: string) => setResultado((p) => ({ ...p, [c.id_control]: { t, s: str } }));
     decir('err', '');
+    setPendiente((p) => { const n = { ...p }; delete n[c.id_control]; return n; });
     try {
       const sim = await fetch(`/api/cron/recordatorios-cobro?simular=1&cliente=${encodeURIComponent(c.id_control)}`);
       const js = await sim.json();
@@ -102,8 +118,7 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
 
         // No hay facturas NUEVAS. Si las que hay ya se reclamaron antes se puede insistir:
         // el control de duplicados protege al envío automático de repetir solo, no a una
-        // decisión tomada a propósito. Se vuelve a simular ignorándolo, para poder mostrar
-        // exactamente qué se re-reclamaría antes de mandarlo.
+        // decisión tomada a propósito.
         const sim2 = await fetch(`/api/cron/recordatorios-cobro?simular=1&insistir=1&cliente=${encodeURIComponent(c.id_control)}`);
         const js2 = await sim2.json();
         det = (js2.detalle || [])[0];
@@ -114,20 +129,25 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
         insistir = true;
       }
 
-      const ok = confirm(
-        (insistir
-          ? `A ${c.nombre} ya se le reclamaron estas facturas antes. Se le van a reclamar DE NUEVO, ahora.\n\n`
-          : `Se le va a mandar el recordatorio a ${c.nombre} AHORA.\n\n`)
-        + `Comprobantes: ${det.comprobantes}\n`
-        + `Total: $${Math.round(det.total).toLocaleString('es-AR')}\n\n`
-        + 'El mail sale al cliente con copia a administración. ¿Confirmás?'
-      );
-      if (!ok) { decir('err', 'Cancelado, no se mandó nada.'); setGuardando(null); return; }
+      setPendiente((p) => ({ ...p, [c.id_control]: { comprobantes: det.comprobantes, total: det.total, insistir } }));
+    } catch (e: any) {
+      decir('err', e.message || 'Error al calcular');
+    }
+    setGuardando(null);
+  }
 
-      const env = await fetch(`/api/cron/recordatorios-cobro?cliente=${encodeURIComponent(c.id_control)}${insistir ? '&insistir=1' : ''}`);
+  // Paso 2: mandar de verdad.
+  async function confirmarEnvio(c: ClienteFila) {
+    const pend = pendiente[c.id_control];
+    if (!pend) return;
+    setGuardando(c.id_control);
+    const decir = (t: 'ok' | 'err', str: string) => setResultado((p) => ({ ...p, [c.id_control]: { t, s: str } }));
+    try {
+      const env = await fetch(`/api/cron/recordatorios-cobro?cliente=${encodeURIComponent(c.id_control)}${pend.insistir ? '&insistir=1' : ''}`);
       const je = await env.json();
       if (!env.ok || (je.errores || []).length) throw new Error((je.errores || []).join(' · ') || 'Error al enviar');
-      decir('ok', `✓ ${insistir ? 'Re-enviado' : 'Enviado'} — ${det.comprobantes}`);
+      decir('ok', `✓ ${pend.insistir ? 'Re-enviado' : 'Enviado'} — ${pend.comprobantes}`);
+      setPendiente((p) => { const n = { ...p }; delete n[c.id_control]; return n; });
       // Sin esto la tabla de "Recordatorios enviados" sigue mostrando lo de antes: se
       // renderiza en el servidor y el envío pasó acá, en el navegador. El mail salía, pero
       // desde la pantalla parecía que no había pasado nada.
@@ -174,6 +194,8 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
               <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>Cliente</th>
               <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 600, width: '90px' }}>Recordatorio</th>
               <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 600, width: '110px' }}>Plazo<br /><span style={{ fontWeight: 400, fontSize: '10px' }}>no se reclama antes de (días)</span></th>
+              <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600, width: '110px' }}>Nos debe</th>
+              <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600, width: '105px' }}>Último reclamo</th>
               <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>Mail de cobranzas</th>
               <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600 }}></th>
             </tr>
@@ -193,6 +215,41 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
                     style={{ ...inputStyle, width: '58px', display: 'inline-block', textAlign: 'right' }}
                     onBlur={(e) => guardarAntiguedad(c, e.target.value)} />
                 </td>
+                {/* Lo que debe y hace cuánto no se le reclama, juntos: por separado no
+                    dicen nada. Dos millones reclamados ayer es el sistema andando; dos
+                    millones sin reclamar hace un mes es lo que hay que accionar. */}
+                <td style={{ padding: '6px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  {c.deuda === null ? (
+                    <span style={{ color: '#d1d5db' }}>—</span>
+                  ) : (
+                    <>
+                      <span style={{ fontWeight: 700, color: c.deuda > 0 ? '#111827' : '#9ca3af' }}>
+                        ${Math.round(c.deuda).toLocaleString('es-AR')}
+                      </span>
+                      {c.deudaFacturas > 0 && (
+                        <span style={{ display: 'block', fontSize: '10px', color: '#9ca3af' }}>
+                          {c.deudaFacturas} fact.{c.deudaDesde ? ` · desde ${c.deudaDesde.slice(8, 10)}/${c.deudaDesde.slice(5, 7)}` : ''}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </td>
+                <td style={{ padding: '6px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  {c.diasSinReclamo === null ? (
+                    // Nunca se le mandó uno. Es distinto de "hace mucho" y se dice distinto:
+                    // si un cliente prendido nunca recibió nada, algo no está funcionando.
+                    <span style={{ color: c.activo ? '#b45309' : '#9ca3af', fontWeight: c.activo ? 700 : 400, fontSize: '11.5px' }}>
+                      nunca
+                    </span>
+                  ) : (
+                    <span style={{
+                      fontSize: '11.5px', fontWeight: c.diasSinReclamo > 21 ? 700 : 400,
+                      color: c.diasSinReclamo > 21 ? '#b45309' : '#6b7280',
+                    }}>
+                      {c.diasSinReclamo === 0 ? 'hoy' : `hace ${c.diasSinReclamo}d`}
+                    </span>
+                  )}
+                </td>
                 <td style={{ padding: '6px 8px' }}>
                   <input defaultValue={c.email} disabled={guardando !== null} style={inputStyle}
                     placeholder={c.emailGeneral ? `${c.emailGeneral} (el general)` : 'sin mail cargado'}
@@ -208,9 +265,35 @@ export function ClientesRecordatorio({ clientes }: { clientes: ClienteFila[] }) 
                   )}
                 </td>
               </tr>,
+              pendiente[c.id_control] ? (
+                <tr key={`${c.id_control}-p`}>
+                  <td colSpan={7} style={{ padding: '0 8px 8px' }}>
+                    <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '8px 10px' }}>
+                      <p style={{ margin: '0 0 2px', fontSize: '12px', fontWeight: 700, color: '#92400e' }}>
+                        {pendiente[c.id_control].insistir
+                          ? `A ${c.nombre} ya se le reclamaron estas facturas. Se le reclaman DE NUEVO:`
+                          : `Se le manda el recordatorio a ${c.nombre} ahora:`}
+                      </p>
+                      <p style={{ margin: '0 0 6px', fontSize: '11.5px', color: '#78350f' }}>
+                        <span style={{ fontFamily: 'monospace' }}>{pendiente[c.id_control].comprobantes}</span>
+                        {' — '}<strong>${Math.round(pendiente[c.id_control].total).toLocaleString('es-AR')}</strong>
+                        <span style={{ color: '#9ca3af' }}> · sale al cliente con copia a administración</span>
+                      </p>
+                      <button onClick={() => confirmarEnvio(c)} disabled={guardando !== null}
+                        style={{ fontSize: '11.5px', padding: '4px 11px', background: '#166534', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 700, marginRight: '6px' }}>
+                        {guardando === c.id_control ? 'Enviando…' : 'Confirmar y enviar'}
+                      </button>
+                      <button onClick={() => setPendiente((pr) => { const n = { ...pr }; delete n[c.id_control]; return n; })} disabled={guardando !== null}
+                        style={{ fontSize: '11.5px', padding: '4px 11px', background: '#fff', color: '#374151', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer' }}>
+                        Cancelar
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ) : null,
               resultado[c.id_control]?.s ? (
                 <tr key={`${c.id_control}-r`}>
-                  <td colSpan={5} style={{ padding: '0 8px 7px' }}>
+                  <td colSpan={7} style={{ padding: '0 8px 7px' }}>
                     <span style={{
                       display: 'inline-block', fontSize: '11.5px', fontWeight: 600, padding: '4px 8px', borderRadius: '5px',
                       color: resultado[c.id_control].t === 'ok' ? '#166534' : '#991b1b',

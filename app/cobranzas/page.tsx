@@ -9,8 +9,7 @@ import MovimientosCobranza from '@/components/MovimientosCobranza';
 import { HOJA_COBRANZAS_CACHE, type CobranzaCache } from '@/lib/xubioCache';
 import {
   HOJA_RECORDATORIOS, COL_ACTIVO, COL_EMAIL, CONFIG_DATOS_PAGO, DATOS_PAGO_DEFAULT,
-  ANTIGUEDAD_DEFAULT, ANTIGUEDAD_HASTA_DEFAULT, COL_ANTIGUEDAD, COL_ANTIGUEDAD_HASTA, type RecordatorioCobro,
-} from '@/lib/recordatoriosCobro';
+  ANTIGUEDAD_DEFAULT, ANTIGUEDAD_HASTA_DEFAULT, COL_ANTIGUEDAD, COL_ANTIGUEDAD_HASTA, type RecordatorioCobro, diasEntre } from '@/lib/recordatoriosCobro';
 import { nombreClienteVisible } from '@/lib/clientes';
 import { HOJA_COBROS, type CobroRegistrado } from '@/lib/cobros';
 import { getCuentas, getCobranzas, getComprobantes, type CuentaXubio } from '@/lib/xubio';
@@ -172,9 +171,26 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   const impagasCliente: Record<string, FacturaCliente[]> = {};
   let cuentasXubio: CuentaXubio[] = [];
   let errorCuentas: string | null = null;
+  // Cuánto debe cada cliente y desde cuándo. Sale de las MISMAS facturas que ya se arman
+  // acá abajo para la bandeja — no se consulta nada de más— y va a la tabla de
+  // recordatorios: un cliente al que hace tres semanas no se le reclama y debe dos
+  // millones tiene que poder verse sin abrir nada.
+  const deudaPorCliente: Record<string, { monto: number; cantidad: number; masVieja: string }> = {};
   try {
     const [comps, cobs] = await pedidoXubio;
     const todas = facturasPorCliente(comps, cobros, clientes, saldadasSet, cobs);
+    for (const [id, fs] of Object.entries(todas)) {
+      // Impaga = ni imputada desde la app, ni cubierta por los cobros de Xubio, ni dada por
+      // saldada a mano. Es el mismo criterio con el que se decide qué reclamar, así que el
+      // número de la tabla y el del mail no se pueden contradecir.
+      const impagas = fs.filter((f) => !f.yaCobrada && !f.cubierta && !f.saldadaManual);
+      if (!impagas.length) continue;
+      deudaPorCliente[String(id)] = {
+        monto: impagas.reduce((a, f) => a + (Number(f.importe) || 0), 0),
+        cantidad: impagas.length,
+        masVieja: impagas.map((f) => f.fecha).sort()[0] || '',
+      };
+    }
     // Para la bandeja alcanza con los clientes que TIENEN algo pendiente de imputar, que
     // son un puñado: es lo único que se mira al abrir la pantalla. El resumen de impagas,
     // que sí necesita a todos, se arma aparte y solo cuando se lo pide.
@@ -224,6 +240,18 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
     .map((a) => ({ alias: String(a.alias).trim(), cliente: String(a.cliente || ''), fecha: String(a.fecha_aprendido || '') }))
     .sort((a, b) => b.fecha.localeCompare(a.fecha));
 
+  // El último recordatorio que SALIÓ. Los omitidos no cuentan: justamente la pregunta que
+  // esto contesta es "¿hace cuánto que no le reclamamos?", y una fila que dice que NO se le
+  // reclamó sería la respuesta contraria.
+  const ultimoEnvio = new Map<string, string>();
+  for (const r of enviados) {
+    if (String(r.estado || '') !== 'enviado') continue;
+    const id = String(r.id_control || '').trim();
+    const f = String(r.fecha_envio || '');
+    if (!id || !f) continue;
+    if (!ultimoEnvio.has(id) || f > ultimoEnvio.get(id)!) ultimoEnvio.set(id, f);
+  }
+
   const filas: ClienteFila[] = clientes
     .filter((c) => String(c.activo || '').toUpperCase() !== 'NO')
     .map((c) => ({
@@ -234,6 +262,15 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
       emailGeneral: String(c.email || ''),
       antiguedad: Number((c as any)[COL_ANTIGUEDAD]) > 0 ? Number((c as any)[COL_ANTIGUEDAD]) : ANTIGUEDAD_DEFAULT,
       antiguedadHasta: Number((c as any)[COL_ANTIGUEDAD_HASTA]) > 0 ? Number((c as any)[COL_ANTIGUEDAD_HASTA]) : ANTIGUEDAD_HASTA_DEFAULT,
+      diasSinReclamo: (() => {
+        const f = ultimoEnvio.get(String(c.id_control).trim());
+        // null = nunca se le mandó uno. No es lo mismo que "hace mucho": es que el
+        // recordatorio nunca funcionó para ese cliente, y eso es lo que hay que mirar.
+        return f ? diasEntre(f.slice(0, 10), hoyF) : null;
+      })(),
+      deuda: deudaPorCliente[String(c.id_control)]?.monto ?? null,
+      deudaFacturas: deudaPorCliente[String(c.id_control)]?.cantidad ?? 0,
+      deudaDesde: deudaPorCliente[String(c.id_control)]?.masVieja ?? '',
     }))
     // Los prendidos primero: son los que se miran.
     .sort((a, b) => (a.activo === b.activo ? a.nombre.localeCompare(b.nombre) : a.activo ? -1 : 1));
