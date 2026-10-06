@@ -35,11 +35,14 @@ const fmtDia = (f: string) => { const [y, m, d] = String(f || '').split('-'); re
 // Una fila de la bandeja: un movimiento que entró y todavía no se imputó. Se resuelve
 // entera acá adentro —cliente, facturas, cuenta— sin salir a otra pantalla, porque el
 // trabajo real es ir una por una y cualquier salto extra se paga por cada movimiento.
-function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridasIniciales }: {
+function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridasIniciales, ultimaCuentaPorCliente }: {
   item: ItemUI; clientes: ClienteOpt[]; cuentas: { id: number; nombre: string }[];
   onListo: (msg: string) => void;
   facturasPrecargadas?: Record<string, FacturaCliente[]>;
   sugeridasIniciales?: string[];
+  // Dónde entró la plata de este cliente la última vez, por id_control. Un cliente paga
+  // casi siempre a la misma cuenta.
+  ultimaCuentaPorCliente?: Record<string, string>;
 }) {
   const router = useRouter();
   const [abierto, setAbierto] = useState(false);
@@ -47,10 +50,21 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
   // Las tres cuentas reales, y la que sugiere el propio aviso: si dice "transferencia a
   // Banco Macro", tiene que quedar Macro elegido y no la de siempre.
   const cuentasOk = useMemo(() => cuentasElegibles(cuentas), [cuentas]);
+  const cuentaDeCostumbre = (id: string) => {
+    const nombre = id ? (ultimaCuentaPorCliente?.[id] || '') : '';
+    if (!nombre) return '';
+    const c = cuentaSugerida(cuentas, nombre);
+    return c ? String(c.id) : '';
+  };
   const [cuentaId, setCuentaId] = useState(() => {
     const sug = cuentaSugerida(cuentas, `${item.descripcion} ${item.cliente}`);
-    return sug ? String(sug.id) : (cuentas.length ? String(cuentas[0].id) : '');
+    if (sug) return String(sug.id);
+    const costumbre = cuentaDeCostumbre(item.id_control || '');
+    if (costumbre) return costumbre;
+    return cuentas.length ? String(cuentas[0].id) : '';
   });
+  // Cuando el aviso no dice dónde entró, elegir el cliente alcanza para saberlo.
+  const [cuentaTocada, setCuentaTocada] = useState(false);
   // Las facturas ya vienen con la página: abrir la fila no dispara ninguna consulta.
   const [facturas, setFacturas] = useState<FacturaCliente[]>(
     () => (item.id_control && facturasPrecargadas?.[item.id_control]) || [],
@@ -266,14 +280,21 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
             <div>
               <label style={{ fontSize: '10.5px', color: '#6b7280', fontWeight: 600 }}>¿De qué cliente es?</label>
               <select value={idControl} disabled={trabajando} style={inputStyle}
-                onChange={e => { setIdControl(e.target.value); traerFacturas(e.target.value); }}>
+                onChange={e => {
+                  const id = e.target.value;
+                  setIdControl(id); traerFacturas(id);
+                  if (!cuentaTocada) {
+                    const costumbre = cuentaDeCostumbre(id);
+                    if (costumbre) setCuentaId(costumbre);
+                  }
+                }}>
                 <option value="">— Elegir —</option>
                 {clientes.map(c => <option key={c.id_control} value={c.id_control}>{c.nombre}</option>)}
               </select>
             </div>
             <div>
               <label style={{ fontSize: '10.5px', color: '#6b7280', fontWeight: 600 }}>¿Dónde entró?</label>
-              <select value={cuentaId} onChange={e => setCuentaId(e.target.value)} disabled={trabajando} style={inputStyle}>
+              <select value={cuentaId} onChange={e => { setCuentaId(e.target.value); setCuentaTocada(true); }} disabled={trabajando} style={inputStyle}>
                 <option value="">— Elegir cuenta —</option>
                 {(() => {
                   // Las de cobro arriba, el resto detrás de un separador: el plan de cuentas
@@ -487,11 +508,13 @@ interface AliasUI { alias: string; cliente: string; fecha: string }
 
 export default function BandejaCobranzas({
   items, clientes, cuentas, aliases = [], facturasPorCliente = {}, sugeridas = {}, cuentasFaltantes = [],
+  ultimaCuentaPorCliente = {},
 }: {
   items: ItemUI[]; clientes: ClienteOpt[]; cuentas: { id: number; nombre: string }[];
   aliases?: AliasUI[];
   facturasPorCliente?: Record<string, FacturaCliente[]>;
   sugeridas?: Record<string, string[]>;
+  ultimaCuentaPorCliente?: Record<string, string>;
   // Las cuentas esperadas que Xubio no devolvió. Se avisa una vez arriba y no en cada fila:
   // que falte una es un problema de configuración de Xubio, no de este cobro.
   cuentasFaltantes?: string[];
@@ -686,6 +709,7 @@ export default function BandejaCobranzas({
           {items.map(i => (
             <Fila key={i.id_item} item={i} clientes={clientes} cuentas={cuentas}
               facturasPrecargadas={facturasPorCliente} sugeridasIniciales={sugeridas[i.id_item]}
+              ultimaCuentaPorCliente={ultimaCuentaPorCliente}
               onListo={(m) => { setMsg(m); setErr(null); }} />
           ))}
         </>

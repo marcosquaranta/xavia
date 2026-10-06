@@ -261,11 +261,18 @@ export async function POST(req: NextRequest) {
 
     if (!contenido || !contenido.texto) {
       console.error('[cobranzas/email] sin contenido para', data?.email_id);
+      const rSin = await crearItemDesdeAviso({
+        texto: '(no se pudo leer el cuerpo del mensaje)',
+        asunto: String(data?.subject || ''),
+        remitente: String(data?.from || ''),
+        origen: 'mail',
+        usuario: 'correo reenviado',
+      }).catch(() => ({ ok: false } as any));
       const acuseSin = await acusarRecibo({
         asunto: String(data?.subject || ''), remitente: String(data?.from || ''),
-        resultado: { ok: false }, texto: '(no se pudo leer el cuerpo del mensaje)',
+        resultado: rSin, texto: '(no se pudo leer el cuerpo del mensaje)',
       });
-      return NextResponse.json({ ok: true, sinContenido: true, acuse: acuseSin });
+      return NextResponse.json({ ok: true, sinContenido: true, resultado: rSin, acuse: acuseSin });
     }
 
     // Los adjuntos se piden SIEMPRE, no solo cuando el webhook los anuncia.

@@ -36,6 +36,11 @@ export const dynamic = 'force-dynamic';
 // pantalla tiene que ser lo mismo que se le reclama al cliente.
 const DIAS_PAGINA = 365;
 
+// Mismo criterio que el resto: sin acentos, sin mayúsculas y sin puntuación, porque
+// "NAF S.R.L." y "NAF SRL" son el mismo cliente.
+const normNombreCuenta = (x: any) => String(x || '')
+  .toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+
 const sumarDiasISO = (fecha: string, dias: number) => {
   const d = new Date(fecha + 'T12:00:00');
   d.setDate(d.getDate() + dias);
@@ -252,6 +257,35 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
     if (!ultimoEnvio.has(id) || f > ultimoEnvio.get(id)!) ultimoEnvio.set(id, f);
   }
 
+  // Dónde entró la plata de cada cliente la última vez.
+  //
+  // Un cliente paga casi siempre a la misma cuenta. Tener que elegirla de nuevo en cada
+  // cobro es una decisión que ya está tomada, y es justo el campo donde equivocarse manda la
+  // plata a la cuenta que no es. Sale de las cobranzas que ya están en Xubio (la copia
+  // local), que es el registro de lo que realmente pasó.
+  const ultimaCuentaPorCliente: Record<string, string> = {};
+  {
+    const clavePorNombre = new Map<string, string>();
+    for (const c of clientes) {
+      const k = normNombreCuenta(c.nombre_xubio);
+      if (k) clavePorNombre.set(k, String(c.id_control));
+    }
+    const masReciente: Record<string, string> = {};
+    for (const cob of cobranzasCache) {
+      const cuenta = String(cob.cuenta || '').trim();
+      if (!cuenta) continue;
+      const id = clavePorNombre.get(normNombreCuenta(String(cob.cliente || '')));
+      if (!id) continue;
+      const f = String(cob.fecha || '').slice(0, 10);
+      if (!masReciente[id] || f > masReciente[id]) {
+        masReciente[id] = f;
+        // Una cobranza puede tener dos instrumentos (parte efectivo, parte transferencia) y
+        // entonces `cuenta` trae los dos nombres. Se usa el primero: es el que más pesó.
+        ultimaCuentaPorCliente[id] = cuenta.split(/\s*[+,]\s*/)[0].trim();
+      }
+    }
+  }
+
   const filas: ClienteFila[] = clientes
     .filter((c) => String(c.activo || '').toUpperCase() !== 'NO')
     .map((c) => ({
@@ -390,6 +424,7 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
               cuentasFaltantes={cuentasFaltantes(cuentasXubio)}
               aliases={aliasAprendidos}
               facturasPorCliente={facturasCliente}
+              ultimaCuentaPorCliente={ultimaCuentaPorCliente}
               sugeridas={sugeridasPorItem}
             />
           </div>

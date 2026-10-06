@@ -190,13 +190,19 @@ export async function crearItemDesdeAviso(args: {
     }
   }
 
-  if (!(Number(importe) > 0)) return { ok: false, motivo: 'sin_importe', comentarioIA };
+  const sinImporte = !(Number(importe) > 0);
+  if (sinImporte) importe = 0;
 
   const fecha = /^\d{4}-\d{2}-\d{2}$/.test(String(args.fechaForzada || ''))
     ? String(args.fechaForzada)
     : (leido.fecha || fechaIA || hoy);
 
-  const hash = hashMovimiento(fecha, Number(importe), `aviso ${comprobantes.join(',')}`);
+  // Sin importe, el hash no puede distinguir dos avisos del mismo día: todos serían
+  // (fecha, 0, "aviso "). Se le suma un pedazo del asunto y del texto, que es lo que
+  // cambia entre un mail y otro y lo que NO cambia entre un reintento y el original.
+  const hash = sinImporte
+    ? hashMovimiento(fecha, 0, `aviso ${asunto} ${texto}`.replace(/\s+/g, ' ').slice(0, 180))
+    : hashMovimiento(fecha, Number(importe), `aviso ${comprobantes.join(',')}`);
   if (previos.some(p => String(p.hash) === hash)) return { ok: false, motivo: 'duplicado' };
 
   // Último intento por texto con el nombre que sacó la IA del PDF: cuando el pagador figura
@@ -208,6 +214,7 @@ export async function crearItemDesdeAviso(args: {
   // ponerla acá la deja elegida sola, y además queda a la vista en "Dice el aviso" para
   // poder desconfiar.
   const descripcion = [
+    sinImporte ? 'NO SE PUDO LEER EL IMPORTE — completálo a mano' : '',
     args.remitente ? `De ${args.remitente}` : '',
     asunto || 'Aviso de pago',
     comprobantes.length ? `facturas ${comprobantes.join(', ')}` : '',
@@ -232,7 +239,10 @@ export async function crearItemDesdeAviso(args: {
     estado: 'pendiente',
     id_cobro: '',
     usuario: args.usuario,
-    nota: cand ? `reconocido por ${cand.confianza}${leidoCon === 'ia' ? ' (IA)' : ''}` : 'sin reconocer al cliente',
+    nota: [
+      sinImporte ? 'falta el importe' : '',
+      cand ? `reconocido por ${cand.confianza}${leidoCon === 'ia' ? ' (IA)' : ''}` : 'sin reconocer al cliente',
+    ].filter(Boolean).join(' · '),
   });
 
   return {
