@@ -1,9 +1,16 @@
 'use client';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { sugerirCombinaciones, toleranciaDe } from '@/lib/conciliacionCobro';
-import { cuentasElegibles, cantidadPreferidas } from '@/lib/cuentasCobro';
+import { cuentasElegibles, cantidadPreferidas, cuentasDeRetencion } from '@/lib/cuentasCobro';
+import { retencionDesdeImporte, cuentaParaRetencion } from '@/lib/retenciones';
 
-interface ClienteOpt { id_control: string; nombre: string }
+interface ClienteOpt {
+  id_control: string;
+  nombre: string;
+  // % que este cliente retiene al pagar (Admin → Clientes de venta). Sirve para proponer
+  // la retención sola, igual que en la bandeja.
+  retencionPct?: number;
+}
 interface CobroFila {
   id_cobro: string; cliente: string; fecha: string; importe: number;
   numero_recibo: string; transaccionid: string; estado: string; observacion: string;
@@ -45,6 +52,11 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
   const [importe, setImporte] = useState('');
   const [cuentaId, setCuentaId] = useState('');
   const [observacion, setObservacion] = useState('');
+  // Retención sufrida. Sin esto, un cobro con retención se registraba por el neto y la
+  // factura quedaba figurando impaga para siempre por el monto retenido — la deuda se
+  // llenaba de saldos de monedas que nadie va a cobrar nunca.
+  const [retencion, setRetencion] = useState('');
+  const [cuentaRet, setCuentaRet] = useState('');
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; s: string } | null>(null);
   const [filas, setFilas] = useState(cobros);
@@ -63,6 +75,9 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
     setCliente(idControl);
     setFacturas([]); setElegidas([]); setFacturasError(null);
     setImporte(''); setImporteTocado(false);
+    // Cada cliente retiene un porcentaje distinto (o ninguno): dejar el número del cliente
+    // anterior es peor que dejarlo vacío.
+    setRetencion('');
     if (!idControl) return;
     setFacturasLoading(true);
     try {
@@ -94,6 +109,16 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
     if (!cuentaId && cuentasOrdenadas.length) setCuentaId(String(cuentasOrdenadas[0].id));
   }, [cuentasOrdenadas, cuentaId]);
 
+  // Siempre ganancias, que es la única retención que aplica hoy. El desplegable queda por
+  // si alguna vez hay otra, pero en el caso normal no hay que elegir nada.
+  const cuentasRet = useMemo(() => cuentasDeRetencion(cuentas), [cuentas]);
+  useEffect(() => {
+    if (!cuentaRet) {
+      const c = cuentaParaRetencion(cuentas);
+      if (c) setCuentaRet(String(c.id));
+    }
+  }, [cuentas, cuentaRet]);
+
   // Combinaciones de facturas que dan ese importe. Se calculan cuando el importe se escribió
   // a mano — que es el caso real: entró una transferencia y hay que averiguar qué cancela.
   const sugerencias = useMemo(() => {
@@ -106,6 +131,7 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
     setElegidas(numeros);
   }
 
+  const pctCliente = Number(clientes.find((c) => c.id_control === cliente)?.retencionPct) || 0;
   const totalElegido = facturas.filter((f) => elegidas.includes(f.numero)).reduce((a, f) => a + f.importe, 0);
   const difImporte = Math.round(Number(importe) || 0) - Math.round(totalElegido);
 
@@ -127,15 +153,26 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
     if (!cliente || !(Number(importe) > 0) || !cuentaId) {
       setMsg({ t: 'err', s: 'Completá cliente, importe y cuenta.' }); return;
     }
+    if (Number(retencion) > 0 && !(Number(cuentaRet) > 0)) {
+      setMsg({ t: 'err', s: 'Elegí a qué cuenta va la retención.' }); return;
+    }
     const nombre = clientes.find((c) => c.id_control === cliente)?.nombre || '';
     const cuentaNom = cuentas.find((c) => String(c.id) === cuentaId)?.nombre || '';
-    if (!confirm(`Se va a registrar en Xubio un cobro de $${Number(importe).toLocaleString('es-AR')} de ${nombre}, en ${cuentaNom}, con fecha ${fmtDia(fecha)}.\n\nEsto impacta en la contabilidad. ¿Confirmás?`)) return;
+    const retTxt = Number(retencion) > 0
+      ? `\nRetención: $${Number(retencion).toLocaleString('es-AR')} — cancela $${(Math.round(Number(importe)) + Math.round(Number(retencion))).toLocaleString('es-AR')} de facturas.`
+      : '';
+    if (!confirm(`Se va a registrar en Xubio un cobro de $${Number(importe).toLocaleString('es-AR')} de ${nombre}, en ${cuentaNom}, con fecha ${fmtDia(fecha)}.${retTxt}\n\nEsto impacta en la contabilidad. ¿Confirmás?`)) return;
 
     setLoading(true); setMsg(null);
     try {
       const r = await fetch('/api/cobranzas/cobro', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_control: cliente, fecha, importe: Number(importe), cuentaId: Number(cuentaId), observacion, comprobantes: elegidas }),
+        body: JSON.stringify({
+          id_control: cliente, fecha, importe: Number(importe), cuentaId: Number(cuentaId),
+          observacion, comprobantes: elegidas,
+          retencion: Number(retencion) || 0,
+          cuentaRetencionId: Number(retencion) > 0 ? Number(cuentaRet) || 0 : 0,
+        }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'Error al registrar');
@@ -236,6 +273,35 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
                 })()}
               </select>
             </div>
+            <div>
+              <label style={labelStyle}>Retención sufrida (opcional)</label>
+              <div style={{ display: 'flex', gap: '5px' }}>
+                <input type="number" value={retencion} onChange={(e) => setRetencion(e.target.value)} disabled={loading}
+                  style={{ ...inputStyle, flex: 1 }} placeholder="0" min="0" />
+                {pctCliente > 0 && (
+                  <button type="button" disabled={loading || !(Number(importe) > 0)}
+                    onClick={() => setRetencion(String(retencionDesdeImporte(Number(importe) || 0, pctCliente)))}
+                    title={`${pctCliente}% del importe, según lo configurado para este cliente`}
+                    style={{ fontSize: '11px', fontWeight: 700, padding: '0 8px', background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    {pctCliente}%
+                  </button>
+                )}
+              </div>
+              {Number(retencion) > 0 && (
+                <p style={{ margin: '3px 0 0', fontSize: '10px', color: '#6b7280' }}>
+                  Cancela {fmt$(Math.round(Number(importe) || 0) + Math.round(Number(retencion)))} de facturas.
+                </p>
+              )}
+            </div>
+            {Number(retencion) > 0 && (
+              <div>
+                <label style={labelStyle}>Cuenta de la retención</label>
+                <select value={cuentaRet} onChange={(e) => setCuentaRet(e.target.value)} disabled={loading} style={inputStyle}>
+                  <option value="">— elegí la cuenta —</option>
+                  {cuentasRet.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                </select>
+              </div>
+            )}
             <div style={{ gridColumn: '1 / -1' }}>
               <label style={labelStyle}>Observación (opcional)</label>
               <input value={observacion} onChange={(e) => setObservacion(e.target.value)} disabled={loading} style={inputStyle}

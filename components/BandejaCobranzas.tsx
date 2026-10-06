@@ -306,14 +306,14 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
                 <button key={i} type="button" onClick={() => { setElegidas(sg.numeros); setACuenta(false); }} disabled={trabajando}
                   style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', width: '100%', textAlign: 'left',
                     cursor: 'pointer', fontSize: '11.5px', padding: '4px 7px', marginBottom: '4px',
-                    background: activa ? '#eef6ff' : 'white',
-                    border: activa ? '2px solid #2563eb' : '1px solid #dbe4fb', borderRadius: '5px' }}>
+                    background: activa ? '#eef6ff' : sg.masViejas ? '#fffbeb' : 'white',
+                    border: activa ? '2px solid #2563eb' : sg.masViejas ? '2px solid #fcd34d' : '1px solid #dbe4fb', borderRadius: '5px' }}>
                   <span style={{ fontSize: '11px', color: activa ? '#1d4ed8' : '#cbd5e1' }}>{activa ? '\u25c9' : '\u25cb'}</span>
                   <span style={{ fontWeight: 700 }}>{sg.numeros.length === 1 ? '1 factura' : `${sg.numeros.length} facturas`}</span>
                   {sg.masViejas && (
-                    <span title="Las facturas más viejas sin cobrar, sumadas hasta acercarse al importe"
-                      style={{ fontSize: '9.5px', fontWeight: 700, padding: '1px 5px', borderRadius: '8px', background: '#fef3c7', color: '#92400e' }}>
-                      las más viejas
+                    <span title="Las facturas más viejas sin cobrar, sumadas hasta acercarse al importe. Casi siempre es esta: el que paga, paga lo más viejo que debe."
+                      style={{ fontSize: '10px', fontWeight: 800, padding: '2px 7px', borderRadius: '8px', background: '#b45309', color: '#fff' }}>
+                      ⏳ LAS MÁS VIEJAS · suele ser esta
                     </span>
                   )}
                   {sg.consecutivas && <span style={{ fontSize: '9.5px', fontWeight: 700, padding: '1px 5px', borderRadius: '8px', background: '#ede9fe', color: '#5b21b6' }}>seguidas</span>}

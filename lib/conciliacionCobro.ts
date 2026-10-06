@@ -221,16 +221,24 @@ export function sugerirCombinaciones(
       reciente(b) - reciente(a))
     .slice(0, MAX_RESULTADOS);
 
-  // La fila de referencia va al final y fuera del orden: no compite con las que sí dan el
-  // importe, es otra pregunta —"¿y si estuviera pagando lo más viejo?"— y la respuesta vale
-  // aunque no cierre. Si resulta ser una de las que ya están, se marca esa en vez de
-  // repetirla.
+  // Las más viejas van PRIMERO, no al final.
+  //
+  // Estaban al final porque no compiten por dar el importe exacto — son otra pregunta. Pero
+  // en la práctica la respuesta correcta casi siempre es esa: un cliente que paga, paga lo
+  // más viejo que debe. Dejarlas últimas, abajo de tres combinaciones que cierran por
+  // casualidad, hacía que la opción buena fuera la menos visible de la lista.
   const viejas = combinacionMasViejas(facturas, objetivo, opciones);
   if (viejas) {
     const clave = [...viejas.numeros].sort().join('|');
     const yaEstaba = ordenadas.find(c => [...c.numeros].sort().join('|') === clave);
-    if (yaEstaba) yaEstaba.masViejas = true;
-    else ordenadas.push(viejas);
+    if (yaEstaba) {
+      yaEstaba.masViejas = true;
+      // Si ya estaba en la lista, sube al primer puesto.
+      const i = ordenadas.indexOf(yaEstaba);
+      if (i > 0) { ordenadas.splice(i, 1); ordenadas.unshift(yaEstaba); }
+    } else {
+      ordenadas.unshift(viejas);
+    }
   }
   return ordenadas;
 }

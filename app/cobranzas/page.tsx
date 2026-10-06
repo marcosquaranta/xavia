@@ -409,7 +409,11 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
             <RegistrarCobro
               cuentasIniciales={cuentasXubio}
               errorCuentas={errorCuentas}
-              clientes={filas.map((f) => ({ id_control: f.id_control, nombre: f.nombre }))}
+              clientes={filas.map((f) => ({
+                id_control: f.id_control,
+                nombre: f.nombre,
+                retencionPct: Number(clientes.find((c) => String(c.id_control) === String(f.id_control))?.retencion_ganancias_pct) || 0,
+              }))}
               cobros={[...cobros]
                 .sort((a, b) => String(b.fecha_registro || '').localeCompare(String(a.fecha_registro || '')))
                 .slice(0, 15)
