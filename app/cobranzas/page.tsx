@@ -20,7 +20,7 @@ import { claveComprobante } from '@/lib/comprobantes';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 import type { ClienteVenta } from '@/lib/types';
 import Header from '@/components/Header';
-import { ClientesRecordatorio, DatosPago, type ClienteFila } from '@/components/CobranzasConfig';
+import { ClientesRecordatorio, type ClienteFila } from '@/components/CobranzasConfig';
 import RegistrarCobro from '@/components/RegistrarCobro';
 import { leerEdiciones, indiceEdiciones, aplicarEdicion } from '@/lib/cobranzasEdit';
 import BandejaCobranzas from '@/components/BandejaCobranzas';
@@ -336,6 +336,150 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
 
         <ActualizarXubio actualizado={actualizadoXubio} />
 
+        {/* ══ BANDEJA ══ */}
+        <div className="card" style={{ marginBottom: '14px' }}>
+          <p className="card-title">Bandeja — cobros por imputar</p>
+          <p className="card-sub">
+            Subís el resumen del banco y acá quedan los movimientos de entrada, uno por uno, con el cliente
+            propuesto y qué facturas podrían ser. Nada se registra en Xubio hasta que lo confirmás.
+            Cuando elegís el cliente a mano, la app se guarda cómo aparece ese pagador en el resumen y la
+            próxima vez lo reconoce sola. Las facturas vienen precargadas solo para los clientes con el
+            recordatorio prendido; para el resto se piden al abrir la fila y tarda unos segundos.
+          </p>
+          <div style={{ marginTop: '10px' }}>
+            <BandejaCobranzas
+              items={itemsBandeja}
+              clientes={filas.map((f) => ({
+                id_control: f.id_control,
+                nombre: f.nombre,
+                retencionPct: Number(clientes.find((c) => String(c.id_control) === String(f.id_control))?.retencion_ganancias_pct) || 0,
+              }))}
+              cuentas={cuentasXubio.map((c) => ({ id: c.id, nombre: c.nombre }))}
+              cuentasFaltantes={cuentasFaltantes(cuentasXubio)}
+              aliases={aliasAprendidos}
+              facturasPorCliente={facturasCliente}
+              ultimaCuentaPorCliente={ultimaCuentaPorCliente}
+              sugeridas={sugeridasPorItem}
+            />
+          </div>
+        </div>
+
+        {/* ══ CARGA MANUAL (los dos caminos juntos) ══ */}
+        <details className="card" style={{ marginBottom: '14px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '14px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
+            Cargar un cobro a mano
+          </summary>
+          <p className="card-sub">
+            Para lo que no entró por la bandeja. Dos caminos según qué haya que hacer.
+          </p>
+
+          <details style={{ marginTop: '10px', borderTop: '1px solid #f3f4f6', paddingTop: '10px' }}>
+            <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
+              Registrar el cobro en Xubio
+            </summary>
+
+          <p className="card-sub">
+            Lo que cargues acá se crea en Xubio como cobranza del cliente. Entra a su cuenta corriente
+            como cobro a cuenta: la API de Xubio no permite imputarlo a una factura puntual, eso sigue
+            siendo a mano si hace falta. Un cobro mal cargado se puede anular desde acá.
+          </p>
+          <div style={{ marginTop: '10px' }}>
+            <RegistrarCobro
+              cuentasIniciales={cuentasXubio}
+              errorCuentas={errorCuentas}
+              clientes={filas.map((f) => ({
+                id_control: f.id_control,
+                nombre: f.nombre,
+                retencionPct: Number(clientes.find((c) => String(c.id_control) === String(f.id_control))?.retencion_ganancias_pct) || 0,
+              }))}
+              cobros={[...cobros]
+                .sort((a, b) => String(b.fecha_registro || '').localeCompare(String(a.fecha_registro || '')))
+                .slice(0, 15)
+                .map((c) => ({
+                  id_cobro: c.id_cobro, cliente: c.cliente, fecha: c.fecha,
+                  fecha_registro: String(c.fecha_registro || ''),
+                  importe: Number(c.importe) || 0, numero_recibo: String(c.numero_recibo || ''),
+                  transaccionid: String(c.transaccionid || ''), estado: String(c.estado || ''),
+                  observacion: String(c.observacion || ''),
+                }))}
+            />
+          </div>
+                  </details>
+
+          <details style={{ marginTop: '10px', borderTop: '1px solid #f3f4f6', paddingTop: '10px' }}>
+            <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
+              Marcar facturas como saldadas (sin tocar Xubio)
+            </summary>
+
+          <p className="card-sub">
+            Para las que se cobraron por fuera de la app —un cheque, una compensación, un cobro cargado
+            a mano en Xubio— o las que ya no se van a cobrar. Se dan por saldadas y dejan de aparecer al
+            imputar y en los reclamos. <strong>No se registra ningún movimiento en Xubio</strong>, así que
+            la contabilidad queda como está. Se puede deshacer.
+          </p>
+          <div style={{ marginTop: '10px' }}>
+            {/* Solo los clientes con recordatorio prendido. La lista completa son todos los
+                clientes que existieron alguna vez, y buscar entre ellos al que se quiere
+                limpiar es peor que no tener la lista. Lo que importa es lo que se reclama:
+                una factura vieja de un cliente al que no se le manda nada no molesta a
+                nadie, y si alguna vez hay que limpiarla, alcanza con prenderle el
+                recordatorio un rato.
+
+                Sin precarga: las facturas se piden al elegir el cliente. Precargar unas
+                pocas no ahorraba nada —igual hay que pedir las de los demás— y hacía que un
+                cliente se viera al instante y otro tardara, sin razón aparente. */}
+            <FacturasViejas
+              clientes={clientes
+                .filter((c) => conRecordatorio.has(String(c.id_control)))
+                .map((c) => ({ id_control: String(c.id_control), nombre: nombreClienteVisible(c) }))
+                .sort((a, b) => a.nombre.localeCompare(b.nombre))}
+              facturasPorCliente={{}}
+              diasVentana={DIAS_PAGINA}
+              saldadas={saldadas
+                .filter((f) => String(f.estado) !== 'revertida')
+                .map((f) => ({
+                  numero: String(f.numero), cliente: String(f.cliente || ''),
+                  importe: Number(f.importe) || 0, fecha_marcado: String(f.fecha_marcado || ''),
+                  motivo: String(f.motivo || ''), usuario: String(f.usuario || ''),
+                }))}
+            />
+          </div>
+                  </details>
+        </details>
+
+        {/* ══ RECLAMO PUNTUAL ══ */}
+        <details className="card" style={{ marginBottom: '14px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '14px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
+            Reclamar facturas a un cliente
+          </summary>
+          <p className="card-sub">
+            Para mandar un reclamo puntual sin tocar la configuración del recordatorio automático.
+            Elegís el cliente, marcás desde qué fecha (o tildás las facturas una por una) y se manda.
+          </p>
+          <div style={{ marginTop: '10px' }}>
+            <ReclamoManual clientes={filas.map((f) => ({ id_control: f.id_control, nombre: f.nombre }))} />
+          </div>
+        </details>
+
+        <details className="card" style={{ marginBottom: '14px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '14px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
+            Clientes con recordatorio
+          </summary>
+          <p className="card-sub">
+            {prendidos === 0 ? 'Ninguno prendido todavía' : `${prendidos} prendido${prendidos > 1 ? 's' : ''}`}
+            {' · '}
+            {/* El mail también está en la ficha del cliente, que es donde se lo busca cuando
+                hay que actualizar un contacto. Es la misma columna: se edite donde se edite,
+                es el mismo dato. */}
+            <Link href="/admin/clientes-venta" style={{ color: '#2563eb' }}>
+              también se edita en la ficha de cada cliente →
+            </Link>
+          </p>
+          <div style={{ marginTop: '10px' }}>
+            <ClientesRecordatorio clientes={filas} />
+          </div>
+        </details>
+
         {/* ══ COBRANZAS DEL MES ══ */}
         {ver !== 'movimientos' ? (
           <div className="card" style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
@@ -409,152 +553,13 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
         </div>
         )}
 
-        {/* ══ BANDEJA ══ */}
-        <div className="card" style={{ marginBottom: '14px' }}>
-          <p className="card-title">Bandeja — cobros por imputar</p>
-          <p className="card-sub">
-            Subís el resumen del banco y acá quedan los movimientos de entrada, uno por uno, con el cliente
-            propuesto y qué facturas podrían ser. Nada se registra en Xubio hasta que lo confirmás.
-            Cuando elegís el cliente a mano, la app se guarda cómo aparece ese pagador en el resumen y la
-            próxima vez lo reconoce sola. Las facturas vienen precargadas solo para los clientes con el
-            recordatorio prendido; para el resto se piden al abrir la fila y tarda unos segundos.
-          </p>
-          <div style={{ marginTop: '10px' }}>
-            <BandejaCobranzas
-              items={itemsBandeja}
-              clientes={filas.map((f) => ({
-                id_control: f.id_control,
-                nombre: f.nombre,
-                retencionPct: Number(clientes.find((c) => String(c.id_control) === String(f.id_control))?.retencion_ganancias_pct) || 0,
-              }))}
-              cuentas={cuentasXubio.map((c) => ({ id: c.id, nombre: c.nombre }))}
-              cuentasFaltantes={cuentasFaltantes(cuentasXubio)}
-              aliases={aliasAprendidos}
-              facturasPorCliente={facturasCliente}
-              ultimaCuentaPorCliente={ultimaCuentaPorCliente}
-              sugeridas={sugeridasPorItem}
-            />
-          </div>
-        </div>
-
-        {/* ══ REGISTRAR UN COBRO ══ */}
-        <details className="card" style={{ marginBottom: '14px' }}>
+        {/* Plegado: es para revisar que la corrida del lunes haya salido, no algo que se
+            mire todos los días. */}
+        <details className="card">
           <summary style={{ cursor: 'pointer', fontSize: '14px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
-            Registrar un cobro a mano en Xubio
+            Recordatorios enviados — últimos 7 días
+            <span style={{ fontWeight: 400, color: '#9ca3af', fontSize: '12.5px' }}> · {historial.length}</span>
           </summary>
-          <p className="card-sub">
-            Lo que cargues acá se crea en Xubio como cobranza del cliente. Entra a su cuenta corriente
-            como cobro a cuenta: la API de Xubio no permite imputarlo a una factura puntual, eso sigue
-            siendo a mano si hace falta. Un cobro mal cargado se puede anular desde acá.
-          </p>
-          <div style={{ marginTop: '10px' }}>
-            <RegistrarCobro
-              cuentasIniciales={cuentasXubio}
-              errorCuentas={errorCuentas}
-              clientes={filas.map((f) => ({
-                id_control: f.id_control,
-                nombre: f.nombre,
-                retencionPct: Number(clientes.find((c) => String(c.id_control) === String(f.id_control))?.retencion_ganancias_pct) || 0,
-              }))}
-              cobros={[...cobros]
-                .sort((a, b) => String(b.fecha_registro || '').localeCompare(String(a.fecha_registro || '')))
-                .slice(0, 15)
-                .map((c) => ({
-                  id_cobro: c.id_cobro, cliente: c.cliente, fecha: c.fecha,
-                  fecha_registro: String(c.fecha_registro || ''),
-                  importe: Number(c.importe) || 0, numero_recibo: String(c.numero_recibo || ''),
-                  transaccionid: String(c.transaccionid || ''), estado: String(c.estado || ''),
-                  observacion: String(c.observacion || ''),
-                }))}
-            />
-          </div>
-        </details>
-
-        {/* ══ LIMPIAR FACTURAS VIEJAS ══ */}
-        <details className="card" style={{ marginBottom: '14px' }}>
-          <summary style={{ cursor: 'pointer', fontSize: '14px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
-            Marcar facturas como saldadas (sin tocar Xubio)
-          </summary>
-          <p className="card-sub">
-            Para las que se cobraron por fuera de la app —un cheque, una compensación, un cobro cargado
-            a mano en Xubio— o las que ya no se van a cobrar. Se dan por saldadas y dejan de aparecer al
-            imputar y en los reclamos. <strong>No se registra ningún movimiento en Xubio</strong>, así que
-            la contabilidad queda como está. Se puede deshacer.
-          </p>
-          <div style={{ marginTop: '10px' }}>
-            {/* Solo los clientes con recordatorio prendido. La lista completa son todos los
-                clientes que existieron alguna vez, y buscar entre ellos al que se quiere
-                limpiar es peor que no tener la lista. Lo que importa es lo que se reclama:
-                una factura vieja de un cliente al que no se le manda nada no molesta a
-                nadie, y si alguna vez hay que limpiarla, alcanza con prenderle el
-                recordatorio un rato.
-
-                Sin precarga: las facturas se piden al elegir el cliente. Precargar unas
-                pocas no ahorraba nada —igual hay que pedir las de los demás— y hacía que un
-                cliente se viera al instante y otro tardara, sin razón aparente. */}
-            <FacturasViejas
-              clientes={clientes
-                .filter((c) => conRecordatorio.has(String(c.id_control)))
-                .map((c) => ({ id_control: String(c.id_control), nombre: nombreClienteVisible(c) }))
-                .sort((a, b) => a.nombre.localeCompare(b.nombre))}
-              facturasPorCliente={{}}
-              diasVentana={DIAS_PAGINA}
-              saldadas={saldadas
-                .filter((f) => String(f.estado) !== 'revertida')
-                .map((f) => ({
-                  numero: String(f.numero), cliente: String(f.cliente || ''),
-                  importe: Number(f.importe) || 0, fecha_marcado: String(f.fecha_marcado || ''),
-                  motivo: String(f.motivo || ''), usuario: String(f.usuario || ''),
-                }))}
-            />
-          </div>
-        </details>
-
-        {/* ══ RECLAMO PUNTUAL ══ */}
-        <details className="card" style={{ marginBottom: '14px' }}>
-          <summary style={{ cursor: 'pointer', fontSize: '14px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
-            Reclamar facturas a un cliente
-          </summary>
-          <p className="card-sub">
-            Para mandar un reclamo puntual sin tocar la configuración del recordatorio automático.
-            Elegís el cliente, marcás desde qué fecha (o tildás las facturas una por una) y se manda.
-          </p>
-          <div style={{ marginTop: '10px' }}>
-            <ReclamoManual clientes={filas.map((f) => ({ id_control: f.id_control, nombre: f.nombre }))} />
-          </div>
-        </details>
-
-        <details className="card" style={{ marginBottom: '14px' }}>
-          <summary style={{ cursor: 'pointer', fontSize: '14px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
-            Clientes con recordatorio
-          </summary>
-          <p className="card-sub">
-            {prendidos === 0 ? 'Ninguno prendido todavía' : `${prendidos} prendido${prendidos > 1 ? 's' : ''}`}
-            {' · '}
-            {/* El mail también está en la ficha del cliente, que es donde se lo busca cuando
-                hay que actualizar un contacto. Es la misma columna: se edite donde se edite,
-                es el mismo dato. */}
-            <Link href="/admin/clientes-venta" style={{ color: '#2563eb' }}>
-              también se edita en la ficha de cada cliente →
-            </Link>
-          </p>
-          <div style={{ marginTop: '10px' }}>
-            <ClientesRecordatorio clientes={filas} />
-          </div>
-        </details>
-
-        {/* Los datos de pago se editan una vez por año: van plegados. */}
-        <details className="card" style={{ marginBottom: '14px' }}>
-          <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#374151' }}>
-            Datos de pago que se incluyen en cada recordatorio
-          </summary>
-          <div style={{ marginTop: '10px' }}>
-            <DatosPago valor={datosPago} />
-          </div>
-        </details>
-
-        <div className="card">
-          <p className="card-title">Recordatorios enviados — últimos 7 días</p>
           {historial.length === 0 ? (
             <p style={{ margin: '8px 0 0', fontSize: '12.5px', color: '#9ca3af' }}>Ninguno en los últimos 7 días.</p>
           ) : (
@@ -586,7 +591,7 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
               </table>
             </div>
           )}
-        </div>
+        </details>
       </div>
     </>
   );

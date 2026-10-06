@@ -637,16 +637,16 @@ export default function BandejaCobranzas({
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
-        <label style={{ fontSize: '11.5px', padding: '6px 14px', background: '#1e40af', color: 'white', borderRadius: '5px', cursor: importando ? 'default' : 'pointer', fontWeight: 700, opacity: importando ? 0.6 : 1 }}>
+        <label style={{ fontSize: '11px', padding: '4px 10px', background: 'white', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: importando ? 'default' : 'pointer', fontWeight: 600, opacity: importando ? 0.6 : 1 }}>
           {importando ? 'Leyendo…' : '📄 Subir resumen bancario'}
           <input type="file" accept=".csv,.xlsx,.xls,.txt" onChange={importar} disabled={importando} style={{ display: 'none' }} />
         </label>
         <button type="button" onClick={() => { setAvisoAbierto(v => !v); setLeido(null); }}
-          style={{ fontSize: '11.5px', padding: '6px 14px', background: 'white', color: '#1e40af', border: '1px solid #bfdbfe', borderRadius: '5px', cursor: 'pointer', fontWeight: 700 }}>
+          style={{ fontSize: '11px', padding: '4px 10px', background: 'white', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer', fontWeight: 600 }}>
           ✉️ Pegar aviso de pago
         </button>
         <span style={{ fontSize: '10.5px', color: '#9ca3af' }}>
-          El CSV del banco dice cuánto entró; el aviso del cliente dice qué facturas paga.
+          Los avisos que llegan a cobros@ entran solos. Esto es para cargar algo a mano.
         </span>
       </div>
 

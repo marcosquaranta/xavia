@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
   if (!(await isAdmin())) return NextResponse.json({ error: 'solo_admin' }, { status: 403 });
 
   try {
-    const { transaccionid, cliente, cuenta, nota } = await req.json();
+    const { transaccionid, cliente, cuenta, importe, oculta, nota } = await req.json();
     if (!String(transaccionid || '').trim()) {
       return NextResponse.json({ error: 'falta_transaccion' }, { status: 400 });
     }
@@ -18,6 +18,8 @@ export async function POST(req: NextRequest) {
       transaccionid: String(transaccionid),
       cliente: String(cliente || ''),
       cuenta: String(cuenta || ''),
+      importe: importe ?? '',
+      oculta: oculta === true,
       nota: String(nota || ''),
       usuario: user.email,
     });

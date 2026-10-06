@@ -21,6 +21,8 @@ export interface CobranzaUI {
   transaccionid?: string;
   editada?: boolean;
   nota?: string;
+  oculta?: boolean;
+  importeXubio?: number;
 }
 
 const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
@@ -46,6 +48,9 @@ export default function MovimientosCobranza({ cobranzas, anioActual, mesActual, 
     const finDia = new Date(anio, mes, 0).getDate();
     const fin = `${anio}-${String(mes).padStart(2, '0')}-${String(finDia).padStart(2, '0')}`;
     return cobranzas
+      // Las dadas de baja a mano no se muestran. Siguen en Xubio y en la caché: lo único
+      // que se guarda acá es la decisión de no verlas más en esta lista.
+      .filter((c) => !c.oculta)
       .filter((c) => c.fecha >= ini && c.fecha <= fin)
       .sort((a, b) => b.fecha.localeCompare(a.fecha) || b.importe - a.importe);
   }, [cobranzas, anio, mes]);
@@ -82,12 +87,14 @@ export default function MovimientosCobranza({ cobranzas, anioActual, mesActual, 
   const [eCliente, setECliente] = useState('');
   const [eCuenta, setECuenta] = useState('');
   const [eNota, setENota] = useState('');
+  const [eImporte, setEImporte] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [errEdit, setErrEdit] = useState<string | null>(null);
 
   function abrirEdicion(c: CobranzaUI) {
     setEditando(String(c.transaccionid || ''));
     setECliente(c.cliente || ''); setECuenta(c.cuenta || ''); setENota(c.nota || '');
+    setEImporte(String(Math.round(c.importe)));
     setErrEdit(null);
   }
 
@@ -96,7 +103,12 @@ export default function MovimientosCobranza({ cobranzas, anioActual, mesActual, 
     try {
       const r = await fetch('/api/cobranzas/editar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transaccionid: c.transaccionid, cliente: eCliente, cuenta: eCuenta, nota: eNota }),
+        body: JSON.stringify({
+          transaccionid: c.transaccionid, cliente: eCliente, cuenta: eCuenta, nota: eNota,
+          // Solo se manda si cambió: así una corrección de cliente no congela el importe,
+          // que si mañana se corrige en Xubio tiene que poder actualizarse solo.
+          importe: Math.round(Number(eImporte)) !== Math.round(c.importeXubio ?? c.importe) ? Number(eImporte) : '',
+        }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
@@ -104,6 +116,24 @@ export default function MovimientosCobranza({ cobranzas, anioActual, mesActual, 
       router.refresh();
     } catch (e: any) {
       setErrEdit(e.message || 'No se pudo guardar');
+    }
+    setGuardando(false);
+  }
+
+  async function ocultar(c: CobranzaUI) {
+    if (!window.confirm('Se saca de esta lista. No se borra de Xubio ni de la copia local: deja de mostrarse acá y nada más. ¿Confirmás?')) return;
+    setGuardando(true); setErrEdit(null);
+    try {
+      const r = await fetch('/api/cobranzas/editar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transaccionid: c.transaccionid, oculta: true, nota: eNota || 'sacada de la lista a mano' }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setEditando(null);
+      router.refresh();
+    } catch (e: any) {
+      setErrEdit(e.message || 'No se pudo sacar');
     }
     setGuardando(false);
   }
@@ -194,7 +224,14 @@ export default function MovimientosCobranza({ cobranzas, anioActual, mesActual, 
                     </td>
                     <td style={{ padding: '5px 8px', color: c.cuenta ? '#374151' : '#b45309' }}>{c.cuenta || 'sin dato'}</td>
                     <td style={{ padding: '5px 8px', fontFamily: 'ui-monospace, monospace', fontSize: '11.5px', color: '#9ca3af' }}>{c.numero}</td>
-                    <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmt$(c.importe)}</td>
+                    <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                      {fmt$(c.importe)}
+                      {c.importeXubio !== undefined && Math.round(c.importeXubio) !== Math.round(c.importe) && (
+                        <span style={{ display: 'block', fontSize: '9.5px', fontWeight: 400, color: '#b45309' }}>
+                          Xubio: {fmt$(c.importeXubio)}
+                        </span>
+                      )}
+                    </td>
                     <td style={{ padding: '5px 8px', textAlign: 'right' }}>
                       {c.transaccionid && editando !== String(c.transaccionid) && (
                         <button type="button" onClick={() => abrirEdicion(c)}
@@ -211,7 +248,8 @@ export default function MovimientosCobranza({ cobranzas, anioActual, mesActual, 
                           <p style={{ margin: '0 0 7px', fontSize: '11px', color: '#92400e' }}>
                             Se corrige <strong>solo en la app</strong>: Xubio no se toca. Sirve para que esta pantalla se entienda
                             cuando Xubio no manda el cliente o el medio de cobro quedó mal cargado allá.
-                            El importe no se puede cambiar — es contra lo que se concilia.
+                            Si cambiás el importe, esta lista deja de cuadrar contra el extracto del banco: la fila queda marcada y
+                            abajo del número se muestra el de Xubio, para no perder contra qué se conciliaba.
                           </p>
                           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
                             <div>
@@ -223,6 +261,11 @@ export default function MovimientosCobranza({ cobranzas, anioActual, mesActual, 
                               <label style={{ display: 'block', fontSize: '10px', color: '#6b7280', fontWeight: 600 }}>MEDIO DE COBRO</label>
                               <input list="cuentas-app" value={eCuenta} onChange={(e) => setECuenta(e.target.value)} disabled={guardando}
                                 style={{ fontSize: '12.5px', padding: '5px 7px', border: '1px solid #d1d5db', borderRadius: '5px', minWidth: '150px' }} />
+                            </div>
+                            <div>
+                              <label style={{ display: 'block', fontSize: '10px', color: '#6b7280', fontWeight: 600 }}>IMPORTE</label>
+                              <input type="number" min={0} value={eImporte} onChange={(e) => setEImporte(e.target.value)} disabled={guardando}
+                                style={{ fontSize: '12.5px', padding: '5px 7px', border: '1px solid #d1d5db', borderRadius: '5px', width: '120px' }} />
                             </div>
                             <div style={{ flex: 1, minWidth: '160px' }}>
                               <label style={{ display: 'block', fontSize: '10px', color: '#6b7280', fontWeight: 600 }}>NOTA</label>
@@ -236,6 +279,11 @@ export default function MovimientosCobranza({ cobranzas, anioActual, mesActual, 
                             <button type="button" onClick={() => setEditando(null)} disabled={guardando}
                               style={{ fontSize: '12px', padding: '6px 10px', background: 'white', color: '#374151', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer' }}>
                               Cancelar
+                            </button>
+                            <button type="button" onClick={() => ocultar(c)} disabled={guardando}
+                              title="La saca de esta lista. No se borra de Xubio."
+                              style={{ fontSize: '12px', padding: '6px 10px', background: 'white', color: '#991b1b', border: '1px solid #fecaca', borderRadius: '5px', cursor: 'pointer', fontWeight: 600 }}>
+                              Sacar de la lista
                             </button>
                           </div>
                           {errEdit && <p style={{ margin: '6px 0 0', fontSize: '11.5px', color: '#dc2626' }}>{errEdit}</p>}
