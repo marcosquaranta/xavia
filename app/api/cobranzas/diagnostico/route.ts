@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
-import { getCuentas, getCobranzas, getComprobantes, importeCobranza, getClientesXubio, getCircuitosContables, circuitoPorDefecto, diagnosticoCuentas } from '@/lib/xubio';
+import { getCuentas, getCobranzas, getComprobantes, importeCobranza, getClientesXubio, getCircuitosContables, circuitoPorDefecto, diagnosticoCuentas, xubioGet } from '@/lib/xubio';
 import { sumarDias } from '@/lib/recordatoriosCobro';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 
@@ -99,6 +99,41 @@ export async function GET() {
           + JSON.stringify(conRet[conRet.length - 1], null, 1).slice(0, 6000));
   } catch (e: any) {
     push('Cómo guarda Xubio una cobranza con retención', false, e?.message || 'error');
+  }
+
+  // ¿Dónde guarda Xubio las retenciones sufridas?
+  //
+  // No están en la cobranza: el bean que devuelve la API trae solo los instrumentos de
+  // cobro, y ahí no entran — Xubio exige que un instrumento apunte a una cuenta que
+  // impacte en disponibilidades, y una retención es un crédito fiscal, no plata.
+  //
+  // Entonces deben vivir en otro documento. Esto prueba nombres candidatos de endpoint,
+  // SOLO LECTURA: un 404 descarta ese nombre, una respuesta muestra la estructura. No
+  // escribe nada y se puede correr las veces que haga falta.
+  try {
+    const candidatos = [
+      'retencionBean', 'retencion', 'certificadoRetencionBean', 'certificadoRetencion',
+      'retencionSufridaBean', 'retencionesBean', 'comprobanteRetencionBean',
+    ];
+    const hallazgos: string[] = [];
+    for (const nombre of candidatos) {
+      try {
+        const r = await xubioGet<any>(`${nombre}?fechaDesde=${desde}&fechaHasta=${hoy}`);
+        const n = Array.isArray(r) ? r.length : (r ? 1 : 0);
+        hallazgos.push(`✓ ${nombre} → EXISTE, ${n} resultado(s)` + (n > 0 ? `. Ejemplo: ${JSON.stringify(Array.isArray(r) ? r[0] : r).slice(0, 1200)}` : ''));
+      } catch (e: any) {
+        const msg = String(e?.message || '');
+        // Un 404 es "no existe ese recurso" y no aporta nada; cualquier otra cosa (400, 500)
+        // significa que el endpoint SÍ existe y lo que está mal es cómo se lo llamó.
+        if (!/HTTP 404/.test(msg)) hallazgos.push(`? ${nombre} → ${msg} (existe, pero pide otros parámetros)`);
+      }
+    }
+    push('¿Dónde guarda Xubio las retenciones?', hallazgos.length > 0,
+      hallazgos.length === 0
+        ? `Ninguno de los nombres probados existe (${candidatos.join(', ')}). Hay que pedirle a Xubio el nombre del recurso, o cargar la retención a mano allá.`
+        : hallazgos.join('\n'));
+  } catch (e: any) {
+    push('¿Dónde guarda Xubio las retenciones?', false, e?.message || 'error');
   }
 
   // Xubio lo exige al crear la cobranza y no asume ninguno por defecto: si falta, el cobro
