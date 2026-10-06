@@ -71,6 +71,17 @@ export interface PedidoCobro {
   // figurando impaga por el monto retenido, para siempre.
   retencion?: number;
   cuentaRetencionId?: number;
+  // Salida de emergencia: registrar el cobro en Xubio por el NETO y dejar la retención
+  // anotada solo acá.
+  //
+  // Existe porque Xubio puede rechazar la cuenta de la retención ("no tiene una categoría
+  // que impacte en disponibilidades") y, hasta que eso se arregle en su plan de cuentas, la
+  // alternativa era no poder registrar el cobro. Entre un cobro con la retención anotada
+  // solo en la app y ningún cobro, lo primero es muchísimo mejor.
+  //
+  // Consecuencia, que la pantalla avisa: en Xubio esa factura queda abierta por el monto
+  // retenido. Acá queda cancelada, porque la app ya es la que decide qué está cobrado.
+  retencionSoloLocal?: boolean;
 }
 
 export interface ResultadoCobro {
@@ -115,7 +126,7 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
   }
   // Una retención sin cuenta no se puede imputar, y mandarla a la cuenta bancaria diría que
   // entró plata que no entró: el saldo del banco dejaría de cuadrar contra el extracto.
-  if (retencion > 0 && !cuentaRetencionId) {
+  if (retencion > 0 && !cuentaRetencionId && !p.retencionSoloLocal) {
     return { ok: false, error: 'Elegí a qué cuenta va la retención.', status: 400 };
   }
 
@@ -175,8 +186,11 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
     };
   }
 
-  const r = await crearCobranza({ clienteId, fecha, importe, cuentaId, observacion: observacionXubio, circuitoId,
-    retenciones: retencion > 0
+  const obsFinal = retencion > 0 && p.retencionSoloLocal
+    ? `${observacionXubio} — el cliente retuvo $${retencion.toLocaleString('es-AR')} (no imputado acá)`
+    : observacionXubio;
+  const r = await crearCobranza({ clienteId, fecha, importe, cuentaId, observacion: obsFinal, circuitoId,
+    retenciones: retencion > 0 && !p.retencionSoloLocal
       ? [{ cuentaId: cuentaRetencionId, importe: retencion, descripcion: 'Retención sufrida' }]
       : [],
     moneda: datosMoneda.moneda,

@@ -150,6 +150,7 @@ export async function PATCH(req: NextRequest) {
       // factura se cancela por la suma de los dos.
       retencion: Number(body.retencion) || 0,
       cuentaRetencionId: Number(body.cuentaRetencionId) || 0,
+      retencionSoloLocal: body.retencionSoloLocal === true,
     });
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status || 500 });
 

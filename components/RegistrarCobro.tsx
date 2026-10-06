@@ -57,6 +57,7 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
   // llenaba de saldos de monedas que nadie va a cobrar nunca.
   const [retencion, setRetencion] = useState('');
   const [cuentaRet, setCuentaRet] = useState('');
+  const [verTodasCuentasRet, setVerTodasCuentasRet] = useState(false);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; s: string } | null>(null);
   const [filas, setFilas] = useState(cobros);
@@ -295,10 +296,16 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
             </div>
             {Number(retencion) > 0 && (
               <div>
-                <label style={labelStyle}>Cuenta de la retención</label>
+                <label style={labelStyle}>
+                  Cuenta de la retención{' '}
+                  <button type="button" onClick={() => setVerTodasCuentasRet((v) => !v)}
+                    style={{ background: 'none', border: 'none', padding: 0, fontSize: '9.5px', color: '#2563eb', cursor: 'pointer', fontWeight: 700 }}>
+                    {verTodasCuentasRet ? '(solo las de retención)' : '(ver todas)'}
+                  </button>
+                </label>
                 <select value={cuentaRet} onChange={(e) => setCuentaRet(e.target.value)} disabled={loading} style={inputStyle}>
                   <option value="">— elegí la cuenta —</option>
-                  {cuentasRet.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                  {(verTodasCuentasRet ? cuentas : cuentasRet).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                 </select>
               </div>
             )}

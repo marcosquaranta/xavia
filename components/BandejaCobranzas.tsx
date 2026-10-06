@@ -110,6 +110,11 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
   const [verTodas, setVerTodas] = useState(false);
   const [trabajando, setTrabajando] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Cuando Xubio rechaza la cuenta de la retención, se ofrece registrar igual dejando la
+  // retención anotada solo acá. No se hace solo: cambia lo que va a quedar en la
+  // contabilidad, así que lo tiene que decidir una persona.
+  const [ofrecerSoloLocal, setOfrecerSoloLocal] = useState(false);
+  const [verTodasCuentasRet, setVerTodasCuentasRet] = useState(false);
 
   function alternarFactura(numero: string) {
     setACuenta(false);
@@ -187,7 +192,7 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
     return base;
   }, [facturas, objetivo, item.comprobantes]);
 
-  async function accion(accion: 'confirmar' | 'descartar') {
+  async function accion(accion: 'confirmar' | 'descartar', retencionSoloLocal = false) {
     if (accion === 'confirmar') {
       if (!idControl) { setErr('Elegí de qué cliente es.'); return; }
       if (!cuentaId) { setErr('Elegí en qué cuenta entró.'); return; }
@@ -201,7 +206,8 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
       const avisoImporte = importeCambiado
         ? `\n\nOJO: el importe se corrigió a mano. El mail decía ${fmt$(item.importe)}.`
         : '';
-      if (!window.confirm(`Se va a registrar en Xubio un cobro de ${fmt$(importeNum)} de ${nombre}, con fecha ${fmtDia(item.fecha)}.${avisoImporte}\n\nEsto impacta en la contabilidad. ¿Confirmás?`)) return;
+      if (!retencionSoloLocal
+        && !window.confirm(`Se va a registrar en Xubio un cobro de ${fmt$(importeNum)} de ${nombre}, con fecha ${fmtDia(item.fecha)}.${avisoImporte}\n\nEsto impacta en la contabilidad. ¿Confirmás?`)) return;
     } else {
       if (!window.confirm('Se va a descartar este movimiento: no se registra ningún cobro y no vuelve a aparecer en la bandeja. ¿Confirmás?')) return;
     }
@@ -214,6 +220,7 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
           id_control: idControl, cuentaId: Number(cuentaId), comprobantes: elegidas,
           importe: importeNum,
           retencion: Number(retencion) || 0,
+          retencionSoloLocal,
           cuentaRetencionId: Number(cuentaRet) || 0,
         }),
       });
@@ -223,7 +230,11 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
         ? `✓ Cobro registrado${j.numeroRecibo ? ` — recibo ${j.numeroRecibo}` : ''}${j.aliasAprendido ? `. Aprendí que "${j.aliasAprendido}" es ese cliente.` : ''}`
         : '✓ Movimiento descartado.');
       router.refresh();
-    } catch (e: any) { setErr(e.message); setTrabajando(false); }
+    } catch (e: any) {
+      setErr(e.message);
+      setOfrecerSoloLocal(/impacte en disponibilidades/i.test(String(e?.message || '')));
+      setTrabajando(false);
+    }
   }
 
   const reconocido = !!item.id_control;
@@ -340,9 +351,15 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
               {Number(retencion) > 0 && (
                 <>
                   <div>
-                    <label style={{ display: 'block', fontSize: '10px', color: '#6b7280', fontWeight: 600 }}>¿DE QUÉ?</label>
+                    <label style={{ display: 'block', fontSize: '10px', color: '#6b7280', fontWeight: 600 }}>
+                      ¿DE QUÉ?{' '}
+                      <button type="button" onClick={() => setVerTodasCuentasRet((v) => !v)}
+                        style={{ background: 'none', border: 'none', padding: 0, fontSize: '9.5px', color: '#2563eb', cursor: 'pointer', fontWeight: 700 }}>
+                        {verTodasCuentasRet ? '(solo las de retención)' : '(ver todas)'}
+                      </button>
+                    </label>
                     <select value={cuentaRet} onChange={(e) => setCuentaRet(e.target.value)} disabled={trabajando} style={{ ...inputStyle, width: 'auto' }}>
-                      {cuentasRet.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                      {(verTodasCuentasRet ? cuentas : cuentasRet).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                     </select>
                   </div>
                   <span style={{ fontSize: '11px', color: '#166534', paddingBottom: '6px' }}>
@@ -481,6 +498,19 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
           )}
 
           {err && <p style={{ margin: '0 0 8px', fontSize: '11.5px', color: '#dc2626' }}>{err}</p>}
+          {ofrecerSoloLocal && (
+            <div style={{ margin: '0 0 8px', padding: '8px 10px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px' }}>
+              <p style={{ margin: '0 0 6px', fontSize: '11.5px', color: '#92400e' }}>
+                Hasta que esa cuenta se habilite en Xubio, se puede registrar el cobro por los <strong>{fmt$(importeNum)}</strong> que
+                entraron y dejar los <strong>{fmt$(Number(retencion) || 0)}</strong> de retención anotados solo acá.
+                Las facturas quedan canceladas en la app; <strong>en Xubio esa factura va a quedar abierta por el monto retenido</strong>.
+              </p>
+              <button type="button" onClick={() => accion('confirmar', true)} disabled={trabajando}
+                style={{ fontSize: '11.5px', padding: '5px 12px', background: '#b45309', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 700 }}>
+                {trabajando ? 'Registrando…' : 'Registrar sin mandar la retención a Xubio'}
+              </button>
+            </div>
+          )}
 
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {(() => {

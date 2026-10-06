@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
       comprobantes: Array.isArray(body.comprobantes) ? body.comprobantes : [],
       retencion: Number(body.retencion) || 0,
       cuentaRetencionId: Number(body.cuentaRetencionId) || 0,
+      retencionSoloLocal: body.retencionSoloLocal === true,
       usuario: user.email,
     });
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status || 500 });
