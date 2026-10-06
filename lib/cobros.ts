@@ -91,12 +91,15 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
   const observacion = String(p.observacion || '').trim();
   const comprobantes = (p.comprobantes || []).map(x => String(x).trim()).filter(Boolean);
   const retencion = Math.round(Number(p.retencion) || 0);
-  const cuentaRetencionId = Number(p.cuentaRetencionId) || 0;
+  // Igual que arriba: una cuenta de retención también puede tener id negativo.
+  const cuentaRetencionId = Number.isFinite(Number(p.cuentaRetencionId)) ? Number(p.cuentaRetencionId) : 0;
 
   if (!idControl) return { ok: false, error: 'Falta el cliente.', status: 400 };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return { ok: false, error: 'La fecha tiene que ser válida.', status: 400 };
   if (!(importe > 0)) return { ok: false, error: 'El importe tiene que ser mayor a 0.', status: 400 };
-  if (!(cuentaId > 0)) return { ok: false, error: 'Elegí en qué cuenta entró la plata.', status: 400 };
+  if (!Number.isFinite(cuentaId) || cuentaId === 0) {
+    return { ok: false, error: 'Elegí en qué cuenta entró la plata.', status: 400 };
+  }
   // Una retención sin cuenta no se puede imputar, y mandarla a la cuenta bancaria diría que
   // entró plata que no entró: el saldo del banco dejaría de cuadrar contra el extracto.
   if (retencion > 0 && !cuentaRetencionId) {

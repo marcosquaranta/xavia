@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation';
 import { sugerirCombinaciones, toleranciaDe } from '@/lib/conciliacionCobro';
 import { cuentasElegibles, cuentaSugerida, cantidadPreferidas, cuentasDeRetencion } from '@/lib/cuentasCobro';
 import { retencionDesdeImporte, cuentaParaRetencion } from '@/lib/retenciones';
+import { parsearImporte } from '@/lib/parseResumen';
+import { claveComprobante } from '@/lib/comprobantes';
 
 interface ItemUI {
   id_item: string;
@@ -68,8 +70,8 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
     // cualquier cuenta — puede haber un mínimo, un tope o un ajuste que el % no sabe.
     const m = String(item.descripcion || '').match(/retenci[oó]n\s+([\d.,]+)/i);
     if (m) {
-      const n = Number(m[1].replace(/\./g, '').replace(',', '.'));
-      if (Number.isFinite(n) && n > 0) return String(Math.round(n));
+      const n = parsearImporte(m[1]);
+      if (n !== null && n > 0) return String(Math.round(n));
     }
     // Si no, se calcula con el % del cliente sobre lo que ENTRÓ.
     const pct = clientes.find((c) => c.id_control === (item.id_control || ''))?.retencionPct || 0;
@@ -80,6 +82,14 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
   // Siempre ganancias: es la única retención que aplica hoy. El desplegable sigue estando
   // por si algún cliente retiene otra cosa, pero no hay que elegir nada en el caso normal.
   const [cuentaRet, setCuentaRet] = useState(() => String(cuentaParaRetencion(cuentas)?.id || ''));
+  // El importe también se edita. Lo lee la IA del mail y a veces lee cualquier cosa: agarra
+  // un número suelto del cuerpo —un total parcial, un número de comprobante— en vez del
+  // monto transferido. Cuando eso pasa, TODO lo demás de la fila queda al pedo: las
+  // sugerencias buscan combinaciones por un número equivocado y no hay ninguna que cierre.
+  // Antes la única salida era descartar el movimiento y cargarlo a mano en otra pantalla.
+  const [importeEditado, setImporteEditado] = useState(String(Math.round(item.importe)));
+  const importeNum = Math.round(Number(importeEditado)) || 0;
+  const importeCambiado = importeNum !== Math.round(item.importe);
   // La lista completa para tildar de a una. Las sugerencias resuelven el caso normal, pero
   // cuando ninguna cierra —un pago parcial, una factura de hace seis meses, dos cobros que
   // cancelan la misma— la única salida era marcar "a cuenta" y perder el detalle.
@@ -127,10 +137,41 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
 
   // Qué facturas dan ese importe. Es el mismo motor que la carga manual de cobros: acá el
   // importe ya está fijo (lo dice el banco), así que la pregunta es solo qué cancela.
-  const sugerencias = useMemo(
-    () => (facturas.length ? sugerirCombinaciones(facturas, item.importe) : []),
-    [facturas, item.importe],
-  );
+  // El objetivo NO es lo que entró al banco: es lo que entró MÁS lo retenido. El cliente
+  // canceló facturas por la suma de las dos cosas, y buscar combinaciones por el neto hace
+  // que la combinación correcta quede fuera de tolerancia justo cuando hay retención.
+  const objetivo = importeNum + (Math.round(Number(retencion)) || 0);
+
+  const sugerencias = useMemo(() => {
+    if (!facturas.length) return [];
+    const base = sugerirCombinaciones(facturas, objetivo);
+
+    // Lo que dice el aviso va primero y va siempre. Antes solo se mostraba como texto
+    // ("El aviso dice que paga: …") y para aplicarlo había que tildar las facturas a mano,
+    // aunque es el dato más confiable que hay: no lo adivinó nadie, lo dice el cliente.
+    const declaradas = String(item.comprobantes || '')
+      .split(/[,;]+/).map((x) => claveComprobante(x)).filter(Boolean);
+    if (!declaradas.length) return base;
+    const numeros = facturas
+      .filter((f) => declaradas.includes(claveComprobante(f.numero)))
+      .map((f) => f.numero);
+    if (!numeros.length) return base;
+
+    const clave = [...numeros].sort().join('|');
+    const yaEstaba = base.find((c) => [...c.numeros].sort().join('|') === clave);
+    if (yaEstaba) {
+      yaEstaba.delAviso = true;
+      const i = base.indexOf(yaEstaba);
+      if (i > 0) { base.splice(i, 1); base.unshift(yaEstaba); }
+      return base;
+    }
+    const total = facturas.filter((f) => numeros.includes(f.numero)).reduce((a, f) => a + f.importe, 0);
+    base.unshift({
+      numeros, total, diferencia: Math.round(total) - objetivo,
+      exacta: Math.round(total) === objetivo, consecutivas: false, delAviso: true,
+    });
+    return base;
+  }, [facturas, objetivo, item.comprobantes]);
 
   async function accion(accion: 'confirmar' | 'descartar') {
     if (accion === 'confirmar') {
@@ -142,7 +183,11 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
         return;
       }
       const nombre = clientes.find(c => c.id_control === idControl)?.nombre || '';
-      if (!window.confirm(`Se va a registrar en Xubio un cobro de ${fmt$(item.importe)} de ${nombre}, con fecha ${fmtDia(item.fecha)}.\n\nEsto impacta en la contabilidad. ¿Confirmás?`)) return;
+      if (!(importeNum > 0)) { setErr('El importe del cobro tiene que ser mayor a 0.'); return; }
+      const avisoImporte = importeCambiado
+        ? `\n\nOJO: el importe se corrigió a mano. El mail decía ${fmt$(item.importe)}.`
+        : '';
+      if (!window.confirm(`Se va a registrar en Xubio un cobro de ${fmt$(importeNum)} de ${nombre}, con fecha ${fmtDia(item.fecha)}.${avisoImporte}\n\nEsto impacta en la contabilidad. ¿Confirmás?`)) return;
     } else {
       if (!window.confirm('Se va a descartar este movimiento: no se registra ningún cobro y no vuelve a aparecer en la bandeja. ¿Confirmás?')) return;
     }
@@ -153,6 +198,7 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
         body: JSON.stringify({
           id_item: item.id_item, accion,
           id_control: idControl, cuentaId: Number(cuentaId), comprobantes: elegidas,
+          importe: importeNum,
           retencion: Number(retencion) || 0,
           cuentaRetencionId: Number(cuentaRet) || 0,
         }),
@@ -256,6 +302,16 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
           {cuentasRet.length > 0 && (
             <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '8px' }}>
               <div>
+                <label style={{ display: 'block', fontSize: '10px', color: '#6b7280', fontWeight: 600 }}>IMPORTE DEL COBRO</label>
+                <input type="number" min={0} value={importeEditado} onChange={(e) => setImporteEditado(e.target.value)} disabled={trabajando}
+                  style={{ ...inputStyle, width: '130px', ...(importeCambiado ? { borderColor: '#b45309', fontWeight: 700 } : {}) }} />
+                {importeCambiado && (
+                  <span style={{ display: 'block', fontSize: '9.5px', color: '#b45309', fontWeight: 700 }}>
+                    el mail decía {fmt$(item.importe)}
+                  </span>
+                )}
+              </div>
+              <div>
                 <label style={{ display: 'block', fontSize: '10px', color: '#6b7280', fontWeight: 600 }}>RETENCIÓN</label>
                 <input type="number" min={0} value={retencion} onChange={(e) => setRetencion(e.target.value)} disabled={trabajando}
                   placeholder="0" style={{ ...inputStyle, width: '110px' }} />
@@ -306,10 +362,16 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
                 <button key={i} type="button" onClick={() => { setElegidas(sg.numeros); setACuenta(false); }} disabled={trabajando}
                   style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', width: '100%', textAlign: 'left',
                     cursor: 'pointer', fontSize: '11.5px', padding: '4px 7px', marginBottom: '4px',
-                    background: activa ? '#eef6ff' : sg.masViejas ? '#fffbeb' : 'white',
-                    border: activa ? '2px solid #2563eb' : sg.masViejas ? '2px solid #fcd34d' : '1px solid #dbe4fb', borderRadius: '5px' }}>
+                    background: activa ? '#eef6ff' : sg.delAviso ? '#f0fdf4' : sg.masViejas ? '#fffbeb' : 'white',
+                    border: activa ? '2px solid #2563eb' : sg.delAviso ? '2px solid #86efac' : sg.masViejas ? '2px solid #fcd34d' : '1px solid #dbe4fb', borderRadius: '5px' }}>
                   <span style={{ fontSize: '11px', color: activa ? '#1d4ed8' : '#cbd5e1' }}>{activa ? '\u25c9' : '\u25cb'}</span>
                   <span style={{ fontWeight: 700 }}>{sg.numeros.length === 1 ? '1 factura' : `${sg.numeros.length} facturas`}</span>
+                  {sg.delAviso && (
+                    <span title="Las facturas que el propio aviso de pago dice estar cancelando. Es el dato más confiable: no lo dedujo la app, lo dice el cliente."
+                      style={{ fontSize: '10px', fontWeight: 800, padding: '2px 7px', borderRadius: '8px', background: '#166534', color: '#fff' }}>
+                      ✉️ LO DICE EL AVISO
+                    </span>
+                  )}
                   {sg.masViejas && (
                     <span title="Las facturas más viejas sin cobrar, sumadas hasta acercarse al importe. Casi siempre es esta: el que paga, paga lo más viejo que debe."
                       style={{ fontSize: '10px', fontWeight: 800, padding: '2px 7px', borderRadius: '8px', background: '#b45309', color: '#fff' }}>
@@ -326,7 +388,7 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
                 );
               })}
               <p style={{ margin: '3px 0 0', fontSize: '10px', color: '#6b7280' }}>
-                Tolerancia {fmt$(toleranciaDe(item.importe))}, por retenciones o redondeos.
+                Se buscan facturas por {fmt$(objetivo)}{Number(retencion) > 0 ? ` (${fmt$(item.importe)} que entraron + ${fmt$(Number(retencion))} retenidos)` : ''}, con una tolerancia de {fmt$(toleranciaDe(objetivo))}.
               </p>
             </div>
           )}

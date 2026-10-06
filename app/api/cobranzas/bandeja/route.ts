@@ -141,7 +141,7 @@ export async function PATCH(req: NextRequest) {
     const r = await registrarCobro({
       idControl,
       fecha: String(item.fecha),
-      importe: Number(item.importe),
+      importe: Number(body.importe) > 0 ? Number(body.importe) : Number(item.importe),
       cuentaId,
       observacion: `Importado del resumen bancario — ${String(item.descripcion).slice(0, 120)}`,
       comprobantes,
@@ -161,6 +161,7 @@ export async function PATCH(req: NextRequest) {
       cliente: cli?.nombre_display || cli?.nombre_xubio || '',
       comprobantes: comprobantes.join(', '),
       id_cobro: r.idCobro || '',
+      importe: Number(body.importe) > 0 ? Number(body.importe) : Number(item.importe),
       usuario: user.email,
     });
 

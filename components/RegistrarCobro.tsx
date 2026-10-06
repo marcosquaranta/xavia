@@ -153,7 +153,7 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
     if (!cliente || !(Number(importe) > 0) || !cuentaId) {
       setMsg({ t: 'err', s: 'Completá cliente, importe y cuenta.' }); return;
     }
-    if (Number(retencion) > 0 && !(Number(cuentaRet) > 0)) {
+    if (Number(retencion) > 0 && !Number(cuentaRet)) {
       setMsg({ t: 'err', s: 'Elegí a qué cuenta va la retención.' }); return;
     }
     const nombre = clientes.find((c) => c.id_control === cliente)?.nombre || '';

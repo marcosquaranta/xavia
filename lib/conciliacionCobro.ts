@@ -15,7 +15,26 @@ export interface FacturaCandidata {
   yaCobrada?: boolean;
   // Cubierta por los cobros que el cliente tiene en Xubio (ver facturasCliente.ts).
   cubierta?: boolean;
+  // Dada por saldada a mano, sin movimiento en Xubio (ver facturasSaldadas.ts).
+  saldadaManual?: boolean;
 }
+
+// Qué cuenta como paga lo decide LA APP: un cobro imputado acá (`yaCobrada`) o una factura
+// dada por saldada a mano (`saldadaManual`). Las dos son hechos que alguien registró.
+//
+// `cubierta` NO cuenta, aunque esté disponible: no es un hecho sino una deducción — se
+// agarran los cobros que el cliente tiene en Xubio y se imputan de la factura más vieja a la
+// más nueva a ver hasta dónde llegan. Cuando esa deducción se equivoca, tapa una factura
+// vieja que SÍ está impaga, que es exactamente la que había que ofrecer.
+//
+// La contrapartida, dicha en voz alta: una factura cobrada cargando la cobranza directo en
+// Xubio, sin pasar por la app, va a seguir apareciendo como impaga. La forma de evitarlo es
+// registrar los cobros desde la app, que es hacia donde va todo esto igual.
+//
+// Antes esto estaba escrito dos veces y con condiciones DISTINTAS — la búsqueda por importe
+// excluía las cubiertas y la fila de "las más viejas" no—, así que esa fila proponía
+// facturas ya cobradas. Ahora es un solo lugar.
+export const estaImpaga = (f: FacturaCandidata) => !f.yaCobrada && !f.saldadaManual;
 
 export interface Combinacion {
   numeros: string[];
@@ -26,6 +45,11 @@ export interface Combinacion {
   // La fila de referencia: arrancar por la factura más vieja e ir sumando. Se muestra
   // siempre, aunque no entre en la tolerancia (ver combinacionMasViejas).
   masViejas?: boolean;
+  // Las facturas que el PROPIO AVISO dice estar pagando. No sale de adivinar por importe:
+  // lo dice el comprobante del cliente, así que va primera y va siempre, cierre o no cierre
+  // la cuenta. Que no cierre es información — significa que hay una nota de crédito, un
+  // pago parcial o una factura que falta— pero no la hace menos cierta.
+  delAviso?: boolean;
 }
 
 // Cuánto se permite que una combinación se aleje del importe cobrado. Existe porque en la
@@ -101,7 +125,7 @@ export function combinacionMasViejas(
   if (!(obj > 0)) return null;
 
   const candidatas = facturas
-    .filter(f => (opciones.incluirYaCobradas ? true : !f.yaCobrada) && Math.round(f.importe) > 0)
+    .filter(f => (opciones.incluirYaCobradas ? true : estaImpaga(f)) && Math.round(f.importe) > 0)
     .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
   if (!candidatas.length) return null;
 
@@ -140,7 +164,7 @@ export function sugerirCombinaciones(
     // Las cubiertas por cobros de Xubio quedan afuera igual que las ya imputadas: proponer
     // una factura que el cliente ya pagó es el error que esta pantalla tiene que evitar, y
     // además son las que hacían que la lista de combinaciones fuera interminable.
-    .filter((f) => (opciones.incluirYaCobradas ? true : (!f.yaCobrada && !f.cubierta)) && Math.round(f.importe) > 0)
+    .filter((f) => (opciones.incluirYaCobradas ? true : estaImpaga(f)) && Math.round(f.importe) > 0)
     .sort((a, b) => b.importe - a.importe)
     .slice(0, MAX_FACTURAS);
   if (!candidatas.length) return [];
