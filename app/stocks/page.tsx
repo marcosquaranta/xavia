@@ -4,6 +4,7 @@ import { readSheet } from '@/lib/sheets';
 import type { Articulo, StockMes, Lote, VentaDia, PrecioVenta, ClienteVenta, Gasto } from '@/lib/types';
 import Header from '@/components/Header';
 import StocksManager from './StocksManager';
+import CargarDescarteCamara, { CULTIVOS_DESCARTE } from '@/components/CargarDescarteCamara';
 import { calcularValorizacionMes } from '@/lib/valorizacionStock';
 import { calcularDriversMes } from '@/lib/usoTeorico';
 import { alertasStockBajo } from '@/lib/alertasPanel';
@@ -100,6 +101,24 @@ export default async function StocksPage() {
       <div className="container">
         <h1 className="page-title">Stocks</h1>
         <p className="page-subtitle">Control de insumos · carga mensual · informe comparativo</p>
+
+        {/* El descarte de cámara no tiene nada que ver con los insumos de esta pantalla,
+            pero "Stocks" es el primer lugar donde uno lo busca. Va arriba, los cuatro
+            cultivos juntos, para no tener que entrar al detalle de cada uno. */}
+        <div className="card" style={{ marginBottom: '14px' }}>
+          <p style={{ margin: '0 0 2px', fontSize: '11px', fontWeight: 700, color: '#991b1b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            Descarte de cámara
+          </p>
+          <p style={{ margin: '0 0 9px', fontSize: '11.5px', color: '#6b7280' }}>
+            Producto ya empaquetado que se tiró. Sale del stock de cámara y cuenta en los indicadores de descarte.
+            No es lo mismo que el faltante de un ajuste de stock, que es producto que no se sabe dónde está.
+          </p>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            {CULTIVOS_DESCARTE.map((c) => (
+              <CargarDescarteCamara key={c.key} cultivo={c.key} label={c.label} compacto />
+            ))}
+          </div>
+        </div>
 
         {alertasStock.length > 0 && (
           <div className="card" style={{ marginBottom: '14px', background: '#fef2f2', border: '1px solid #fecaca' }}>

@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
+import CargarDescarteCamara from './CargarDescarteCamara';
 import type { CultivoCamara } from '@/lib/camara';
 
 interface CultivoStock { actual: number; ajusteMes: number }
@@ -98,11 +99,17 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, a
                     Ajustar
                   </button>
                 )}
+                {/* Al lado de Ajustar, que es donde uno se acuerda: se entra a mirar el
+                    stock y ahí se acuerda de los paquetes que se tiraron ayer. */}
+                {abierto !== c.key && <CargarDescarteCamara cultivo={c.key} label={c.label} compacto />}
               </div>
             ) : (
-              <Link href={`/stocks/${c.key}`} style={{ display: 'inline-block', marginBottom: '8px', fontSize: '11px', color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}>
-                Ver detalle →
-              </Link>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                <Link href={`/stocks/${c.key}`} style={{ fontSize: '11px', color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}>
+                  Ver detalle →
+                </Link>
+                {abierto !== c.key && <CargarDescarteCamara cultivo={c.key} label={c.label} compacto />}
+              </div>
             )}
 
             {abierto === c.key ? (

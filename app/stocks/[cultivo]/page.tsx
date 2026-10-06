@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import type { Lote, VentaDia, StockCamara } from '@/lib/types';
 import Header from '@/components/Header';
+import CargarDescarteCamara from '@/components/CargarDescarteCamara';
 
 import { plantasDeVenta } from '@/lib/articulos';
 export const dynamic = 'force-dynamic';
@@ -134,7 +135,10 @@ export default async function StockDetallePage({ params, searchParams }: { param
         <Link href="/stocks" style={{ fontSize: '13px', display: 'inline-block', marginBottom: '10px' }}>← Volver a Stocks</Link>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '6px' }}>
           <h1 className="page-title" style={{ margin: 0, color: accent }}>Stock {label}</h1>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            {/* Esta pantalla tiene una columna "Descarte cámara": el lugar natural para
+                cargarlo es justo acá, mirando la columna que se va a llenar. */}
+            <CargarDescarteCamara cultivo={cultivo} label={label} compacto />
             <Link href={`/stocks/${cultivo}?mes=${prevMes}`} className="btn secondary" style={{ fontSize: '12px', padding: '4px 10px' }}>←</Link>
             <span style={{ fontSize: '13px', fontWeight: 600, textTransform: 'capitalize', minWidth: '120px', textAlign: 'center' }}>{nombreMes}</span>
             <Link href={`/stocks/${cultivo}?mes=${nextMes}`} className="btn secondary" style={{ fontSize: '12px', padding: '4px 10px' }}>→</Link>
