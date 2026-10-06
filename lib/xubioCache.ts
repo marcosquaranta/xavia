@@ -22,7 +22,7 @@
 // engorda la planilla y hace más lenta justamente la lectura que se quiere rápida.
 
 import { asegurarHoja, asegurarColumnas, readSheet, appendRowsObj, batchUpdateRows } from './sheets';
-import { getComprobantes, getCobranzas, importeCobranza } from './xubio';
+import { getComprobantes, getCobranzas, importeCobranza, getClientesXubio } from './xubio';
 import { nombreClienteComprobante } from './recordatoriosCobro';
 
 export const HOJA_COMPROBANTES = 'XubioComprobantes';
@@ -55,6 +55,18 @@ export interface CobranzaCache {
 }
 
 // El nombre de la cuenta donde entró una cobranza, tal como viene del bean.
+// El nombre del cliente de una cobranza. Xubio manda el ID y nada más, así que se busca en
+// el padrón; si viniera el nombre (otro endpoint, otra versión) se usa ese.
+export function nombreDeCobranza(cob: any, nombres: Map<string, string>): string {
+  const cl = cob?.cliente;
+  if (!cl) return '';
+  if (typeof cl === 'string') return cl.trim();
+  const directo = String(cl.nombre || cl.name || '').trim();
+  if (directo) return directo;
+  const id = cl.ID ?? cl.id ?? cl.clienteId;
+  return id !== undefined ? (nombres.get(String(id)) || '') : '';
+}
+
 export function cuentaDeCobranza(cob: any): string {
   const items = cob?.transaccionInstrumentoDeCobro;
   if (!Array.isArray(items)) return '';
@@ -163,6 +175,14 @@ export async function guardarSnapshotXubio(desde: string, hasta: string): Promis
     else { nuevosComp.push(fila); yaComp.add(id); res.comprobantes.nuevos++; }
   }
 
+  // El padrón de clientes, para ponerle nombre al ID que trae la cobranza. Una sola consulta
+  // para todas; si falla, las cobranzas se guardan igual y sin nombre — vale muchísimo más
+  // tener la cobranza con el cliente en blanco que no tenerla.
+  const nombresClientes = new Map<string, string>();
+  try {
+    for (const cli of await getClientesXubio()) nombresClientes.set(String(cli.cliente_id), cli.nombre);
+  } catch { /* se sigue sin nombres */ }
+
   const yaCob = new Set(filasCob.map((f) => String(f.transaccionid)));
   const nuevosCob: Record<string, any>[] = [];
   const updCob: { keyValue: string; updates: Record<string, any> }[] = [];
@@ -172,10 +192,10 @@ export async function guardarSnapshotXubio(desde: string, hasta: string): Promis
     const fila = {
       transaccionid: id,
       fecha: soloFecha(c?.fecha),
-      cliente: nombreClienteComprobante(c),
+      cliente: nombreDeCobranza(c, nombresClientes),
       importe: importeCobranza(c),
       cuenta: cuentaDeCobranza(c),
-      numero: String(c?.numeroDocumento || '').trim(),
+      numero: String(c?.numeroRecibo || c?.numeroDocumento || '').trim(),
       actualizado: ahora,
     };
     if (yaCob.has(id)) { updCob.push({ keyValue: id, updates: fila }); res.cobranzas.actualizados++; }
