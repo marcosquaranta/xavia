@@ -433,8 +433,8 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
             // Cuánto suma lo elegido contra lo que entró: con selección a mano ya no hay
             // ninguna garantía de que cierre, así que la diferencia se muestra siempre.
             const suma = facturas.filter((f) => elegidas.includes(f.numero)).reduce((a, f) => a + f.importe, 0);
-            const dif = Math.round(suma - item.importe);
-            const ok = Math.abs(dif) <= toleranciaDe(item.importe);
+            const dif = Math.round(suma) - objetivo;
+            const ok = Math.abs(dif) <= toleranciaDe(objetivo);
             return (
               <p style={{ margin: '0 0 8px', fontSize: '11.5px', color: ok ? '#166534' : '#b45309', fontWeight: 600 }}>
                 Cancela: {elegidas.join(', ')}

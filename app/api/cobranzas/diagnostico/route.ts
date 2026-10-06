@@ -68,6 +68,29 @@ export async function GET() {
     push('Cuentas donde imputar el cobro', false, e?.message || 'error');
   }
 
+  // Cómo arma Xubio una cobranza que YA tiene retención.
+  //
+  // Xubio rechaza mandar la retención como un medio de cobro más ("la cuenta no tiene una
+  // categoría que impacte en disponibilidades"), así que hay que ver cómo la guarda ÉL. Esto
+  // busca entre las cobranzas existentes alguna con más de un instrumento o con una cuenta
+  // que parezca de retención, y muestra su estructura cruda. Copiar lo que ya funciona es
+  // lo que resolvió todos los problemas anteriores con esta API; reconstruirlo del manual,
+  // ninguno.
+  try {
+    const conRet = cobs.filter((c: any) => {
+      const items = c?.transaccionInstrumentoDeCobro;
+      if (!Array.isArray(items)) return false;
+      if (items.length > 1) return true;
+      return items.some((i: any) => /retenci[o\u00f3]n|percepci[o\u00f3]n/i.test(String(i?.cuenta?.nombre || '')));
+    });
+    push('C\u00f3mo guarda Xubio una cobranza con retenci\u00f3n', conRet.length > 0,
+      conRet.length === 0
+        ? 'No hay ninguna cobranza con retenci\u00f3n cargada en los \u00faltimos 60 d\u00edas. Carg\u00e1 UNA a mano en Xubio y volv\u00e9 a correr esto: con la estructura real a la vista se puede replicar exacto.'
+        : `${conRet.length} encontrada(s). La m\u00e1s reciente, cruda:\n` + JSON.stringify(conRet[0], null, 1).slice(0, 2500));
+  } catch (e: any) {
+    push('C\u00f3mo guarda Xubio una cobranza con retenci\u00f3n', false, e?.message || 'error');
+  }
+
   // Xubio lo exige al crear la cobranza y no asume ninguno por defecto: si falta, el cobro
   // se rechaza con "El campo CircuitoContable esta vacío o es nulo".
   try {

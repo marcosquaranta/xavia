@@ -83,6 +83,19 @@ export interface ResultadoCobro {
   status?: number;
 }
 
+// Xubio contesta algunos errores en su propio idioma. Traducirlos no es cosmética: el
+// mensaje crudo no dice qué hacer, y el que lo lee no tiene por qué saber qué es una
+// "categoría que impacte en disponibilidades".
+export function explicarErrorXubio(err: string): string {
+  const e = String(err || '');
+  if (/no tiene una categor[ií]a que impacte en disponibilidades/i.test(e)) {
+    return 'Xubio no deja usar esa cuenta como forma de cobro. La cuenta de la retención existe, pero en el plan de cuentas de Xubio no está marcada como una cuenta por la que puede entrar un cobro. '
+      + 'Se arregla en Xubio (plan de cuentas → esa cuenta → categoría), o eligiendo otra cuenta. '
+      + `Mensaje de Xubio: ${e}`;
+  }
+  return e;
+}
+
 export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
   const idControl = String(p.idControl || '').trim();
   const fecha = String(p.fecha || '').trim();
@@ -171,7 +184,7 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
     utilizaMonedaExtranjera: datosMoneda.utilizaMonedaExtranjera,
     plantilla,
   });
-  if (!r.ok) return { ok: false, error: `Xubio rechazó el cobro: ${r.error}`, status: 502 };
+  if (!r.ok) return { ok: false, error: `Xubio rechazó el cobro: ${explicarErrorXubio(String(r.error || ''))}`, status: 502 };
 
   await asegurarHoja(HOJA_COBROS, HEADERS_COBROS);
   await asegurarColumna(HOJA_COBROS, 'comprobantes'); // la hoja puede existir sin esta columna
