@@ -1,4 +1,5 @@
 'use client';
+import { PCT_RETENCION_GANANCIAS } from '@/lib/retenciones';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -249,12 +250,19 @@ function ClienteRow({ c, precios, cambios, onSaved }: { c: ClienteVenta; precios
                   <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#9ca3af' }}>Si está vacío se usa el general.</p>
                 </div>
                 <div>
-                  {/* Con esto la app propone sola cuánto retuvo en cada cobro. La cuenta no
-                      es "depósito × %": es sobre la factura, que es mayor que el depósito. */}
-                  <label style={{ fontSize: '11px' }}>Me retiene ganancias (%)</label>
-                  <input type="number" min={0} max={49} step="0.5" value={fields.retencion_ganancias_pct}
-                    onChange={e => setFields(f => ({ ...f, retencion_ganancias_pct: e.target.value }))} disabled={saving}
-                    placeholder="vacío = no retiene" />
+                  <label style={{ fontSize: '11px' }}>Retención de ganancias</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '7px', cursor: saving ? 'default' : 'pointer', fontSize: '12.5px', padding: '6px 0' }}>
+                    <input type="checkbox" disabled={saving}
+                      checked={Number(fields.retencion_ganancias_pct) > 0}
+                      onChange={e => setFields(f => ({ ...f, retencion_ganancias_pct: e.target.checked ? String(PCT_RETENCION_GANANCIAS) : '' }))}
+                      style={{ width: '16px', height: '16px' }} />
+                    Me retiene ganancias ({Number(fields.retencion_ganancias_pct) > 0 ? fields.retencion_ganancias_pct : PCT_RETENCION_GANANCIAS}%)
+                  </label>
+                  <p style={{ margin: 0, fontSize: '10px', color: '#9ca3af' }}>
+                    {Number(fields.retencion_ganancias_pct) > 0 && Number(fields.retencion_ganancias_pct) !== PCT_RETENCION_GANANCIAS
+                      ? `Tiene cargado ${fields.retencion_ganancias_pct}%, distinto del 2% general. Se respeta.`
+                      : 'La alícuota la fija la ley (RG 830) y es 2% para todos. Acá solo se marca si este cliente es agente de retención. El monto siempre se puede editar al cargar el cobro.'}
+                  </p>
                 </div>
                 <div>
                   <label style={{ fontSize: '11px' }}>Recordatorio de cobranza</label>
