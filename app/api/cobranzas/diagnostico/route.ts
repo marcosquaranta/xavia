@@ -70,25 +70,35 @@ export async function GET() {
 
   // Cómo arma Xubio una cobranza que YA tiene retención.
   //
-  // Xubio rechaza mandar la retención como un medio de cobro más ("la cuenta no tiene una
-  // categoría que impacte en disponibilidades"), así que hay que ver cómo la guarda ÉL. Esto
-  // busca entre las cobranzas existentes alguna con más de un instrumento o con una cuenta
-  // que parezca de retención, y muestra su estructura cruda. Copiar lo que ya funciona es
-  // lo que resolvió todos los problemas anteriores con esta API; reconstruirlo del manual,
-  // ninguno.
+  // La cuenta "Retención Ganancias Sufrida" está bien categorizada en Xubio: es un crédito
+  // fiscal (Activo Corriente > Otros Créditos), no una cuenta de caja. Por eso Xubio la
+  // rechaza como MEDIO DE COBRO: no es que la cuenta esté mal, es que la estamos mandando
+  // por el campo equivocado. La retención no es plata que entró, es una factura cancelada
+  // sin plata, y Xubio la debe guardar en otro lado del mismo documento.
+  //
+  // Esto busca ese otro lado. No asume que la retención esté en los instrumentos de cobro:
+  // recorre la cobranza ENTERA buscando cualquier campo que mencione retención, y lista las
+  // claves de primer nivel. Si estuviera en un array aparte —`transaccionRetencion`, el
+  // nombre que sea— con el filtro anterior no se habría encontrado nunca.
   try {
-    const conRet = cobs.filter((c: any) => {
-      const items = c?.transaccionInstrumentoDeCobro;
-      if (!Array.isArray(items)) return false;
-      if (items.length > 1) return true;
-      return items.some((i: any) => /retenci[o\u00f3]n|percepci[o\u00f3]n/i.test(String(i?.cuenta?.nombre || '')));
-    });
-    push('C\u00f3mo guarda Xubio una cobranza con retenci\u00f3n', conRet.length > 0,
+    const mencionaRetencion = (v: any): boolean => {
+      if (v === null || v === undefined) return false;
+      if (typeof v === 'string') return /retenc|percep/i.test(v);
+      if (typeof v !== 'object') return false;
+      return Object.entries(v).some(([k, x]) => /retenc|percep/i.test(k) || mencionaRetencion(x));
+    };
+    const conRet = cobs.filter(mencionaRetencion);
+    const claves = cobs.length ? Object.keys(cobs[0]).join(', ') : '(sin cobranzas)';
+    push('Cómo guarda Xubio una cobranza con retención', conRet.length > 0,
       conRet.length === 0
-        ? 'No hay ninguna cobranza con retenci\u00f3n cargada en los \u00faltimos 60 d\u00edas. Carg\u00e1 UNA a mano en Xubio y volv\u00e9 a correr esto: con la estructura real a la vista se puede replicar exacto.'
-        : `${conRet.length} encontrada(s). La m\u00e1s reciente, cruda:\n` + JSON.stringify(conRet[0], null, 1).slice(0, 2500));
+        ? `Ninguna de las ${cobs.length} cobranzas de los últimos 60 días menciona una retención por ningún lado. `
+          + `Campos que trae una cobranza: ${claves}. `
+          + 'Si cargaste alguna con retención a mano, puede ser que tenga más de 60 días, o que Xubio no devuelva ese dato por la API.'
+        : `${conRet.length} de ${cobs.length} cobranzas mencionan retención. La más reciente, cruda y completa:
+`
+          + JSON.stringify(conRet[conRet.length - 1], null, 1).slice(0, 6000));
   } catch (e: any) {
-    push('C\u00f3mo guarda Xubio una cobranza con retenci\u00f3n', false, e?.message || 'error');
+    push('Cómo guarda Xubio una cobranza con retención', false, e?.message || 'error');
   }
 
   // Xubio lo exige al crear la cobranza y no asume ninguno por defecto: si falta, el cobro

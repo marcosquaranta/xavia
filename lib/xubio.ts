@@ -485,8 +485,10 @@ export async function crearCobranza(args: NuevaCobranza):
   }];
   for (const r of args.retenciones || []) {
     if (!(Number(r?.importe) > 0) || !(Number(r?.cuentaId) !== 0)) continue;
+    const base = { ...(args.plantilla || {}) };
+    delete (base as any).cuentaTipo;
     instrumentos.push({
-      ...(args.plantilla || {}),
+      ...base,
       cuenta: { ID: r.cuentaId },
       importe: Number(r.importe),
       descripcion: r.descripcion || 'Retención',
