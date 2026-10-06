@@ -35,7 +35,6 @@ function CardCamara({ datos, cultivo, cultivoKey, onSaved }: {
   const [motivo, setMotivo] = useState('');
   const [tipo, setTipo] = useState<'inicial' | 'ajuste'>('ajuste');
   const [cantidad, setCantidad] = useState('');
-  const [descarte, setDescarte] = useState('');
   const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0]);
   const [notas, setNotas] = useState('');
   const [loading, setLoading] = useState(false);
@@ -48,10 +47,10 @@ function CardCamara({ datos, cultivo, cultivoKey, onSaved }: {
       const res = await fetch('/api/stocks/camara/base', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cultivo: datos.cultivo, fecha, tipo, cantidad_paq: Number(cantidad), descarte_paq: Number(descarte) || 0, notas }),
+        body: JSON.stringify({ cultivo: datos.cultivo, fecha, tipo, cantidad_paq: Number(cantidad), notas }),
       });
       if (!res.ok) { const j = await res.json(); throw new Error(j.error); }
-      setMostrarForm(false); setCantidad(''); setDescarte(''); setNotas('');
+      setMostrarForm(false); setCantidad(''); setNotas('');
       onSaved();
     } catch (err: any) {
       setError(err.message);
@@ -194,10 +193,10 @@ function CardCamara({ datos, cultivo, cultivoKey, onSaved }: {
             <input type="number" value={cantidad} onChange={e => setCantidad(e.target.value)} required min="0" step="any" disabled={loading} />
           </div>
           {tipo === 'ajuste' && (
-            <div>
-              <label style={{ fontSize: '11px' }} title="Cuánto de la diferencia es producto que se tira (podrido, pasado) — queda registrado como descarte en cámara">Descarte en cámara (paq, opcional)</label>
-              <input type="number" value={descarte} onChange={e => setDescarte(e.target.value)} min="0" step="any" disabled={loading} placeholder="0" />
-            </div>
+            <p style={{ margin: 0, fontSize: '10.5px', color: '#9ca3af' }}>
+              La diferencia contra lo esperado queda como <strong>faltante</strong>. Si lo que pasó fue que se tiró producto,
+              cerrá esto y usalo con <strong>Cargar descarte</strong>: son dos cosas distintas.
+            </p>
           )}
           <div>
             <label style={{ fontSize: '11px' }}>Notas</label>

@@ -14,7 +14,6 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, a
 }) {
   const [abierto, setAbierto] = useState<CultivoCamara | null>(null);
   const [cantidad, setCantidad] = useState('');
-  const [descarte, setDescarte] = useState('');
   const [notas, setNotas] = useState('');
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; s: string } | null>(null);
@@ -29,10 +28,10 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, a
   const diff = abierto && cantidad !== '' ? Math.round(Number(cantidad) - stockAbierto) : null;
 
   function abrir(key: CultivoCamara) {
-    setAbierto(key); setCantidad(''); setDescarte(''); setNotas(''); setMsg(null);
+    setAbierto(key); setCantidad(''); setNotas(''); setMsg(null);
   }
   function cerrar() {
-    setAbierto(null); setCantidad(''); setDescarte(''); setNotas('');
+    setAbierto(null); setCantidad(''); setNotas('');
   }
 
   async function registrar() {
@@ -43,14 +42,15 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, a
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           cultivo: abierto, fecha: new Date().toISOString().slice(0, 10),
-          tipo: 'ajuste', cantidad_paq: Number(cantidad), descarte_paq: Number(descarte) || 0, notas,
+          tipo: 'ajuste', cantidad_paq: Number(cantidad), notas,
         }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'Error al guardar');
-      const dTxt = diff === null || diff === 0 ? 'sin diferencia vs. lo esperado' : `${diff > 0 ? '+' : ''}${diff} paq vs. lo esperado`;
-      const descTxt = Number(descarte) > 0 ? `, ${Number(descarte)} paq de descarte` : '';
-      setMsg({ t: 'ok', s: `Ajuste registrado (${dTxt}${descTxt}). Recargando…` });
+      // La diferencia de un recuento es un FALTANTE, no un descarte: es producto que no se
+      // sabe dónde está. El descarte se carga aparte, desde Stocks, y dice por qué se tiró.
+      const dTxt = diff === null || diff === 0 ? 'sin faltante vs. lo esperado' : `${diff > 0 ? '+' : ''}${diff} paq de faltante`;
+      setMsg({ t: 'ok', s: `Ajuste registrado (${dTxt}). Recargando…` });
       setTimeout(() => window.location.reload(), 1600);
     } catch (e: any) {
       setMsg({ t: 'err', s: e.message || 'Error al guardar' });
@@ -111,12 +111,9 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, a
                   style={{ fontSize: '12px', padding: '4px 6px', border: '1px solid #d1d5db', borderRadius: '5px' }} />
                 {diff !== null && (
                   <span style={{ fontSize: '11px', fontWeight: 600, color: diff === 0 ? '#6b7280' : diff > 0 ? '#059669' : '#dc2626' }}>
-                    {diff === 0 ? 'Sin diferencia' : `${diff > 0 ? '+' : ''}${diff} paq vs. lo esperado`}
+                    {diff === 0 ? 'Sin faltante' : `${diff > 0 ? '+' : ''}${diff} paq de faltante`}
                   </span>
                 )}
-                <input type="number" placeholder="Descarte en cámara (paq, opcional)" value={descarte} onChange={e => setDescarte(e.target.value)} disabled={loading}
-                  title="Cuánto de la diferencia es producto que se tira (podrido, pasado) — queda registrado como descarte en cámara"
-                  style={{ fontSize: '12px', padding: '4px 6px', border: '1px solid #d1d5db', borderRadius: '5px' }} />
                 <input type="text" placeholder="Notas (opcional)" value={notas} onChange={e => setNotas(e.target.value)} disabled={loading}
                   style={{ fontSize: '12px', padding: '4px 6px', border: '1px solid #d1d5db', borderRadius: '5px' }} />
                 <div style={{ display: 'flex', gap: '6px' }}>

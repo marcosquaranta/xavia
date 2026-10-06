@@ -104,6 +104,12 @@ function clientesConVariacionSemana(ventas: VentaDia[], clientes: ClienteVenta[]
 
 export interface DescarteFaseReporte {
   cultivo: string; plantinF1: number; f1F2: number; f2Cosecha: number; total: number;
+  // Cámara: producto ya empaquetado que se TIRÓ. No es el faltante de un ajuste de stock
+  // — eso es otra cosa y tiene su propia sección— sino lo que alguien decidió descartar.
+  // Se carga en paquetes y se convierte a plantas para poder sumarlo con las otras etapas.
+  camara: number;         // paquetes, que es como se carga
+  camaraPlantas: number;  // los mismos, en plantas
+  baseCamara: number;     // lo que salió vivo de la cosecha en la ventana
   // Base = lo que PASÓ por esa fase (descartado + lo que siguió vivo). El % se calcula
   // sobre eso: un descarte de 1.200 plantas puede ser grave o irrelevante según si por ahí
   // pasaron 3.000 o 300.000, y el número suelto no lo dice.
@@ -117,7 +123,7 @@ export interface DescarteFaseReporte {
 // se pierde — Plantín→F1, F1→F2 (Movimientos tipo "trasplante") y F2→Cosecha (Movimientos
 // tipo "cosecha") — para poder ver DÓNDE se concentra la pérdida, no solo cuánta hay.
 function descartePorFaseUltimasSemanas(
-  lotes: Lote[], movimientos: Movimiento[], nSemanas = 4,
+  lotes: Lote[], movimientos: Movimiento[], registrosCamara: StockCamara[], nSemanas = 4,
   // Rango explícito, para poder pedir una semana puntual o un mes en vez de "las últimas N
   // semanas". El descarte se venía mirando solo por mes, y un mes esconde la semana que se
   // fue de rango: para cuando el promedio mensual se mueve, el problema ya pasó.
@@ -129,7 +135,7 @@ function descartePorFaseUltimasSemanas(
   const fin = rango ? rango.hasta : (() => { const d = new Date(hoy); d.setHours(23, 59, 59); return d; })();
   const lotesMap = new Map(lotes.map(l => [l.id_lote, l]));
   const cero = () => ({
-    plantinF1: 0, f1F2: 0, f2Cosecha: 0, basePlantinF1: 0, baseF1F2: 0, baseF2Cosecha: 0,
+    plantinF1: 0, f1F2: 0, f2Cosecha: 0, camara: 0, basePlantinF1: 0, baseF1F2: 0, baseF2Cosecha: 0,
     lotesPlantinF1: new Map<string, number>(), lotesF1F2: new Map<string, number>(), lotesF2Cosecha: new Map<string, number>(),
   });
   const acc = { rucula: cero(), lechuga: cero() };
@@ -164,17 +170,40 @@ function descartePorFaseUltimasSemanas(
       sumarLote(acc[key].lotesF2Cosecha, lote.id_lote, descarte);
     }
   }
+  // Descarte de cámara de la misma ventana. Solo lo que se cargó COMO descarte: la
+  // diferencia que revela un ajuste de stock es un faltante y se informa aparte, en la
+  // sección de stock en cámara. Son dos cosas distintas — el faltante es producto que no se
+  // sabe dónde está, el descarte es producto que se decidió tirar— y mezclarlas haría que
+  // ninguno de los dos números sirva.
+  for (const r of registrosCamara) {
+    if (String(r.tipo) !== 'descarte') continue;
+    const paq = Number(r.descarte_paq) || 0;
+    if (paq <= 0) continue;
+    const f = new Date(String(r.fecha).split(/[T ]/)[0] + 'T12:00:00');
+    if (isNaN(f.getTime()) || f < inicio || f > fin) continue;
+    const key = esRuculaV(String(r.cultivo)) ? 'rucula' : 'lechuga';
+    acc[key].camara += paq;
+  }
+
   // Del lote que más descartó al que menos — así si hay muchos, los primeros de la lista
   // son justo los que conviene mirar primero.
   const topLotes = (mapa: Map<string, number>, max = 6) =>
     Array.from(mapa.entries()).sort((a, b) => b[1] - a[1]).map(([id]) => id).slice(0, max);
-  return (['rucula', 'lechuga'] as const).map((k) => ({
+  return (['rucula', 'lechuga'] as const).map((k) => {
+    // En rúcula el paquete son 3 plantas; en lechuga el paquete ES una planta. Sin convertir,
+    // el total sumaría paquetes con plantas y en rúcula mostraría un tercio del descarte real.
+    const camaraPlantas = Math.round(acc[k].camara * (k === 'rucula' ? POSPAQ : 1));
+    return {
     cultivo: k === 'rucula' ? 'Rúcula' : 'Lechuga',
     plantinF1: Math.round(acc[k].plantinF1), f1F2: Math.round(acc[k].f1F2), f2Cosecha: Math.round(acc[k].f2Cosecha),
-    total: Math.round(acc[k].plantinF1 + acc[k].f1F2 + acc[k].f2Cosecha),
+    camara: Math.round(acc[k].camara), camaraPlantas,
+    // Lo que pasó por la cámara es lo que salió vivo de la cosecha en la misma ventana.
+    baseCamara: Math.max(0, Math.round(acc[k].baseF2Cosecha - acc[k].f2Cosecha)),
+    total: Math.round(acc[k].plantinF1 + acc[k].f1F2 + acc[k].f2Cosecha) + camaraPlantas,
     basePlantinF1: Math.round(acc[k].basePlantinF1), baseF1F2: Math.round(acc[k].baseF1F2), baseF2Cosecha: Math.round(acc[k].baseF2Cosecha),
     lotesPlantinF1: topLotes(acc[k].lotesPlantinF1), lotesF1F2: topLotes(acc[k].lotesF1F2), lotesF2Cosecha: topLotes(acc[k].lotesF2Cosecha),
-  }));
+    };
+  });
 }
 
 // Proyección de cosecha MENSUAL (no semanal — la semanal no se estaba cumpliendo, mucho
@@ -526,13 +555,13 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     const d = new Date(iso + (finDelDia ? 'T23:59:59' : 'T00:00:00'));
     return d;
   };
-  const descarteSemana = descartePorFaseUltimasSemanas(lotes, movimientos, 1, {
+  const descarteSemana = descartePorFaseUltimasSemanas(lotes, movimientos, registrosCamara, 1, {
     desde: diaDe(desdeSemana), hasta: diaDe(hastaHoy, true),
   });
-  const descarteSemanaAnterior = descartePorFaseUltimasSemanas(lotes, movimientos, 1, {
+  const descarteSemanaAnterior = descartePorFaseUltimasSemanas(lotes, movimientos, registrosCamara, 1, {
     desde: diaDe(desdeAnt), hasta: diaDe(hastaAnt, true),
   });
-  const descarteMes = descartePorFaseUltimasSemanas(lotes, movimientos, 1, {
+  const descarteMes = descartePorFaseUltimasSemanas(lotes, movimientos, registrosCamara, 1, {
     desde: new Date(hoy.getFullYear(), hoy.getMonth(), 1),
     hasta: diaDe(hastaHoy, true),
   });
@@ -562,7 +591,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const clientesVariacion = clientesConVariacionSemana(ventas, clientes, desdeSemana, hastaHoy, desdeAnt, hastaAnt, 6);
 
   // ── Descarte por cultivo Y por fase (dónde se pierde), últimas 4 semanas ──
-  const descartePorFase = descartePorFaseUltimasSemanas(lotes, movimientos, 4);
+  const descartePorFase = descartePorFaseUltimasSemanas(lotes, movimientos, registrosCamara, 4);
 
   // ── Indicadores de gestión del mes en curso vs. mes pasado ──
   // Mismo cálculo que las tarjetas del Panel (se reusan las mismas funciones, no se
@@ -954,6 +983,7 @@ export function construirHtml(d: ReporteSemanalData): string {
       <td style="padding:2px 10px;border-bottom:1px solid #f7f7f7;text-align:right">${pct(x.plantinF1, x.basePlantinF1)}</td>
       <td style="padding:2px 10px;border-bottom:1px solid #f7f7f7;text-align:right">${pct(x.f1F2, x.baseF1F2)}</td>
       <td style="padding:2px 10px;border-bottom:1px solid #f7f7f7;text-align:right">${pct(x.f2Cosecha, x.baseF2Cosecha)}</td>
+      <td style="padding:2px 10px;border-bottom:1px solid #f7f7f7;text-align:right">${pct(x.camaraPlantas, x.baseCamara)}</td>
       <td style="padding:2px 10px;border-bottom:1px solid #f7f7f7;text-align:right">${fmtN(x.total)}</td>
     </tr>`;
   };
@@ -962,6 +992,10 @@ export function construirHtml(d: ReporteSemanalData): string {
       <td style="padding:6px 10px;text-align:right">${celdaFaseHtml(f.plantinF1, f.basePlantinF1)}</td>
       <td style="padding:6px 10px;text-align:right">${celdaFaseHtml(f.f1F2, f.baseF1F2)}</td>
       <td style="padding:6px 10px;text-align:right">${celdaFaseHtml(f.f2Cosecha, f.baseF2Cosecha)}</td>
+      <td style="padding:6px 10px;text-align:right">
+        ${celdaFaseHtml(f.camaraPlantas, f.baseCamara)}
+        ${f.camara > 0 && f.camaraPlantas !== f.camara ? `<br><span style="color:#c8c8c8;font-size:11px">${fmtN(f.camara)} paq tirados</span>` : ''}
+      </td>
       <td style="padding:6px 10px;text-align:right;font-weight:800">${fmtN(f.total)}${esRuculaFila(f.cultivo) ? ` <span style="font-weight:400;color:#9ca3af">(${enPaq(f.total)})</span>` : ''}</td>
     </tr>
     ${filaVentana('esta semana', d.descarteSemana, f.cultivo)}
@@ -1215,10 +1249,15 @@ export function construirHtml(d: ReporteSemanalData): string {
     <p style="margin:0 0 20px;font-size:11px;color:#9ca3af">− (rojo) = falta, contado por debajo de lo esperado · + (verde) = sobra, contado por encima de lo esperado.</p>
 
     <h3 style="margin:0 0 8px;font-size:14px">Descarte por cultivo y por fase <span style="font-weight:400;color:#9ca3af">(últimas 4 semanas — plantas descartadas y % de las que pasaron por esa fase)</span></h3>
-    <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
-      <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Plantín→F1</th><th style="padding:6px 10px;text-align:right">F1→F2</th><th style="padding:6px 10px;text-align:right">F2→Cosecha</th><th style="padding:6px 10px;text-align:right">Total</th></tr></thead>
+    <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:6px">
+      <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Plantín→F1</th><th style="padding:6px 10px;text-align:right">F1→F2</th><th style="padding:6px 10px;text-align:right">F2→Cosecha</th><th style="padding:6px 10px;text-align:right">Cámara</th><th style="padding:6px 10px;text-align:right">Total</th></tr></thead>
       <tbody>${descarteFaseFilas}</tbody>
     </table>
+    <p style="margin:0 0 20px;font-size:11px;color:#9ca3af">
+      <strong>Cámara</strong> es producto ya empaquetado que se tiró, cargado desde Stocks. Se carga en paquetes y se muestra
+      convertido a plantas (en rúcula, 3 por paquete) para poder sumarlo con las otras etapas; su base es lo que salió vivo de la cosecha.
+      No incluye el faltante de los ajustes de stock: eso es producto que no se sabe dónde está, no producto que se decidió tirar, y va en la sección de stock en cámara.
+    </p>
 
     ${indicadoresHtml}
 
@@ -1364,7 +1403,7 @@ export function construirTexto(d: ReporteSemanalData): string {
   L.push(`🗑️ *Descarte por cultivo y por fase* (plantas, últimas 4 semanas — dónde se pierde):`);
   for (const f of d.descartePorFase) {
     const pctTxt = (desc: number, base: number) => base > 0 ? `${fmtN(desc)} (${Math.round((desc / base) * 1000) / 10}% de ${fmtN(base)})` : '—';
-    L.push(`  ${f.cultivo}: Plantín→F1 ${pctTxt(f.plantinF1, f.basePlantinF1)} · F1→F2 ${pctTxt(f.f1F2, f.baseF1F2)} · F2→Cosecha ${pctTxt(f.f2Cosecha, f.baseF2Cosecha)} · Total ${fmtN(f.total)}${f.cultivo.toLowerCase().startsWith('rúc') ? ` (${fmtN(Math.round(f.total / POSPAQ))} paq)` : ''}`);
+    L.push(`  ${f.cultivo}: Plantín→F1 ${pctTxt(f.plantinF1, f.basePlantinF1)} · F1→F2 ${pctTxt(f.f1F2, f.baseF1F2)} · F2→Cosecha ${pctTxt(f.f2Cosecha, f.baseF2Cosecha)} · Cámara ${pctTxt(f.camaraPlantas, f.baseCamara)}${f.camara > 0 ? ` [${fmtN(f.camara)} paq]` : ''} · Total ${fmtN(f.total)}${f.cultivo.toLowerCase().startsWith('rúc') ? ` (${fmtN(Math.round(f.total / POSPAQ))} paq)` : ''}`);
   }
   L.push('');
 
