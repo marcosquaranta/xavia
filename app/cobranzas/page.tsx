@@ -22,6 +22,7 @@ import type { ClienteVenta } from '@/lib/types';
 import Header from '@/components/Header';
 import { ClientesRecordatorio, DatosPago, type ClienteFila } from '@/components/CobranzasConfig';
 import RegistrarCobro from '@/components/RegistrarCobro';
+import { leerEdiciones, indiceEdiciones, aplicarEdicion } from '@/lib/cobranzasEdit';
 import BandejaCobranzas from '@/components/BandejaCobranzas';
 import { HOJA_BANDEJA, HOJA_ALIAS, type ItemBandeja, type AliasCobranza } from '@/lib/bandejaCobranzas';
 import ReclamoManual from '@/components/ReclamoManual';
@@ -66,6 +67,7 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   let revisiones: RevisionCliente[] = [];
   let cacheXubio: { actualizado?: string }[] = [];
   let cobranzasCache: CobranzaCache[] = [];
+  let edicionesRaw: Awaited<ReturnType<typeof leerEdiciones>> = [];
   // Xubio arranca junto con las planillas, no después. Son las dos consultas más lentas de
   // la página y ninguna depende de la otra: esperarlas en serie hacía que entrar a
   // Cobranzas tardara la suma de las dos. Se lanzan acá y se esperan más abajo.
@@ -80,7 +82,7 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   ]).catch(() => [[], []] as [any[], any[]]);
 
   try {
-    [clientes, enviados, configRows, cobros, bandeja, aliasRows, saldadas, revisiones, cacheXubio, cobranzasCache] = await Promise.all([
+    [clientes, enviados, configRows, cobros, bandeja, aliasRows, saldadas, revisiones, cacheXubio, cobranzasCache, edicionesRaw] = await Promise.all([
       readSheet<ClienteVenta>('Clientes').catch(() => []),
       readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => []),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
@@ -96,6 +98,7 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
       readSheet<{ actualizado?: string }>(HOJA_COMPROBANTES).catch(() => []),
       // Las cobranzas tal como están en Xubio, para el movimiento del mes.
       readSheet<CobranzaCache>(HOJA_COBRANZAS_CACHE).catch(() => []),
+      leerEdiciones(),
     ]);
   } catch {}
 
@@ -124,6 +127,7 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   // para cada movimiento. Antes cada fila pedía las suyas al abrirse: con diez movimientos
   // para imputar eran diez consultas a Xubio de varios segundos cada una, justo cuando la
   // persona está esperando para decidir.
+  const edicionesCobranzas = indiceEdiciones(edicionesRaw);
   const saldadasSet = numerosSaldados(saldadas);
 
   // Qué sección pesada se pidió ver. Plegar con <details> esconde pero NO ahorra: el
@@ -352,13 +356,16 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
           </p>
           <div style={{ marginTop: '10px' }}>
             <MovimientosCobranza
-              cobranzas={cobranzasCache.map((c) => ({
+              cobranzas={cobranzasCache.map((c) => aplicarEdicion({
+                transaccionid: String(c.transaccionid || ''),
                 fecha: String(c.fecha || '').slice(0, 10),
                 cliente: String(c.cliente || ''),
                 importe: Number(c.importe) || 0,
                 cuenta: String(c.cuenta || ''),
                 numero: String(c.numero || ''),
-              }))}
+              }, edicionesCobranzas))}
+              clientesApp={clientes.map((c) => nombreClienteVisible(c)).filter(Boolean).sort()}
+              cuentasApp={cuentasXubio.map((c) => c.nombre).sort()}
               anioActual={new Date(hoyF + 'T12:00:00').getFullYear()}
               mesActual={new Date(hoyF + 'T12:00:00').getMonth() + 1}
             />

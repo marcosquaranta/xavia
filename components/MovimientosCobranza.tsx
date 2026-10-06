@@ -1,5 +1,6 @@
 'use client';
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 // ── Las cobranzas del mes ────────────────────────────────────────────────────────────
 //
@@ -16,16 +17,24 @@ export interface CobranzaUI {
   importe: number;
   cuenta: string;
   numero: string;
+  // Hace falta para poder corregirla: es la clave con la que se guarda la corrección.
+  transaccionid?: string;
+  editada?: boolean;
+  nota?: string;
 }
 
 const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 const fmtDia = (f: string) => { const [, m, d] = String(f || '').split('-'); return d ? `${d}/${m}` : f; };
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-export default function MovimientosCobranza({ cobranzas, anioActual, mesActual }: {
+export default function MovimientosCobranza({ cobranzas, anioActual, mesActual, clientesApp = [], cuentasApp = [] }: {
   cobranzas: CobranzaUI[];
   anioActual: number;
   mesActual: number;
+  // Para elegir de una lista en vez de escribir a mano: un cliente tipeado distinto cada
+  // vez rompe el filtro por cliente, que agrupa por texto exacto.
+  clientesApp?: string[];
+  cuentasApp?: string[];
 }) {
   const [anio, setAnio] = useState(anioActual);
   const [mes, setMes] = useState(mesActual);
@@ -66,6 +75,38 @@ export default function MovimientosCobranza({ cobranzas, anioActual, mesActual }
     for (const c of delMes) map.set(c.cuenta || 'sin cuenta', (map.get(c.cuenta || 'sin cuenta') || 0) + c.importe);
     return [...map.entries()].sort((a, b) => b[1] - a[1]);
   }, [delMes]);
+
+  const router = useRouter();
+  // Qué fila se está corrigiendo y con qué valores.
+  const [editando, setEditando] = useState<string | null>(null);
+  const [eCliente, setECliente] = useState('');
+  const [eCuenta, setECuenta] = useState('');
+  const [eNota, setENota] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  const [errEdit, setErrEdit] = useState<string | null>(null);
+
+  function abrirEdicion(c: CobranzaUI) {
+    setEditando(String(c.transaccionid || ''));
+    setECliente(c.cliente || ''); setECuenta(c.cuenta || ''); setENota(c.nota || '');
+    setErrEdit(null);
+  }
+
+  async function guardarEdicion(c: CobranzaUI) {
+    setGuardando(true); setErrEdit(null);
+    try {
+      const r = await fetch('/api/cobranzas/editar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transaccionid: c.transaccionid, cliente: eCliente, cuenta: eCuenta, nota: eNota }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setEditando(null);
+      router.refresh();
+    } catch (e: any) {
+      setErrEdit(e.message || 'No se pudo guardar');
+    }
+    setGuardando(false);
+  }
 
   function mover(n: number) {
     let m = mes + n, a = anio;
@@ -126,6 +167,9 @@ export default function MovimientosCobranza({ cobranzas, anioActual, mesActual }
             ))}
           </div>
 
+          <datalist id="clientes-app">{clientesApp.map((c) => <option key={c} value={c} />)}</datalist>
+          <datalist id="cuentas-app">{cuentasApp.map((c) => <option key={c} value={c} />)}</datalist>
+
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', minWidth: '520px' }}>
               <thead>
@@ -135,18 +179,71 @@ export default function MovimientosCobranza({ cobranzas, anioActual, mesActual }
                   <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>Medio de cobro</th>
                   <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>Recibo</th>
                   <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600 }}>Importe</th>
+                  <th style={{ padding: '6px 8px' }} />
                 </tr>
               </thead>
               <tbody>
-                {filtradas.map((c, i) => (
+                {filtradas.flatMap((c, i) => [
                   <tr key={`${c.numero}-${i}`} style={{ borderTop: '1px solid #f3f4f6' }}>
                     <td style={{ padding: '5px 8px', color: '#6b7280', whiteSpace: 'nowrap' }}>{fmtDia(c.fecha)}</td>
-                    <td style={{ padding: '5px 8px', fontWeight: 600 }}>{c.cliente}</td>
+                    <td style={{ padding: '5px 8px', fontWeight: 600 }}>
+                      {c.cliente || <span style={{ color: '#b45309', fontWeight: 400 }}>sin cliente</span>}
+                      {/* La marca importa: este panel es el espejo de Xubio, y un dato
+                          corregido acá NO está así del otro lado. */}
+                      {c.editada && <span title={c.nota || 'Corregido a mano en la app'} style={{ fontSize: '9.5px', fontWeight: 700, color: '#b45309', marginLeft: '5px' }}>✎ corregido</span>}
+                    </td>
                     <td style={{ padding: '5px 8px', color: c.cuenta ? '#374151' : '#b45309' }}>{c.cuenta || 'sin dato'}</td>
                     <td style={{ padding: '5px 8px', fontFamily: 'ui-monospace, monospace', fontSize: '11.5px', color: '#9ca3af' }}>{c.numero}</td>
                     <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmt$(c.importe)}</td>
-                  </tr>
-                ))}
+                    <td style={{ padding: '5px 8px', textAlign: 'right' }}>
+                      {c.transaccionid && editando !== String(c.transaccionid) && (
+                        <button type="button" onClick={() => abrirEdicion(c)}
+                          style={{ background: 'none', border: 'none', fontSize: '11px', color: '#2563eb', cursor: 'pointer', fontWeight: 600 }}>
+                          corregir
+                        </button>
+                      )}
+                    </td>
+                  </tr>,
+                  editando === String(c.transaccionid) ? (
+                    <tr key={`${c.numero}-${i}-e`}>
+                      <td colSpan={6} style={{ padding: '0 8px 8px' }}>
+                        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '9px 11px' }}>
+                          <p style={{ margin: '0 0 7px', fontSize: '11px', color: '#92400e' }}>
+                            Se corrige <strong>solo en la app</strong>: Xubio no se toca. Sirve para que esta pantalla se entienda
+                            cuando Xubio no manda el cliente o el medio de cobro quedó mal cargado allá.
+                            El importe no se puede cambiar — es contra lo que se concilia.
+                          </p>
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                            <div>
+                              <label style={{ display: 'block', fontSize: '10px', color: '#6b7280', fontWeight: 600 }}>CLIENTE</label>
+                              <input list="clientes-app" value={eCliente} onChange={(e) => setECliente(e.target.value)} disabled={guardando}
+                                style={{ fontSize: '12.5px', padding: '5px 7px', border: '1px solid #d1d5db', borderRadius: '5px', minWidth: '200px' }} />
+                            </div>
+                            <div>
+                              <label style={{ display: 'block', fontSize: '10px', color: '#6b7280', fontWeight: 600 }}>MEDIO DE COBRO</label>
+                              <input list="cuentas-app" value={eCuenta} onChange={(e) => setECuenta(e.target.value)} disabled={guardando}
+                                style={{ fontSize: '12.5px', padding: '5px 7px', border: '1px solid #d1d5db', borderRadius: '5px', minWidth: '150px' }} />
+                            </div>
+                            <div style={{ flex: 1, minWidth: '160px' }}>
+                              <label style={{ display: 'block', fontSize: '10px', color: '#6b7280', fontWeight: 600 }}>NOTA</label>
+                              <input value={eNota} onChange={(e) => setENota(e.target.value)} disabled={guardando} placeholder="por qué se corrigió"
+                                style={{ fontSize: '12.5px', padding: '5px 7px', border: '1px solid #d1d5db', borderRadius: '5px', width: '100%' }} />
+                            </div>
+                            <button type="button" onClick={() => guardarEdicion(c)} disabled={guardando}
+                              style={{ fontSize: '12px', fontWeight: 700, padding: '6px 12px', background: '#166534', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
+                              {guardando ? 'Guardando…' : 'Guardar'}
+                            </button>
+                            <button type="button" onClick={() => setEditando(null)} disabled={guardando}
+                              style={{ fontSize: '12px', padding: '6px 10px', background: 'white', color: '#374151', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer' }}>
+                              Cancelar
+                            </button>
+                          </div>
+                          {errEdit && <p style={{ margin: '6px 0 0', fontSize: '11.5px', color: '#dc2626' }}>{errEdit}</p>}
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null,
+                ])}
               </tbody>
             </table>
           </div>
