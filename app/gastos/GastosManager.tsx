@@ -63,6 +63,10 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const unidadArticulo = useMemo(
+    () => String(articulos.find((a) => a.id_articulo === idArticulo)?.unidad_medida || '').trim(),
+    [articulos, idArticulo],
+  );
   const categoriasArticulo = useMemo(() => Array.from(new Set(articulos.map((a) => a.categoria))).sort(), [articulos]);
   const precioUnitarioCalc = monto > 0 && Number(cantidad) > 0 ? monto / Number(cantidad) : null;
 
@@ -161,6 +165,8 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
     if (esMovimiento && !medioDestino) { setError('Elegí a qué cuenta entra la plata'); return; }
     if (esAdelanto && !empleadoAdelanto) { setError('Elegí a qué empleado se le adelantó'); return; }
     if (pendiente && !proveedor.trim()) { setError('Poné a qué proveedor se le debe'); return; }
+    if (categoria === 'insumos' && !idArticulo) { setError('Elegí qué artículo se compró: un insumo sin artículo no entra al stock.'); return; }
+    if (categoria === 'insumos' && !(Number(cantidad) > 0)) { setError('Poné la cantidad comprada, en la unidad del artículo.'); return; }
     // Un monto muy fuera de escala casi siempre son ceros de más. Se pregunta, no se bloquea:
     // el día que haya una compra grande de verdad tiene que poder cargarse igual.
     const aviso = avisoMontoSospechoso(Number(monto), gastos.map((g) => Number(g.monto) || 0));
@@ -413,7 +419,7 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
         {categoria === 'insumos' && (
           <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px', marginBottom: '12px' }}>
             <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' }}>
-              Detalle del insumo (opcional, pero acelera la carga en Stocks)
+              Detalle del insumo — obligatorio
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px' }}>
               <div>
@@ -430,8 +436,19 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
                 </select>
               </div>
               <div>
-                <label>Cantidad comprada</label>
-                <input type="number" value={cantidad} onChange={(e) => setCantidad(e.target.value)} min={0} step={0.001} disabled={guardando} placeholder="Ej: 50" />
+                {/* La unidad del artículo, a la vista: sin esto no se sabe si van 50 bolsas,
+                    50 kilos o 50 planchas, y el stock termina en otra unidad que el consumo. */}
+                <label>
+                  Cantidad comprada
+                  {unidadArticulo && <span style={{ color: '#2563eb', fontWeight: 700 }}> · en {unidadArticulo}</span>}
+                </label>
+                <input type="number" value={cantidad} onChange={(e) => setCantidad(e.target.value)} min={0} step={0.001} disabled={guardando}
+                  placeholder={unidadArticulo ? `Ej: 50 ${unidadArticulo}` : 'Eleg\u00ed primero el art\u00edculo'} />
+                {idArticulo && (
+                  <a href="/admin/articulos" style={{ fontSize: '10.5px', color: '#2563eb' }}>
+                    cambiar la unidad del artículo →
+                  </a>
+                )}
               </div>
               <div>
                 <label style={{ color: '#9ca3af' }}>Precio unitario (calculado)</label>
@@ -441,7 +458,8 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
               </div>
             </div>
             <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#9ca3af' }}>
-              Si completás artículo y cantidad, la sugerencia de compra en Stocks queda pre-cargada y lista para confirmar en un click.
+              Un insumo sin artículo entra al gasto pero no al stock, y el consumo del mes (había + compró − quedó) queda mal sin que nada avise.
+              Si el artículo no está en la lista, creálo en <strong>Admin → Artículos de stock</strong>.
             </p>
           </div>
         )}

@@ -379,37 +379,82 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
   // Gastos "insumos" del mes seleccionado, aún no aplicados — sugerencia de compra.
   const [matchOverride, setMatchOverride] = useState<Record<string, string>>({});
   const [cantidadGasto, setCantidadGasto] = useState<Record<string, string>>({});
+  // Insumos adicionales de un mismo gasto, además del principal. El importe por renglón es
+  // opcional: solo hace falta cuando hay más de uno, para saber a qué precio entró cada
+  // artículo — sin eso se podría repartir el total en partes iguales, pero eso inventa un
+  // precio unitario que después valoriza el stock.
+  const [itemsExtra, setItemsExtra] = useState<Record<string, { id_articulo: string; cantidad: string; monto: string }[]>>({});
+  const [montoItem, setMontoItem] = useState<Record<string, string>>({});
+  // Las sugerencias ya resueltas en esta sesión. La página se arma en el servidor: hasta que
+  // vuelve el refresh la fila sigue en la lista y parece que el click no hizo nada.
+  const [aplicados, setAplicados] = useState<string[]>([]);
   const [procesandoGasto, setProcesandoGasto] = useState<string | null>(null);
   const gastosDelMes = useMemo(() => {
     return gastosSugeridos.filter((g) => {
+      if (aplicados.includes(g.id_gasto)) return false;
       const f = String(g.fecha || '').split(/[T ]/)[0];
       const [gy, gm] = f.split('-').map(Number);
       return gy === anio && gm === mes;
     });
-  }, [gastosSugeridos, anio, mes]);
+  }, [gastosSugeridos, anio, mes, aplicados]);
 
+  // Una factura puede traer dos insumos —bolsas de rúcula y de lechuga en el mismo
+  // comprobante— y antes solo se podía imputar a uno: el otro quedaba sin entrar al stock.
   async function confirmarGasto(g: Gasto, idArticulo: string, cantidadStr: string) {
     const cant = Number(cantidadStr);
     if (!idArticulo || idArticulo === '__nuevo__' || !(cant > 0)) return;
+    const extra = (itemsExtra[g.id_gasto] || [])
+      .filter((i) => i.id_articulo && i.id_articulo !== '__nuevo__' && Number(i.cantidad) > 0);
+    const items = [
+      { id_articulo: idArticulo, cantidad: cant, monto: Number(montoItem[g.id_gasto] || '') || undefined },
+      ...extra.map((i) => ({ id_articulo: i.id_articulo, cantidad: Number(i.cantidad), monto: Number(i.monto) || undefined })),
+    ];
+    if (new Set(items.map((i) => i.id_articulo)).size !== items.length) {
+      alert('Hay dos renglones con el mismo artículo. Juntá las cantidades en uno solo.');
+      return;
+    }
     setProcesandoGasto(g.id_gasto);
     try {
-      await fetch('/api/stocks/gastos-aplicar', {
+      const r = await fetch('/api/stocks/gastos-aplicar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_gasto: g.id_gasto, id_articulo: idArticulo, anio, mes, cantidad: cant }),
+        body: JSON.stringify({ id_gasto: g.id_gasto, anio, mes, items }),
       });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setAplicados((p) => [...p, g.id_gasto]);
       router.refresh();
-    } catch {}
+    } catch (e: any) {
+      alert(`No se pudo aplicar al stock: ${e?.message || 'error'}`);
+    }
     setProcesandoGasto(null);
+  }
+
+  function agregarItem(idGasto: string) {
+    setItemsExtra((p) => ({ ...p, [idGasto]: [...(p[idGasto] || []), { id_articulo: '', cantidad: '', monto: '' }] }));
+  }
+  function cambiarItem(idGasto: string, i: number, campo: 'id_articulo' | 'cantidad' | 'monto', valor: string) {
+    setItemsExtra((p) => {
+      const lista = [...(p[idGasto] || [])];
+      lista[i] = { ...lista[i], [campo]: valor };
+      return { ...p, [idGasto]: lista };
+    });
+  }
+  function sacarItem(idGasto: string, i: number) {
+    setItemsExtra((p) => ({ ...p, [idGasto]: (p[idGasto] || []).filter((_, j) => j !== i) }));
   }
   async function descartarGasto(g: Gasto) {
     setProcesandoGasto(g.id_gasto);
     try {
-      await fetch('/api/stocks/gastos-aplicar', {
+      const r = await fetch('/api/stocks/gastos-aplicar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id_gasto: g.id_gasto, descartar: true }),
       });
+      if (!r.ok) throw new Error('el servidor lo rechazó');
+      setAplicados((p) => [...p, g.id_gasto]);
       router.refresh();
-    } catch {}
+    } catch (e: any) {
+      alert(`No se pudo descartar: ${e?.message || 'error'}`);
+    }
     setProcesandoGasto(null);
   }
 
@@ -759,8 +804,58 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                               className="btn secondary" style={{ fontSize: '11px', padding: '3px 8px' }}>
                               Descartar
                             </button>
+                            <button onClick={() => agregarItem(g.id_gasto)} disabled={procesandoGasto === g.id_gasto}
+                              title="Este gasto trae más de un insumo"
+                              style={{ display: 'block', margin: '3px auto 0', background: 'none', border: 'none', fontSize: '10.5px', color: '#2563eb', cursor: 'pointer', fontWeight: 600 }}>
+                              + otro insumo
+                            </button>
                           </td>
                         </tr>
+
+                        {/* Los insumos adicionales del mismo gasto. El importe por renglón
+                            solo hace falta cuando hay más de uno: es lo que define a qué
+                            precio entró cada artículo. */}
+                        {(itemsExtra[g.id_gasto] || []).map((it, i) => (
+                          <tr key={`${g.id_gasto}-x${i}`} style={{ background: '#fefce8' }}>
+                            <td />
+                            <td style={{ fontSize: '11px', color: '#92400e', fontWeight: 600 }}>↳ también trae</td>
+                            <td style={{ padding: '2px 4px' }}>
+                              <input type="number" min={0} step={0.01} value={it.monto}
+                                onChange={(e) => cambiarItem(g.id_gasto, i, 'monto', e.target.value)}
+                                style={{ width: '100%', textAlign: 'right', fontSize: '12px' }} placeholder="$ de este" />
+                            </td>
+                            <td style={{ padding: '2px 4px' }}>
+                              <select value={it.id_articulo} onChange={(e) => cambiarItem(g.id_gasto, i, 'id_articulo', e.target.value)}
+                                style={{ width: '100%', fontSize: '12px' }}>
+                                <option value="">— elegí el artículo —</option>
+                                {artActivos.map((a) => <option key={a.id_articulo} value={a.id_articulo}>{a.articulo}</option>)}
+                              </select>
+                            </td>
+                            <td style={{ padding: '2px 4px' }}>
+                              <input type="number" min={0} step={0.001} value={it.cantidad}
+                                onChange={(e) => cambiarItem(g.id_gasto, i, 'cantidad', e.target.value)}
+                                style={{ width: '100%', textAlign: 'right', fontSize: '12px' }} placeholder="cant." />
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              <button onClick={() => sacarItem(g.id_gasto, i)}
+                                style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '13px' }}>×</button>
+                            </td>
+                          </tr>
+                        ))}
+                        {(itemsExtra[g.id_gasto] || []).length > 0 && (
+                          <tr style={{ background: '#fefce8' }}>
+                            <td />
+                            <td colSpan={5} style={{ fontSize: '10.5px', color: '#92400e', paddingBottom: '6px' }}>
+                              Con más de un insumo, poné cuánto del gasto corresponde a cada uno — incluido el primero, acá abajo.
+                              Sin eso la cantidad entra igual, pero el precio unitario no se actualiza: repartir el total en partes
+                              iguales inventaría un precio que después valoriza el stock.
+                              <input type="number" min={0} step={0.01} value={montoItem[g.id_gasto] || ''}
+                                onChange={(e) => setMontoItem((p) => ({ ...p, [g.id_gasto]: e.target.value }))}
+                                placeholder={`$ del primero (de $${fmt(num(g.monto), 0)})`}
+                                style={{ marginLeft: '8px', width: '160px', fontSize: '11.5px', padding: '2px 6px' }} />
+                            </td>
+                          </tr>
+                        )}
                         {creandoAqui && (
                           <tr>
                             <td colSpan={6} style={{ background: '#eff6ff', padding: '8px', borderRadius: '6px' }}>
@@ -957,6 +1052,17 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                                     className="btn secondary" style={{ fontSize: '10px', padding: '2px 6px', flexShrink: 0 }}>
                                     ✏️
                                   </button>
+                                  {num(vals.comp) > 0 && (
+                                    <button onClick={() => {
+                                      if (!confirm(`Se borra la compra de ${fmt(num(vals.comp))} de "${art.articulo}" en este mes. El GASTO no se toca: la plata salió igual. Esto solo saca la cantidad del stock. ¿Confirmás?`)) return;
+                                      setField(art.id_articulo, 'comp', '0');
+                                      setTimeout(() => autoguardar(art.id_articulo), 0);
+                                    }}
+                                      title="Borrar la compra de este artículo en este mes"
+                                      style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '13px', padding: 0, flexShrink: 0 }}>
+                                      ×
+                                    </button>
+                                  )}
                                 </>
                               )}
                             </div>
