@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { CULTIVOS_DESCARTE } from '@/lib/cultivosCamara';
 
 // ── Cargar descarte de cámara ─────────────────────────────────────────────────────────
 //
@@ -16,12 +17,7 @@ import { useRouter } from 'next/navigation';
 // cargarlo: el panel, el detalle de stock de cada cultivo y la pantalla de stocks. Un
 // formulario copiado tres veces se arregla en uno solo y queda roto en los otros dos.
 
-export const CULTIVOS_DESCARTE = [
-  { key: 'rucula', label: 'Rúcula' },
-  { key: 'lechuga_crespa', label: 'Lechuga Crespa' },
-  { key: 'lechuga_roble', label: 'Lechuga Hoja de Roble' },
-  { key: 'albahaca', label: 'Albahaca' },
-] as const;
+export { CULTIVOS_DESCARTE } from '@/lib/cultivosCamara';
 
 const MOTIVOS = ['Podrido', 'Pasado / amarillo', 'Golpeado', 'Devolución de cliente', 'Otro'];
 

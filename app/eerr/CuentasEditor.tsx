@@ -158,20 +158,23 @@ export default function CuentasEditor({ anio, mes, cobranzas, saldos, clientes }
                     {!s.hayInicial && <span title="No hay saldo de cierre del mes anterior: el inicial arranca en cero" style={{ color: '#b45309', marginLeft: '4px' }}>·</span>}
                   </td>
                   <td style={{ ...cel, textAlign: 'right' }}>
-                    {s.hayInicial ? (
-                      <span style={{ color: '#9ca3af', fontVariantNumeric: 'tabular-nums' }}>{$(s.inicial)}</span>
-                    ) : (
-                      <input type="number" value={inicialSemilla[s.medio] ?? ''} step={1} disabled={ocupado}
-                        onChange={(e) => setInicialSemilla((p) => ({ ...p, [s.medio]: e.target.value }))}
-                        onBlur={() => {
-                          const v = inicialSemilla[s.medio];
-                          if (v === '' || v === undefined) return;
-                          llamar({ accion: 'saldo_guardar', anio: mesPrev.anio, mes: mesPrev.mes, medio_pago: s.medio, saldo_real: Number(v) });
-                        }}
-                        title="No hay cierre del mes anterior: cargá acá el saldo con el que arranca esta cuenta. Se guarda como el cierre del mes pasado."
-                        placeholder="sembrar"
-                        style={{ width: '100px', textAlign: 'right', fontSize: '12.5px', padding: '3px 6px', border: '1px dashed #d1d5db', borderRadius: '4px' }} />
-                    )}
+                    <input type="number" value={inicialSemilla[s.medio] ?? (s.hayInicial ? String(Math.round(s.inicial)) : '')} step={1} disabled={ocupado}
+                      onChange={(e) => setInicialSemilla((p) => ({ ...p, [s.medio]: e.target.value }))}
+                      onBlur={() => {
+                        const v = inicialSemilla[s.medio];
+                        if (v === '' || v === undefined) return;
+                        if (s.hayInicial && Number(v) === Math.round(s.inicial)) return;
+                        llamar({ accion: 'saldo_guardar', anio: mesPrev.anio, mes: mesPrev.mes, medio_pago: s.medio, saldo_real: Number(v) });
+                      }}
+                      title={s.hayInicial
+                        ? 'Es el cierre del mes anterior. Se puede corregir: lo que escribas acá se guarda como el saldo real de ese mes.'
+                        : 'No hay cierre del mes anterior: cargá acá el saldo con el que arranca esta cuenta. Se guarda como el cierre del mes pasado.'}
+                      placeholder={s.hayInicial ? '0' : 'sembrar'}
+                      style={{
+                        width: '110px', textAlign: 'right', fontSize: '12.5px', padding: '3px 6px', borderRadius: '4px',
+                        border: s.hayInicial ? '1px solid #e5e7eb' : '1px dashed #b45309',
+                        color: s.hayInicial ? '#6b7280' : '#111827',
+                      }} />
                   </td>
                   <td style={{ ...celNum, color: s.cobranzas ? '#059669' : '#d1d5db' }}>{$(s.cobranzas)}</td>
                   <td style={{ ...celNum, color: s.gastos ? '#b45309' : '#d1d5db' }}>{$(s.gastos)}</td>

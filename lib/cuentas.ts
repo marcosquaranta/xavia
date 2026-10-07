@@ -145,12 +145,13 @@ export function saldosDelMes(
       .filter((g) => g.categoria === 'movimiento_interno' && g.medio_pago_destino === medio)
       .reduce((a, g) => a + num(g.monto), 0);
 
-    const inicial = filaPrev ? num(filaPrev.saldo_real) : 0;
+    const hayPrev = !!filaPrev && String(filaPrev.saldo_real ?? '').trim() !== '';
+    const inicial = hayPrev ? num(filaPrev!.saldo_real) : 0;
     const calculado = inicial + cobrado - salidaGastos + entradas - salidas;
     const real = filaAct && String(filaAct.saldo_real ?? '').trim() !== '' ? num(filaAct.saldo_real) : null;
 
     return {
-      medio, inicial, hayInicial: !!filaPrev, cobranzas: cobrado, gastos: salidaGastos,
+      medio, inicial, hayInicial: hayPrev, cobranzas: cobrado, gastos: salidaGastos,
       entradas, salidas, calculado, real,
       diferencia: real === null ? null : real - calculado,
     };
