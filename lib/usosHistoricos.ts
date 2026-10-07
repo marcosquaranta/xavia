@@ -42,31 +42,82 @@ export const USOS_HISTORICOS: { articulo: string; meses: Record<string, number> 
   { articulo: 'AntiEscalante',                meses: { '2026-04': 5,      '2026-05': 0.1,   '2026-06': 5.9,   '2026-07': -3.75,  '2026-08': 8.8 } },
 ];
 
-// Sin acentos, sin mayúsculas y sin puntuación: en el Excel se escribió "Acido Nitrico 50%"
-// y en el catálogo puede estar "Ácido Nítrico 50 %". Son el mismo insumo.
-const clave = (s: any) => String(s || '')
-  .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
-
-const PORCLAVE = new Map(USOS_HISTORICOS.map((u) => [clave(u.articulo), u.meses]));
-
-// El uso histórico de un artículo en un mes, o null si no hay dato.
+// ── Emparejar los nombres del Excel con los del catálogo ─────────────────────────────
 //
-// Devuelve null de septiembre de 2026 en adelante aunque hubiera número cargado: a partir de
-// ahí manda la app. Si alguna vez conviven los dos, el de la app es el que se puede auditar
-// contra el stock contado.
-export function usoHistorico(nombreArticulo: string, anio: number, mes: number): number | null {
-  const mk = `${anio}-${String(mes).padStart(2, '0')}`;
-  if (mk > ULTIMO_MES_HISTORICO) return null;
-  const meses = PORCLAVE.get(clave(nombreArticulo));
-  if (!meses) return null;
-  const v = meses[mk];
-  return typeof v === 'number' ? v : null;
+// Los dos nombres son los mismos insumos escritos por personas distintas: "Caja Green Up
+// Rucula" acá, "Caja Green-Up Rúcula x 5kg" allá. Comparar el texto entero no los une.
+//
+// Se comparan las PALABRAS. Si todas las palabras del nombre del Excel aparecen en el del
+// catálogo —aunque el catálogo tenga alguna de más— es el mismo insumo. Si no, se pide un
+// parecido alto y que no haya empate: dos candidatos igual de buenos significan que la app
+// no puede decidir, y elegir uno al azar imputaría el consumo al artículo equivocado.
+//
+// Lo que la app empareja sola queda a la vista en la pantalla, para poder desconfiar.
+
+const SIN_VALOR = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'con', 'sin', 'x', 'por', 'y']);
+
+const palabras = (s: any): string[] => String(s || '')
+  .toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9]+/g, ' ')
+  .split(' ')
+  .filter((w) => w && !SIN_VALOR.has(w));
+
+const clave = (s: any) => palabras(s).join('');
+
+// Cuánto se parecen dos nombres, de 0 a 1.
+function parecido(a: string, b: string): number {
+  const pa = palabras(a), pb = palabras(b);
+  if (!pa.length || !pb.length) return 0;
+  const sb = new Set(pb);
+  const comunes = pa.filter((w) => sb.has(w)).length;
+  // Todas las palabras del Excel están en el del catálogo: es el mismo insumo con más
+  // detalle del otro lado ("Semilla Crespa" / "Semilla Lechuga Crespa").
+  if (comunes === pa.length) return 1;
+  return (2 * comunes) / (pa.length + pb.length);
 }
 
-// Los nombres del Excel que NO existen en el catálogo de artículos. Se muestran en la
-// pantalla en vez de descartarse en silencio: un insumo que figura en el histórico y no en
-// el catálogo es una fila que nunca se va a poder comparar, y conviene saber cuál es.
-export function historicosSinArticulo(nombresDelCatalogo: string[]): string[] {
-  const existen = new Set(nombresDelCatalogo.map(clave));
-  return USOS_HISTORICOS.filter((u) => !existen.has(clave(u.articulo))).map((u) => u.articulo);
+export interface Emparejamiento {
+  excel: string;
+  articulo: string | null;   // nombre en el catálogo, o null si no se pudo
+  exacto: boolean;
+  parecido: number;
+}
+
+const UMBRAL = 0.6;
+
+// Empareja cada nombre del Excel con un artículo del catálogo.
+export function emparejarHistoricos(nombresDelCatalogo: string[]): Emparejamiento[] {
+  return USOS_HISTORICOS.map((u) => {
+    const exacto = nombresDelCatalogo.find((n) => clave(n) === clave(u.articulo));
+    if (exacto) return { excel: u.articulo, articulo: exacto, exacto: true, parecido: 1 };
+
+    const puntajes = nombresDelCatalogo
+      .map((n) => ({ n, p: parecido(u.articulo, n) }))
+      .sort((a, b) => b.p - a.p);
+    const mejor = puntajes[0];
+    const segundo = puntajes[1];
+    // Empate técnico: la app no puede decidir y elegir al azar imputaría el consumo al
+    // artículo equivocado, que es peor que no mostrar la fila.
+    const hayEmpate = !!segundo && mejor && Math.abs(mejor.p - segundo.p) < 0.05;
+    if (!mejor || mejor.p < UMBRAL || hayEmpate) {
+      return { excel: u.articulo, articulo: null, exacto: false, parecido: mejor?.p ?? 0 };
+    }
+    return { excel: u.articulo, articulo: mejor.n, exacto: false, parecido: mejor.p };
+  });
+}
+
+// El uso histórico de un artículo del catálogo en un mes, o null si no hay dato.
+//
+// Devuelve null de septiembre de 2026 en adelante aunque hubiera número: a partir de ahí
+// manda la app, que es el dato que se puede auditar contra el stock contado.
+export function usoHistoricoDe(
+  nombreArticulo: string, anio: number, mes: number, pares: Emparejamiento[],
+): number | null {
+  const mk = `${anio}-${String(mes).padStart(2, '0')}`;
+  if (mk > ULTIMO_MES_HISTORICO) return null;
+  const par = pares.find((x) => x.articulo && clave(x.articulo) === clave(nombreArticulo));
+  if (!par) return null;
+  const fila = USOS_HISTORICOS.find((u) => clave(u.articulo) === clave(par.excel));
+  const v = fila?.meses[mk];
+  return typeof v === 'number' ? v : null;
 }

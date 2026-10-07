@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useMemo, useRef } from 'react';
-import { usoHistorico, historicosSinArticulo } from '@/lib/usosHistoricos';
+import { emparejarHistoricos, usoHistoricoDe } from '@/lib/usosHistoricos';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { Articulo, StockMes, Lote, VentaDia, PrecioVenta, ClienteVenta, Gasto } from '@/lib/types';
@@ -313,11 +313,13 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
 
   const mesesInforme = getMesesAnteriores();
 
+  const paresHistoricos = useMemo(() => emparejarHistoricos(articulos.map((a) => a.articulo)), [articulos]);
+
   function getUso(id_articulo: string, a: number, m: number) {
     const s = stocks.find((s) => s.id_articulo === id_articulo && String(s.anio) === String(a) && String(s.mes) === String(m));
     if (s) return num(s.uso_calculado);
     const art = articulos.find((x) => x.id_articulo === id_articulo);
-    return art ? usoHistorico(art.articulo, a, m) : null;
+    return art ? usoHistoricoDe(art.articulo, a, m, paresHistoricos) : null;
   }
 
   // De dónde salió ese número. La pantalla lo marca: un uso del Excel viejo no se mide
@@ -326,7 +328,7 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
     const s = stocks.find((s) => s.id_articulo === id_articulo && String(s.anio) === String(a) && String(s.mes) === String(m));
     if (s) return false;
     const art = articulos.find((x) => x.id_articulo === id_articulo);
-    return !!art && usoHistorico(art.articulo, a, m) !== null;
+    return !!art && usoHistoricoDe(art.articulo, a, m, paresHistoricos) !== null;
   }
 
   const artActivos = articulos.filter((a) => a.activo === 'SI');
@@ -1246,13 +1248,28 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
             y van marcados con <strong>·h</strong>; de septiembre en adelante los calcula la app con el stock contado.
           </p>
           {(() => {
-            const huerfanos = historicosSinArticulo(articulos.map((a) => a.articulo));
-            if (!huerfanos.length) return null;
+            // Lo que la app emparejó sola se muestra para poder desconfiar, y lo que no pudo
+            // se nombra: sin eso esa fila no aparece y nadie se entera de que falta.
+            const aprox = paresHistoricos.filter((x) => x.articulo && !x.exacto);
+            const sinMatch = paresHistoricos.filter((x) => !x.articulo);
+            if (!aprox.length && !sinMatch.length) return null;
             return (
-              <p style={{ margin: '0 0 8px', fontSize: '11px', color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '6px 9px' }}>
-                Estos insumos tienen uso histórico pero no existen en el catálogo de artículos, así que no aparecen en la tabla:{' '}
-                <strong>{huerfanos.join(', ')}</strong>. Si alguno se sigue usando, creálo con ese mismo nombre en Admin → Artículos de stock.
-              </p>
+              <div style={{ margin: '0 0 8px', fontSize: '11px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '7px 9px' }}>
+                {aprox.length > 0 && (
+                  <p style={{ margin: 0, color: '#92400e' }}>
+                    Nombres emparejados por parecido:{' '}
+                    {aprox.map((x) => `"${x.excel}" → ${x.articulo}`).join(' · ')}.
+                    {' '}Si alguno no corresponde, avisame.
+                  </p>
+                )}
+                {sinMatch.length > 0 && (
+                  <p style={{ margin: aprox.length ? '5px 0 0' : 0, color: '#b45309' }}>
+                    Sin artículo en el catálogo (no aparecen en la tabla):{' '}
+                    <strong>{sinMatch.map((x) => x.excel).join(', ')}</strong>.
+                    {' '}Creálos en Admin → Artículos de stock o decime cómo se llaman acá.
+                  </p>
+                )}
+              </div>
             );
           })()}
           <div style={{ overflowX: 'auto' }}>
