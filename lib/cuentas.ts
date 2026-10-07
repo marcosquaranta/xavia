@@ -98,13 +98,20 @@ export async function guardarSaldoReal(args: {
   if (!actualizada) await appendRowObj(HOJA_SALDOS, fila);
 }
 
+// Para comparar el nombre de una cuenta entre Xubio y la app: "CAJA MQ" y "Caja MQ" son la
+// misma, y una comparación literal no las une.
+const claveCuenta = (x: any) => String(x || '')
+  .toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+
 // ── Saldo de cada cuenta en un mes ────────────────────────────────────────────────────
 
 export interface SaldoMes {
   medio: string;
   inicial: number;          // saldo real del mes anterior (0 si nunca se cargó)
   hayInicial: boolean;
-  cobranzas: number;
+  cobranzas: number;        // total cobrado: lo de Xubio más lo cargado a mano
+  cobradoXubio: number;
+  cobradoManual: number;
   gastos: number;
   entradas: number;         // movimientos internos que entran a esta cuenta
   salidas: number;          // movimientos internos que salen de esta cuenta
@@ -115,6 +122,10 @@ export interface SaldoMes {
 
 export function saldosDelMes(
   gastos: Gasto[], cobranzas: Cobranza[], saldos: SaldoCuenta[], anio: number, mes: number,
+  // Las cobranzas que ya están en Xubio, de la copia local. Traen la cuenta donde entró la
+  // plata, así que son el registro real de lo cobrado: sin esto la columna daba cero aunque
+  // el mes estuviera lleno de cobros, porque solo miraba las líneas cargadas a mano.
+  cobranzasXubio: { fecha: any; cuenta: any; importe: any }[] = [],
 ): SaldoMes[] {
   const mm = String(mes).padStart(2, '0');
   const desde = `${anio}-${mm}-01`;
@@ -127,12 +138,21 @@ export function saldosDelMes(
   // cuando sale la plata. Lo pendiente no mueve nada todavía.
   const gastosMes = pagadosEnRango(gastos, desde, hasta);
   const cobranzasMes = delMes(cobranzas);
+  const xubioMes = (cobranzasXubio || []).filter((c) => { const f = dia(c.fecha); return f >= desde && f <= hasta; });
 
   return MEDIOS_PAGO.map((medio: MedioPagoGasto) => {
     const filaPrev = saldos.find((s) => String(s.id_saldo) === idSaldo(anioPrev, mesPrev, medio));
     const filaAct = saldos.find((s) => String(s.id_saldo) === idSaldo(anio, mes, medio));
 
-    const cobrado = cobranzasMes.filter((c) => c.medio_pago === medio).reduce((a, c) => a + num(c.monto), 0);
+    const cobradoManual = cobranzasMes.filter((c) => c.medio_pago === medio).reduce((a, c) => a + num(c.monto), 0);
+    // Por clave y no por texto: en Xubio la cuenta se llama "CAJA MQ" y acá "Caja MQ", y una
+    // comparación literal no las une. Una cobranza con dos instrumentos trae los dos nombres
+    // juntos, así que se busca el nombre adentro del texto.
+    const kMedio = claveCuenta(medio);
+    const cobradoXubio = xubioMes
+      .filter((c) => claveCuenta(c.cuenta).includes(kMedio))
+      .reduce((a, c) => a + num(c.importe), 0);
+    const cobrado = cobradoManual + cobradoXubio;
     // Un movimiento entre cuentas no es un gasto: sale de una punta y entra en la otra, así
     // que se cuenta como salida de su origen y como entrada de su destino, nunca como costo.
     const salidaGastos = gastosMes
@@ -151,7 +171,8 @@ export function saldosDelMes(
     const real = filaAct && String(filaAct.saldo_real ?? '').trim() !== '' ? num(filaAct.saldo_real) : null;
 
     return {
-      medio, inicial, hayInicial: hayPrev, cobranzas: cobrado, gastos: salidaGastos,
+      medio, inicial, hayInicial: hayPrev,
+      cobranzas: cobrado, cobradoXubio, cobradoManual, gastos: salidaGastos,
       entradas, salidas, calculado, real,
       diferencia: real === null ? null : real - calculado,
     };

@@ -10,6 +10,7 @@ import PrevisionesEditor from './PrevisionesEditor';
 import TablaEERR from './TablaEERR';
 import EnviarInforme from './EnviarInforme';
 import { leerCobranzas, leerSaldos, saldosDelMes, type Cobranza, type SaldoCuenta } from '@/lib/cuentas';
+import { HOJA_COBRANZAS_CACHE, type CobranzaCache } from '@/lib/xubioCache';
 import CuentasEditor from './CuentasEditor';
 import { nombreClienteVisible } from '@/lib/clientes';
 import { pasosDelCierre, resumenChecklist } from '@/lib/cierreChecklist';
@@ -33,13 +34,16 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   let ventas: VentaDia[] = [], precios: PrecioVenta[] = [], clientes: ClienteVenta[] = [];
   let previsiones: Awaited<ReturnType<typeof leerPrevisiones>> = [];
   let cobranzas: Cobranza[] = [], saldosGuardados: SaldoCuenta[] = [];
+  let cobranzasXubio: CobranzaCache[] = [];
   let err: string | null = null;
   try {
-    [articulos, stocks, gastos, ventas, precios, clientes, previsiones, cobranzas, saldosGuardados] = await Promise.all([
+    [articulos, stocks, gastos, ventas, precios, clientes, previsiones, cobranzas, saldosGuardados, cobranzasXubio] = await Promise.all([
       readSheet<Articulo>('Articulos'), readSheet<StockMes>('Stocks'), readSheet<Gasto>('Gastos'),
       readSheet<VentaDia>('Ventas'), readSheet<PrecioVenta>('Precios').catch(() => []),
       readSheet<ClienteVenta>('Clientes').catch(() => []),
       leerPrevisiones(), leerCobranzas(), leerSaldos(),
+      // Las cobranzas que ya están en Xubio: de ahí sale cuánto entró en cada cuenta.
+      readSheet<CobranzaCache>(HOJA_COBRANZAS_CACHE).catch(() => [] as CobranzaCache[]),
     ]);
   } catch (e: any) { err = e?.message || 'Error cargando datos'; }
 
@@ -94,7 +98,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   const cobranzasMes = cobranzas
     .filter((c) => { const f = String(c.fecha || '').split(/[T ]/)[0]; return f >= desdeMes && f <= hastaMes; })
     .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
-  const saldos = saldosDelMes(gastos, cobranzas, saldosGuardados, anio, mes);
+  const saldos = saldosDelMes(gastos, cobranzas, saldosGuardados, anio, mes, cobranzasXubio);
   const pasos = pasosDelCierre({ eerr: act, gastos, stocks, articulos, cobranzas: cobranzasMes, saldos, hayPrevision: !!guardada, anio, mes });
   const resumenPasos = resumenChecklist(pasos);
   // Los pasos que alguien marcó a mano. La hoja no existe hasta el primer marcado.
