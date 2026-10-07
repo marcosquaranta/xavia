@@ -2,30 +2,47 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MEDIOS_PAGO } from '@/lib/types';
-import type { Cobranza, SaldoMes } from '@/lib/cuentas';
+import type { SaldoMes } from '@/lib/cuentas';
 
-// El cliente es opcional a propósito. Hoy la cuenta corriente vive en Xubio y para los
-// saldos alcanza con el total por cuenta; pero cada cobranza que sí lo lleve es un paso
-// hacia poder calcular deudores por venta acá, sin tener que volver atrás a completarlas.
-
-// Cobranzas del mes y conciliación de cada cuenta. La diferencia entre el saldo calculado y
-// el del resumen es plata que se movió sin quedar registrada: mientras no sea cero, falta
-// cargar algo. Es el mismo control que hoy se hace a mano contra Xubio.
+// ── Saldos de cada cuenta y movimientos entre cuentas ──────────────────────────
+//
+// Esto es el extracto del mes de cada cuenta: con qué arrancó, qué entró, qué salió y con
+// qué termina, contra el saldo real del resumen. La diferencia es plata que se movió sin
+// quedar registrada: mientras no sea cero, falta cargar algo.
+//
+// Las cobranzas NO se cargan acá. Entran por la bandeja de Cobranzas, que es donde están
+// las facturas y el cliente; cargarlas también acá era un segundo lugar para lo mismo y la
+// garantía de contar dos veces el mismo cobro.
+//
+// Los movimientos ENTRE cuentas sí: pagar el resumen de la tarjeta o pasar plata de un banco
+// a otro no es un gasto —la plata sigue siendo de la empresa— pero mueve los dos saldos, y
+// sin cargarlos la conciliación no cierra nunca. Antes existían (como gasto de categoría
+// "movimiento interno") pero no se veían por ningún lado: la columna "entre cuentas" daba
+// un número y no había forma de saber de dónde salía.
 
 const $ = (n: number) => `$${Math.round(n).toLocaleString('es-AR')}`;
 const cel: React.CSSProperties = { padding: '5px 8px', fontSize: '12.5px' };
 const celNum: React.CSSProperties = { ...cel, textAlign: 'right', fontVariantNumeric: 'tabular-nums' };
 
-export default function CuentasEditor({ anio, mes, cobranzas, saldos, clientes }: {
-  anio: number; mes: number; cobranzas: Cobranza[]; saldos: SaldoMes[];
-  clientes: { id: string; nombre: string }[];
+export interface MovimientoCuenta {
+  id_gasto: string;
+  fecha: string;
+  descripcion: string;
+  monto: number;
+  origen: string;
+  destino: string;
+}
+
+export default function CuentasEditor({ anio, mes, saldos, movimientos }: {
+  anio: number; mes: number; saldos: SaldoMes[];
+  movimientos: MovimientoCuenta[];
 }) {
   const router = useRouter();
   const [fecha, setFecha] = useState(`${anio}-${String(mes).padStart(2, '0')}-${String(new Date(anio, mes, 0).getDate()).padStart(2, '0')}`);
-  const [medio, setMedio] = useState<string>(MEDIOS_PAGO[0]);
+  const [origen, setOrigen] = useState<string>(MEDIOS_PAGO[0]);
+  const [destino, setDestino] = useState<string>(MEDIOS_PAGO[1]);
   const [monto, setMonto] = useState('');
   const [notas, setNotas] = useState('');
-  const [cliente, setCliente] = useState('');
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // El saldo inicial normalmente no se toca: es el cierre del mes anterior. Pero el primer
@@ -52,15 +69,48 @@ export default function CuentasEditor({ anio, mes, cobranzas, saldos, clientes }
     } finally { setOcupado(false); }
   }
 
-  async function agregar() {
+  // El movimiento se guarda como un gasto de categoría "movimiento interno": es el mismo
+  // registro que ya usaba la app, así que lo que se carga acá y lo que se cargó desde Gastos
+  // son la misma cosa y no hay dos verdades.
+  async function agregarMovimiento() {
     const m = Number(monto);
     if (!isFinite(m) || m <= 0) { setError('Ingresá un monto mayor a 0'); return; }
-    if (await llamar({ accion: 'cobranza_nueva', fecha, medio_pago: medio, monto: m, notas, id_control: cliente })) {
-      setMonto(''); setNotas(''); setCliente('');
-    }
+    if (origen === destino) { setError('La cuenta de origen y la de destino tienen que ser distintas.'); return; }
+    setOcupado(true); setError(null);
+    try {
+      const res = await fetch('/api/gastos/nuevo', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fecha, descripcion: notas || `${origen} → ${destino}`,
+          categoria: 'movimiento_interno', monto: m,
+          medio_pago: origen, medio_pago_destino: destino,
+        }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      setMonto(''); setNotas('');
+      router.refresh();
+    } catch (e: any) {
+      setError(e?.message || 'No se pudo guardar el movimiento');
+    } finally { setOcupado(false); }
   }
 
-  const totalCobrado = cobranzas.reduce((a, c) => a + (Number(c.monto) || 0), 0);
+  async function borrarMovimiento(id: string) {
+    if (!confirm('Se borra este movimiento entre cuentas. Los dos saldos vuelven a como estaban. ¿Confirmás?')) return;
+    setOcupado(true); setError(null);
+    try {
+      const res = await fetch('/api/gastos/borrar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_gasto: id }),
+      });
+      if (!res.ok) throw new Error('No se pudo borrar');
+      router.refresh();
+    } catch (e: any) {
+      setError(e?.message || 'No se pudo borrar');
+    } finally { setOcupado(false); }
+  }
+
+  const totalMovido = movimientos.reduce((a, m) => a + (Number(m.monto) || 0), 0);
   const mesPrev = mes === 1 ? { anio: anio - 1, mes: 12 } : { anio, mes: mes - 1 };
   // Se muestran TODAS las cuentas aunque no hayan tenido movimiento: si solo aparecieran
   // las que se movieron, no habría dónde cargar el saldo real de las demás — y el primer
@@ -72,9 +122,11 @@ export default function CuentasEditor({ anio, mes, cobranzas, saldos, clientes }
     <div>
       {error && <p style={{ margin: '0 0 8px', fontSize: '12px', color: '#dc2626' }}>{error}</p>}
 
-      {/* ── Cobranzas ── */}
+      {/* ── Movimientos entre cuentas ── */}
       <p style={{ margin: '0 0 6px', fontSize: '11.5px', color: '#6b7280' }}>
-        Cargá el total cobrado por cuenta. Podés poner una línea por cuenta al cerrar el mes, o ir sumándolas durante el mes: lo que importa es el total por cuenta.
+        Plata que pasa de una cuenta a otra: pagar el resumen de la tarjeta, una transferencia entre bancos, retirar
+        efectivo. <strong>No es un gasto</strong> —la plata sigue siendo de la empresa— pero mueve los dos saldos.
+        Las cobranzas no van acá: entran por la pantalla de Cobranzas.
       </p>
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: '10px' }}>
         <div>
@@ -83,52 +135,52 @@ export default function CuentasEditor({ anio, mes, cobranzas, saldos, clientes }
             style={{ fontSize: '12px', padding: '5px 7px', border: '1px solid #e5e7eb', borderRadius: '5px' }} />
         </div>
         <div>
-          <label style={{ display: 'block', fontSize: '10.5px', color: '#6b7280' }}>Entra a</label>
-          <select value={medio} onChange={(e) => setMedio(e.target.value)} disabled={ocupado}
+          <label style={{ display: 'block', fontSize: '10.5px', color: '#6b7280' }}>Sale de</label>
+          <select value={origen} onChange={(e) => setOrigen(e.target.value)} disabled={ocupado}
             style={{ fontSize: '12px', padding: '5px 7px', border: '1px solid #e5e7eb', borderRadius: '5px' }}>
-            {MEDIOS_PAGO.filter((m) => m !== 'Aporte socios').map((m) => <option key={m} value={m}>{m}</option>)}
+            {MEDIOS_PAGO.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         </div>
         <div>
-          <label style={{ display: 'block', fontSize: '10.5px', color: '#6b7280' }}>Monto cobrado</label>
+          <label style={{ display: 'block', fontSize: '10.5px', color: '#6b7280' }}>Entra a</label>
+          <select value={destino} onChange={(e) => setDestino(e.target.value)} disabled={ocupado}
+            style={{ fontSize: '12px', padding: '5px 7px', border: '1px solid #e5e7eb', borderRadius: '5px', borderColor: origen === destino ? '#dc2626' : '#e5e7eb' }}>
+            {MEDIOS_PAGO.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{ display: 'block', fontSize: '10.5px', color: '#6b7280' }}>Monto</label>
           <input type="number" value={monto} onChange={(e) => setMonto(e.target.value)} min={0} step={1} disabled={ocupado} placeholder="0"
             style={{ width: '130px', textAlign: 'right', fontSize: '13px', fontWeight: 600, padding: '5px 7px', border: '1px solid #e5e7eb', borderRadius: '5px' }} />
         </div>
-        <div>
-          <label style={{ display: 'block', fontSize: '10.5px', color: '#6b7280' }}>Cliente <span style={{ color: '#9ca3af' }}>(opcional)</span></label>
-          <select value={cliente} onChange={(e) => setCliente(e.target.value)} disabled={ocupado}
-            style={{ fontSize: '12px', padding: '5px 7px', border: '1px solid #e5e7eb', borderRadius: '5px', maxWidth: '170px' }}>
-            <option value="">— sin detallar —</option>
-            {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-          </select>
-        </div>
         <div style={{ flex: '1 1 140px', minWidth: '120px' }}>
-          <label style={{ display: 'block', fontSize: '10.5px', color: '#6b7280' }}>Notas</label>
-          <input type="text" value={notas} onChange={(e) => setNotas(e.target.value)} disabled={ocupado} placeholder="Ej: cobranzas de la semana"
+          <label style={{ display: 'block', fontSize: '10.5px', color: '#6b7280' }}>Detalle</label>
+          <input type="text" value={notas} onChange={(e) => setNotas(e.target.value)} disabled={ocupado} placeholder="Ej: pago resumen VISA"
             style={{ width: '100%', fontSize: '12px', padding: '5px 7px', border: '1px solid #e5e7eb', borderRadius: '5px' }} />
         </div>
-        <button onClick={agregar} className="btn" disabled={ocupado} style={{ fontSize: '12px' }}>Agregar</button>
+        <button onClick={agregarMovimiento} className="btn" disabled={ocupado} style={{ fontSize: '12px' }}>Agregar</button>
       </div>
 
-      {cobranzas.length > 0 && (
+      {movimientos.length > 0 && (
         <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '14px' }}>
           <tbody>
-            {cobranzas.map((c) => (
-              <tr key={c.id_cobranza} style={{ borderTop: '1px solid #f3f4f6' }}>
-                <td style={{ ...cel, color: '#6b7280', width: '90px' }}>{String(c.fecha).split('-').reverse().join('/')}</td>
-                <td style={cel}>{c.medio_pago}</td>
-                <td style={cel}>{clientes.find((x) => x.id === String(c.id_control))?.nombre ?? ''}</td>
-                <td style={{ ...cel, color: '#9ca3af' }}>{c.notas}</td>
-                <td style={{ ...celNum, fontWeight: 700 }}>{$(Number(c.monto) || 0)}</td>
+            {movimientos.map((m) => (
+              <tr key={m.id_gasto} style={{ borderTop: '1px solid #f3f4f6' }}>
+                <td style={{ ...cel, color: '#6b7280', width: '90px' }}>{String(m.fecha).split('-').reverse().join('/')}</td>
+                <td style={cel}>
+                  <strong>{m.origen}</strong> <span style={{ color: '#9ca3af' }}>→</span> <strong>{m.destino || '—'}</strong>
+                </td>
+                <td style={{ ...cel, color: '#9ca3af' }}>{m.descripcion}</td>
+                <td style={{ ...celNum, fontWeight: 700 }}>{$(Number(m.monto) || 0)}</td>
                 <td style={{ ...cel, width: '30px', textAlign: 'right' }}>
-                  <button onClick={() => llamar({ accion: 'cobranza_borrar', id_cobranza: c.id_cobranza })} disabled={ocupado}
+                  <button onClick={() => borrarMovimiento(m.id_gasto)} disabled={ocupado}
                     title="Borrar" style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '13px', padding: 0 }}>×</button>
                 </td>
               </tr>
             ))}
             <tr style={{ borderTop: '1px solid #e5e7eb' }}>
-              <td colSpan={4} style={{ ...cel, fontWeight: 700 }}>Total cobrado</td>
-              <td style={{ ...celNum, fontWeight: 800 }}>{$(totalCobrado)}</td>
+              <td colSpan={3} style={{ ...cel, fontWeight: 700 }}>Total movido entre cuentas</td>
+              <td style={{ ...celNum, fontWeight: 800 }}>{$(totalMovido)}</td>
               <td />
             </tr>
           </tbody>

@@ -216,10 +216,25 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
 
         <div className="card" style={{ marginTop: '12px' }}>
           <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Cobranzas y saldos — {nombre}
+            Saldos y movimientos entre cuentas — {nombre}
           </p>
-          <CuentasEditor anio={anio} mes={mes} cobranzas={cobranzasMes} saldos={saldos}
-            clientes={clientes.filter((c) => c.activo !== 'NO').map((c) => ({ id: String(c.id_control), nombre: nombreClienteVisible(c) })).sort((a, b) => a.nombre.localeCompare(b.nombre))} />
+          <CuentasEditor anio={anio} mes={mes} saldos={saldos}
+            movimientos={gastos
+              .filter((g) => g.categoria === 'movimiento_interno')
+              .filter((g) => {
+                const f = String(g.fecha || '').split(/[T ]/)[0];
+                const mm = String(mes).padStart(2, '0');
+                return f >= `${anio}-${mm}-01` && f <= `${anio}-${mm}-31`;
+              })
+              .map((g) => ({
+                id_gasto: String(g.id_gasto),
+                fecha: String(g.fecha || '').split(/[T ]/)[0],
+                descripcion: String(g.descripcion || ''),
+                monto: Number(g.monto) || 0,
+                origen: String(g.medio_pago || ''),
+                destino: String(g.medio_pago_destino || ''),
+              }))
+              .sort((a, b) => a.fecha.localeCompare(b.fecha))} />
         </div>
 
         <div className="card" style={{ marginTop: '12px', background: '#fafaf9' }}>
