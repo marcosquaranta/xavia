@@ -1,5 +1,6 @@
 'use client';
 import React, { useState, useMemo, useRef } from 'react';
+import { usoHistorico, historicosSinArticulo } from '@/lib/usosHistoricos';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { Articulo, StockMes, Lote, VentaDia, PrecioVenta, ClienteVenta, Gasto } from '@/lib/types';
@@ -314,8 +315,18 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
 
   function getUso(id_articulo: string, a: number, m: number) {
     const s = stocks.find((s) => s.id_articulo === id_articulo && String(s.anio) === String(a) && String(s.mes) === String(m));
-    if (!s) return null;
-    return num(s.uso_calculado);
+    if (s) return num(s.uso_calculado);
+    const art = articulos.find((x) => x.id_articulo === id_articulo);
+    return art ? usoHistorico(art.articulo, a, m) : null;
+  }
+
+  // De dónde salió ese número. La pantalla lo marca: un uso del Excel viejo no se mide
+  // igual que uno calculado contra el stock contado del mes.
+  function usoEsHistorico(id_articulo: string, a: number, m: number) {
+    const s = stocks.find((s) => s.id_articulo === id_articulo && String(s.anio) === String(a) && String(s.mes) === String(m));
+    if (s) return false;
+    const art = articulos.find((x) => x.id_articulo === id_articulo);
+    return !!art && usoHistorico(art.articulo, a, m) !== null;
   }
 
   const artActivos = articulos.filter((a) => a.activo === 'SI');
@@ -1230,7 +1241,20 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
       {vista === 'informe' && (
         <div className="card">
           <p className="card-title">Uso mensual comparativo — últimos 6 meses</p>
-          <p className="card-sub">Uso = Stock inicial + Compras − Stock final</p>
+          <p className="card-sub">
+            Uso = Stock inicial + Compras − Stock final. Los meses hasta agosto de 2026 salen del Excel anterior a la app
+            y van marcados con <strong>·h</strong>; de septiembre en adelante los calcula la app con el stock contado.
+          </p>
+          {(() => {
+            const huerfanos = historicosSinArticulo(articulos.map((a) => a.articulo));
+            if (!huerfanos.length) return null;
+            return (
+              <p style={{ margin: '0 0 8px', fontSize: '11px', color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '6px 9px' }}>
+                Estos insumos tienen uso histórico pero no existen en el catálogo de artículos, así que no aparecen en la tabla:{' '}
+                <strong>{huerfanos.join(', ')}</strong>. Si alguno se sigue usando, creálo con ese mismo nombre en Admin → Artículos de stock.
+              </p>
+            );
+          })()}
           <div style={{ overflowX: 'auto' }}>
             <table style={{ fontSize: '12px', minWidth: '700px' }}>
               <thead>
@@ -1286,6 +1310,9 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                                     : 'transparent',
                                 }}>
                                   {u === null ? '—' : u.toLocaleString('es-AR', { maximumFractionDigits: 3 })}
+                                  {usoEsHistorico(art.id_articulo, mesesInforme[i].anio, mesesInforme[i].mes) && (
+                                    <span title="Dato del Excel anterior a la app" style={{ color: '#9ca3af', fontSize: '9px' }}> ·h</span>
+                                  )}
                                 </td>
                               );
                             })}
