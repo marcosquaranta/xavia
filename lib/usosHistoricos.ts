@@ -40,6 +40,11 @@ export const USOS_HISTORICOS: { articulo: string; meses: Record<string, number> 
   { articulo: 'Nativo (Fungicida)',           meses: { '2026-04': 0.75,   '2026-05': -0.7,  '2026-06': 0,     '2026-07': 0,      '2026-08': 0 } },
   { articulo: 'Bayer Serenade',               meses: { '2026-04': -1.3,   '2026-05': 1.3,   '2026-06': 1.7,   '2026-07': -2.6,   '2026-08': 1.4 } },
   { articulo: 'AntiEscalante',                meses: { '2026-04': 5,      '2026-05': 0.1,   '2026-06': 5.9,   '2026-07': -3.75,  '2026-08': 8.8 } },
+  { articulo: 'Agua oxigenada',               meses: { '2026-04': 0,      '2026-05': 0,     '2026-06': 0,     '2026-07': 0,      '2026-08': 0 } },
+  { articulo: 'Alchohol',                     meses: { '2026-04': 0,      '2026-05': 0,     '2026-06': 0,     '2026-07': 0,      '2026-08': 0 } },
+  { articulo: 'Tracer (Insecticida emergencia)', meses: { '2026-04': 0,   '2026-05': 0,     '2026-06': 0,     '2026-07': 0,      '2026-08': 0 } },
+  { articulo: 'Imida (insecticida)',          meses: { '2026-04': 0,      '2026-05': 0,     '2026-06': 0,     '2026-07': 0,      '2026-08': 0 } },
+  { articulo: 'Bacilus Subtillis',            meses: { '2026-04': 0,      '2026-05': 0,     '2026-06': 0,     '2026-07': 0,      '2026-08': 0 } },
 ];
 
 // ── Emparejar los nombres del Excel con los del catálogo ─────────────────────────────

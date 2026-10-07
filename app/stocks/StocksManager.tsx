@@ -1,5 +1,6 @@
 'use client';
 import React, { useState, useMemo, useRef } from 'react';
+import { calcularValorizacionMes } from '@/lib/valorizacionStock';
 import { emparejarHistoricos, usoHistoricoDe } from '@/lib/usosHistoricos';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -71,7 +72,7 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
   const router = useRouter();
   const [anio, setAnio] = useState(anioActual);
   const [mes, setMes] = useState(mesActual);
-  const [vista, setVista] = useState<'carga' | 'informe'>('carga');
+  const [vista, setVista] = useState<'carga' | 'informe' | 'valorizado'>('carga');
   const [saving, setSaving] = useState<string | null>(null);
   const [errorGuardado, setErrorGuardado] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, { ini: string; comp: string; fin: string; precio: string; notas: string }>>({});
@@ -303,7 +304,13 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
   // Informe: últimos 6 meses por artículo
   function getMesesAnteriores() {
     const meses: { anio: number; mes: number; label: string }[] = [];
+    const hoy = new Date();
+    const esMesEnCurso = (a: number, m: number) => a === hoy.getFullYear() && m === hoy.getMonth() + 1;
     let a = anio, m = mes;
+    // Si el mes elegido es el actual se arranca del anterior: el mes en curso no tiene
+    // stock final contado, así que su "uso" es todo lo que entró y se lee como un consumo
+    // enorme al lado de los meses cerrados.
+    if (esMesEnCurso(a, m)) { m--; if (m === 0) { m = 12; a--; } }
     for (let i = 0; i < 6; i++) {
       meses.unshift({ anio: a, mes: m, label: MESES[m - 1].slice(0, 3) + ' ' + a });
       m--; if (m === 0) { m = 12; a--; }
@@ -316,17 +323,17 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
   const paresHistoricos = useMemo(() => emparejarHistoricos(articulos.map((a) => a.articulo)), [articulos]);
 
   function getUso(id_articulo: string, a: number, m: number) {
+    const art = articulos.find((x) => x.id_articulo === id_articulo);
+    const hist = art ? usoHistoricoDe(art.articulo, a, m, paresHistoricos) : null;
+    if (hist !== null) return hist;
     const s = stocks.find((s) => s.id_articulo === id_articulo && String(s.anio) === String(a) && String(s.mes) === String(m));
     if (s) return num(s.uso_calculado);
-    const art = articulos.find((x) => x.id_articulo === id_articulo);
-    return art ? usoHistoricoDe(art.articulo, a, m, paresHistoricos) : null;
+    return null;
   }
 
   // De dónde salió ese número. La pantalla lo marca: un uso del Excel viejo no se mide
   // igual que uno calculado contra el stock contado del mes.
   function usoEsHistorico(id_articulo: string, a: number, m: number) {
-    const s = stocks.find((s) => s.id_articulo === id_articulo && String(s.anio) === String(a) && String(s.mes) === String(m));
-    if (s) return false;
     const art = articulos.find((x) => x.id_articulo === id_articulo);
     return !!art && usoHistoricoDe(art.articulo, a, m, paresHistoricos) !== null;
   }
@@ -540,6 +547,9 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
           </button>
           <button onClick={() => setVista('informe')} className={vista === 'informe' ? 'btn' : 'btn secondary'} style={{ fontSize: '12px' }}>
             Informe comparativo
+          </button>
+          <button onClick={() => setVista('valorizado')} className={vista === 'valorizado' ? 'btn' : 'btn secondary'} style={{ fontSize: '12px' }}>
+            Stock valorizado
           </button>
         </div>
         {vista === 'carga' && (
@@ -1239,6 +1249,69 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
         </div>
       )}
 
+      {/* ===== VISTA: STOCK VALORIZADO ===== */}
+      {vista === 'valorizado' && (() => {
+        // Cuánta plata hay parada en insumos al cierre del mes: stock final × último precio
+        // de compra conocido. Es el mismo número que usa el EERR para el costo variable, así
+        // que si acá falta un precio, allá falta también.
+        const val = calcularValorizacionMes(articulos, stocks, anio, mes);
+        // Los artículos con stock pero sin precio conocido: su valor cuenta como cero y eso
+        // baja el total sin que se note. Es el único error posible de esta pantalla.
+        const sinPrecio = articulos
+          .filter((a) => a.activo === 'SI')
+          .map((a) => {
+            const st = stocks.find((x) => x.id_articulo === a.id_articulo && String(x.anio) === String(anio) && String(x.mes) === String(mes));
+            return { art: a, fin: st ? num(st.stock_final) : 0, precio: precioUltimoConocido(a.id_articulo) };
+          })
+          .filter((x) => x.fin > 0 && x.precio === null);
+        return (
+          <div className="card">
+            <p className="card-title">Stock valorizado — {MESES[mes - 1]} {anio}</p>
+            <p className="card-sub">Stock final de cada artículo por su último precio de compra conocido.</p>
+
+            {val.porCategoria.length === 0 ? (
+              <p style={{ margin: '10px 0 0', fontSize: '13px', color: '#9ca3af' }}>
+                No hay stock final cargado en este mes, así que no hay nada que valorizar.
+              </p>
+            ) : (
+              <>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginTop: '10px', maxWidth: '480px' }}>
+                  <tbody>
+                    {val.porCategoria.map((c) => (
+                      <tr key={c.categoria} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                        <td style={{ padding: '7px 0', color: '#374151' }}>{c.categoria}</td>
+                        <td style={{ padding: '7px 0', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                          ${fmt(c.valorizado, 0)}
+                        </td>
+                        <td style={{ padding: '7px 0 7px 14px', textAlign: 'right', fontSize: '11.5px', color: '#9ca3af', whiteSpace: 'nowrap' }}>
+                          {val.total > 0 ? `${Math.round((c.valorizado / val.total) * 100)}%` : ''}
+                        </td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td style={{ padding: '10px 0 0', fontWeight: 800, fontSize: '15px' }}>Total</td>
+                      <td style={{ padding: '10px 0 0', textAlign: 'right', fontWeight: 800, fontSize: '15px', fontVariantNumeric: 'tabular-nums' }}>
+                        ${fmt(val.total, 0)}
+                      </td>
+                      <td />
+                    </tr>
+                  </tbody>
+                </table>
+
+                {sinPrecio.length > 0 && (
+                  <p style={{ margin: '12px 0 0', fontSize: '11.5px', color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '7px 9px' }}>
+                    Estos artículos tienen stock pero ningún precio de compra conocido, así que entran valorizados en <strong>cero</strong>
+                    {' '}y el total de arriba queda corto:{' '}
+                    <strong>{sinPrecio.map((x) => `${x.art.articulo} (${fmt(x.fin)} ${x.art.unidad_medida})`).join(', ')}</strong>.
+                    {' '}Se arregla cargando una compra de ese artículo con su precio.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })()}
+
       {/* ===== VISTA: INFORME COMPARATIVO ===== */}
       {vista === 'informe' && (
         <div className="card">
@@ -1252,7 +1325,14 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
             // se nombra: sin eso esa fila no aparece y nadie se entera de que falta.
             const aprox = paresHistoricos.filter((x) => x.articulo && !x.exacto);
             const sinMatch = paresHistoricos.filter((x) => !x.articulo);
-            if (!aprox.length && !sinMatch.length) return null;
+            const ok = paresHistoricos.filter((x) => x.articulo).length;
+            if (!aprox.length && !sinMatch.length) {
+              return (
+                <p style={{ margin: '0 0 8px', fontSize: '11px', color: '#166534' }}>
+                  ✓ Los {ok} insumos del histórico (abr–ago 2026) están emparejados con el catálogo.
+                </p>
+              );
+            }
             return (
               <div style={{ margin: '0 0 8px', fontSize: '11px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '7px 9px' }}>
                 {aprox.length > 0 && (
