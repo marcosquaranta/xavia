@@ -4,15 +4,21 @@ import { useRouter } from 'next/navigation';
 import { parsearResumen, type LineaResumen } from '@/lib/parseResumen';
 import { CATEGORIAS_GASTO, MEDIOS_PAGO } from '@/lib/types';
 
-// ── Pegar el resumen de la tarjeta ───────────────────────────────────────────────────
+// ── Pegar un resumen y cargar todos los gastos juntos ───────────────────────────────────────────────────
 //
-// Treinta consumos con la misma fecha de cierre y el mismo medio de pago, cada uno con su
-// categoría. Cargarlos de a uno son treinta formularios por mes; la carga rápida por grilla
+// Sirve para la tarjeta Y para el banco: treinta movimientos con el mismo medio de pago,
+// cada uno con su categoría. Cargarlos de a uno son treinta formularios por mes; la carga rápida por grilla
 // tampoco sirve, porque agrupa por categoría y acá hace falta el detalle de cada consumo.
 //
 // El parser saca lo que puede y deja el resto para corregir a mano. Lo que no hace es
-// adivinar de más: una línea que parece un total viene DESTILDADA, porque cargarla
-// duplicaría todo el resumen y es el error más caro que puede cometer esta pantalla.
+// adivinar de más, y por eso vienen DESTILDADAS dos clases de línea:
+//
+// · las que parecen un TOTAL — cargarlas duplicaría todo el resumen;
+// · las que parecen un INGRESO — en un extracto bancario la mitad de los renglones son
+//   cobranzas, y cargarlas como gastos duplicaría el mes al revés.
+//
+// En los dos casos la línea se muestra igual, con su motivo al lado: esconderla sería
+// decidir por el otro, y a veces una de esas sí es un gasto.
 
 const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 
@@ -42,7 +48,7 @@ export default function ResumenTarjeta({ categoriasPrevias = [] }: { categoriasP
   function analizar() {
     const anio = Number(fechaDefecto.slice(0, 4)) || new Date().getFullYear();
     const lineas = parsearResumen(texto, anio, (d) => previas.get(d.trim().toUpperCase()) || null);
-    setFilas(lineas.map((l) => ({ ...l, usar: !l.esTotal })));
+    setFilas(lineas.map((l) => ({ ...l, usar: !l.esTotal && !l.esIngreso })));
     setMsg(lineas.length ? null : { ok: false, texto: 'No se encontró ningún consumo en ese texto.' });
   }
 
@@ -83,8 +89,8 @@ export default function ResumenTarjeta({ categoriasPrevias = [] }: { categoriasP
     return (
       <div className="card" style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
         <div>
-          <p className="card-title" style={{ margin: 0 }}>Cargar resumen de tarjeta</p>
-          <p className="card-sub" style={{ margin: '2px 0 0' }}>Pegás el resumen y salen todos los consumos juntos, cada uno con su categoría.</p>
+          <p className="card-title" style={{ margin: 0 }}>Cargar varios gastos de una</p>
+          <p className="card-sub" style={{ margin: '2px 0 0' }}>Pegás el resumen de la tarjeta o del banco y salen todos los movimientos juntos, cada uno con su categoría.</p>
         </div>
         <button type="button" className="btn secondary" style={{ fontSize: '13px' }} onClick={() => setAbierto(true)}>Abrir →</button>
       </div>
@@ -94,7 +100,7 @@ export default function ResumenTarjeta({ categoriasPrevias = [] }: { categoriasP
   return (
     <div className="card" style={{ marginBottom: '14px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
-        <p className="card-title" style={{ margin: 0 }}>Cargar resumen de tarjeta</p>
+        <p className="card-title" style={{ margin: 0 }}>Cargar varios gastos de una</p>
         <button type="button" onClick={() => setAbierto(false)} style={{ background: 'none', border: 'none', fontSize: '12px', color: '#2563eb', cursor: 'pointer' }}>Cerrar</button>
       </div>
 
@@ -145,7 +151,7 @@ export default function ResumenTarjeta({ categoriasPrevias = [] }: { categoriasP
               </thead>
               <tbody>
                 {filas.map((f, i) => (
-                  <tr key={i} style={{ borderTop: '1px solid #f3f4f6', opacity: f.usar ? 1 : 0.5, background: f.esTotal ? '#fffbeb' : undefined }}>
+                  <tr key={i} style={{ borderTop: '1px solid #f3f4f6', opacity: f.usar ? 1 : 0.5, background: f.esTotal || f.esIngreso ? '#fffbeb' : undefined }}>
                     <td style={{ padding: '3px 6px' }}>
                       <input type="checkbox" checked={f.usar} disabled={guardando}
                         onChange={() => setFilas((p) => p.map((x, j) => j === i ? { ...x, usar: !x.usar } : x))} />
@@ -160,6 +166,7 @@ export default function ResumenTarjeta({ categoriasPrevias = [] }: { categoriasP
                         onChange={(e) => setFilas((p) => p.map((x, j) => j === i ? { ...x, descripcion: e.target.value } : x))}
                         style={{ width: '100%', fontSize: '12px' }} />
                       {f.esTotal && <span style={{ display: 'block', fontSize: '10px', color: '#b45309' }}>parece el total del resumen — cargarlo duplicaría todo</span>}
+                      {f.esIngreso && !f.esTotal && <span style={{ display: 'block', fontSize: '10px', color: '#b45309' }}>parece plata que ENTRÓ, no un gasto — si igual es un gasto, tildalo</span>}
                     </td>
                     <td style={{ padding: '3px 6px' }}>
                       <select value={f.categoria} disabled={guardando}

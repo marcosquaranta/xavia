@@ -17,9 +17,18 @@ export interface LineaResumen {
   // —un comercio podría llamarse así— pero viene destildada: cargarla duplicaría todo el
   // resumen, y es el error que más caro sale de los que puede cometer este parser.
   esTotal: boolean;
+  // Parece plata que ENTRÓ, no un gasto. En un resumen de banco la mitad de los renglones
+  // son cobranzas y transferencias recibidas: cargarlas como gastos duplicaría el mes al
+  // revés. Viene destildada, igual que un total.
+  esIngreso: boolean;
 }
 
 const PALABRAS_TOTAL = /\b(total|subtotal|saldo|anterior|pago\s+m[ií]nimo|l[ií]mite|cuota\s+social)\b/i;
+
+// Lo que en un extracto bancario es plata entrando, no saliendo. Un resumen de banco mezcla
+// las dos cosas en la misma columna de descripción, así que sin esto cargar el extracto
+// convertiría cada cobranza en un gasto.
+const PALABRAS_INGRESO = /\b(cr[eé]dito|acreditaci[oó]n|acreditado|dep[oó]sito|deposito|transferencia\s+recibida|recibida|ingreso|cobranza|devoluci[oó]n|reintegro|haber)\b/i;
 
 // Un importe argentino: 1.234,56 · 1234,56 · 1234.56 · 1,234.56
 // Se decide por el ÚLTIMO separador: el que está más cerca del final y deja uno o dos
@@ -105,6 +114,7 @@ export function parsearResumen(
       monto: Math.abs(monto),
       categoria: categoriaPrevia(descripcion) || categoriaPorDefecto,
       esTotal: PALABRAS_TOTAL.test(descripcion),
+      esIngreso: PALABRAS_INGRESO.test(descripcion),
     });
   }
   return out;
