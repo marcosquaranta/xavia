@@ -99,7 +99,12 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
     .filter((c) => { const f = String(c.fecha || '').split(/[T ]/)[0]; return f >= desdeMes && f <= hastaMes; })
     .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
   const saldos = saldosDelMes(gastos, cobranzas, saldosGuardados, anio, mes, cobranzasXubio);
-  const pasos = pasosDelCierre({ eerr: act, gastos, stocks, articulos, cobranzas: cobranzasMes, saldos, hayPrevision: !!guardada, anio, mes });
+  const cobradoMesTotal =
+    cobranzasMes.reduce((a, c) => a + (Number(c.monto) || 0), 0)
+    + cobranzasXubio
+      .filter((c) => { const f = String(c.fecha || '').split(/[T ]/)[0]; return f >= desdeMes && f <= hastaMes; })
+      .reduce((a, c) => a + (Number(c.importe) || 0), 0);
+  const pasos = pasosDelCierre({ eerr: act, gastos, stocks, articulos, cobranzas: cobranzasMes, cobradoMes: cobradoMesTotal, saldos, hayPrevision: !!guardada, anio, mes });
   const resumenPasos = resumenChecklist(pasos);
   // Los pasos que alguien marcó a mano. La hoja no existe hasta el primer marcado.
   const marcados = marcadosDelMes(await leerPasosManuales(), anio, mes);
@@ -124,7 +129,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   const fondos = origenYAplicacion({
     resultado: act.resultado,
     facturadoMes: act.ventas.total,
-    cobradoMes: cobranzasMes.reduce((a, c) => a + (Number(c.monto) || 0), 0),
+    cobradoMes: cobradoMesTotal,
     deudaProveedoresInicio: deudaProveedoresAlCierre(gastos, finMesPrev),
     deudaProveedoresFin: deudaProveedoresAlCierre(gastos, hastaMes),
     previsionesMes: (previsionesDelMes?.despidos || 0) + (previsionesDelMes?.sac || 0),

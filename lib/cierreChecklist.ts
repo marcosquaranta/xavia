@@ -34,12 +34,15 @@ export function pasosDelCierre(args: {
   stocks: StockMes[];
   articulos: Articulo[];
   cobranzas: Cobranza[];
+  // Lo cobrado del mes, contando las cobranzas que ya están en Xubio. No alcanza con las
+  // cargadas a mano: desde que los cobros se imputan por la bandeja, esa hoja queda vacía.
+  cobradoMes: number;
   saldos: SaldoMes[];
   hayPrevision: boolean;
   anio: number;
   mes: number;
 }): PasoCierre[] {
-  const { eerr, gastos, stocks, articulos, cobranzas, saldos, hayPrevision, anio, mes } = args;
+  const { eerr, gastos, stocks, articulos, cobranzas, cobradoMes, saldos, hayPrevision, anio, mes } = args;
   const mm = String(mes).padStart(2, '0');
   const desde = `${anio}-${mm}-01`;
   const hasta = `${anio}-${mm}-${String(new Date(anio, mes, 0).getDate()).padStart(2, '0')}`;
@@ -165,11 +168,12 @@ export function pasosDelCierre(args: {
 
   pasos.push({
     id: 'cobrado_banco',
-    titulo: 'Cargar el total cobrado por banco',
-    estado: cobranzas.length > 0 ? 'listo' : 'pendiente',
-    detalle: cobranzas.length > 0
-      ? `${cobranzas.length} cobranza(s) cargadas por $${Math.round(cobranzas.reduce((a, c) => a + (Number(c.monto) || 0), 0)).toLocaleString('es-AR')}.`
-      : 'Del resumen sacás cuánto entró a cada banco; de las cajas, lo que te pasaron los socios. Sin esto los saldos de bancos y cajas no pueden dar bien.',
+    titulo: 'Revisar que estén todos los cobros del mes',
+    estado: cobradoMes > 0 ? 'listo' : 'pendiente',
+    detalle: cobradoMes > 0
+      ? `$${Math.round(cobradoMes).toLocaleString('es-AR')} cobrados en el mes, según las cobranzas de Xubio.`
+      : 'No figura ningún cobro este mes. Los cobros se imputan desde Cobranzas y de ahí salen solos; si falta alguno, los saldos de bancos y cajas no van a dar.',
+    href: '/cobranzas',
   });
 
   pasos.push({
