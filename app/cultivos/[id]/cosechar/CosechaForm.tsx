@@ -22,6 +22,8 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
   const [plantasQuedan, setPlantasQuedan] = useState(0);
 
   const plantasEst = Number(lote.plantas_estimadas_actual) || Number(lote.plantines_iniciales) || 0;
+  const parcialValida = parcial && plantasQuedan > 0 && plantasQuedan < plantasEst;
+  const plantasDeEstaTanda = parcialValida ? plantasEst - plantasQuedan : plantasEst;
   // En una cosecha parcial, el descarte NO se mide contra todo el lote: las plantas que
   // quedan en la mesada no se descartaron, se cosechan después. Lo que se bajó de la mesada
   // esta vez es `plantasEst − plantasQuedan`, y ESA es la base.
@@ -30,8 +32,6 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
   // con una alerta roja — por una cosecha perfecta. (El servidor siempre calculó bien el
   // descarte de una parcial; el que estaba mal era este número en pantalla, así que no hay
   // ningún dato guardado mal.)
-  const parcialValida = parcial && plantasQuedan > 0 && plantasQuedan < plantasEst;
-  const plantasDeEstaTanda = parcialValida ? plantasEst - plantasQuedan : plantasEst;
   const descarteAuto = useMemo(
     () => !esPorPaquete ? Math.max(0, plantasDeEstaTanda - plantas) : 0,
     [esPorPaquete, plantasDeEstaTanda, plantas],
@@ -39,9 +39,12 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
   const esRucula = lote.variedad.toLowerCase().includes('rucula') || lote.variedad.toLowerCase().includes('rúcula');
 
   // Para rúcula: paquetes estimados = plantas / plantasPorPaqueteManual
-  const paquetesEstimados = esRucula && plantasEst > 0 ? Math.round(plantasEst / plantasPorPaqueteManual) : 0;
+  const paquetesEstimados = esRucula && plantasDeEstaTanda > 0 ? Math.round(plantasDeEstaTanda / plantasPorPaqueteManual) : 0;
   // Plantas/paquete calculado desde paquetes reales ingresados
-  const plantasPorPaqReal = useMemo(() => esPorPaquete && paquetes > 0 ? Math.round((plantasEst / paquetes) * 10) / 10 : 0, [esPorPaquete, plantasEst, paquetes]);
+  const plantasPorPaqReal = useMemo(
+    () => esPorPaquete && paquetes > 0 ? Math.round((plantasDeEstaTanda / paquetes) * 10) / 10 : 0,
+    [esPorPaquete, plantasDeEstaTanda, paquetes],
+  );
 
   // Alertas de calidad — mismo umbral que el Panel ("Desvíos y calidad de cosecha"):
   // lechuga con descarte > 5% de la cosecha del lote, o rúcula armada a más de 3
@@ -177,7 +180,7 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
           )}
           {densidadAlta && (
             <div style={{ marginTop: '10px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '10px 12px', fontSize: '12px', color: '#78350f', fontWeight: 600 }}>
-              ⚠️ {plantasPorPaqReal} plantas por paquete (más de 3) — paquetes más chicos de lo normal, va a quedar marcado en Alertas del panel.
+              ⚠️ {plantasPorPaqReal} plantas por paquete{parcialValida ? ` (${plantasDeEstaTanda} plantas de esta tanda ÷ ${paquetes} paquetes)` : ''} (más de 3) — paquetes más chicos de lo normal, va a quedar marcado en Alertas del panel.
             </div>
           )}
 
