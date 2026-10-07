@@ -1324,8 +1324,8 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
             // Lo que la app emparejó sola se muestra para poder desconfiar, y lo que no pudo
             // se nombra: sin eso esa fila no aparece y nadie se entera de que falta.
             const aprox = paresHistoricos.filter((x) => x.articulo && !x.exacto);
-            const sinMatch = paresHistoricos.filter((x) => !x.articulo);
-            const ok = paresHistoricos.filter((x) => x.articulo).length;
+            const sinMatch = paresHistoricos.filter((x) => !x.articulo && x.tieneConsumo);
+            const ok = paresHistoricos.filter((x) => x.articulo || !x.tieneConsumo).length;
             if (!aprox.length && !sinMatch.length) {
               return (
                 <p style={{ margin: '0 0 8px', fontSize: '11px', color: '#166534' }}>

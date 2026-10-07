@@ -86,6 +86,10 @@ export interface Emparejamiento {
   articulo: string | null;   // nombre en el catálogo, o null si no se pudo
   exacto: boolean;
   parecido: number;
+  // Si todos los meses dan cero, no hay nada que comparar. Se guarda igual —el día que ese
+  // insumo se use, los ceros son el historial correcto— pero no se reclama que falte el
+  // artículo: sería pedir que se cree un artículo para mostrar una fila de ceros.
+  tieneConsumo: boolean;
 }
 
 const UMBRAL = 0.6;
@@ -93,8 +97,9 @@ const UMBRAL = 0.6;
 // Empareja cada nombre del Excel con un artículo del catálogo.
 export function emparejarHistoricos(nombresDelCatalogo: string[]): Emparejamiento[] {
   return USOS_HISTORICOS.map((u) => {
+    const tieneConsumo = Object.values(u.meses).some((v) => Number(v) !== 0);
     const exacto = nombresDelCatalogo.find((n) => clave(n) === clave(u.articulo));
-    if (exacto) return { excel: u.articulo, articulo: exacto, exacto: true, parecido: 1 };
+    if (exacto) return { excel: u.articulo, articulo: exacto, exacto: true, parecido: 1, tieneConsumo };
 
     const puntajes = nombresDelCatalogo
       .map((n) => ({ n, p: parecido(u.articulo, n) }))
@@ -105,9 +110,9 @@ export function emparejarHistoricos(nombresDelCatalogo: string[]): Emparejamient
     // artículo equivocado, que es peor que no mostrar la fila.
     const hayEmpate = !!segundo && mejor && Math.abs(mejor.p - segundo.p) < 0.05;
     if (!mejor || mejor.p < UMBRAL || hayEmpate) {
-      return { excel: u.articulo, articulo: null, exacto: false, parecido: mejor?.p ?? 0 };
+      return { excel: u.articulo, articulo: null, exacto: false, parecido: mejor?.p ?? 0, tieneConsumo };
     }
-    return { excel: u.articulo, articulo: mejor.n, exacto: false, parecido: mejor.p };
+    return { excel: u.articulo, articulo: mejor.n, exacto: false, parecido: mejor.p, tieneConsumo };
   });
 }
 
