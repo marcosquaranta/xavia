@@ -30,6 +30,16 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
   const router = useRouter();
   const [anio, setAnio] = useState(HOY.getFullYear());
   const [mes, setMes] = useState(HOY.getMonth() + 1);
+  // La vista por mes y categoría sirve para cerrar el mes; para encontrar UN gasto y
+  // corregirlo —que es cuando hay que buscar por lo que uno recuerda, no por el mes— hace
+  // falta la lista completa, plana y por fecha.
+  const [vista, setVista] = useState<'mes' | 'todos'>('mes');
+  const [busqueda, setBusqueda] = useState('');
+  const [filtroCat, setFiltroCat] = useState('');
+  const [filtroMedio, setFiltroMedio] = useState('');
+  // Se dibujan de a tandas: son miles de filas y renderizarlas todas de golpe tranca el
+  // navegador justo cuando uno está buscando algo.
+  const [limite, setLimite] = useState(300);
 
   // Alta
   const [fecha, setFecha] = useState(hoyISO());
@@ -86,6 +96,22 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
   }, [delMes]);
 
   const totalGeneral = delMes.reduce((a, g) => a + (Number(g.monto) || 0), 0);
+  // Todos los gastos, del más nuevo al más viejo. El filtro corre sobre TODO y no sobre lo
+  // que se muestra: si no, buscar algo viejo no lo encontraría nunca.
+  const todos = useMemo(() => {
+    const txt = busqueda.trim().toLowerCase();
+    return gastos
+      .filter((g) => {
+        if (filtroCat && g.categoria !== filtroCat) return false;
+        if (filtroMedio && g.medio_pago !== filtroMedio) return false;
+        if (!txt) return true;
+        return `${g.descripcion || ''} ${g.categoria || ''} ${g.medio_pago || ''} ${g.monto || ''}`
+          .toLowerCase().includes(txt);
+      })
+      .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)) || String(b.id_gasto).localeCompare(String(a.id_gasto)));
+  }, [gastos, busqueda, filtroCat, filtroMedio]);
+  const totalTodos = todos.reduce((a, g) => a + (Number(g.monto) || 0), 0);
+
   // Cuánto de ese total todavía no salió de la caja. Sin esto, el total del mes se lee como
   // plata gastada cuando puede incluir compras a crédito que se pagan el mes que viene.
   const pendienteDelMes = delMes.filter((g) => !estaPagado(g)).reduce((a, g) => a + (Number(g.monto) || 0), 0);
@@ -423,8 +449,20 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
         <button type="submit" className="btn" disabled={guardando}>{guardando ? 'Guardando…' : '+ Agregar gasto'}</button>
       </form>
 
+      {/* ══ Vista: el mes para cerrar, o todo para buscar ══ */}
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '10px', flexWrap: 'wrap' }}>
+        {([['mes', 'Por mes y categoría'], ['todos', 'Todos los gastos']] as const).map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setVista(k)}
+            style={{
+              fontSize: '12.5px', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: vista === k ? 700 : 400,
+              border: '1px solid ' + (vista === k ? '#111827' : '#e5e7eb'),
+              background: vista === k ? '#111827' : '#fff', color: vista === k ? '#fff' : '#374151',
+            }}>{label}</button>
+        ))}
+      </div>
+
       {/* ══ Selector de mes + export ══ */}
-      <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap' }}>
+      <div style={{ display: vista === 'mes' ? 'flex' : 'none', gap: '12px', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap' }}>
         <select value={anio} onChange={(e) => setAnio(Number(e.target.value))} style={{ width: '90px' }}>
           {[2024, 2025, 2026, 2027].map((y) => <option key={y}>{y}</option>)}
         </select>
@@ -438,7 +476,7 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
       </div>
 
       {/* ══ Totales del mes ══ */}
-      {delMes.length > 0 && (
+      {vista === 'mes' && delMes.length > 0 && (
         <div className="card" style={{ marginBottom: '14px' }}>
           <p style={{ margin: '0 0 10px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             Totales — {MESES[mes - 1]} {anio}
@@ -459,9 +497,107 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
       )}
 
       {/* ══ Listado por categoría ══ */}
-      {porCategoria.length === 0 ? (
+      {/* ══ TODOS LOS GASTOS ══ */}
+      {vista === 'todos' && (
+        <div className="card" style={{ marginBottom: '12px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
+            <input type="text" value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setLimite(300); }}
+              placeholder="Buscar por descripción, categoría, medio o monto"
+              style={{ flex: 1, minWidth: '220px', fontSize: '12.5px', padding: '6px 9px', border: '1px solid #d1d5db', borderRadius: '6px' }} />
+            <select value={filtroCat} onChange={(e) => { setFiltroCat(e.target.value); setLimite(300); }}
+              style={{ fontSize: '12.5px', padding: '6px 8px', border: '1px solid #d1d5db', borderRadius: '6px' }}>
+              <option value="">Todas las categorías</option>
+              {CATEGORIAS_GASTO.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+            <select value={filtroMedio} onChange={(e) => { setFiltroMedio(e.target.value); setLimite(300); }}
+              style={{ fontSize: '12.5px', padding: '6px 8px', border: '1px solid #d1d5db', borderRadius: '6px' }}>
+              <option value="">Todos los medios</option>
+              {MEDIOS.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <span style={{ fontSize: '12.5px', fontWeight: 700, whiteSpace: 'nowrap' }}>
+              {todos.length} {todos.length === 1 ? 'gasto' : 'gastos'} · {fmtMoneda(totalTodos)}
+            </span>
+          </div>
+
+          {todos.length === 0 ? (
+            <p style={{ margin: 0, fontSize: '13px', color: '#9ca3af' }}>No hay gastos que coincidan.</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ fontSize: '12px', width: '100%', minWidth: '680px' }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left', width: '70px' }}>Fecha</th>
+                    <th style={{ textAlign: 'left' }}>Descripción</th>
+                    <th style={{ textAlign: 'left', width: '150px' }}>Categoría</th>
+                    <th style={{ textAlign: 'left', width: '120px' }}>Medio de pago</th>
+                    <th style={{ textAlign: 'right', width: '110px' }}>Monto</th>
+                    <th style={{ width: '70px' }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {todos.slice(0, limite).map((g) => {
+                    const editando = editId === g.id_gasto;
+                    if (editando && editVals) {
+                      return (
+                        <tr key={g.id_gasto} style={{ background: '#fefce8' }}>
+                          <td style={{ padding: '2px 4px' }}><input type="date" value={editVals.fecha} onChange={(e) => setEditVals({ ...editVals, fecha: e.target.value })} style={{ fontSize: '11px', padding: '3px' }} /></td>
+                          <td style={{ padding: '2px 4px' }}><input type="text" value={editVals.descripcion} onChange={(e) => setEditVals({ ...editVals, descripcion: e.target.value })} style={{ width: '100%', fontSize: '12px', padding: '3px 6px', border: '1px solid #e5e7eb', borderRadius: '4px' }} /></td>
+                          {/* Acá SÍ se puede cambiar la categoría: media carga masiva cae en
+                              "Gastos generales" y corregirla es el motivo principal para
+                              entrar a esta lista. */}
+                          <td style={{ padding: '2px 4px' }}>
+                            <select value={editVals.categoria} onChange={(e) => setEditVals({ ...editVals, categoria: e.target.value as any })} style={{ fontSize: '11px', padding: '3px', width: '100%' }}>
+                              {CATEGORIAS_GASTO.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                            </select>
+                          </td>
+                          <td style={{ padding: '2px 4px' }}>
+                            <select value={editVals.medio_pago} onChange={(e) => setEditVals({ ...editVals, medio_pago: e.target.value })} style={{ fontSize: '11px', padding: '3px' }}>
+                              {MEDIOS.map((m) => <option key={m} value={m}>{m}</option>)}
+                            </select>
+                          </td>
+                          <td style={{ padding: '2px 4px' }}>
+                            <input type="number" value={editVals.monto} onChange={(e) => setEditVals({ ...editVals, monto: Number(e.target.value) || 0 })} style={{ width: '100%', textAlign: 'right', fontSize: '12px', padding: '3px 6px', border: '1px solid #e5e7eb', borderRadius: '4px' }} min={admiteMontoNegativo(editVals.categoria) ? undefined : 0} step={0.01} />
+                          </td>
+                          <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                            <button onClick={guardarEdicion} disabled={guardando} style={{ background: '#059669', color: 'white', border: 'none', borderRadius: '4px', padding: '3px 7px', fontSize: '11px', cursor: 'pointer', marginRight: '3px' }}>✓</button>
+                            <button onClick={() => { setEditId(null); setEditVals(null); }} style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: '11px' }}>✕</button>
+                          </td>
+                        </tr>
+                      );
+                    }
+                    return (
+                      <tr key={g.id_gasto}>
+                        <td style={{ whiteSpace: 'nowrap', color: '#6b7280' }}>{fmtFecha(g.fecha)}</td>
+                        <td>{g.descripcion || <span style={{ color: '#d1d5db' }}>sin detalle</span>}</td>
+                        <td style={{ color: '#6b7280' }}>{LABEL_CAT[g.categoria] || g.categoria}</td>
+                        <td style={{ color: '#6b7280' }}>
+                          {g.medio_pago}{g.medio_pago_destino ? ` → ${g.medio_pago_destino}` : ''}
+                          {!estaPagado(g) && <span style={{ color: '#b45309', fontWeight: 700 }}> · sin pagar</span>}
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtMoneda(Number(g.monto) || 0)}</td>
+                        <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                          <button onClick={() => empezarEdicion(g)} title="Editar" style={{ background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', fontSize: '12px', marginRight: '4px' }}>✎</button>
+                          <button onClick={() => borrar(g.id_gasto)} title="Eliminar" disabled={borrando === g.id_gasto} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '13px' }}>×</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {todos.length > limite && (
+                <button type="button" onClick={() => setLimite((l) => l + 300)}
+                  style={{ marginTop: '10px', fontSize: '12.5px', padding: '6px 12px', background: 'white', border: '1px solid #e5e7eb', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}>
+                  Ver 300 más ({todos.length - limite} sin mostrar)
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {vista === 'mes' && porCategoria.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '30px', color: '#9ca3af' }}>Sin gastos cargados en {MESES[mes - 1]} {anio}.</div>
-      ) : porCategoria.map(({ cat, items }) => {
+      ) : vista === 'mes' ? porCategoria.map(({ cat, items }) => {
         const subtotal = items.reduce((a, g) => a + (Number(g.monto) || 0), 0);
         return (
           <div key={cat} className="card" style={{ marginBottom: '12px' }}>
@@ -521,7 +657,7 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
             </table>
           </div>
         );
-      })}
+      }) : null}
     </div>
   );
 }
