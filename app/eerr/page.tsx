@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import { calcularEERR, previsionesSugeridas } from '@/lib/eerr';
+import { calcularEERR, previsionesSugeridas, gastosDeLinea } from '@/lib/eerr';
 import type { Articulo, StockMes, Gasto, VentaDia, PrecioVenta, ClienteVenta } from '@/lib/types';
 import Header from '@/components/Header';
 import { leerPrevisiones, previsionDelMes } from '@/lib/previsiones';
@@ -188,7 +188,12 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
 
         <ChecklistCierre pasos={pasos} {...resumenPasos} anio={anio} mes={mes} marcados={[...marcados]} />
 
-        <TablaEERR act={act} ant={ant} nombre={nombre} nombrePrev={nombrePrev} />
+        <TablaEERR act={act} ant={ant} nombre={nombre} nombrePrev={nombrePrev}
+          detalle={Object.fromEntries(
+            [...act.costoVariable.lineas, ...act.costosFijos.lineas].map((l) => [
+              l.label, gastosDeLinea(gastos, articulos, l.label, anio, mes),
+            ]),
+          )} />
 
         {/* El mail del cierre se manda acá, a mano, cuando el mes ya está cargado. No hay
             cron: un informe automático llegaría siempre antes de que estén el resumen de la

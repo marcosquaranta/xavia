@@ -136,12 +136,6 @@ export function historicoEERR(d: DatosHistorico, meses: { anio: number; mes: num
     ...FIJOS.map((l): FilaHistorico => ({
       label: l.label, bloque: 'fijos', nivel: 'detalle', montos: deLinea('costosFijos', l.label),
     })),
-    // Las previsiones no son una categoría de gasto: se suman al bloque de fijos como línea
-    // propia, así que en la serie van como una línea más del bloque y no se pierden.
-    {
-      label: 'Previsiones (despidos y SAC)', bloque: 'fijos', nivel: 'detalle',
-      montos: deLinea('costosFijos', 'Previsiones (despidos y SAC)'),
-    },
 
     { label: 'Resultado final', bloque: 'resultado', nivel: 'total', montos: en((e) => e.resultado) },
     { label: 'Resultado sin inversión', bloque: 'resultado', nivel: 'total', montos: en((e) => e.resultadoSinInversion) },

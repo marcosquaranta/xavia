@@ -23,10 +23,22 @@ const fmtPP = (d: number) => `${d > 0 ? '+' : d < 0 ? '−' : ''}${Math.abs(d).t
 const cel: React.CSSProperties = { padding: '5px 10px', fontSize: '13px' };
 const celNum: React.CSSProperties = { ...cel, textAlign: 'right', fontVariantNumeric: 'tabular-nums' };
 
-export default function TablaEERR({ act, ant, nombre, nombrePrev }: {
+export interface DetalleLinea {
+  items: { id_gasto: string; fecha: string; descripcion: string; monto: number; medio_pago: string; categoria: string }[];
+  // Las líneas que salen de Stocks muestran COMPRAS, que no suman lo mismo que la línea: la
+  // línea es consumo. Se avisa en vez de esconderlo, porque un detalle que no cierra con su
+  // total y no explica por qué hace dudar del total entero.
+  esCompra: boolean;
+}
+
+export default function TablaEERR({ act, ant, nombre, nombrePrev, detalle = {} }: {
   act: EERR; ant: EERR; nombre: string; nombrePrev: string;
+  detalle?: Record<string, DetalleLinea>;
 }) {
   const [abierto, setAbierto] = useState<Record<string, boolean>>({ variable: true, fijos: true, ventas: false });
+  // Qué línea tiene el detalle abierto. Una sola a la vez: abrir varias convierte la tabla
+  // en una lista larga y se pierde la comparación entre líneas, que es para lo que sirve.
+  const [lineaAbierta, setLineaAbierta] = useState<string | null>(null);
   const toggle = (k: string) => setAbierto((p) => ({ ...p, [k]: !p[k] }));
 
   const montoAnt = (label: string, lineas: { label: string; monto: number }[]) =>
@@ -87,20 +99,38 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev }: {
               <span style={{ fontWeight: 700, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{label}</span>
             </button>
           ) : (
-            <span style={{
-              fontWeight: esRes ? 700 : 400,
-              fontSize: esRes ? '14px' : '13px',
-            }}>
-              {label}
-              {cantidad && <span style={{ color: '#9ca3af', fontSize: '11.5px' }}> · {cantidad}</span>}
-            </span>
+            (() => {
+              const det = detalle[label];
+              const hayDetalle = nivel === 'detalle' && !!det && det.items.length > 0;
+              const contenido = (
+                <>
+                  {label}
+                  {cantidad && <span style={{ color: '#9ca3af', fontSize: '11.5px' }}> · {cantidad}</span>}
+                  {hayDetalle && (
+                    <span style={{ color: '#9ca3af', fontSize: '10px' }}> {lineaAbierta === label ? '▾' : '▸'} {det.items.length}</span>
+                  )}
+                </>
+              );
+              if (!hayDetalle) {
+                return (
+                  <span style={{ fontWeight: esRes ? 700 : 400, fontSize: esRes ? '14px' : '13px' }}>{contenido}</span>
+                );
+              }
+              return (
+                <button onClick={() => setLineaAbierta((p) => (p === label ? null : label))}
+                  title="Ver los movimientos de esta línea"
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', color: '#1d4ed8', textAlign: 'left' }}>
+                  {contenido}
+                </button>
+              );
+            })()
           )}
         </td>
         <td style={{ ...celNum, fontWeight: esTotal || esRes ? 800 : 500, fontSize: esRes ? '15px' : '13px', color: esRes && monto < 0 ? '#dc2626' : '#111827' }}>
           {$(monto)}
         </td>
         <td style={{ ...celNum, fontSize: '12px', color: '#6b7280' }}>{fmtPeso(pesoPct(monto, act.ventas.total))}</td>
-        {/* Compró y quedó en stock: solo tienen sentido en las líneas que salen de stock.
+        {/* Compró y variación de stock: solo tienen sentido en las líneas que salen de stock.
             El costo del mes es el CONSUMO, no la compra — un mes se puede comprar el triple
             de lo que se consume y el costo no se mueve. Verlas al lado es lo que evita que
             alguien lea la compra como si fuera el costo. */}
@@ -117,6 +147,40 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev }: {
     );
   }
 
+  function DetalleDe({ label }: { label: string }) {
+    if (lineaAbierta !== label) return null;
+    const det = detalle[label];
+    if (!det || !det.items.length) return null;
+    const suma = det.items.reduce((a, g) => a + g.monto, 0);
+    return (
+      <tr>
+        <td colSpan={8} style={{ padding: '0 10px 10px 30px', background: '#fafaf9' }}>
+          <p style={{ margin: '0 0 5px', fontSize: '11px', color: '#6b7280' }}>
+            {det.esCompra
+              ? `Compras del mes de estos artículos — ${$(suma)}. La línea de arriba es el CONSUMO (había + compró − quedó), así que no tiene por qué dar lo mismo.`
+              : `${det.items.length} movimiento(s) · ${$(suma)}`}
+          </p>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
+            <tbody>
+              {det.items.map((g) => (
+                <tr key={g.id_gasto} style={{ borderTop: '1px solid #f3f4f6' }}>
+                  <td style={{ padding: '3px 8px 3px 0', color: '#6b7280', whiteSpace: 'nowrap', width: '70px' }}>
+                    {g.fecha.slice(8, 10)}/{g.fecha.slice(5, 7)}
+                  </td>
+                  <td style={{ padding: '3px 8px 3px 0' }}>{g.descripcion || <span style={{ color: '#d1d5db' }}>sin detalle</span>}</td>
+                  <td style={{ padding: '3px 8px 3px 0', color: '#9ca3af', whiteSpace: 'nowrap' }}>{g.medio_pago}</td>
+                  <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                    {$(g.monto)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </td>
+      </tr>
+    );
+  }
+
   const varVentas = ant.ventas.total > 0 ? ((act.ventas.total - ant.ventas.total) / ant.ventas.total) * 100 : null;
 
   return (
@@ -124,7 +188,7 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev }: {
       <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '620px' }}>
         <thead>
           <tr style={{ background: '#fafaf9' }}>
-            {['Concepto', nombre, '% s/ventas', 'Compró', 'Quedó en stock', nombrePrev, 'Δ $', 'Δ % s/ventas'].map((h, i) => (
+            {['Concepto', nombre, '% s/ventas', 'Compró', 'Var. stock', nombrePrev, 'Δ $', 'Δ % s/ventas'].map((h, i) => (
               <th key={h} style={{
                 ...cel, textAlign: i === 0 ? 'left' : 'right', fontSize: '11px',
                 color: i >= 3 ? '#9ca3af' : '#6b7280',
@@ -162,21 +226,26 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev }: {
           <Fila label="Costo variable" monto={act.costoVariable.total} anterior={ant.costoVariable.total} nivel="total" seccion="variable"
             compras={act.costoVariable.lineas.reduce((a, l) => a + (l.compras || 0), 0)}
             variacionStock={act.costoVariable.lineas.reduce((a, l) => a + (l.variacionStock || 0), 0)} />
-          {abierto.variable && act.costoVariable.lineas.map((l) => (
+          {abierto.variable && act.costoVariable.lineas.flatMap((l) => [
             <Fila key={l.label} label={l.label} monto={l.monto} anterior={montoAnt(l.label, ant.costoVariable.lineas)} nivel="detalle"
-              compras={l.compras} variacionStock={l.variacionStock} />
-          ))}
+              compras={l.compras} variacionStock={l.variacionStock} />,
+            <DetalleDe key={l.label + '-d'} label={l.label} />,
+          ])}
 
           <Fila label="Costos fijos" monto={act.costosFijos.total} anterior={ant.costosFijos.total} nivel="total" seccion="fijos" />
-          {abierto.fijos && act.costosFijos.lineas.map((l) => (
-            <Fila key={l.label} label={l.label} monto={l.monto} anterior={montoAnt(l.label, ant.costosFijos.lineas)} nivel="detalle" />
-          ))}
+          {abierto.fijos && act.costosFijos.lineas.flatMap((l) => [
+            <Fila key={l.label} label={l.label} monto={l.monto} anterior={montoAnt(l.label, ant.costosFijos.lineas)} nivel="detalle" />,
+            <DetalleDe key={l.label + '-d'} label={l.label} />,
+          ])}
 
           <Fila label="Resultado final" monto={act.resultado} anterior={ant.resultado} nivel="resultado" invertido />
           <Fila label="Resultado sin inversión" monto={act.resultadoSinInversion} anterior={ant.resultadoSinInversion} nivel="resultado" invertido />
         </tbody>
       </table>
       <p style={{ margin: 0, padding: '8px 10px', fontSize: '11px', color: '#9ca3af', borderTop: '1px solid #f3f4f6' }}>
+        <strong>Var. stock</strong> es cuánto <strong>subió o bajó</strong> el stock en el mes, no cuánto hay:
+        <em>compró − var. stock = costo del mes</em>. Para ver cuánta plata hay parada en el depósito, que es otro número,
+        está "Stock valorizado" en Stocks.{' '}
         <strong>Δ $</strong> es cuánta plata más o menos que el mes pasado: en rojo si el costo subió.
         <strong> Δ % s/ventas</strong> es cuánto cambió el <strong>peso sobre las ventas</strong>: si semillas pesaba 5% y ahora pesa 4%, dice −1,0% en verde.
         Las dos pueden ir para lados distintos —un costo puede salir más caro y a la vez pesar menos, si las ventas subieron más que él— y por eso están las dos.

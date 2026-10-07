@@ -46,7 +46,6 @@ function filasDelInforme(act: MesEERR, ant: MesEERR): FilaInforme[] {
     ...LINEAS_VARIABLE.map((l) => linea('costoVariable', l.label)),
     { label: 'Costos fijos', monto: e.costosFijos.total, anterior: a.costosFijos.total, nivel: 'total' },
     ...FIJOS.map((l) => linea('costosFijos', l.label)),
-    linea('costosFijos', 'Previsiones (despidos y SAC)'),
     { label: 'Resultado final', monto: e.resultado, anterior: a.resultado, nivel: 'resultado', subirEsBueno: true },
     { label: 'Resultado sin inversión', monto: e.resultadoSinInversion, anterior: a.resultadoSinInversion, nivel: 'resultado', subirEsBueno: true },
   ];

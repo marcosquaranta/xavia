@@ -17,9 +17,13 @@ import { precioUltimoConocido } from './valorizacionStock';
 //    compras de Stocks (ver "Sugerencias de compra desde Gastos"), así que contarlos además
 //    como costo sería contar la misma compra dos veces. Si alguno quedó sin aplicar a stock,
 //    no está en ningún lado: eso se avisa.
-// 3. Fletes, energía y cultivos de reventa son costo variable pero NO pasan por Stocks:
-//    salen de Gastos. Si alguna vez existiera un artículo de stock en una categoría "Fletes",
-//    se contaría dos veces — por eso el costo de esas tres líneas sale solo de Gastos.
+// 3. Fletes y energía son costo variable pero NO pasan por Stocks: salen de Gastos. Si
+//    alguna vez existiera un artículo de stock en una categoría "Fletes", se contaría dos
+//    veces — por eso el costo de esas dos líneas sale solo de Gastos.
+//
+//    Los cultivos de reventa SÍ pasan por Stocks: son un rubro de insumos más (se compran,
+//    quedan en el depósito y se consumen), así que su costo es el consumo valorizado y no lo
+//    comprado en el mes. Sus gastos tampoco se suman, por la misma razón que los de insumos.
 //
 // Fuera del resultado quedan: 'movimiento_interno' (pagar el resumen de la tarjeta mueve
 // plata del banco a la tarjeta, no genera un gasto nuevo) y el medio de pago 'Aporte socios'
@@ -48,7 +52,7 @@ export const LINEAS_VARIABLE: { label: string; claves?: string[]; cat?: Categori
   { label: 'Semillas', claves: ['semilla'] },
   { label: 'Energía + agua', cat: 'energia_agua' },
   { label: 'Insumos de limpieza', claves: ['limpieza'] },
-  { label: 'Cultivos de reventa', cat: 'cultivos_reventa' },
+  { label: 'Cultivos de reventa', claves: ['reventa'] },
   { label: 'Varios', claves: [] },   // catch-all: todo lo que no matcheó arriba
 ];
 
@@ -184,21 +188,29 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
   const lineasFijas: LineaEERR[] = FIJOS
     .map(({ label, cats }) => ({ label, monto: sumaCats(cats), fuente: 'gastos' as const }));
 
-  // Las previsiones, como una línea más de costo fijo. No salen de ningún gasto cargado:
-  // son plata que todavía está en la cuenta pero ya está comprometida.
+  // Las previsiones van DENTRO de Sueldos, no como línea aparte: son costo laboral del mes
+  // igual que el sueldo —el SAC se gana todos los meses aunque se pague en junio y diciembre,
+  // y los despidos se devengan mientras la persona trabaja—. Separadas, la línea de sueldos
+  // mostraba menos de lo que el equipo cuesta de verdad.
+  //
+  // Ojo con la masa salarial: sale de los GASTOS de sueldos, no de esta línea. Si saliera de
+  // acá, las previsiones se calcularían sobre sí mismas y creciendo mes a mes.
   const montoPrevisiones = Math.round((d.previsiones?.despidos || 0) + (d.previsiones?.sac || 0));
   if (montoPrevisiones > 0) {
-    lineasFijas.push({ label: 'Previsiones (despidos y SAC)', monto: montoPrevisiones, fuente: 'gastos' as const });
+    const sueldos = lineasFijas.find((l) => l.label === 'Sueldos equipo');
+    if (sueldos) sueldos.monto += montoPrevisiones;
+    else lineasFijas.push({ label: 'Sueldos equipo', monto: montoPrevisiones, fuente: 'gastos' as const });
   }
   const totalFijos = lineasFijas.reduce((a, l) => a + l.monto, 0);
   const inversion = sumaCats(['inversion_equipamiento', 'inversion_nave3']);
   const masaSalarial = sumaCats(['sueldos']);
 
   // ── Avisos: lo que hace que el número no cierre ──
-  const insumosSinAplicar = gastosMes.filter((g) => g.categoria === 'insumos' && g.aplicado_stock !== 'SI');
+  const CATS_POR_STOCK: CategoriaGasto[] = ['insumos', 'cultivos_reventa'];
+  const insumosSinAplicar = gastosMes.filter((g) => CATS_POR_STOCK.includes(g.categoria) && g.aplicado_stock !== 'SI');
   if (insumosSinAplicar.length) {
     const monto = insumosSinAplicar.reduce((a, g) => a + num(g.monto), 0);
-    avisos.push(`${insumosSinAplicar.length} gasto(s) de insumos por $${Math.round(monto).toLocaleString('es-AR')} sin aplicar a Stocks: esa compra no está en el costo de ningún lado.`);
+    avisos.push(`${insumosSinAplicar.length} compra(s) de insumos por $${Math.round(monto).toLocaleString('es-AR')} sin aplicar a Stocks: esa compra no está en el costo de ningún lado.`);
   }
   // Una línea de costo mayor que las ventas del mes no puede ser real: significaría que cada
   // peso vendido costó más de un peso solo en ese renglón. Casi siempre es un gasto con ceros
@@ -239,4 +251,70 @@ export function previsionesSugeridas(masaSalarial: number): { despidos: number; 
     despidos: masaSalarial * PCT_PREVISION_DESPIDOS,
     sac: masaSalarial / DIVISOR_PREVISION_SAC,
   };
+}
+
+// ── Qué gastos hay detrás de cada línea del EERR ──────────────────────────────────────
+//
+// El total de una línea no dice nada por sí solo: "Otros $2.100.000" obliga a abrir la
+// planilla y filtrar a mano para saber qué lo compone, que es justo cuando uno quiere
+// entender un número que se fue de escala.
+//
+// Las líneas que salen de Gastos devuelven sus gastos directo. Las que salen de Stocks
+// —el consumo valorizado— devuelven las COMPRAS del mes de esos artículos: no son el mismo
+// número que la línea (la línea es consumo, no compra) y por eso se dice en la pantalla,
+// pero son los movimientos que hay para mirar.
+export interface GastoDeLinea {
+  id_gasto: string;
+  fecha: string;
+  descripcion: string;
+  monto: number;
+  medio_pago: string;
+  categoria: string;
+}
+
+export function gastosDeLinea(
+  gastos: Gasto[], articulos: Articulo[], label: string, anio: number, mes: number,
+): { items: GastoDeLinea[]; esCompra: boolean } {
+  const mm = String(mes).padStart(2, '0');
+  const desde = `${anio}-${mm}-01`;
+  const hasta = `${anio}-${mm}-${String(new Date(anio, mes, 0).getDate()).padStart(2, '0')}`;
+  const delMes = gastos.filter((g) => {
+    const f = String(g.fecha || '').split(/[T ]/)[0];
+    return f >= desde && f <= hasta;
+  });
+  const fila = (g: Gasto): GastoDeLinea => ({
+    id_gasto: String(g.id_gasto),
+    fecha: String(g.fecha || '').split(/[T ]/)[0],
+    descripcion: String(g.descripcion || ''),
+    monto: num(g.monto),
+    medio_pago: String(g.medio_pago || ''),
+    categoria: String(g.categoria || ''),
+  });
+  const ordenar = (xs: GastoDeLinea[]) => xs.sort((a, b) => b.monto - a.monto);
+
+  const fijo = FIJOS.find((f) => f.label === label);
+  if (fijo) {
+    return { items: ordenar(delMes.filter((g) => fijo.cats.includes(g.categoria)).map(fila)), esCompra: false };
+  }
+
+  const variable = LINEAS_VARIABLE.find((l) => l.label === label);
+  if (variable?.cat) {
+    return { items: ordenar(delMes.filter((g) => g.categoria === variable.cat).map(fila)), esCompra: false };
+  }
+
+  if (variable) {
+    // Línea de stock: los gastos son las compras de los artículos de esa categoría. La
+    // categoría del artículo es texto libre en la planilla, así que se clasifica con la
+    // misma función que usa el cálculo — si acá se clasificara distinto, el detalle no
+    // correspondería a la línea.
+    const deLaLinea = new Set(
+      articulos.filter((a) => lineaDeCategoria(a.categoria) === label).map((a) => String(a.id_articulo)),
+    );
+    return {
+      items: ordenar(delMes.filter((g) => deLaLinea.has(String((g as any).id_articulo || ''))).map(fila)),
+      esCompra: true,
+    };
+  }
+
+  return { items: [], esCompra: false };
 }
