@@ -119,6 +119,10 @@ export default function PlanificacionManager({ naves, defaults, repartoInicial, 
                     <p style={{ margin: 0, fontSize: '26px', fontWeight: 900, color: LEAF, lineHeight: 1 }}>{siembraHoy.lecPl}</p>
                     <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#166534', fontWeight: 600, textTransform: 'uppercase' }}>planchas lechuga</p>
                   </div>
+                  <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '7px', padding: '8px 12px', textAlign: 'center' }}>
+                    <p style={{ margin: 0, fontSize: '26px', fontWeight: 900, color: '#15803d', lineHeight: 1 }}>{siembraHoy.albPl}</p>
+                    <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#166534', fontWeight: 600, textTransform: 'uppercase' }}>planchas albahaca</p>
+                  </div>
                 </div>
               </div>
             )}

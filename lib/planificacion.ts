@@ -95,14 +95,23 @@ export function tareasDelDia(plan: Plan, reparto: Slot[], jsDay: number): Tarea[
   return t;
 }
 
-export interface SiembraHoy { rucPl: number; lecPl: number }
+// Planchas de albahaca por semana. Fijo, no calculado: la albahaca no se planifica por
+// capacidad como la rúcula y la lechuga, es una cantidad constante que definió Marcelo.
+// Si algún día hay que subirla, se cambia acá y listo.
+export const PLANCHAS_ALBAHACA_SEMANA = 1;
+
+export interface SiembraHoy { rucPl: number; lecPl: number; albPl: number }
 
 // Solo devuelve algo el día de siembra (miércoles) — se renderiza como bloque destacado,
 // no como línea de texto, para que los números por cultivo no se pierdan.
 export function siembraDelDia(plan: Plan, reparto: Slot[], jsDay: number): SiembraHoy | null {
   if (jsDay !== DIA_SIEMBRA) return null;
   const h = repartoHelpers(plan, reparto);
-  return { rucPl: planchas(h.siembraRucPl), lecPl: planchas(h.siembraLecPl) };
+  return {
+    rucPl: planchas(h.siembraRucPl),
+    lecPl: planchas(h.siembraLecPl),
+    albPl: PLANCHAS_ALBAHACA_SEMANA,
+  };
 }
 
 // Sanitiza un reparto venido de storage (JSON) — descarta entradas inválidas.
