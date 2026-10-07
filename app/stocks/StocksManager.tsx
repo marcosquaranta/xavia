@@ -159,13 +159,24 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
     if (!compraMedioPago) { setErrorCompra('Elegí un medio de pago.'); return; }
     setGuardandoCompra(true); setErrorCompra(null);
     try {
+      const items = [
+        { id_articulo, cantidad: cant, precio_unitario: precio },
+        ...compraExtra
+          .filter((x) => x.id_articulo && Number(x.cantidad) > 0 && Number(x.precio) > 0)
+          .map((x) => ({ id_articulo: x.id_articulo, cantidad: Number(x.cantidad), precio_unitario: Number(x.precio) })),
+      ];
+      if (new Set(items.map((i) => i.id_articulo)).size !== items.length) {
+        setErrorCompra('Hay dos renglones con el mismo artículo. Juntá las cantidades en uno solo.');
+        setGuardandoCompra(false);
+        return;
+      }
       const res = await fetch('/api/stocks/comprar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_articulo, anio, mes, cantidad: cant, precio_unitario: precio, medio_pago: compraMedioPago }),
+        body: JSON.stringify({ anio, mes, medio_pago: compraMedioPago, items }),
       });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || 'Error');
-      setCompraGeneral(false);
+      setCompraGeneral(false); setCompraExtra([]);
       router.refresh();
     } catch (err: any) {
       setErrorCompra(err.message || 'No se pudo guardar la compra');
@@ -388,6 +399,10 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
   // Las sugerencias ya resueltas en esta sesión. La página se arma en el servidor: hasta que
   // vuelve el refresh la fila sigue en la lista y parece que el click no hizo nada.
   const [aplicados, setAplicados] = useState<string[]>([]);
+  // Artículos adicionales de la MISMA compra. Una factura del proveedor con bolsas, cubos y
+  // fertilizante es una sola compra: cargarla de a un artículo dejaba tres gastos donde hubo
+  // uno, y obligaba a repetir fecha y medio de pago tres veces.
+  const [compraExtra, setCompraExtra] = useState<{ id_articulo: string; cantidad: string; precio: string }[]>([]);
   const [procesandoGasto, setProcesandoGasto] = useState<string | null>(null);
   const gastosDelMes = useMemo(() => {
     return gastosSugeridos.filter((g) => {
@@ -449,7 +464,8 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id_gasto: g.id_gasto, descartar: true }),
       });
-      if (!r.ok) throw new Error('el servidor lo rechazó');
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
       setAplicados((p) => [...p, g.id_gasto]);
       router.refresh();
     } catch (e: any) {
@@ -605,6 +621,10 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                         Total: <strong>${fmt(Number(compraCantidad) * Number(compraPrecio), 0)}</strong>
                       </p>
                     )}
+                    <button onClick={() => setCompraExtra((p) => [...p, { id_articulo: '', cantidad: '', precio: '' }])}
+                      disabled={guardandoCompra} className="btn secondary" style={{ fontSize: '12px', padding: '6px 14px' }}>
+                      + otro artículo
+                    </button>
                     <button onClick={() => confirmarCompra(compraGeneralArticulo)} disabled={guardandoCompra} className="btn" style={{ fontSize: '12px', padding: '6px 14px' }}>
                       {guardandoCompra ? 'Guardando…' : '✓ Confirmar compra'}
                     </button>
@@ -614,6 +634,44 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                   Cancelar
                 </button>
               </div>
+              {/* Los demás artículos de esta misma compra. Comparten fecha y medio de pago;
+                  cada uno lleva su cantidad y su precio, que es lo que valoriza el stock. */}
+              {compraExtra.map((x, i) => (
+                <div key={i} style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #bfdbfe' }}>
+                  <div style={{ minWidth: '240px' }}>
+                    <label style={{ fontSize: '10px' }}>Artículo</label>
+                    <select value={x.id_articulo} disabled={guardandoCompra}
+                      onChange={(e) => setCompraExtra((p) => p.map((y, j) => j === i ? { ...y, id_articulo: e.target.value } : y))}
+                      style={{ width: '100%', fontSize: '13px', padding: '6px 8px', color: x.id_articulo ? '#111827' : '#dc2626' }}>
+                      <option value="">— elegir artículo —</option>
+                      {categorias.map((cat) => (
+                        <optgroup key={cat} label={cat}>
+                          {artActivos.filter((a) => a.categoria === cat).map((a) => <option key={a.id_articulo} value={a.id_articulo}>{a.articulo}</option>)}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '10px' }}>
+                      Cantidad {x.id_articulo ? `(${artActivos.find((a) => a.id_articulo === x.id_articulo)?.unidad_medida || ''})` : ''}
+                    </label>
+                    <input type="number" min={0} step={0.001} value={x.cantidad} disabled={guardandoCompra}
+                      onChange={(e) => setCompraExtra((p) => p.map((y, j) => j === i ? { ...y, cantidad: e.target.value } : y))}
+                      style={{ width: '110px', fontSize: '12px', padding: '5px 8px' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '10px', color: '#dc2626', fontWeight: 700 }}>Precio unitario</label>
+                    <input type="number" min={0} step={0.1} value={x.precio} disabled={guardandoCompra}
+                      onChange={(e) => setCompraExtra((p) => p.map((y, j) => j === i ? { ...y, precio: e.target.value } : y))}
+                      style={{ width: '110px', fontSize: '12px', padding: '5px 8px' }} />
+                  </div>
+                  {Number(x.cantidad) > 0 && Number(x.precio) > 0 && (
+                    <span style={{ fontSize: '12px', color: '#6b7280' }}>${fmt(Number(x.cantidad) * Number(x.precio), 0)}</span>
+                  )}
+                  <button onClick={() => setCompraExtra((p) => p.filter((_, j) => j !== i))} disabled={guardandoCompra}
+                    style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '15px' }}>×</button>
+                </div>
+              ))}
               {errorCrearArt && creandoArticuloPara === '__top__' && <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#dc2626' }}>{errorCrearArt}</p>}
               {errorCompra && <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#dc2626' }}>{errorCompra}</p>}
               <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#6b7280' }}>

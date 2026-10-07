@@ -18,6 +18,19 @@ export async function POST(req: NextRequest) {
     if (!medio_pago) return NextResponse.json({ error: 'falta_medio_pago' }, { status: 400 });
     if (!Array.isArray(items) || !items.length) return NextResponse.json({ error: 'sin_items' }, { status: 400 });
 
+    // La carga masiva no tiene dónde elegir el artículo de cada renglón, así que un insumo
+    // no puede entrar por acá: entraría al gasto pero no al stock, y el consumo del mes
+    // (había + compró − quedó) saldría mal sin que nada avise. Se rechaza la tanda entera
+    // nombrando los renglones, para poder arreglarlos y volver a pegar.
+    const insumosSinArticulo = items.filter((it: any) => it?.categoria === 'insumos');
+    if (insumosSinArticulo.length) {
+      return NextResponse.json({
+        error: `Hay ${insumosSinArticulo.length} renglón(es) con categoría Insumos: ${insumosSinArticulo.map((i: any) => i?.descripcion || 's/d').slice(0, 5).join(', ')}. `
+          + 'Los insumos se cargan desde Stocks → Cargar compra, que pide el artículo y la cantidad. '
+          + 'Cambiáles la categoría acá o sacalos de la tanda.',
+      }, { status: 400 });
+    }
+
     await asegurarColumna('Gastos', 'medio_pago_destino');
     await asegurarColumnas('Gastos', ['empleado', 'estado_pago', 'proveedor', 'vencimiento', 'fecha_pago']);
 

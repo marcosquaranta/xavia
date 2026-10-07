@@ -28,6 +28,10 @@ export async function POST(req: NextRequest) {
 
     // Un adelanto sin empleado no se puede descontar del sueldo de nadie, que es para lo
     // único que sirve registrarlo aparte de los sueldos.
+    // Ver el comentario de más abajo: un insumo sin artículo no entra al stock.
+    if (categoria === 'insumos' && !String(id_articulo || '').trim()) {
+      return NextResponse.json({ error: 'Un gasto de Insumos tiene que decir qué artículo se compró: sin eso entra al gasto pero no al stock, y el consumo del mes queda mal.' }, { status: 400 });
+    }
     if (categoria === 'adelanto_sueldo' && !String(empleado || '').trim()) {
       return NextResponse.json({ error: 'falta_empleado' }, { status: 400 });
     }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { appendRowObj, readSheet, updateRow } from '@/lib/sheets';
+import { appendRowObj, asegurarColumna, readSheet, updateRow } from '@/lib/sheets';
 import type { Articulo, Gasto, StockMes } from '@/lib/types';
 
 // Confirma (o descarta) una sugerencia de compra detectada en Gastos: si se confirma,
@@ -26,6 +26,8 @@ export async function POST(req: NextRequest) {
           monto: Number(i?.monto) > 0 ? Number(i.monto) : undefined,
         }))
       : [{ id_articulo: String(id_articulo || ''), cantidad: Number(cantidad), monto: undefined }];
+
+    await asegurarColumna('Gastos', 'aplicado_stock');
 
     if (descartar) {
       const ok = await updateRow('Gastos', 'id_gasto', String(id_gasto), { aplicado_stock: 'SI' });
