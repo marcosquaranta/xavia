@@ -45,10 +45,15 @@ export function pasosDelCierre(args: {
   articulos: Articulo[];
   saldos: SaldoMes[];
   hayPrevision: boolean;
+  // La previsión que está guardada y la que saldría hoy de la masa salarial. Se comparan:
+  // el automático corre el día 5 con los sueldos que haya entonces, y si después se carga
+  // uno que faltaba, lo guardado queda viejo sin que nada avise.
+  previsionGuardada?: { despidos: number; sac: number; usuario: string } | null;
+  previsionDeHoy?: { despidos: number; sac: number } | null;
   anio: number;
   mes: number;
 }): PasoCierre[] {
-  const { eerr, gastos, stocks, articulos, saldos, hayPrevision, anio, mes } = args;
+  const { eerr, gastos, stocks, articulos, saldos, hayPrevision, previsionGuardada, previsionDeHoy, anio, mes } = args;
   const mm = String(mes).padStart(2, '0');
   const desde = `${anio}-${mm}-01`;
   const hasta = `${anio}-${mm}-${String(new Date(anio, mes, 0).getDate()).padStart(2, '0')}`;
@@ -218,10 +223,24 @@ export function pasosDelCierre(args: {
   pasos.push({
     id: 'previsiones',
     titulo: 'Previsiones del mes — se guardan solas',
-    estado: hayPrevision ? 'listo' : 'pendiente',
+    estado: !hayPrevision ? 'pendiente'
+      : (previsionGuardada && previsionDeHoy
+        && Math.abs((previsionGuardada.despidos + previsionGuardada.sac) - (previsionDeHoy.despidos + previsionDeHoy.sac)) >= 1)
+        ? 'pendiente' : 'listo',
     href: `/eerr?anio=${anio}&mes=${mes}#previsiones`,
     detalle: hayPrevision
-      ? 'Guardadas para este mes. Restan del resultado y vuelven en el puente de caja: es plata comprometida que todavía está en la cuenta.'
+      ? (() => {
+        const g = previsionGuardada, h = previsionDeHoy;
+        const desfasada = g && h && Math.abs((g.despidos + g.sac) - (h.despidos + h.sac)) >= 1;
+        const quien = g?.usuario === 'automático' ? 'Guardadas solas' : 'Guardadas a mano';
+        if (desfasada) {
+          return `${quien}, pero quedaron viejas: con los sueldos que hay cargados hoy darían `
+            + `$${Math.round(h!.despidos + h!.sac).toLocaleString('es-AR')} en vez de `
+            + `$${Math.round(g!.despidos + g!.sac).toLocaleString('es-AR')}. Se cargó un sueldo después de que se guardaron — `
+            + 'actualizalas más abajo si el mes todavía no está cerrado.';
+        }
+        return `${quien} para este mes. Restan del resultado y vuelven en el puente de caja: es plata comprometida que todavía está en la cuenta.`;
+      })()
       : 'Todavía no están guardadas. Se guardan solas a partir del día 5 del mes siguiente, cuando ya están los sueldos cargados; '
         + 'si necesitás que estén ahora, guardalas más abajo en esta misma pantalla.',
     ayuda: 'Despidos y SAC salen de la masa salarial del mes (6% y un doceavo) y se guardan automáticamente una vez por mes. '

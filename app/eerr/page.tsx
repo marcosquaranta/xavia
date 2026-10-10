@@ -121,7 +121,15 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
     + cobranzasXubio
       .filter((c) => { const f = String(c.fecha || '').split(/[T ]/)[0]; return f >= desdeMes && f <= hastaMes; })
       .reduce((a, c) => a + (Number(c.importe) || 0), 0);
-  const pasos = pasosDelCierre({ eerr: act, gastos, stocks, articulos, saldos, hayPrevision: !!guardada, anio, mes });
+  const pasos = pasosDelCierre({
+    eerr: act, gastos, stocks, articulos, saldos, hayPrevision: !!guardada, anio, mes,
+    previsionGuardada: guardada
+      ? { despidos: Number(guardada.despidos) || 0, sac: Number(guardada.sac) || 0, usuario: String(guardada.usuario || '') }
+      : null,
+    // La que saldría hoy, para avisar si la guardada quedó vieja porque se cargó un sueldo
+    // después. `act.masaSalarial` no sirve acá: ya tiene las previsiones guardadas adentro.
+    previsionDeHoy: previsionesSugeridas(base.masaSalarial),
+  });
   const resumenPasos = resumenChecklist(pasos);
   // Los pasos que alguien marcó a mano. La hoja no existe hasta el primer marcado.
   const marcados = marcadosDelMes(await leerPasosManuales(), anio, mes);
@@ -257,7 +265,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
           </div>
         )}
 
-        <div className="card" style={{ marginTop: '12px' }}>
+        <div className="card" id="previsiones" style={{ marginTop: '12px', scrollMarginTop: '16px' }}>
           <p style={{ margin: '0 0 6px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             Previsiones y cuentas corrientes — {nombre}
           </p>
