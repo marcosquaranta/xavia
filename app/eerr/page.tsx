@@ -16,10 +16,12 @@ import { nombreClienteVisible } from '@/lib/clientes';
 import { pasosDelCierre, resumenChecklist } from '@/lib/cierreChecklist';
 import { puntosDelCierre, type TonoPunto } from '@/lib/cierreResumen';
 import ChecklistCierre from './ChecklistCierre';
+import InstruccionesCierre from './InstruccionesCierre';
 import { leerPasosManuales, marcadosDelMes } from '@/lib/cierreManual';
 import OrigenAplicacionCard from '@/components/OrigenAplicacion';
 import { origenYAplicacion, deudaProveedoresAlCierre, causasDeLaDiferencia } from '@/lib/origenAplicacion';
 import { calcularValorizacionMes as valorizacionDelMes } from '@/lib/valorizacionStock';
+import { fechaArgentinaHoy } from '@/lib/ocupacion';
 export const dynamic = 'force-dynamic';
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -65,7 +67,11 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
     </>
   );
 
-  const hoy = new Date();
+  // La fecha de Argentina, no la del servidor. `new Date()` en Vercel es UTC: entre las 21
+  // y la medianoche del último día del mes, para el servidor ya es el mes siguiente y la
+  // pantalla saltaba de mes tres horas antes de tiempo.
+  const [anioHoy, mesHoy] = fechaArgentinaHoy().split('-').map(Number);
+  const hoy = new Date(anioHoy, mesHoy - 1, 15);
   // Por defecto, el ÚLTIMO MES CERRADO y no el actual.
   //
   // Un EERR del mes en curso siempre está mal y de la peor manera: muestra ingresos de
@@ -115,7 +121,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
     + cobranzasXubio
       .filter((c) => { const f = String(c.fecha || '').split(/[T ]/)[0]; return f >= desdeMes && f <= hastaMes; })
       .reduce((a, c) => a + (Number(c.importe) || 0), 0);
-  const pasos = pasosDelCierre({ eerr: act, gastos, stocks, articulos, cobranzas: cobranzasMes, cobradoMes: cobradoMesTotal, saldos, hayPrevision: !!guardada, anio, mes });
+  const pasos = pasosDelCierre({ eerr: act, gastos, stocks, articulos, saldos, hayPrevision: !!guardada, anio, mes });
   const resumenPasos = resumenChecklist(pasos);
   // Los pasos que alguien marcó a mano. La hoja no existe hasta el primer marcado.
   const marcados = marcadosDelMes(await leerPasosManuales(), anio, mes);
@@ -306,10 +312,12 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
             <li><strong>Los gastos de «Insumos» no se suman aparte:</strong> ya están contados dentro del consumo de Stocks. Si alguno quedó sin aplicar a stock, aparece arriba como aviso.</li>
             <li><strong>Quedan afuera del resultado:</strong> los movimientos entre medios de pago (pagar el resumen de la tarjeta no es un gasto nuevo) y los aportes de socios, que son financiamiento.</li>
           </ul>
-          <p style={{ margin: '10px 0 0', fontSize: '12.5px' }}>
-            <Link href="/eerr/instrucciones" style={{ color: '#2563eb', fontWeight: 600 }}>Qué va en la app y qué queda en Xubio →</Link>
-          </p>
         </div>
+
+        {/* La regla de trabajo. Estaba en /eerr/instrucciones, una página aparte a la que
+            nadie entraba: el mes se cierra acá. Junto con el checklist de arriba son UNA
+            sola instrucción — qué hacer y en qué orden arriba, dónde vive cada cosa acá. */}
+        <InstruccionesCierre />
       </div>
     </>
   );

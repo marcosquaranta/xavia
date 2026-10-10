@@ -120,8 +120,8 @@ export default function ChecklistCierre({ pasos, listos, pendientes, total, anio
 
       <p style={{ margin: '8px 0 0', fontSize: '10.5px', color: '#9ca3af', lineHeight: 1.5 }}>
         Los pasos con tilde los marcás vos: son los que la app no puede verificar sola. Los demás se ponen en ✓
-        cuando el dato está cargado — no se tildan por adivinanza. Cada paso tiene su “cómo se hace” al lado.{' '}
-        <Link href="/eerr/instrucciones" style={{ color: '#2563eb' }}>Qué va en la app y qué queda en Xubio →</Link>
+        cuando el dato está cargado — no se tildan por adivinanza. Cada paso tiene su “cómo se hace” al lado, y la regla
+        de qué va en la app y qué queda en Xubio está al pie de esta misma pantalla.
       </p>
     </details>
   );

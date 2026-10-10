@@ -214,7 +214,14 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
     // marcados en la tabla, que es la información útil —esa plata no se reclama sola— sin
     // dejarlos afuera.
     if (ver === 'impagas') {
-      for (const id of Object.keys(todas)) impagasCliente[id] = todas[id];
+      // Solo las impagas, no todas las facturas del año. Ahora que van TODOS los clientes y
+      // no solo los que tienen recordatorio, mandar el detalle completo multiplica por diez
+      // lo que se serializa y se transfiere — que es exactamente lo que hacía lenta esta
+      // pantalla. El resumen no muestra otra cosa, así que no se pierde nada.
+      for (const id of Object.keys(todas)) {
+        const abiertas = todas[id].filter((f) => !f.yaCobrada && !f.cubierta && !f.saldadaManual && !f.imputadaManual);
+        if (abiertas.length) impagasCliente[id] = abiertas;
+      }
     }
     cuentasXubio = (await getCuentas(cobs)).cuentas;
     if (!cuentasXubio.length) errorCuentas = 'Xubio no devolvió ninguna cuenta donde imputar el cobro.';
