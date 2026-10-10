@@ -49,7 +49,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
 
   if (err) return (
     <>
-      <Header user={user} current="estadisticas" />
+      <Header user={user} current="eerr" />
       <div className="container"><div className="alert-box error">{err}</div></div>
     </>
   );
@@ -151,7 +151,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   // mes y no en el otro.
   return (
     <>
-      <Header user={user} current="estadisticas" />
+      <Header user={user} current="eerr" />
       <div className="container">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
           <div>

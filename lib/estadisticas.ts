@@ -561,7 +561,38 @@ export function resumenCosechaPorCultivo(
   }
 
   // Factor por cultivo desde variedades (plantas_por_unidad_esperado), default 3 rúcula / 1 lechuga
+  // Cuántas plantas entran en un paquete. Manda lo MEDIDO en las cosechas recientes.
+  //
+  // `plantas_por_unidad_esperado` es lo que alguien configuró alguna vez: si el equipo pasa
+  // de armar a 3 plantas por paquete a armar a 2, ese número no se mueve y la conversión de
+  // plantas a paquetes sigue dando igual — el cambio no aparece en ninguna estadística por
+  // más que haya pasado de verdad.
+  //
+  // Se miran los últimos 60 días y no todo el histórico: lo que importa es cómo se está
+  // armando ahora. Sin cosechas con el dato, se cae a lo configurado.
+  function factorMedido(cultivo: 'rucula' | 'lechuga'): number | null {
+    const desde = new Date(); desde.setDate(desde.getDate() - 60);
+    const esDelCultivo = (v: string) => {
+      const x = String(v || '').toLowerCase();
+      const r = x.includes('rucula') || x.includes('rúcula');
+      if (cultivo === 'rucula') return r;
+      return !r && !x.includes('albahaca');
+    };
+    const vals = lotes
+      .filter((l) => l.estado === 'cosechado' && esDelCultivo(l.variedad) && Number(l.plantas_por_unidad_real) > 0)
+      .filter((l) => {
+        const f = new Date(String(l.fecha_cosecha || l.fecha_ult_movimiento || '') + 'T12:00:00');
+        return !isNaN(f.getTime()) && f >= desde;
+      })
+      .map((l) => Number(l.plantas_por_unidad_real));
+    if (!vals.length) return null;
+    const prom = vals.reduce((a, v) => a + v, 0) / vals.length;
+    return prom > 0 ? Math.round(prom * 10) / 10 : null;
+  }
+
   function factorPorCultivo(cultivo: 'rucula' | 'lechuga'): number {
+    const medido = factorMedido(cultivo);
+    if (medido !== null) return medido;
     const vars = variedades.filter(v =>
       v.activo === 'SI' &&
       Number(v.plantas_por_unidad_esperado) > 0 &&

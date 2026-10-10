@@ -69,7 +69,11 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
           id_lote: lote.id_lote, fecha, es_por_paquete: esPorPaquete,
           plantas_cosechadas: plantas, descarte: descarteAuto,
           peso_muestra_gr: pesoGr, paquetes_armados: paquetes,
-          plantas_por_paquete: esPorPaquete ? plantasPorPaqueteManual : 1,
+          // El ratio MEDIDO (plantas de esta tanda ÷ paquetes armados), no el tipeado arriba.
+          // Ese campo es una estimación para saber cuántos paquetes esperar y arranca en 3:
+          // guardarlo como "plantas por unidad real" hacía que el dato real no existiera
+          // nunca, y si el equipo arma a 2 ninguna estadística podía notarlo.
+          plantas_por_paquete: esPorPaquete ? (plantasPorPaqReal > 0 ? plantasPorPaqReal : plantasPorPaqueteManual) : 1,
           peso_muestra_paquete_gr: pesoPaqGr, bandejas_armadas: bandejas,
           tubos_consumidos_bandejas: tubosBandejas, peso_muestra_bandeja_gr: pesoBandGr,
           plantas_estimadas_lote: plantasEst, usuario,

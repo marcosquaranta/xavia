@@ -24,6 +24,7 @@ export default function Header({ user, current }: { user: UsuarioPublico; curren
     items.push({ href: '/ventas', label: 'Ventas', key: 'ventas' });
     items.push({ href: '/gastos', label: 'Gastos', key: 'gastos' });
     items.push({ href: '/cobranzas', label: 'Cobranzas', key: 'cobranzas' });
+    items.push({ href: '/eerr', label: 'Cierre mensual', key: 'eerr' });
     items.push({ href: '/admin', label: 'Admin', key: 'admin' });
   }
   return (

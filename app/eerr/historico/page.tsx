@@ -29,7 +29,7 @@ export default async function HistoricoEERRPage() {
 
   return (
     <>
-      <Header user={user} current="estadisticas" />
+      <Header user={user} current="eerr" />
       <div className="container">
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap', marginBottom: '4px' }}>
           <h1 style={{ margin: 0 }}>Histórico mes a mes</h1>
