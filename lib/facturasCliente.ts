@@ -12,6 +12,7 @@ import { nombreClienteComprobante } from './recordatoriosCobro';
 import { importeCobranza } from './xubio';
 import type { ClienteVenta } from './types';
 import { claveComprobante } from './comprobantes';
+import type { ImputacionesManuales } from './cobranzasEdit';
 
 export interface FacturaCliente {
   numero: string;
@@ -25,6 +26,9 @@ export interface FacturaCliente {
   // en vez de ocultarse: quien está imputando un cobro tiene que poder ver que alguien
   // decidió que esta factura ya estaba, y con qué criterio.
   saldadaManual: boolean;
+  // Relacionada a mano con un cobro de Xubio desde la app (ver cobranzasEdit.ts). Es un
+  // hecho, no una deducción: alguien miró el cobro y dijo qué paga. Gana sobre `cubierta`.
+  imputadaManual?: boolean;
 }
 
 const norm = (s: any) => String(s || '')
@@ -47,6 +51,10 @@ const soloFecha = (v: any) => String(v || '').split(/[T ]/)[0];
 // No es una certeza: es la mejor reconstrucción posible con lo que Xubio expone. Por eso se
 // informa como `cubierta` y no como `yaCobrada` —que sí es un hecho, alguien la imputó— y
 // por eso existe la pantalla de marcar a mano, para corregir lo que esto no acierte.
+// `totalCobrado` tiene que venir YA SIN la plata de los cobros que la app tiene imputados a
+// facturas concretas (ver facturasPorCliente). Si entra entera, esa plata se reparte dos
+// veces: una por la imputación y otra por el reparto, y el sobrante tapa facturas que nadie
+// pagó. Es el peor error posible acá — esconde deuda — y no se ve en ningún número.
 export function cubrirConCobrosDeXubio(
   facturas: FacturaCliente[], totalCobrado: number,
 ): FacturaCliente[] {
@@ -55,9 +63,9 @@ export function cubrirConCobrosDeXubio(
   const porFecha = [...facturas].sort((a, b) => a.fecha.localeCompare(b.fecha));
   const cubiertas = new Set<string>();
   for (const f of porFecha) {
-    // Lo ya imputado desde la app no consume saldo acá: ese cobro también está en Xubio y
-    // descontarlo dos veces taparía facturas que siguen impagas.
-    if (f.yaCobrada) continue;
+    // Lo que la app ya decidió no se vuelve a decidir: ni consume saldo ni se re-evalúa.
+    // La plata de esos cobros tampoco está en `totalCobrado`, así que las cuentas cierran.
+    if (f.yaCobrada || f.imputadaManual || f.saldadaManual) continue;
     if (resto <= 0) break;
     // Se corta en la primera que no entra entera, en vez de saltearla y seguir buscando
     // alguna más chica que sí entre. Saltear afirmaba algo bastante improbable —que el
@@ -140,6 +148,9 @@ function nombreDe(c: ClienteVenta): string {
 export function facturasPorCliente(
   comprobantes: any[], cobros: any[], clientes: ClienteVenta[], saldadas?: Set<string>,
   cobranzas?: any[],
+  // Las imputaciones hechas a mano sobre los cobros de Xubio. Mandan sobre el reparto
+  // automático: ver cobranzasEdit.ts.
+  imputadas?: ImputacionesManuales,
 ): Record<string, FacturaCliente[]> {
   // Las facturas que la app ya imputó. No es lo mismo que "pagas" —Xubio no expone eso—
   // pero alcanza para no ofrecer dos veces la misma.
@@ -171,15 +182,48 @@ export function facturasPorCliente(
       importe: Number(c?.importetotal) || 0,
       yaCobrada: yaCobradas.has(claveComprobante(numero)),
       saldadaManual: !!saldadas?.has(claveComprobante(numero)),
+      imputadaManual: !!imputadas?.porFactura.has(claveComprobante(numero)),
     });
   }
 
-  // Cuánto cobró cada cliente según Xubio, para imputar de la más vieja a la más nueva.
+  // ── Cuánto cobró cada cliente SIN EXPLICAR todavía ─────────────────────────────────
+  //
+  // Lo que se reparte de la más vieja a la más nueva es solo la plata que nadie asignó. Un
+  // cobro cuya imputación ya está dicha —porque se cargó desde la app eligiendo facturas, o
+  // porque alguien lo relacionó a mano después— no entra: sus facturas ya figuran cobradas,
+  // y dejar la plata en el pozo las cobraría dos veces y taparía otras que siguen abiertas.
+  //
+  // Se identifica por `transaccionid`, que es el mismo número de los dos lados. No se suman
+  // importes: la cobranza de Xubio puede diferir del importe que guardó la app —retenciones,
+  // una corrección posterior— y restar un número parecido deja un sobrante que vuelve a
+  // tapar facturas. Acá o se saca el cobro entero o no se saca nada.
+  const explicadas = new Set<string>(imputadas?.transaccionesImputadas || []);
+  // Los cobros de la app que no guardaron el transaccionid —los más viejos, de antes de que
+  // se registrara— no se pueden sacar por id. Ahí sí hay que restar el importe: es menos
+  // exacto, pero dejar esa plata en el pozo la cuenta dos veces, que es el error que tapa
+  // deuda. Se anota por cliente y se descuenta abajo.
+  const descontarPorCliente = new Map<string, number>();
+  for (const c of cobros || []) {
+    if (String(c?.estado) === 'anulado') continue;
+    if (!String(c?.comprobantes || '').trim()) continue;
+    const tid = String(c?.transaccionid || '').trim();
+    if (tid) { explicadas.add(tid); continue; }
+    const id = String(c?.id_control || '').trim();
+    if (!id) continue;
+    const monto = (Number(c?.importe) || 0) + (Number(c?.retencion) || 0);
+    descontarPorCliente.set(id, (descontarPorCliente.get(id) || 0) + monto);
+  }
+
   const cobradoPorCliente = new Map<string, number>();
   for (const cob of cobranzas || []) {
     const id = porNombre.get(norm(nombreClienteComprobante(cob)));
     if (!id) continue;
+    if (explicadas.has(String(cob?.transaccionid || '').trim())) continue;
     cobradoPorCliente.set(id, (cobradoPorCliente.get(id) || 0) + importeCobranza(cob));
+  }
+  for (const [id, monto] of descontarPorCliente) {
+    if (!cobradoPorCliente.has(id)) continue;
+    cobradoPorCliente.set(id, Math.max(0, cobradoPorCliente.get(id)! - monto));
   }
 
   // De la más reciente a la más vieja, que es como se las busca al cobrar.

@@ -6,6 +6,7 @@ import { leerSaldadas, numerosSaldados } from './facturasSaldadas';
 import { claveComprobante } from './comprobantes';
 import { HOJA_COBROS } from './cobros';
 import { VENTANA_MINIMA_DIAS } from './cobranzasVentana';
+import { leerEdiciones, imputacionesManuales } from './cobranzasEdit';
 
 // ── Recordatorios de cobro ────────────────────────────────────────────────────────────
 //
@@ -554,11 +555,12 @@ export async function correrRecordatoriosCobro(
     // y calcular el saldo de cada cliente. Va hasta MAX_DIAS_ATRAS porque el mail ahora
     // lista todo lo impago, no solo lo que entraba en una ventana de antigüedad.
     const desde = sumarDias(hoy, -MAX_DIAS_ATRAS);
-    const [comprobantes, cobranzas, saldadasFilas, cobrosApp] = await Promise.all([
+    const [comprobantes, cobranzas, saldadasFilas, cobrosApp, edicionesCobranzas] = await Promise.all([
       getComprobantes(desde, hoy),
       getCobranzas(desde, hoy).catch(() => []),
       leerSaldadas(),
       readSheet<{ estado: string; comprobantes: string }>(HOJA_COBROS).catch(() => []),
+      leerEdiciones(),
     ]);
     // Lo que no se reclama: lo dado por saldado a mano y lo ya imputado desde la app. Es
     // el caso que más quema la confianza en el recordatorio automático — reclamarle a un
@@ -572,6 +574,13 @@ export async function correrRecordatoriosCobro(
         const k = claveComprobante(n);
         if (k) cobradas.add(k);
       }
+    }
+    // Y lo imputado a mano sobre un cobro que ya estaba en Xubio. Es el caso más común de
+    // todos —el cobro entró por transferencia y se cargó directo allá— y hasta acá no
+    // contaba: alguien decía en la app qué factura pagaba ese cobro y el recordatorio del
+    // lunes la reclamaba igual.
+    for (const k of imputacionesManuales(edicionesCobranzas, claveComprobante).porFactura.keys()) {
+      cobradas.add(k);
     }
     const saldos = calcularSaldos(comprobantes, cobranzas, saldadas);
     // Insistir solo tiene sentido en el envío puntual: en la corrida completa reclamaría

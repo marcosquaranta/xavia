@@ -13,6 +13,7 @@ import { leerSaldadas, numerosSaldados } from '@/lib/facturasSaldadas';
 import { claveComprobante } from '@/lib/comprobantes';
 import { cubrirConCobrosDeXubio } from '@/lib/facturasCliente';
 import { comprobantesParaMirar, cobranzasParaMirar } from '@/lib/xubioLectura';
+import { leerEdiciones, imputacionesManuales } from '@/lib/cobranzasEdit';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
@@ -42,14 +43,19 @@ export async function GET(req: NextRequest) {
 
     const hoy = fechaArgentinaHoy();
     const desde = sumarDias(hoy, -dias);
-    const [comps, cobros, reclamos, cobranzas, saldadasFilas] = await Promise.all([
+    const [comps, cobros, reclamos, cobranzas, saldadasFilas, edicionesRaw] = await Promise.all([
       comprobantesParaMirar(desde, hoy),
       readSheet<CobroRegistrado>(HOJA_COBROS).catch(() => [] as CobroRegistrado[]),
       readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => [] as RecordatorioCobro[]),
       cobranzasParaMirar(desde, hoy),
       leerSaldadas(),
+      leerEdiciones(),
     ]);
     const saldadas = numerosSaldados(saldadasFilas);
+    // Las imputaciones hechas a mano. Van por el mismo camino que en la pantalla de
+    // Cobranzas: si acá se decidieran distinto, la misma factura figuraría cobrada en una
+    // lista y abierta en la otra, que es exactamente el lío que esto viene a terminar.
+    const imputadas = imputacionesManuales(edicionesRaw, claveComprobante);
 
     const k = norm(cli.nombre_xubio || cli.nombre_display);
     const facturas = comps
@@ -83,8 +89,19 @@ export async function GET(req: NextRequest) {
     // reconstrucción que usa la pantalla de Cobranzas. Sin esto, pedir las facturas de un
     // cliente a mano devolvía como abiertas las que la precarga ya daba por cubiertas, y
     // los dos caminos mostraban cosas distintas para el mismo cliente.
+    // Los cobros cuya imputación ya está dicha no entran: su plata está asignada a facturas
+    // concretas y dejarla en el pozo la contaría dos veces, tapando otras que siguen
+    // abiertas. Mismo criterio que facturasPorCliente.
+    const explicadas = new Set<string>(imputadas.transaccionesImputadas);
+    for (const c of cobros) {
+      if (String(c.estado) === 'anulado') continue;
+      if (!String((c as any).comprobantes || '').trim()) continue;
+      const tid = String((c as any).transaccionid || '').trim();
+      if (tid) explicadas.add(tid);
+    }
     const cobradoTotal = cobranzas
       .filter((cob: any) => norm(nombreClienteComprobante(cob)) === k)
+      .filter((cob: any) => !explicadas.has(String(cob?.transaccionid || '').trim()))
       .reduce((a: number, cob: any) => a + importeCobranza(cob), 0);
 
     // Cuándo se reclamó cada factura (si se reclamó): al armar un reclamo manual es el
@@ -108,10 +125,13 @@ export async function GET(req: NextRequest) {
           ...f,
           yaCobrada: yaCobradas.has(claveComprobante(f.numero)),
           saldadaManual: saldadas.has(claveComprobante(f.numero)),
+          imputadaManual: imputadas.porFactura.has(claveComprobante(f.numero)),
         })),
         cobradoTotal,
       ).map((f) => ({ ...f, reclamadaEl: reclamadas.get(f.numero) || '' })),
       notasCredito: Math.round(notasCredito),
+      // Lo cobrado que todavía NO está asignado a ninguna factura: es la plata que la app
+      // reparte sola, y por lo tanto lo único que explica qué figura cubierto por deducción.
       cobradoTotal: Math.round(cobradoTotal),
     });
   } catch (err: any) {

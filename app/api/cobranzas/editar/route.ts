@@ -10,17 +10,22 @@ export async function POST(req: NextRequest) {
   if (!(await isAdmin())) return NextResponse.json({ error: 'solo_admin' }, { status: 403 });
 
   try {
-    const { transaccionid, cliente, cuenta, importe, oculta, nota } = await req.json();
+    const body = await req.json();
+    const { transaccionid, cliente, cuenta, importe, oculta, nota, comprobantes } = body;
     if (!String(transaccionid || '').trim()) {
       return NextResponse.json({ error: 'falta_transaccion' }, { status: 400 });
     }
+    // Solo se manda lo que vino en el pedido: un campo ausente deja el valor que ya estaba
+    // (ver guardarEdicion). Sin esto, "sacar de la lista" —que manda solo `oculta`— borraba
+    // la imputación y el cliente corregido.
     await guardarEdicion({
       transaccionid: String(transaccionid),
-      cliente: String(cliente || ''),
-      cuenta: String(cuenta || ''),
-      importe: importe ?? '',
-      oculta: oculta === true,
-      nota: String(nota || ''),
+      ...(cliente !== undefined ? { cliente: String(cliente || '') } : {}),
+      ...(cuenta !== undefined ? { cuenta: String(cuenta || '') } : {}),
+      ...(importe !== undefined ? { importe: importe ?? '' } : {}),
+      ...(oculta !== undefined ? { oculta: oculta === true } : {}),
+      ...(nota !== undefined ? { nota: String(nota || '') } : {}),
+      ...(Array.isArray(comprobantes) ? { comprobantes: comprobantes.map((x: any) => String(x)) } : {}),
       usuario: user.email,
     });
     return NextResponse.json({ ok: true });

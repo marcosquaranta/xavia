@@ -22,7 +22,7 @@ import type { ClienteVenta } from '@/lib/types';
 import Header from '@/components/Header';
 import { ClientesRecordatorio, type ClienteFila } from '@/components/CobranzasConfig';
 import RegistrarCobro from '@/components/RegistrarCobro';
-import { leerEdiciones, indiceEdiciones, aplicarEdicion } from '@/lib/cobranzasEdit';
+import { leerEdiciones, indiceEdiciones, aplicarEdicion, imputacionesManuales } from '@/lib/cobranzasEdit';
 import BandejaCobranzas from '@/components/BandejaCobranzas';
 import { HOJA_BANDEJA, HOJA_ALIAS, type ItemBandeja, type AliasCobranza } from '@/lib/bandejaCobranzas';
 import ReclamoManual from '@/components/ReclamoManual';
@@ -129,6 +129,9 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   // persona está esperando para decidir.
   const edicionesCobranzas = indiceEdiciones(edicionesRaw);
   const saldadasSet = numerosSaldados(saldadas);
+  // Las imputaciones hechas a mano sobre los cobros de Xubio: qué factura paga cada uno.
+  // Mandan sobre el reparto automático — ver lib/cobranzasEdit.ts.
+  const imputadas = imputacionesManuales(edicionesRaw, claveComprobante);
 
   // Qué sección pesada se pidió ver. Plegar con <details> esconde pero NO ahorra: el
   // servidor arma el contenido igual y lo manda. Lo que hace lenta esta página es
@@ -187,12 +190,12 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   const deudaPorCliente: Record<string, { monto: number; cantidad: number; masVieja: string }> = {};
   try {
     const [comps, cobs] = await pedidoXubio;
-    const todas = facturasPorCliente(comps, cobros, clientes, saldadasSet, cobs);
+    const todas = facturasPorCliente(comps, cobros, clientes, saldadasSet, cobs, imputadas);
     for (const [id, fs] of Object.entries(todas)) {
       // Impaga = ni imputada desde la app, ni cubierta por los cobros de Xubio, ni dada por
       // saldada a mano. Es el mismo criterio con el que se decide qué reclamar, así que el
       // número de la tabla y el del mail no se pueden contradecir.
-      const impagas = fs.filter((f) => !f.yaCobrada && !f.cubierta && !f.saldadaManual);
+      const impagas = fs.filter((f) => !f.yaCobrada && !f.cubierta && !f.saldadaManual && !f.imputadaManual);
       if (!impagas.length) continue;
       deudaPorCliente[String(id)] = {
         monto: impagas.reduce((a, f) => a + (Number(f.importe) || 0), 0),
@@ -205,10 +208,13 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
     // que sí necesita a todos, se arma aparte y solo cuando se lo pide.
     const deLaBandeja = new Set(itemsBandeja.map((i) => String(i.id_control)).filter(Boolean));
     for (const id of deLaBandeja) if (todas[id]) facturasCliente[id] = todas[id];
+    // Todos los clientes, no solo los que tienen el recordatorio prendido. Filtrarlos
+    // escondía deuda real: un cliente sin recordatorio debe igual, y mirando esta tabla no
+    // había forma de saber que faltaba gente. Los que no reciben recordatorio quedan
+    // marcados en la tabla, que es la información útil —esa plata no se reclama sola— sin
+    // dejarlos afuera.
     if (ver === 'impagas') {
-      for (const id of Object.keys(todas)) {
-        if (conRecordatorio.has(String(id))) impagasCliente[id] = todas[id];
-      }
+      for (const id of Object.keys(todas)) impagasCliente[id] = todas[id];
     }
     cuentasXubio = (await getCuentas(cobs)).cuentas;
     if (!cuentasXubio.length) errorCuentas = 'Xubio no devolvió ninguna cuenta donde imputar el cobro.';
@@ -430,7 +436,6 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
                 cliente se viera al instante y otro tardara, sin razón aparente. */}
             <FacturasViejas
               clientes={clientes
-                .filter((c) => conRecordatorio.has(String(c.id_control)))
                 .map((c) => ({ id_control: String(c.id_control), nombre: nombreClienteVisible(c) }))
                 .sort((a, b) => a.nombre.localeCompare(b.nombre))}
               facturasPorCliente={{}}
@@ -509,6 +514,13 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
                 numero: String(c.numero || ''),
               }, edicionesCobranzas))}
               clientesApp={clientes.map((c) => nombreClienteVisible(c)).filter(Boolean).sort()}
+              // Con el id, para poder traer las facturas del cliente y decir cuál paga cada
+              // cobro. El nombre solo no alcanza: el de Xubio y el de la app pueden diferir.
+              clientesConId={clientes.map((c) => ({
+                id_control: String(c.id_control),
+                nombre: nombreClienteVisible(c),
+                nombreXubio: String(c.nombre_xubio || ''),
+              }))}
               cuentasApp={cuentasXubio.map((c) => c.nombre).sort()}
               anioActual={new Date(hoyF + 'T12:00:00').getFullYear()}
               mesActual={new Date(hoyF + 'T12:00:00').getMonth() + 1}
@@ -534,14 +546,13 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
           </div>
           <p className="card-sub">
             Todo lo facturado en los últimos {DIAS_PAGINA} días que no figura cobrado: ni imputado desde la app,
-            ni dado por saldado a mano, ni cubierto por los cobros que el cliente tiene en Xubio. Es exactamente
-            lo que se le reclama a cada cliente en el recordatorio. <strong>Solo los clientes con el recordatorio
-            prendido</strong>.
+            ni dado por saldado a mano, ni imputado a un cobro, ni cubierto por los cobros que el cliente tiene en
+            Xubio. Están <strong>todos los clientes</strong>: los que no tienen el recordatorio prendido quedan
+            marcados, porque esa deuda existe igual pero no se reclama sola.
           </p>
           <div style={{ marginTop: '10px' }}>
             <ResumenImpagas
               clientes={clientes
-                .filter((c) => conRecordatorio.has(String(c.id_control)))
                 .map((c) => ({ id_control: String(c.id_control), nombre: nombreClienteVisible(c) }))
                 .sort((a, b) => a.nombre.localeCompare(b.nombre))}
               facturasPorCliente={impagasCliente}

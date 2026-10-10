@@ -75,7 +75,11 @@ export default function ResumenImpagas({
     return clientes
       .map((c) => {
         const impagas = (facturasPorCliente[c.id_control] || [])
-          .filter((f) => !f.yaCobrada && !f.saldadaManual && !f.cubierta)
+          // Mismo criterio que el de la página y el del mail: lo que la app ya dio por
+          // cobrado —imputado desde un cobro, imputado a mano sobre un cobro de Xubio, o
+          // dado por saldado— no es deuda. Un criterio distinto acá y la tabla contradice
+          // al reclamo que sale por mail, sin forma de saber cuál está bien.
+          .filter((f) => !f.yaCobrada && !f.saldadaManual && !f.cubierta && !f.imputadaManual)
           .slice()
           .sort((a, b) => a.fecha.localeCompare(b.fecha));
         const total = impagas.reduce((a, f) => a + f.importe, 0);
