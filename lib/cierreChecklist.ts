@@ -8,6 +8,15 @@ import type { Cobranza, SaldoMes } from './cuentas';
 // El problema del cierre no es que sea difícil, es que son doce cosas y siempre falta una.
 // Esto las lista y, donde puede, dice sola si está hecha mirando los datos.
 //
+// Esta es LA instrucción del cierre. Antes había dos: una página aparte con los pasos
+// explicados y este checklist con el estado. Nadie mantiene dos listas iguales: una de las
+// dos envejece, y la que envejece es la que no se mira todos los meses. Ahora el "cómo" y el
+// "cuánto falta" viven en el mismo renglón — el `ayuda` de cada paso trae la explicación que
+// antes estaba en la otra página.
+//
+// Lo único que quedó afuera es qué va en la app y qué en Xubio: eso no es un paso del cierre
+// sino una regla de trabajo, y vive en /eerr/instrucciones.
+//
 // Hay pasos que la app NO puede verificar: si ya conciliaste el resumen del banco, si
 // desglosaste la tarjeta. Para esos no invento un estado — quedan como recordatorio. Un
 // tilde puesto por adivinanza es peor que ningún tilde, porque das por hecho algo que no
@@ -22,6 +31,9 @@ export interface PasoCierre {
   titulo: string;
   estado: EstadoPaso;
   detalle: string;
+  // El "por qué" del paso: lo que antes vivía en la página de instrucciones aparte. Va
+  // separado del `detalle` porque el detalle cambia con el estado del mes y esto no.
+  ayuda?: string;
   href?: string;
   // true = la app no puede verificarlo sola, así que se marca a mano. Un tilde puesto por
   // adivinanza es peor que ninguno: das por hecho algo que no pasó.
@@ -95,7 +107,9 @@ export function pasosDelCierre(args: {
     titulo: 'Conciliar los resúmenes del banco',
     estado: 'recordatorio',
     manual: true,
-    detalle: 'Bajá Macro y Brubank. De ahí salen los tres pasos que siguen: los gastos que faltan, el total cobrado y los saldos reales.',
+    detalle: 'Bajá los resúmenes de Macro y Brubank del mes que estás cerrando y tenelos abiertos al lado: de ahí salen '
+      + 'los gastos que faltan, el total cobrado y los saldos reales. No hace falta reformatearlos ni compararlos contra nada '
+      + 'todavía; acá se usan solo para leer.',
   });
 
   pasos.push({
@@ -107,6 +121,8 @@ export function pasosDelCierre(args: {
       : sinContar > 0
         ? `Faltan ${sinContar} artículo(s) por contar. Sin el recuento no hay costo variable: el consumo daría igual a todo el stock inicial.`
         : 'Todos los artículos con movimiento tienen su recuento cargado.',
+    ayuda: 'El costo variable sale de contar: inicial + compras − final. Un final vacío no es cero — haría que el consumo '
+      + 'dé igual a todo el stock inicial y el costo del mes se dispare.',
     href: '/stocks',
   });
 
@@ -119,6 +135,8 @@ export function pasosDelCierre(args: {
       : insumosSinAplicar > 0
         ? `${insumosSinAplicar} gasto(s) de insumos sin aplicar: esa compra no está en el costo de ningún lado.`
         : 'No quedan gastos de insumos sin aplicar.',
+    ayuda: 'Un gasto de insumos que no se aplica a Stocks no entra al costo por ningún lado: no está en el gasto del mes '
+      + '(los insumos salen de Stocks) ni en el consumo (porque nunca se cargó la compra).',
     href: '/stocks',
   });
 
@@ -128,7 +146,12 @@ export function pasosDelCierre(args: {
     estado: eerr.masaSalarial > 0 ? 'listo' : 'pendiente',
     detalle: eerr.masaSalarial > 0
       ? `Masa salarial del mes: $${Math.round(eerr.masaSalarial).toLocaleString('es-AR')} — es la base de las previsiones. Revisá igual que no falte ningún otro débito del resumen (impuestos bancarios, comisiones, nafta).`
-      : 'Hacé la conciliación de Macro y Brubank y sacá de ahí los gastos que todavía no pasaste a la app y que ahí figuran — sueldos, impuestos bancarios, comisiones, nafta. Cargalos todos juntos: una columna por cuenta, una fila por rubro.',
+      : 'Sacá del resumen los gastos que todavía no están en la app: sueldos, nafta, viáticos, impuestos bancarios, comisiones. '
+        + 'Van con la fecha real en que salió la plata, no con la de hoy.',
+    ayuda: 'Los débitos automáticos no se cargan de a uno. Un mes puede tener cincuenta líneas de impuesto al cheque de '
+      + 'trescientos pesos: sumá en el resumen todo lo que es impuesto al cheque y cargá UNA línea — "Impuesto al cheque — '
+      + 'septiembre", categoría Impuestos, con el banco como medio de pago. Lo mismo con comisiones. Para el resultado y para el '
+      + 'saldo da exactamente igual, y son dos líneas en vez de cincuenta.',
     href: hrefCargaRapida,
   });
 
@@ -138,7 +161,11 @@ export function pasosDelCierre(args: {
     estado: conTarjeta > 0 ? 'listo' : 'recordatorio',
     detalle: conTarjeta > 0
       ? `${conTarjeta} consumo(s) con VISA cargados este mes. El pago del resumen va aparte, como transferencia entre cuentas.`
-      : 'Pegá el resumen entero en "Cargar resumen de tarjeta" y salen todos los consumos juntos, cada uno con su fecha y su categoría. El pago del resumen NO es un gasto nuevo: va como transferencia entre cuentas.',
+      : 'Pegá el resumen entero en "Cargar varios gastos de una" y salen todos los consumos juntos, cada uno con su fecha y su categoría.',
+    ayuda: 'Cada consumo va con la fecha en que se consumió, aunque sea de un mes anterior: el EERR no se cierra nunca, si '
+      + 'cargás algo de agosto estando en septiembre, agosto se recalcula solo. Y el pago del resumen NO es un gasto: cuando la '
+      + 'tarjeta se debita del banco va como movimiento entre cuentas. Cargado como gasto, cada compra con tarjeta contaría dos '
+      + 'veces en el resultado.',
     href: '/gastos',
   });
 
@@ -149,6 +176,8 @@ export function pasosDelCierre(args: {
     detalle: transferenciasMes.length > 0
       ? `${transferenciasMes.length} transferencia(s) cargada(s) este mes entre cuentas propias.`
       : 'Plata que pasó de un banco a otro, o de un banco a una caja, todavía no está cargada. Sin esto los saldos de las dos puntas no van a cerrar.',
+    ayuda: 'No es un gasto: la plata sigue siendo de la empresa, solo cambió de cuenta. Se cargan abajo, en "Saldos y '
+      + 'movimientos entre cuentas", eligiendo de dónde sale y a dónde entra.',
     href: `${hrefCargaRapida}#transferencias`,
   });
 
@@ -173,6 +202,8 @@ export function pasosDelCierre(args: {
     detalle: cobradoMes > 0
       ? `$${Math.round(cobradoMes).toLocaleString('es-AR')} cobrados en el mes, según las cobranzas de Xubio.`
       : 'No figura ningún cobro este mes. Los cobros se imputan desde Cobranzas y de ahí salen solos; si falta alguno, los saldos de bancos y cajas no van a dar.',
+    ayuda: 'Ya no hay que cargar el total cobrado a mano: sale de las cobranzas que están en Xubio, que se actualizan solas '
+      + 'todas las mañanas y se pueden refrescar con el botón de Cobranzas.',
     href: '/cobranzas',
   });
 

@@ -252,13 +252,14 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
           <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12.5px', color: '#4b5563', lineHeight: 1.6 }}>
             <li><strong>Ventas:</strong> las ventas cargadas del mes, a los precios de cada cliente. Los kg se convierten a unidades con el peso real de las plantas cosechadas.</li>
             <li><strong>Costo variable de insumos:</strong> lo que se <em>consumió</em>, no lo que se compró — <span style={{ fontFamily: 'monospace' }}>inicial + compras − final</span> de Stocks, valorizado al último precio conocido, agrupado por categoría de artículo.</li>
-            <li><strong>Fletes, energía y cultivos de reventa:</strong> son costo variable pero no pasan por Stocks, así que salen de Gastos.</li>
+            <li><strong>Fletes y energía:</strong> son costo variable pero no pasan por Stocks, así que salen de Gastos.</li>
+            <li><strong>Cultivos de reventa:</strong> es un rubro de insumos, así que sale de Stocks como los demás: el costo es el consumo, no lo comprado en el mes.</li>
             <li><strong>Costos fijos:</strong> los gastos del mes agrupados por categoría.</li>
             <li><strong>Los gastos de «Insumos» no se suman aparte:</strong> ya están contados dentro del consumo de Stocks. Si alguno quedó sin aplicar a stock, aparece arriba como aviso.</li>
             <li><strong>Quedan afuera del resultado:</strong> los movimientos entre medios de pago (pagar el resumen de la tarjeta no es un gasto nuevo) y los aportes de socios, que son financiamiento.</li>
           </ul>
           <p style={{ margin: '10px 0 0', fontSize: '12.5px' }}>
-            <Link href="/eerr/instrucciones" style={{ color: '#2563eb', fontWeight: 600 }}>Instrucciones completas del cierre de mes →</Link>
+            <Link href="/eerr/instrucciones" style={{ color: '#2563eb', fontWeight: 600 }}>Qué va en la app y qué queda en Xubio →</Link>
           </p>
         </div>
       </div>

@@ -102,6 +102,16 @@ export default function ChecklistCierre({ pasos, listos, pendientes, total, anio
                   )}
                 </p>
                 <p style={{ margin: '1px 0 0', fontSize: '11.5px', color: '#6b7280', lineHeight: 1.45 }}>{p.detalle}</p>
+                {p.ayuda && (
+                  <details style={{ marginTop: '2px' }}>
+                    <summary style={{ cursor: 'pointer', fontSize: '11px', color: '#2563eb', fontWeight: 600, listStyle: 'revert' }}>
+                      cómo se hace
+                    </summary>
+                    <p style={{ margin: '3px 0 0', fontSize: '11.5px', color: '#4b5563', lineHeight: 1.5, background: 'white', border: '1px solid #f3f4f6', borderRadius: '6px', padding: '6px 9px' }}>
+                      {p.ayuda}
+                    </p>
+                  </details>
+                )}
               </div>
             </div>
           );
@@ -110,7 +120,8 @@ export default function ChecklistCierre({ pasos, listos, pendientes, total, anio
 
       <p style={{ margin: '8px 0 0', fontSize: '10.5px', color: '#9ca3af', lineHeight: 1.5 }}>
         Los pasos con tilde los marcás vos: son los que la app no puede verificar sola. Los demás se ponen en ✓
-        cuando el dato está cargado — no se tildan por adivinanza.
+        cuando el dato está cargado — no se tildan por adivinanza. Cada paso tiene su “cómo se hace” al lado.{' '}
+        <Link href="/eerr/instrucciones" style={{ color: '#2563eb' }}>Qué va en la app y qué queda en Xubio →</Link>
       </p>
     </details>
   );
