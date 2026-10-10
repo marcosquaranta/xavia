@@ -68,6 +68,39 @@ function parsearPegado(texto: string, articulos: Articulo[]): FilaPreview[] {
 
 function fmt(n: number, maxFrac = 3) { return n.toLocaleString('es-AR', { maximumFractionDigits: maxFrac }); }
 
+// Los estados —:hover, :focus— no se pueden escribir con style={}, y son justamente lo que
+// hace que un campo editable se vea como un número hasta que alguien lo va a tocar. Por eso
+// esto es CSS y no estilos inline como el resto del archivo.
+const CSS_TABLA = `
+.stk-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 760px; }
+.stk-tbl th { font-weight: 600; font-size: 10px; letter-spacing: .4px; text-transform: uppercase;
+  color: #9ca3af; padding: 0 8px 5px; vertical-align: bottom; white-space: nowrap; }
+.stk-bloques th { font-size: 9.5px; color: #c4c8cf; padding-bottom: 2px; text-align: left; }
+.stk-bloques th.stk-sep { text-align: left; }
+.stk-tbl td { padding: 7px 8px; vertical-align: top; }
+.stk-fila td { border-top: 1px solid #f4f5f7; }
+.stk-pend td { background: #fefce8; }
+.stk-art { text-align: left; min-width: 220px; }
+.stk-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Separador solo ENTRE bloques. Una línea por columna es una grilla de Excel: el ojo la
+   recorre toda igual y no queda nada agrupado. */
+.stk-sep { border-left: 1px solid #e8eaed; }
+.stk-sub { display: block; font-size: 10px; font-weight: 400; margin-top: 1px; }
+.stk-sub-total td { border-top: 2px solid #e5e7eb; font-size: 11px; color: #6b7280; font-weight: 700; padding-top: 7px; }
+/* Campo editable: se ve como texto, el marco aparece recién al apuntarlo. */
+.stk-in { width: 100%; text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums;
+  color: #111827; background: transparent; border: 1px solid transparent; border-radius: 4px;
+  padding: 2px 5px; font-family: inherit; }
+.stk-in::placeholder { color: #d1d5db; }
+.stk-in:hover { border-color: #e5e7eb; background: #fff; }
+.stk-in:focus, .stk-in-on { border-color: #2563eb; background: #fff; outline: none; }
+.stk-in::-webkit-outer-spin-button, .stk-in::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.stk-in[type=number] { -moz-appearance: textfield; }
+.stk-lapiz { opacity: 0; background: none; border: none; cursor: pointer; font-size: 11px;
+  padding: 0; line-height: 1; transition: opacity .1s; }
+.stk-edit:hover .stk-lapiz, .stk-lapiz:focus { opacity: 1; }
+`;
+
 export default function StocksManager({ articulos, stocks, lotes, ventas, precios, clientes, gastosSugeridos, usuario, anioActual, mesActual }: Props) {
   const router = useRouter();
   const [anio, setAnio] = useState(anioActual);
@@ -374,6 +407,13 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [artActivos, editValues, stockMes, drivers, driversMesAnterior, stocks, anio, mes, anioPrev, mesPrev]);
+
+  // Cuántos artículos se consumieron más que el mes pasado. Es lo único del resumen de
+  // arriba que no se puede leer de un total: dice dónde mirar.
+  const consumosArriba = useMemo(
+    () => resumenArticulos.filter((r) => (r.ini || r.comp || r.fin) && (r.pctVsMesPasado ?? 0) > 5).length,
+    [resumenArticulos],
+  );
 
   // Vista consolidada del mes
   const consolidado = useMemo(() => {
@@ -1055,13 +1095,59 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
             </div>
           )}
 
+          {/* ── Resumen de arriba ────────────────────────────────────────────────
+              Una línea antes de la tabla. No es decoración: son las tres preguntas que se
+              vienen a contestar acá —cuántos artículos, cuánto vale el stock, dónde se
+              consumió más que el mes pasado— y hasta ahora había que leer la tabla entera
+              para contestar cualquiera de las tres. */}
+          {artActivos.length > 0 && (
+            <p style={{ margin: '0 0 10px', fontSize: '12.5px', color: '#6b7280' }}>
+              <strong style={{ color: '#111827' }}>{artActivos.length}</strong> {artActivos.length === 1 ? 'producto' : 'productos'}
+              {' · '}Stock valorizado <strong style={{ color: '#111827' }}>${fmt(consolidado.valorizacionTotal, 0)}</strong>
+              {consumosArriba > 0 && (
+                <>
+                  {' · '}
+                  <span style={{ color: '#b45309' }}>
+                    {consumosArriba} {consumosArriba === 1 ? 'consumo' : 'consumos'} arriba del mes pasado
+                  </span>
+                </>
+              )}
+              {/* El estado del guardado, uno solo para toda la tabla. Antes cada fila
+                  mostraba su propio "✓ guardado": doce avisos de que todo está normal
+                  compitiendo por la atención con los números, que es lo que hay que mirar.
+                  Lo que importa saber es si quedó algo sin guardar, y eso es uno. */}
+              {saving ? (
+                <span style={{ marginLeft: '10px', color: '#2563eb', fontWeight: 600 }}>Guardando…</span>
+              ) : Object.keys(editValues).length > 0 ? (
+                <span style={{ marginLeft: '10px', color: '#d97706', fontWeight: 600 }}
+                  title="Se guarda solo al salir del campo">
+                  ● {Object.keys(editValues).length} sin guardar
+                </span>
+              ) : null}
+            </p>
+          )}
+
+          <style>{CSS_TABLA}</style>
+
           {categorias.map((cat) => {
             const artscat = artActivos.filter((a) => a.categoria === cat);
-            const valorizadoCat = artscat.reduce((acc, a) => acc + (resumenArticulos.find((x) => x.art.id_articulo === a.id_articulo)?.valorizado ?? 0), 0);
+            const resumenCat = artscat.map((a) => resumenArticulos.find((x) => x.art.id_articulo === a.id_articulo)!);
+            const valorizadoCat = resumenCat.reduce((acc, r) => acc + (r?.valorizado ?? 0), 0);
+            // La columna "Vs. teórico" solo existe si en este rubro hay algo con qué
+            // comparar. Una columna de guiones ocupa el mismo ancho que una con datos y no
+            // dice nada: en los rubros sin fórmula configurada era la mitad de la tabla.
+            const hayTeorico = resumenCat.some((r) => r && (r.usoTeorico !== null || r.esReferencia));
+            const cols = hayTeorico ? 8 : 7;
             return (
               <div key={cat} className="card" style={{ marginBottom: '12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                  <p style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{cat}</p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px', gap: '8px', flexWrap: 'wrap' }}>
+                  <p style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    {cat}
+                    <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: '#9ca3af' }}>
+                      {' · '}{artscat.length} {artscat.length === 1 ? 'producto' : 'productos'}
+                      {valorizadoCat > 0 && ` · $${fmt(valorizadoCat, 0)}`}
+                    </span>
+                  </p>
                   {valorizadoCat > 0 && (
                     <button
                       onClick={() => copiarConAviso(
@@ -1073,145 +1159,161 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                           ['TOTAL', '', Math.round(valorizadoCat)]],
                         `Detalle de ${cat} copiado — pegalo en Excel`
                       )}
-                      className="btn secondary" style={{ fontSize: '11px', padding: '3px 8px' }}
+                      style={{ background: 'none', border: 'none', fontSize: '11px', color: '#2563eb', cursor: 'pointer', fontWeight: 600, padding: 0 }}
                     >
-                      📋 Copiar detalle
+                      Copiar detalle
                     </button>
                   )}
                 </div>
                 <div style={{ overflowX: 'auto' }}>
-                <table style={{ fontSize: '12px', minWidth: '940px' }}>
+                <table className="stk-tbl">
                   <thead>
+                    {/* Los tres bloques. El ojo no tiene que elegir entre ocho columnas
+                        sueltas, sino entre "cuánto hay", "cuánto se usó" y "cuánto vale". */}
+                    <tr className="stk-bloques">
+                      <th />
+                      <th colSpan={4}>Inventario</th>
+                      <th colSpan={hayTeorico ? 2 : 1} className="stk-sep">Consumo</th>
+                      <th className="stk-sep">Valorización</th>
+                    </tr>
                     <tr>
-                      <th>Artículo</th>
-                      <th style={{ textAlign: 'center', width: '50px' }}>U.</th>
-                      <th style={{ textAlign: 'right', width: '100px' }}>Stock inicial</th>
-                      <th style={{ textAlign: 'right', width: '160px' }}>Compras</th>
-                      <th style={{ textAlign: 'right', width: '90px' }}>Precio compra</th>
-                      <th style={{ textAlign: 'right', width: '100px' }}>Stock final</th>
-                      <th style={{ textAlign: 'right', width: '80px', color: '#059669', fontWeight: 700 }}>Uso real</th>
-                      <th style={{ textAlign: 'right', width: '100px', fontWeight: 700 }} title="Uso real del mes anterior, ya cerrado — verde si este mes se usó menos, rojo si se usó más">Uso mes pasado</th>
-                      <th style={{ textAlign: 'right', width: '80px', color: '#6b7280', fontWeight: 700 }} title="≈ = referencia estimada (sin fórmula configurada), no un target preciso">Uso teórico</th>
-                      <th style={{ textAlign: 'right', width: '100px', fontWeight: 700 }}>Dif. real vs teórico</th>
-                      <th style={{ textAlign: 'right', width: '100px', fontWeight: 700 }}>Stock final valorizado</th>
-                      <th style={{ width: '110px' }}></th>
+                      <th className="stk-art">Artículo</th>
+                      <th className="stk-num">Stock inicial</th>
+                      <th className="stk-num">Compras</th>
+                      <th className="stk-num">Precio</th>
+                      <th className="stk-num">Stock final</th>
+                      <th className="stk-num stk-sep">Uso real</th>
+                      {hayTeorico && (
+                        <th className="stk-num" title="Uso real contra el teórico de la fórmula configurada. ≈ = referencia estimada (sin fórmula), no un target preciso.">
+                          Vs. teórico
+                        </th>
+                      )}
+                      <th className="stk-num stk-sep">Valor stock</th>
                     </tr>
                   </thead>
                   <tbody>
                     {artscat.map((art) => {
                       const r = resumenArticulos.find((x) => x.art.id_articulo === art.id_articulo)!;
                       const vals = getEdit(art.id_articulo);
-                      const guardado = getStock(art.id_articulo);
                       const modificado = editValues[art.id_articulo] !== undefined;
+                      const hayDatos = !!(r.ini || r.comp || r.fin);
                       const diffRef = r.esReferencia && r.usoReferencia !== null ? r.usoReal - r.usoReferencia : null;
-                      const diffColor = r.diff !== null ? (r.diff > 0 ? '#dc2626' : '#059669') : diffRef !== null ? '#7c6fda' : '#9ca3af';
+                      // Color solo cuando dice algo. Antes el uso real estaba siempre en
+                      // verde: un color que aparece en todas las filas no distingue nada, y
+                      // de paso le quitaba fuerza al rojo de las que sí están desviadas.
+                      const sobreTeorico = r.diff !== null && hayDatos && r.diff > 0;
+                      const pctAlto = r.pct !== null && Math.abs(r.pct) >= 20;
                       return (
-                        <React.Fragment key={art.id_articulo}>
-                        <tr style={{ background: modificado ? '#fefce8' : 'transparent' }}>
-                          <td style={{ fontWeight: 500 }}>{art.articulo}</td>
-                          <td style={{ textAlign: 'center', color: '#9ca3af', fontSize: '11px' }}>{art.unidad_medida}</td>
-                          <td style={{ textAlign: 'right', fontSize: '12px', color: '#6b7280' }}
-                            title="No se edita: es el stock final del mes anterior">
-                            {vals.ini ? fmt(num(vals.ini)) : '—'}
+                        <tr key={art.id_articulo} className={modificado ? 'stk-fila stk-pend' : 'stk-fila'}>
+                          <td className="stk-art">
+                            <span style={{ fontWeight: 600, color: '#111827' }}>{art.articulo}</span>
+                            {art.unidad_medida && (
+                              <span style={{ color: '#9ca3af', fontWeight: 400, fontSize: '11px' }}> · {art.unidad_medida}</span>
+                            )}
                           </td>
-                          <td style={{ padding: '2px 4px' }}>
-                            <div style={{ display: 'flex', gap: '4px', alignItems: 'center', justifyContent: 'flex-end' }}>
-                              {editandoCompras === art.id_articulo ? (
-                                <input type="number" value={vals.comp} autoFocus
-                                  onChange={(e) => setField(art.id_articulo, 'comp', e.target.value)}
-                                  onBlur={() => { autoguardar(art.id_articulo); setEditandoCompras(null); }}
-                                  onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                                  style={{ width: '100%', textAlign: 'right', fontSize: '12px', border: '1px solid #2563eb', borderRadius: '4px', padding: '3px 6px' }}
-                                  min={0} step={0.001} />
-                              ) : (
-                                <>
-                                  <span style={{ fontSize: '12px', fontWeight: num(vals.comp) > 0 ? 600 : 400, color: num(vals.comp) > 0 ? '#111827' : '#d1d5db' }}>
-                                    {num(vals.comp) > 0 ? fmt(num(vals.comp)) : '—'}
-                                  </span>
-                                  <button onClick={() => setEditandoCompras(art.id_articulo)}
-                                    title="Corregir a mano lo comprado de este articulo en este mes. Para registrar una compra nueva con su medio de pago, usa Cargar compra arriba."
-                                    className="btn secondary" style={{ fontSize: '10px', padding: '2px 6px', flexShrink: 0 }}>
-                                    ✏️
+                          <td className="stk-num" title="No se edita: es el stock final del mes anterior">
+                            <span style={{ color: num(vals.ini) ? '#374151' : '#d1d5db' }}>{vals.ini ? fmt(num(vals.ini)) : '—'}</span>
+                          </td>
+                          {/* Compras: se edita, pero se ve como un número. El lápiz y el
+                              borde aparecen al pasar por encima — un campo con marco en
+                              cada fila convierte la tabla en un formulario. */}
+                          <td className="stk-num stk-edit">
+                            {editandoCompras === art.id_articulo ? (
+                              <input type="number" className="stk-in stk-in-on" value={vals.comp} autoFocus
+                                onChange={(e) => setField(art.id_articulo, 'comp', e.target.value)}
+                                onBlur={() => { autoguardar(art.id_articulo); setEditandoCompras(null); }}
+                                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                                min={0} step={0.001} />
+                            ) : (
+                              <span style={{ display: 'inline-flex', gap: '5px', alignItems: 'center', justifyContent: 'flex-end' }}>
+                                <span style={{ color: num(vals.comp) > 0 ? '#111827' : '#d1d5db', fontWeight: num(vals.comp) > 0 ? 600 : 400 }}>
+                                  {num(vals.comp) > 0 ? fmt(num(vals.comp)) : '—'}
+                                </span>
+                                <button onClick={() => setEditandoCompras(art.id_articulo)} className="stk-lapiz"
+                                  title="Corregir a mano lo comprado de este artículo este mes. Para registrar una compra nueva con su medio de pago, usá Cargar compra arriba.">
+                                  ✏️
+                                </button>
+                                {num(vals.comp) > 0 && (
+                                  <button className="stk-lapiz" onClick={() => {
+                                    if (!confirm(`Se borra la compra de ${fmt(num(vals.comp))} de "${art.articulo}" en este mes. El GASTO no se toca: la plata salió igual. Esto solo saca la cantidad del stock. ¿Confirmás?`)) return;
+                                    setField(art.id_articulo, 'comp', '0');
+                                    setTimeout(() => autoguardar(art.id_articulo), 0);
+                                  }} title="Borrar la compra de este artículo en este mes" style={{ color: '#dc2626' }}>
+                                    ×
                                   </button>
-                                  {num(vals.comp) > 0 && (
-                                    <button onClick={() => {
-                                      if (!confirm(`Se borra la compra de ${fmt(num(vals.comp))} de "${art.articulo}" en este mes. El GASTO no se toca: la plata salió igual. Esto solo saca la cantidad del stock. ¿Confirmás?`)) return;
-                                      setField(art.id_articulo, 'comp', '0');
-                                      setTimeout(() => autoguardar(art.id_articulo), 0);
-                                    }}
-                                      title="Borrar la compra de este artículo en este mes"
-                                      style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '13px', padding: 0, flexShrink: 0 }}>
-                                      ×
-                                    </button>
+                                )}
+                              </span>
+                            )}
+                          </td>
+                          <td className="stk-num" title="Se carga junto con la compra, no acá">
+                            <span style={{ color: r.precio !== null ? '#374151' : '#d1d5db' }}>
+                              {r.precio !== null ? '$' + fmt(r.precio, 1) : '—'}
+                            </span>
+                          </td>
+                          <td className="stk-num stk-edit">
+                            <input type="number" className="stk-in" value={vals.fin}
+                              onChange={(e) => setField(art.id_articulo, 'fin', e.target.value)}
+                              onBlur={() => autoguardar(art.id_articulo)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                              min={0} step={0.001} placeholder="—" />
+                          </td>
+                          {/* Uso real con el mes pasado debajo: es la misma pregunta
+                              —cuánto se usó— no dos. En columnas separadas había que
+                              cruzar la vista de un lado al otro para compararlos. */}
+                          <td className="stk-num stk-sep">
+                            <span style={{ fontWeight: 700, fontSize: '13.5px', color: hayDatos ? (r.usoReal < 0 ? '#dc2626' : '#111827') : '#d1d5db' }}>
+                              {hayDatos ? fmt(r.usoReal) : '—'}
+                            </span>
+                            {r.usoMesPasado !== null && (
+                              <span className="stk-sub">
+                                {hayDatos && r.pctVsMesPasado !== null ? (
+                                  <>
+                                    <span style={{ color: r.pctVsMesPasado > 5 ? '#b45309' : '#9ca3af', fontWeight: r.pctVsMesPasado > 5 ? 600 : 400 }}>
+                                      {r.pctVsMesPasado > 0 ? '↑' : r.pctVsMesPasado < 0 ? '↓' : '·'}{fmt(Math.abs(r.pctVsMesPasado), 0)}%
+                                    </span>
+                                    <span style={{ color: '#9ca3af' }}> vs {fmt(r.usoMesPasado)}</span>
+                                  </>
+                                ) : (
+                                  <span style={{ color: '#9ca3af' }}>mes pasado {fmt(r.usoMesPasado)}</span>
+                                )}
+                              </span>
+                            )}
+                          </td>
+                          {hayTeorico && (
+                            <td className="stk-num">
+                              {r.diff !== null && hayDatos ? (
+                                <>
+                                  <span style={{ fontWeight: 600, color: sobreTeorico ? (pctAlto ? '#dc2626' : '#b45309') : '#374151' }}>
+                                    {r.diff > 0 ? '+' : ''}{fmt(r.diff)}
+                                  </span>
+                                  {r.pct !== null && (
+                                    <span className="stk-sub" style={{ color: sobreTeorico ? (pctAlto ? '#dc2626' : '#b45309') : '#9ca3af' }}>
+                                      {r.pct > 0 ? '+' : ''}{fmt(r.pct, 0)}% s/ {fmt(r.usoTeorico!)}
+                                    </span>
                                   )}
                                 </>
-                              )}
-                            </div>
-                          </td>
-                          <td style={{ textAlign: 'right', fontSize: '12px', color: r.precio !== null ? '#6b7280' : '#d1d5db' }}
-                            title="Se carga junto con la compra, no aca">
-                            {r.precio !== null ? '$' + fmt(r.precio, 1) : '—'}
-                          </td>
-                          <td style={{ padding: '2px 4px' }}>
-                            <input type="number" value={vals.fin} onChange={(e) => setField(art.id_articulo, 'fin', e.target.value)}
-                              onBlur={() => autoguardar(art.id_articulo)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                              style={{ width: '100%', textAlign: 'right', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '3px 6px' }}
-                              min={0} step={0.001} />
-                          </td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: r.usoReal > 0 ? '#059669' : r.usoReal < 0 ? '#dc2626' : '#9ca3af', fontSize: '13px' }}>
-                            {(r.ini || r.comp || r.fin) ? fmt(r.usoReal) : '—'}
-                          </td>
-                          <td style={{ textAlign: 'right', fontSize: '12px' }}>
-                            {r.usoMesPasado !== null ? (
-                              <>
-                                <span style={{ color: '#6b7280' }}>{fmt(r.usoMesPasado)}</span>
-                                {(r.ini || r.comp || r.fin) && r.pctVsMesPasado !== null && (
-                                  <span style={{ marginLeft: '4px', fontWeight: 700, color: r.pctVsMesPasado <= 0 ? '#059669' : '#dc2626' }}>
-                                    {r.pctVsMesPasado > 0 ? '↑' : r.pctVsMesPasado < 0 ? '↓' : '·'} {fmt(Math.abs(r.pctVsMesPasado), 0)}%
+                              ) : diffRef !== null && hayDatos ? (
+                                <>
+                                  <span style={{ fontWeight: 600, color: diffRef > 0 ? '#b45309' : '#374151' }} title="Diferencia contra la referencia (uso del mes anterior ajustado por la variación de venta), no contra un teórico configurado.">
+                                    ≈{diffRef > 0 ? '+' : ''}{fmt(diffRef)}
                                   </span>
-                                )}
-                              </>
-                            ) : '—'}
-                          </td>
-                          <td style={{ textAlign: 'right', color: '#6b7280', fontSize: '13px' }}>
-                            {r.usoTeorico !== null ? (
-                              fmt(r.usoTeorico)
-                            ) : r.esReferencia ? (
-                              <span style={{ fontStyle: 'italic', color: '#7c6fda' }} title="Referencia: uso del mes anterior ajustado por la variación de venta total. No hay fórmula configurada, es sólo orientativo.">
-                                ≈{fmt(r.usoReferencia!)}
-                              </span>
-                            ) : '—'}
-                          </td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: diffColor, fontSize: '12px' }}>
-                            {r.diff !== null && (r.ini || r.comp || r.fin)
-                              ? `${r.diff > 0 ? '+' : ''}${fmt(r.diff)}${r.pct !== null ? ` (${r.pct > 0 ? '+' : ''}${fmt(r.pct, 0)}%)` : ''}`
-                              : diffRef !== null && (r.ini || r.comp || r.fin)
-                                ? <span style={{ fontStyle: 'italic' }} title="Diferencia contra la referencia (no un target preciso).">≈{diffRef > 0 ? '+' : ''}{fmt(diffRef)}</span>
-                                : '—'}
-                          </td>
-                          <td style={{ textAlign: 'right', fontSize: '12px', color: r.valorizado !== null ? '#111827' : '#d1d5db' }}>
-                            {r.valorizado !== null ? `$${fmt(r.valorizado, 0)}` : '—'}
-                          </td>
-                          <td style={{ textAlign: 'center' }}>
-                            {saving === art.id_articulo ? (
-                              <span style={{ fontSize: '10px', color: '#6b7280' }}>Guardando…</span>
-                            ) : modificado ? (
-                              <span style={{ fontSize: '10px', color: '#d97706' }} title="Se guarda solo al salir del campo">● sin guardar</span>
-                            ) : guardado ? (
-                              <span style={{ fontSize: '10px', color: '#9ca3af' }}>✓ guardado</span>
-                            ) : null}
+                                  <span className="stk-sub" style={{ color: '#9ca3af' }}>ref. {fmt(r.usoReferencia!)}</span>
+                                </>
+                              ) : <span style={{ color: '#d1d5db' }}>—</span>}
+                            </td>
+                          )}
+                          <td className="stk-num stk-sep">
+                            <span style={{ color: r.valorizado !== null ? '#111827' : '#d1d5db' }}>
+                              {r.valorizado !== null ? `$${fmt(r.valorizado, 0)}` : '—'}
+                            </span>
                           </td>
                         </tr>
-                        </React.Fragment>
                       );
                     })}
-                    {artscat.some((a) => resumenArticulos.find((x) => x.art.id_articulo === a.id_articulo)?.valorizado) && (
-                      <tr style={{ borderTop: '2px solid #e5e7eb' }}>
-                        <td colSpan={10} style={{ textAlign: 'right', fontSize: '11px', color: '#6b7280', fontWeight: 700, padding: '6px 8px' }}>Subtotal valorizado {cat}</td>
-                        <td style={{ textAlign: 'right', fontSize: '12px', fontWeight: 800, padding: '6px 8px' }}>
-                          ${fmt(artscat.reduce((acc, a) => acc + (resumenArticulos.find((x) => x.art.id_articulo === a.id_articulo)?.valorizado ?? 0), 0), 0)}
-                        </td>
-                        <td></td>
+                    {valorizadoCat > 0 && (
+                      <tr className="stk-sub-total">
+                        <td colSpan={cols - 1} className="stk-num">Subtotal {cat}</td>
+                        <td className="stk-num stk-sep" style={{ fontWeight: 800 }}>${fmt(valorizadoCat, 0)}</td>
                       </tr>
                     )}
                   </tbody>
@@ -1220,6 +1322,15 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
               </div>
             );
           })}
+
+          {/* El total de todo, al pie. Los subtotales por rubro ya estaban; el número que
+              se busca —cuánto vale el stock— había que sumarlo a mano. */}
+          {consolidado.valorizacionTotal > 0 && (
+            <div className="card" style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#374151' }}>Valor total del stock</span>
+              <span style={{ fontSize: '18px', fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>${fmt(consolidado.valorizacionTotal, 0)}</span>
+            </div>
+          )}
 
           {/* Usos del sistema — referencia de los drivers de producción/venta del mes, colapsado */}
           <div className="card" style={{ marginBottom: '12px' }}>

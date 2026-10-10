@@ -618,79 +618,83 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
         {/* ══ INDICADORES OPERATIVOS MARCE — KPIs acordados con Marcelo para su rol,
             ver conclusión completa en /produccion/puesto ══ */}
-        <div id="indicadores-marce" style={{ background: 'linear-gradient(135deg, #1e293b, #0f172a)', borderRadius: '14px', padding: '22px 22px 24px', marginBottom: '20px', scrollMarginTop: '16px' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:'10px', marginBottom:'18px' }}>
+        <div id="indicadores-marce" style={{ background: 'linear-gradient(135deg, #1e293b, #0f172a)', borderRadius: '14px', padding: '14px 14px 16px', marginBottom: '20px', scrollMarginTop: '16px' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', flexWrap:'wrap', gap:'8px', marginBottom:'10px' }}>
             <div>
-              <p style={{ margin:0, fontSize:'11px', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.6px' }}>KPIs de gestión</p>
-              <h2 style={{ margin:'2px 0 0', fontSize:'26px', fontWeight:900, color:'white' }}>Indicadores Operativos Marce</h2>
+              <p style={{ margin:0, fontSize:'9.5px', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.6px' }}>KPIs de gestión</p>
+              <h2 style={{ margin:'1px 0 0', fontSize:'17px', fontWeight:800, color:'white' }}>Indicadores Operativos Marce</h2>
             </div>
             <Link href="/produccion/puesto" style={{ fontSize:'12px', color:'#e2e8f0', textDecoration:'underline', fontWeight:600, whiteSpace:'nowrap' }}>
               Ver descripción completa del puesto →
             </Link>
           </div>
 
-          {/* Uno abajo del otro (antes 3 en fila, quedaban muy apretados) — con el ancho
-              completo cada gráfico se lee mejor, y de paso entra la fila de "más detalle"
-              (promedio/mejor/peor del período) sin amontonar nada. */}
-          <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:'16px' }}>
+          {/* Los tres en fila cuando hay ancho.
+              Estuvieron uno abajo del otro, para que cada gráfico entrara más grande, y el
+              resultado fue que los tres indicadores ocupaban tres pantallas: para comparar
+              ocupación contra eficiencia había que scrollear, que es exactamente lo que un
+              tablero tiene que evitar. El SVG es responsive, así que en una columna más
+              angosta se achica solo y se sigue leyendo. En celular caen uno abajo del otro
+              igual, por el minmax. */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(290px, 1fr))', gap:'10px' }}>
             {/* KPI 1 — Ocupación de posiciones */}
-            <div className="card" style={{ margin:0 }}>
-              <p style={{ margin:'0 0 2px', fontSize:'12.5px', fontWeight:700 }}>1. Ocupación de posiciones</p>
-              <p style={{ margin:'0 0 10px', fontSize:'11px', color:'#9ca3af' }}>Objetivo: 95% promedio mensual, por cultivo — promedio del mes, no foto puntual · últimos {ocupacionMensual.length} meses</p>
-              <div style={{ display:'flex', alignItems:'baseline', gap:'8px', marginBottom:'6px' }}>
-                <strong style={{ fontSize:'30px', color: ocupacionUltimoMes?.total.pct !== null && ocupacionUltimoMes?.total.pct !== undefined ? (ocupacionUltimoMes.total.pct >= 95 ? '#059669' : '#d97706') : '#9ca3af' }}>
+            <div className="card" style={{ margin:0, padding:'11px 12px' }}>
+              <p style={{ margin:'0 0 1px', fontSize:'11.5px', fontWeight:700 }}>1. Ocupación de posiciones</p>
+              <p style={{ margin:'0 0 6px', fontSize:'10px', color:'#9ca3af', lineHeight:1.35 }}>Objetivo 95% promedio mensual, por cultivo · últimos {ocupacionMensual.length} meses</p>
+              <div style={{ display:'flex', alignItems:'baseline', gap:'6px', marginBottom:'3px' }}>
+                <strong style={{ fontSize:'22px', color: ocupacionUltimoMes?.total.pct !== null && ocupacionUltimoMes?.total.pct !== undefined ? (ocupacionUltimoMes.total.pct >= 95 ? '#059669' : '#d97706') : '#9ca3af' }}>
                   {ocupacionUltimoMes?.total.pct !== null && ocupacionUltimoMes?.total.pct !== undefined ? `${ocupacionUltimoMes.total.pct}%` : '—'}
                 </strong>
                 <span style={{ fontSize:'11px', color:'#9ca3af' }}>{ocupacionUltimoMes?.label ?? 'sin datos aún'}</span>
               </div>
               {ocupacionUltimoMes && (
-                <p style={{ margin:'0 0 10px', fontSize:'11px', color:'#6b7280' }}>
+                <p style={{ margin:'0 0 6px', fontSize:'10.5px', color:'#6b7280' }}>
                   Rúcula {ocupacionUltimoMes.rucula.pct ?? '—'}% · Lechuga {ocupacionUltimoMes.lechuga.pct ?? '—'}%
                 </p>
               )}
               {evoOcupacionCultivo.series.some((s) => s.puntos.length > 0) ? (
                 <>
                   <GraficoEvolucion series={evoOcupacionCultivo.series} labels={evoOcupacionCultivo.labels} hoyIdx={evoOcupacionCultivo.hoyIdx} unidad="%" yMax={Math.min(100, Math.ceil((Math.max(...evoOcupacionCultivo.series.flatMap(s => s.puntos.map(p => p[1]))) + 3) / 5) * 5)} />
-                  <p style={{ margin:'6px 0 0', fontSize:'11px', color:'#6b7280' }}>{detalleMinMaxProm(ocupacionMensual.map(m => m.total.pct), '%')}</p>
+                  <p style={{ margin:'5px 0 0', fontSize:'10px', color:'#6b7280' }}>{detalleMinMaxProm(ocupacionMensual.map(m => m.total.pct), '%')}</p>
                 </>
               ) : (
                 <p style={{ color:'#9ca3af', fontSize:'12px', textAlign:'center', padding:'16px' }}>Sin histórico de ocupación todavía.</p>
               )}
-              <Link href="/ocupacion" style={{ fontSize:'11px', color:'#2563eb', textDecoration:'none', fontWeight:600, display:'inline-block', marginTop:'8px' }}>Ver detalle en Ocupación →</Link>
+              <Link href="/ocupacion" style={{ fontSize:'10.5px', color:'#2563eb', textDecoration:'none', fontWeight:600, display:'inline-block', marginTop:'6px' }}>Ver detalle en Ocupación →</Link>
             </div>
 
             {/* KPI 2 — Eficiencia Siembra → Cosecha */}
-            <div className="card" style={{ margin:0 }}>
-              <p style={{ margin:'0 0 2px', fontSize:'12.5px', fontWeight:700 }}>2. Eficiencia Siembra → Cosecha</p>
-              <p style={{ margin:'0 0 10px', fontSize:'11px', color:'#9ca3af' }}>% de plantines que llega vivo a cosecha, según el descarte de las 3 etapas — sin ventas ni cámara. Sin objetivo numérico fijado aún · últimos {eficienciaMensual.length} meses</p>
-              <div style={{ display:'flex', alignItems:'baseline', gap:'8px', marginBottom:'6px' }}>
-                <strong style={{ fontSize:'30px', color:'#111827' }}>
+            <div className="card" style={{ margin:0, padding:'11px 12px' }}>
+              <p style={{ margin:'0 0 1px', fontSize:'11.5px', fontWeight:700 }}>2. Eficiencia Siembra → Cosecha</p>
+              <p style={{ margin:'0 0 6px', fontSize:'10px', color:'#9ca3af', lineHeight:1.35 }} title="% de plantines que llega vivo a cosecha, según el descarte de las 3 etapas — sin ventas ni cámara.">Plantines que llegan vivos a cosecha · sin objetivo fijado · últimos {eficienciaMensual.length} meses</p>
+              <div style={{ display:'flex', alignItems:'baseline', gap:'6px', marginBottom:'3px' }}>
+                <strong style={{ fontSize:'22px', color:'#111827' }}>
                   {eficienciaUltimoMes ? `${eficienciaUltimoMes.pctGlobal}%` : '—'}
                 </strong>
                 <span style={{ fontSize:'11px', color:'#9ca3af' }}>{eficienciaUltimoMes?.mes.label ?? 'sin datos aún'}</span>
               </div>
               {eficienciaUltimoMes && (
-                <p style={{ margin:'0 0 10px', fontSize:'11px', color:'#6b7280' }}>
+                <p style={{ margin:'0 0 6px', fontSize:'10.5px', color:'#6b7280' }}>
                   Rúcula {eficienciaUltimoMes.mes.rucula.pct ?? '—'}% · Crespa {eficienciaUltimoMes.mes.lechuga_crespa.pct ?? '—'}% · Roble {eficienciaUltimoMes.mes.lechuga_roble.pct ?? '—'}%
                 </p>
               )}
               {evoEficienciaCultivo.series.some((s) => s.puntos.length > 0) ? (
                 <>
                   <GraficoEvolucion series={evoEficienciaCultivo.series} labels={evoEficienciaCultivo.labels} hoyIdx={evoEficienciaCultivo.hoyIdx} unidad="%" />
-                  <p style={{ margin:'6px 0 0', fontSize:'11px', color:'#6b7280' }}>{detalleMinMaxProm(eficienciaGlobalMensual, '%')}</p>
+                  <p style={{ margin:'5px 0 0', fontSize:'10px', color:'#6b7280' }}>{detalleMinMaxProm(eficienciaGlobalMensual, '%')}</p>
                 </>
               ) : (
                 <p style={{ color:'#9ca3af', fontSize:'12px', textAlign:'center', padding:'16px' }}>Sin lotes cosechados en el período.</p>
               )}
-              <a href="#descarte-por-fase" style={{ fontSize:'11px', color:'#2563eb', textDecoration:'none', fontWeight:600, display:'inline-block', marginTop:'8px' }}>Ver desglose de descarte por fase ↓</a>
+              <a href="#descarte-por-fase" style={{ fontSize:'10.5px', color:'#2563eb', textDecoration:'none', fontWeight:600, display:'inline-block', marginTop:'6px' }}>Ver desglose de descarte por fase ↓</a>
             </div>
 
             {/* KPI 3 — Productividad (plantas cosechadas / hora-persona) */}
-            <div className="card" style={{ margin:0 }}>
-              <p style={{ margin:'0 0 2px', fontSize:'12.5px', fontWeight:700 }}>3. Productividad de empleados</p>
-              <p style={{ margin:'0 0 10px', fontSize:'11px', color:'#9ca3af' }}>Plantas cosechadas al mes por hora-persona total. En medición — objetivo a fijar con 6-8 mediciones contra el propio baseline · últimos {productividadPlantasMensual.length} meses</p>
-              <div style={{ display:'flex', alignItems:'baseline', gap:'8px', marginBottom:'10px' }}>
-                <strong style={{ fontSize:'30px', color:'#111827' }}>
+            <div className="card" style={{ margin:0, padding:'11px 12px' }}>
+              <p style={{ margin:'0 0 1px', fontSize:'11.5px', fontWeight:700 }}>3. Productividad de empleados</p>
+              <p style={{ margin:'0 0 6px', fontSize:'10px', color:'#9ca3af', lineHeight:1.35 }} title="En medición — el objetivo se fija con 6-8 mediciones contra el propio baseline.">Plantas cosechadas al mes por hora-persona · últimos {productividadPlantasMensual.length} meses</p>
+              <div style={{ display:'flex', alignItems:'baseline', gap:'6px', marginBottom:'6px' }}>
+                <strong style={{ fontSize:'22px', color:'#111827' }}>
                   {productividadPlantasUltimoMes ? productividadPlantasUltimoMes.productividad!.toLocaleString('es-AR') : '—'}
                 </strong>
                 <span style={{ fontSize:'11px', color:'#9ca3af' }}>pl/h · {productividadPlantasUltimoMes?.label ?? 'sin datos aún'}</span>
@@ -698,12 +702,12 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
               {evoProductividadPlantas.series[0].puntos.length > 0 ? (
                 <>
                   <GraficoEvolucion series={evoProductividadPlantas.series} labels={evoProductividadPlantas.labels} hoyIdx={evoProductividadPlantas.hoyIdx} unidad=" pl/h" />
-                  <p style={{ margin:'6px 0 0', fontSize:'11px', color:'#6b7280' }}>{detalleMinMaxProm(productividadPlantasMensual.map(m => m.productividad), ' pl/h')}</p>
+                  <p style={{ margin:'5px 0 0', fontSize:'10px', color:'#6b7280' }}>{detalleMinMaxProm(productividadPlantasMensual.map(m => m.productividad), ' pl/h')}</p>
                 </>
               ) : (
                 <p style={{ color:'#9ca3af', fontSize:'12px', textAlign:'center', padding:'16px' }}>Sin datos de CrossChex disponibles.</p>
               )}
-              <a href="#productividad" style={{ fontSize:'11px', color:'#2563eb', textDecoration:'none', fontWeight:600, display:'inline-block', marginTop:'8px' }}>Ver evolución en paquetes/hora →</a>
+              <a href="#productividad" style={{ fontSize:'10.5px', color:'#2563eb', textDecoration:'none', fontWeight:600, display:'inline-block', marginTop:'6px' }}>Ver evolución en paquetes/hora →</a>
             </div>
           </div>
         </div>

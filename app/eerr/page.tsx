@@ -14,6 +14,7 @@ import { HOJA_COBRANZAS_CACHE, type CobranzaCache } from '@/lib/xubioCache';
 import CuentasEditor from './CuentasEditor';
 import { nombreClienteVisible } from '@/lib/clientes';
 import { pasosDelCierre, resumenChecklist } from '@/lib/cierreChecklist';
+import { puntosDelCierre, type TonoPunto } from '@/lib/cierreResumen';
 import ChecklistCierre from './ChecklistCierre';
 import { leerPasosManuales, marcadosDelMes } from '@/lib/cierreManual';
 import OrigenAplicacionCard from '@/components/OrigenAplicacion';
@@ -23,6 +24,16 @@ export const dynamic = 'force-dynamic';
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const $ = (n: number) => `$${Math.round(n).toLocaleString('es-AR')}`;
+
+// Un color por tono, y nada más que eso: el renglón se tiene que entender leyéndolo, no
+// descifrando de qué color está. El símbolo acompaña al color para que no dependa de poder
+// distinguirlos.
+const COLOR_TONO: Record<TonoPunto, string> = {
+  ok: '#059669', atencion: '#b45309', problema: '#dc2626', neutro: '#9ca3af',
+};
+const MARCA_TONO: Record<TonoPunto, string> = {
+  ok: '\u2713', atencion: '!', problema: '\u2715', neutro: '\u00b7',
+};
 
 
 export default async function CierreMensualPage({ searchParams }: { searchParams: { anio?: string; mes?: string } }) {
@@ -147,6 +158,13 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   const nombre = `${MESES[mes - 1]} ${anio}`.replace(/^./, (c) => c.toUpperCase());
   const nombrePrev = `${MESES[mesPrev - 1].slice(0, 3)} ${String(anioPrev).slice(2)}`;
 
+  // Los cuatro puntos de arriba. Se calculan al final porque necesitan todo lo anterior:
+  // el resultado, el checklist, los saldos y el puente de caja.
+  const puntos = puntosDelCierre({
+    act, ant, pasos, saldos, fondos, anio, mes,
+    nombreMes: nombre, nombreMesPrev: nombrePrev, esMesActual,
+  });
+
   // Cada línea del bloque anterior, para poder comparar aunque una categoría exista en un
   // mes y no en el otro.
   return (
@@ -169,6 +187,33 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
           {haySiguiente
             ? <Link href={hrefMes(anioSig, mesSig)} className="btn secondary" style={{ fontSize: '12px' }}>Mes siguiente ›</Link>
             : <span className="btn secondary" style={{ fontSize: '12px', opacity: 0.4, pointerEvents: 'none' }}>Mes siguiente ›</span>}
+        </div>
+
+        {/* ── Los cuatro puntos ──────────────────────────────────────────────────────
+            Lo primero de la pantalla. El resto de la página sigue estando y no cambió: esto
+            es la respuesta corta, para no tener que leerla entera para saber si el mes está
+            bien. Ver lib/cierreResumen.ts por qué son estos cuatro y en este orden. */}
+        <div className="card" style={{ marginBottom: '12px', padding: '12px 14px' }}>
+          <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            Lo que hay que revisar — {nombre}
+          </p>
+          <ol style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+            {puntos.map((pt, i) => (
+              <li key={pt.clave} style={{
+                display: 'flex', gap: '8px', alignItems: 'baseline', fontSize: '13px',
+                padding: '5px 0', borderTop: i === 0 ? 'none' : '1px solid #f4f5f7', lineHeight: 1.4,
+              }}>
+                <span style={{ color: COLOR_TONO[pt.tono], fontWeight: 700, flexShrink: 0, width: '13px' }}>{MARCA_TONO[pt.tono]}</span>
+                <span style={{ fontWeight: 700, color: '#374151', flexShrink: 0, minWidth: '118px' }}>{pt.clave}</span>
+                <span style={{ color: pt.tono === 'ok' ? '#4b5563' : COLOR_TONO[pt.tono], flex: 1 }}>
+                  {pt.texto}
+                  {pt.href && pt.tono !== 'ok' && (
+                    <>{' '}<Link href={pt.href} style={{ color: '#2563eb', fontWeight: 600, whiteSpace: 'nowrap' }}>resolver →</Link></>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ol>
         </div>
 
         {esMesActual && (
@@ -223,9 +268,11 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
           />
         </div>
 
-        <OrigenAplicacionCard datos={fondos} causas={causasDeLaDiferencia(saldos)} nombreMes={nombre} />
+        <div id="fondos" style={{ scrollMarginTop: '16px' }}>
+          <OrigenAplicacionCard datos={fondos} causas={causasDeLaDiferencia(saldos)} nombreMes={nombre} />
+        </div>
 
-        <div className="card" style={{ marginTop: '12px' }}>
+        <div className="card" id="cuentas" style={{ marginTop: '12px', scrollMarginTop: '16px' }}>
           <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             Saldos y movimientos entre cuentas — {nombre}
           </p>
