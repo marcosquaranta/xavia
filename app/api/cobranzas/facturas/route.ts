@@ -27,7 +27,13 @@ export async function GET(req: NextRequest) {
   if (!(await isAdmin())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const idControl = new URL(req.url).searchParams.get('id_control') || '';
   if (!idControl) return NextResponse.json({ error: 'Falta el cliente.' }, { status: 400 });
-  const dias = Math.min(365, Math.max(30, Number(new URL(req.url).searchParams.get('dias')) || 120));
+  // 365 días, la misma ventana que usa la pantalla de Cobranzas (DIAS_PAGINA). No es un
+  // detalle estético: lo que se da por cubierto se calcula imputando los cobros del cliente
+  // de la factura más vieja a la más nueva, y con 120 días se ven menos cobros y menos
+  // facturas que con 365. El reparto da distinto y la MISMA factura aparece cobrada en una
+  // lista y abierta en la otra — dos listas de la misma pantalla contradiciéndose es peor
+  // que cualquiera de las dos por separado.
+  const dias = Math.min(365, Math.max(30, Number(new URL(req.url).searchParams.get('dias')) || 365));
 
   try {
     const clientes = await readSheet<ClienteVenta>('Clientes');
@@ -106,6 +112,7 @@ export async function GET(req: NextRequest) {
         cobradoTotal,
       ).map((f) => ({ ...f, reclamadaEl: reclamadas.get(f.numero) || '' })),
       notasCredito: Math.round(notasCredito),
+      cobradoTotal: Math.round(cobradoTotal),
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'server_error' }, { status: 500 });

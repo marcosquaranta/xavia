@@ -21,6 +21,10 @@ const diasDesde = (f: string) => Math.round((Date.now() - new Date(f + 'T12:00:0
 export default function ReclamoManual({ clientes }: { clientes: ClienteOpt[] }) {
   const [cliente, setCliente] = useState('');
   const [facturas, setFacturas] = useState<Factura[]>([]);
+  // Cuánto cobró este cliente en la ventana. Es lo que se reparte de la factura más vieja a
+  // la más nueva para decidir cuáles quedan cubiertas: sin verlo, "esta figura cobrada" es
+  // un veredicto sin fundamento y no hay con qué discutirlo.
+  const [cobrado, setCobrado] = useState(0);
   const [elegidas, setElegidas] = useState<string[]>([]);
   const [desde, setDesde] = useState('');
   const [cargando, setCargando] = useState(false);
@@ -36,7 +40,8 @@ export default function ReclamoManual({ clientes }: { clientes: ClienteOpt[] }) 
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'No se pudieron traer las facturas');
       setFacturas(j.facturas || []);
-      if (!(j.facturas || []).length) setMsg({ t: 'err', s: 'Ese cliente no tiene facturas en los últimos 120 días.' });
+      setCobrado(Number(j.cobradoTotal) || 0);
+      if (!(j.facturas || []).length) setMsg({ t: 'err', s: 'Ese cliente no tiene facturas en los últimos 365 días.' });
     } catch (e: any) {
       setMsg({ t: 'err', s: e.message || 'No se pudieron traer las facturas' });
     }
@@ -113,7 +118,13 @@ export default function ReclamoManual({ clientes }: { clientes: ClienteOpt[] }) 
         <div style={{ marginTop: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap', marginBottom: '5px' }}>
             <span style={{ fontSize: '11px', fontWeight: 700, color: '#374151' }}>Facturas de {nombreCliente}</span>
-            <span style={{ fontSize: '10.5px', color: '#9ca3af' }}>últimos 120 días</span>
+            <span style={{ fontSize: '10.5px', color: '#9ca3af' }}>últimos 365 días</span>
+            {cobrado > 0 && (
+              <span style={{ fontSize: '10.5px', color: '#9ca3af' }}
+                title="Los cobros de este cliente en la ventana se imputan de la factura más vieja a la más nueva: hasta ahí llegan las que figuran cubiertas.">
+                · cobró ${Math.round(cobrado).toLocaleString('es-AR')} en el período
+              </span>
+            )}
             <button onClick={() => { setElegidas(facturas.map((f) => f.numero)); setDesde(''); }} disabled={enviando}
               style={{ fontSize: '10.5px', background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', fontWeight: 600, padding: 0 }}>
               tildar todas
