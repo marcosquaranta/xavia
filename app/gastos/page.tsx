@@ -47,6 +47,13 @@ export default async function GastosPage() {
               .filter((g) => String(g.descripcion || '').trim() && g.categoria)
               .slice(-800)
               .map((g) => ({ descripcion: String(g.descripcion), categoria: String(g.categoria) }))}
+            yaCargados={gastos
+              .filter((g) => Number(g.monto) > 0)
+              .map((g) => ({
+                fecha: String(g.fecha || '').split(/[T ]/)[0],
+                descripcion: String(g.descripcion || ''),
+                monto: Number(g.monto) || 0,
+              }))}
           />
         )}
 

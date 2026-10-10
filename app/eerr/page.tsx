@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import { calcularEERR, previsionesSugeridas, gastosDeLinea } from '@/lib/eerr';
+import { calcularEERR, previsionesSugeridas, gastosDeLinea, desgloseVentas } from '@/lib/eerr';
 import type { Articulo, StockMes, Gasto, VentaDia, PrecioVenta, ClienteVenta } from '@/lib/types';
 import Header from '@/components/Header';
 import { leerPrevisiones, previsionDelMes } from '@/lib/previsiones';
@@ -189,6 +189,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
         <ChecklistCierre pasos={pasos} {...resumenPasos} anio={anio} mes={mes} marcados={[...marcados]} />
 
         <TablaEERR act={act} ant={ant} nombre={nombre} nombrePrev={nombrePrev}
+          desglose={desgloseVentas(datos, anio, mes)}
           detalle={Object.fromEntries(
             [...act.costoVariable.lineas, ...act.costosFijos.lineas].map((l) => [
               l.label, gastosDeLinea(gastos, articulos, l.label, anio, mes),

@@ -1,4 +1,7 @@
 import type { Articulo, StockMes, Gasto, VentaDia, PrecioVenta, ClienteVenta, CategoriaGasto } from './types';
+import { ARTICULOS } from './articulos';
+import { nombreClienteVisible } from './clientes';
+import { precioFinal } from './estadisticasVentas';
 import { ventasEnRango } from './estadisticasVentas';
 import { precioUltimoConocido } from './valorizacionStock';
 
@@ -317,4 +320,53 @@ export function gastosDeLinea(
   }
 
   return { items: [], esCompra: false };
+}
+
+// ── Las ventas del mes abiertas por artículo y por cliente ────────────────────────────
+//
+// El EERR agrupa las ventas por cultivo, que es lo que hace falta para el resultado. Pero
+// cuando un mes se va de escala, la pregunta siguiente siempre es la misma: ¿por qué
+// artículo y a qué cliente. Tenerlo acá evita salir a Estadísticas y volver.
+//
+// Se valoriza con `precioFinal`, el mismo que usa el resto de la app: el precio real de ese
+// cliente con el IVA que le corresponde. Un promedio daría otro total que el del EERR, y dos
+// totales distintos en la misma pantalla no se pueden defender.
+export interface DesgloseVenta { label: string; unidades: number; monto: number }
+
+export function desgloseVentas(d: Omit<DatosEERR, 'previsiones'>, anio: number, mes: number): {
+  porArticulo: DesgloseVenta[];
+  porCliente: DesgloseVenta[];
+} {
+  const mm = String(mes).padStart(2, '0');
+  const desde = `${anio}-${mm}-01`;
+  const hasta = `${anio}-${mm}-${String(new Date(anio, mes, 0).getDate()).padStart(2, '0')}`;
+  const clienteMap = new Map(d.clientes.map((c) => [String(c.id_control), c]));
+
+  const porArticulo = new Map<string, DesgloseVenta>();
+  const porCliente = new Map<string, DesgloseVenta>();
+
+  for (const v of d.ventas) {
+    const f = String(v.fecha || '').split(/[T ]/)[0];
+    if (!f || f < desde || f > hasta) continue;
+    const cli = clienteMap.get(String(v.id_control));
+    const nombreCli = nombreClienteVisible(cli) || String(v.id_control);
+
+    for (const art of ARTICULOS) {
+      const qty = Number((v as any)[art.key]) || 0;
+      if (qty <= 0) continue;
+      const monto = qty * precioFinal(d.precios, String(v.id_control), v.sucursal, art.key, cli);
+
+      const a = porArticulo.get(art.label) || { label: art.labelLargo || art.label, unidades: 0, monto: 0 };
+      a.unidades += qty; a.monto += monto;
+      porArticulo.set(art.label, a);
+
+      const c = porCliente.get(nombreCli) || { label: nombreCli, unidades: 0, monto: 0 };
+      c.unidades += qty; c.monto += monto;
+      porCliente.set(nombreCli, c);
+    }
+  }
+
+  const ordenar = (m: Map<string, DesgloseVenta>) =>
+    [...m.values()].filter((x) => x.monto > 0 || x.unidades > 0).sort((a, b) => b.monto - a.monto);
+  return { porArticulo: ordenar(porArticulo), porCliente: ordenar(porCliente) };
 }

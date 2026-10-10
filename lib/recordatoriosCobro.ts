@@ -58,6 +58,17 @@ export const COL_ANTIGUEDAD_HASTA = 'recordatorio_antiguedad_hasta'; // hasta cu
 //
 // Mientras la app no sepa qué factura está paga, la ventana es la única defensa: se reclama
 // una vez, en el momento en que tiene sentido, y después se deja de insistir.
+// Las direcciones de un campo de mail. En la ficha del cliente se escribe de todas las
+// formas: "a@x.com, b@x.com", con punto y coma, con un nombre adelante, con espacios.
+// Mandar el campo entero como UNA dirección hace que Resend la descarte y el cliente no
+// reciba nada — y como la copia interna sí sale, desde acá parece que se envió bien.
+export function direccionesDeMail(texto: any): string[] {
+  return String(texto || '')
+    .split(/[,;\s]+/)
+    .map((x) => x.trim().replace(/^<|>$/g, ''))
+    .filter((x) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
+}
+
 export const ANTIGUEDAD_DEFAULT = 7;
 export const ANTIGUEDAD_HASTA_DEFAULT = 14;
 
@@ -126,8 +137,9 @@ export function clientesConRecordatorio(clientes: ClienteVenta[]): { activos: Cl
     const prendido = String((c as any)[COL_ACTIVO] || '').trim().toUpperCase() === 'SI';
     if (!prendido) continue;
     const nombre = c.nombre_display || c.nombre_xubio || c.id_control;
-    const email = String((c as any)[COL_EMAIL] || c.email || '').trim();
-    if (!email.includes('@')) { sinEmail.push(nombre); continue; }
+    const destinos = direccionesDeMail((c as any)[COL_EMAIL] || c.email);
+    if (!destinos.length) { sinEmail.push(nombre); continue; }
+    const email = destinos.join(', ');
     const ant = Number((c as any)[COL_ANTIGUEDAD]);
     const antHasta = Number((c as any)[COL_ANTIGUEDAD_HASTA]);
     const desde = ant > 0 ? ant : ANTIGUEDAD_DEFAULT;
@@ -384,7 +396,7 @@ export function cuerpoRecordatorioTexto(envio: EnvioRecordatorio, datosPago: str
   return L.join('\n');
 }
 
-async function enviarMail(args: { to: string[]; cc?: string[]; asunto: string; html: string; texto: string }): Promise<{ ok: boolean; error?: string }> {
+async function enviarMail(args: { to: string[]; cc?: string[]; asunto: string; html: string; texto: string }): Promise<{ ok: boolean; error?: string; id?: string }> {
   if (!process.env.RESEND_API_KEY) return { ok: false, error: 'RESEND_API_KEY no configurada' };
   try {
     const res = await fetch('https://api.resend.com/emails', {
@@ -404,7 +416,10 @@ async function enviarMail(args: { to: string[]; cc?: string[]; asunto: string; h
       const err: any = await res.json().catch(() => ({}));
       return { ok: false, error: err?.message || `HTTP ${res.status}` };
     }
-    return { ok: true };
+    // El id que devuelve Resend es lo único que permite después buscar ese envío en su panel
+    // y ver si entró, si rebotó o si quedó en spam.
+    const data: any = await res.json().catch(() => ({}));
+    return { ok: true, id: data?.id };
   } catch (e: any) {
     return { ok: false, error: e?.message || 'error de red' };
   }
@@ -452,8 +467,11 @@ export async function enviarReclamoManual(args: {
     if (!cli) return { ok: false, error: 'No se encontró el cliente.' };
 
     const nombre = cli.nombre_display || cli.nombre_xubio || cli.id_control;
-    const email = String((cli as any)[COL_EMAIL] || cli.email || '').trim();
-    if (!email.includes('@')) return { ok: false, error: `${nombre} no tiene mail cargado (ni de cobranzas ni el general).` };
+    const destinos = direccionesDeMail((cli as any)[COL_EMAIL] || cli.email);
+    if (!destinos.length) {
+      return { ok: false, error: `${nombre} no tiene un mail válido cargado (ni de cobranzas ni el general).` };
+    }
+    const email = destinos.join(', ');
 
     const datosPagoFila = configRows.find((r) => String(r.clave).trim() === CONFIG_DATOS_PAGO);
     const datosPago = String(datosPagoFila?.valor || '').trim() || DATOS_PAGO_DEFAULT;
@@ -467,7 +485,7 @@ export async function enviarReclamoManual(args: {
     };
 
     const r = await enviarMail({
-      to: [email],
+      to: destinos,
       cc: COPIA_INTERNA,
       asunto: asuntoRecordatorio(envio),
       html: cuerpoRecordatorioHtml(envio, datosPago),
@@ -573,7 +591,7 @@ export async function correrRecordatoriosCobro(
       if (soloSimular) continue;
 
       const r = await enviarMail({
-        to: [envio.cliente.email],
+        to: direccionesDeMail(envio.cliente.email),
         cc: COPIA_INTERNA,
         asunto: asuntoRecordatorio(envio),
         html: cuerpoRecordatorioHtml(envio, datosPago),

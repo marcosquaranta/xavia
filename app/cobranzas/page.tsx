@@ -578,7 +578,14 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
                   {historial.map((r) => (
                     <tr key={r.id_recordatorio} style={{ borderTop: '1px solid #f3f4f6' }}>
                       <td style={{ padding: '6px 8px', color: '#6b7280' }}>{fmtFechaHora(r.fecha_envio)}</td>
-                      <td style={{ padding: '6px 8px', fontWeight: 600 }}>{r.cliente}</td>
+                      <td style={{ padding: '6px 8px', fontWeight: 600 }}>
+                        {r.cliente}
+                        {r.destinatarios && (
+                          <span style={{ display: 'block', fontWeight: 400, fontSize: '10.5px', color: '#9ca3af' }}>
+                            {String(r.destinatarios)}
+                          </span>
+                        )}
+                      </td>
                       <td style={{ padding: '6px 8px', fontFamily: 'monospace', fontSize: '11px' }}>{r.comprobantes}</td>
                       <td style={{ padding: '6px 8px', textAlign: 'right' }}>${Math.round(Number(r.importe) || 0).toLocaleString('es-AR')}</td>
                       <td style={{ padding: '6px 8px', color: String(r.estado) === 'enviado' ? '#059669' : String(r.estado) === 'omitido' ? '#b45309' : '#dc2626', fontWeight: 600 }}>

@@ -23,14 +23,19 @@ import { CATEGORIAS_GASTO, MEDIOS_PAGO } from '@/lib/types';
 const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 
 export interface CategoriaPrevia { descripcion: string; categoria: string }
+// Lo ya cargado, para avisar si una línea del pegado ya existe.
+export interface GastoYaCargado { fecha: string; descripcion: string; monto: number }
 
-export default function ResumenTarjeta({ categoriasPrevias = [] }: { categoriasPrevias?: CategoriaPrevia[] }) {
+export default function ResumenTarjeta({ categoriasPrevias = [], yaCargados = [] }: {
+  categoriasPrevias?: CategoriaPrevia[];
+  yaCargados?: GastoYaCargado[];
+}) {
   const router = useRouter();
   const [abierto, setAbierto] = useState(false);
   const [texto, setTexto] = useState('');
   const [medio, setMedio] = useState<string>('VISA');
   const [fechaDefecto, setFechaDefecto] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }));
-  const [filas, setFilas] = useState<(LineaResumen & { usar: boolean })[]>([]);
+  const [filas, setFilas] = useState<(LineaResumen & { usar: boolean; repetido?: GastoYaCargado | null })[]>([]);
   const [guardando, setGuardando] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
 
@@ -45,10 +50,39 @@ export default function ResumenTarjeta({ categoriasPrevias = [] }: { categoriasP
     return m;
   }, [categoriasPrevias]);
 
+  // Un gasto que ya está cargado.
+  //
+  // Pegar el resumen dos veces, o pegar uno que se superpone con gastos cargados a mano
+  // durante el mes, duplica todo sin que nada avise: los montos son plausibles y el error
+  // recién aparece en el resultado del mes.
+  //
+  // Se busca por MONTO, que es lo único que no cambia de un lado al otro — la descripción
+  // del resumen casi nunca es igual a la que se escribió a mano. Se pide que la fecha esté
+  // cerca (tres días) porque la del resumen y la del consumo suelen diferir por el cierre.
+  const yaEstaba = useMemo(() => {
+    const porMonto = new Map<number, GastoYaCargado[]>();
+    for (const g of yaCargados) {
+      const k = Math.round(g.monto);
+      if (!porMonto.has(k)) porMonto.set(k, []);
+      porMonto.get(k)!.push(g);
+    }
+    return (fecha: string, monto: number): GastoYaCargado | null => {
+      const candidatos = porMonto.get(Math.round(monto));
+      if (!candidatos?.length) return null;
+      if (!fecha) return candidatos[0];
+      const dias = (a: string, b: string) =>
+        Math.abs(new Date(a + 'T12:00:00').getTime() - new Date(b + 'T12:00:00').getTime()) / 86400000;
+      return candidatos.find((c) => c.fecha && dias(c.fecha, fecha) <= 3) || null;
+    };
+  }, [yaCargados]);
+
   function analizar() {
     const anio = Number(fechaDefecto.slice(0, 4)) || new Date().getFullYear();
     const lineas = parsearResumen(texto, anio, (d) => previas.get(d.trim().toUpperCase()) || null);
-    setFilas(lineas.map((l) => ({ ...l, usar: !l.esTotal && !l.esIngreso })));
+    setFilas(lineas.map((l) => {
+      const repetido = yaEstaba(l.fecha, l.monto);
+      return { ...l, usar: !l.esTotal && !l.esIngreso && !repetido, repetido };
+    }));
     setMsg(lineas.length ? null : { ok: false, texto: 'No se encontró ningún consumo en ese texto.' });
   }
 
@@ -151,7 +185,7 @@ export default function ResumenTarjeta({ categoriasPrevias = [] }: { categoriasP
               </thead>
               <tbody>
                 {filas.map((f, i) => (
-                  <tr key={i} style={{ borderTop: '1px solid #f3f4f6', opacity: f.usar ? 1 : 0.5, background: f.esTotal || f.esIngreso ? '#fffbeb' : undefined }}>
+                  <tr key={i} style={{ borderTop: '1px solid #f3f4f6', opacity: f.usar ? 1 : 0.5, background: f.esTotal || f.esIngreso || f.repetido ? '#fffbeb' : undefined }}>
                     <td style={{ padding: '3px 6px' }}>
                       <input type="checkbox" checked={f.usar} disabled={guardando}
                         onChange={() => setFilas((p) => p.map((x, j) => j === i ? { ...x, usar: !x.usar } : x))} />
@@ -167,6 +201,12 @@ export default function ResumenTarjeta({ categoriasPrevias = [] }: { categoriasP
                         style={{ width: '100%', fontSize: '12px' }} />
                       {f.esTotal && <span style={{ display: 'block', fontSize: '10px', color: '#b45309' }}>parece el total del resumen — cargarlo duplicaría todo</span>}
                       {f.esIngreso && !f.esTotal && <span style={{ display: 'block', fontSize: '10px', color: '#b45309' }}>parece plata que ENTRÓ, no un gasto — si igual es un gasto, tildalo</span>}
+                      {f.repetido && (
+                        <span style={{ display: 'block', fontSize: '10px', color: '#b45309' }}>
+                          ya hay un gasto de ese importe el {f.repetido.fecha.slice(8, 10)}/{f.repetido.fecha.slice(5, 7)}
+                          {f.repetido.descripcion ? ` ("${f.repetido.descripcion}")` : ''} — si no es el mismo, tildalo
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: '3px 6px' }}>
                       <select value={f.categoria} disabled={guardando}

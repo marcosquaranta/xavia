@@ -31,9 +31,12 @@ export interface DetalleLinea {
   esCompra: boolean;
 }
 
-export default function TablaEERR({ act, ant, nombre, nombrePrev, detalle = {} }: {
+export default function TablaEERR({ act, ant, nombre, nombrePrev, detalle = {}, desglose }: {
   act: EERR; ant: EERR; nombre: string; nombrePrev: string;
   detalle?: Record<string, DetalleLinea>;
+  // Las ventas abiertas por artículo y por cliente. Van plegadas: el EERR es un resumen y
+  // dos listas largas arriba de todo lo convierten en otra cosa.
+  desglose?: { porArticulo: { label: string; unidades: number; monto: number }[]; porCliente: { label: string; unidades: number; monto: number }[] };
 }) {
   const [abierto, setAbierto] = useState<Record<string, boolean>>({ variable: true, fijos: true, ventas: false });
   // Qué línea tiene el detalle abierto. Una sola a la vez: abrir varias convierte la tabla
@@ -242,6 +245,38 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev, detalle = {} }
           <Fila label="Resultado sin inversión" monto={act.resultadoSinInversion} anterior={ant.resultadoSinInversion} nivel="resultado" invertido />
         </tbody>
       </table>
+      {desglose && (desglose.porArticulo.length > 0 || desglose.porCliente.length > 0) && (
+        <div style={{ borderTop: '1px solid #f3f4f6', padding: '8px 10px', display: 'flex', gap: '18px', flexWrap: 'wrap' }}>
+          {([['Ventas por artículo', desglose.porArticulo], ['Ventas por cliente', desglose.porCliente]] as const).map(([titulo, filas]) => (
+            filas.length === 0 ? null : (
+              <details key={titulo} style={{ flex: '1 1 280px', minWidth: '240px' }}>
+                <summary style={{ cursor: 'pointer', fontSize: '11.5px', fontWeight: 700, color: '#374151', listStyle: 'revert' }}>
+                  {titulo} <span style={{ fontWeight: 400, color: '#9ca3af' }}>({filas.length})</span>
+                </summary>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px', marginTop: '5px' }}>
+                  <tbody>
+                    {filas.map((f) => (
+                      <tr key={f.label} style={{ borderTop: '1px solid #f6f6f4' }}>
+                        <td style={{ padding: '3px 6px 3px 0' }}>{f.label}</td>
+                        <td style={{ padding: '3px 6px 3px 0', textAlign: 'right', color: '#9ca3af', whiteSpace: 'nowrap' }}>
+                          {Math.round(f.unidades).toLocaleString('es-AR')} u
+                        </td>
+                        <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                          {$(f.monto)}
+                        </td>
+                        <td style={{ padding: '3px 0 3px 8px', textAlign: 'right', color: '#9ca3af', whiteSpace: 'nowrap' }}>
+                          {act.ventas.total > 0 ? `${Math.round((f.monto / act.ventas.total) * 100)}%` : ''}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </details>
+            )
+          ))}
+        </div>
+      )}
+
       <p style={{ margin: 0, padding: '8px 10px', fontSize: '11px', color: '#9ca3af', borderTop: '1px solid #f3f4f6' }}>
         <strong>Var. stock</strong> es cuánto <strong>subió o bajó</strong> el stock en el mes, no cuánto hay:
         <em>compró − var. stock = costo del mes</em>. Para ver cuánta plata hay parada en el depósito, que es otro número,
