@@ -247,6 +247,13 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
 
         <ChecklistCierre pasos={pasos} {...resumenPasos} anio={anio} mes={mes} marcados={[...marcados]} />
 
+        {/* La regla de trabajo, abajo del checklist y no al pie de la pantalla.
+            Juntas son UNA sola instrucción: qué hacer y en qué orden arriba, dónde vive cada
+            cosa acá. Entrar al cierre tiene que alcanzar para leer las dos, y al pie de una
+            página de este largo nadie llega. Va plegada porque abierta empuja los números
+            abajo de una pantalla de texto, y entonces no se lee ninguna de las dos. */}
+        <InstruccionesCierre />
+
         <TablaEERR act={act} ant={ant} nombre={nombre} nombrePrev={nombrePrev}
           desglose={desgloseVentas(datos, anio, mes)}
           detalle={Object.fromEntries(
@@ -322,10 +329,6 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
           </ul>
         </div>
 
-        {/* La regla de trabajo. Estaba en /eerr/instrucciones, una página aparte a la que
-            nadie entraba: el mes se cierra acá. Junto con el checklist de arriba son UNA
-            sola instrucción — qué hacer y en qué orden arriba, dónde vive cada cosa acá. */}
-        <InstruccionesCierre />
       </div>
     </>
   );
