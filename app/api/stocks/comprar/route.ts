@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, isAdmin } from '@/lib/auth';
-import { appendRowObj, readSheet, updateRow } from '@/lib/sheets';
+import { appendRowObj, asegurarColumnas, readSheet, updateRow } from '@/lib/sheets';
 import { MEDIOS_PAGO, type Articulo, type Gasto, type StockMes } from '@/lib/types';
 
 // Registra una compra de insumo directamente desde Stocks: crea el Gasto correspondiente
@@ -15,6 +15,14 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { anio, mes, medio_pago, fecha } = body;
+    // Una compra a 30 días no es lo mismo que una pagada: el costo es de este mes igual, pero
+    // la plata no salió todavía. Sin esto, toda compra cargada desde Stocks quedaba como
+    // pagada el día de la compra y el saldo de la cuenta bajaba un mes antes de tiempo —
+    // justo el desfase que después aparece como "sin explicar" en el puente de caja.
+    const pendiente = body.pendiente === true;
+    const proveedor = String(body.proveedor || '').trim();
+    const vencimiento = String(body.vencimiento || '').trim();
+    const detalle = String(body.descripcion || '').trim();
     // `items` es la forma nueva; el artículo suelto se sigue aceptando para no romper nada.
     const items: { id_articulo: string; cantidad: number; precio_unitario: number }[] =
       Array.isArray(body.items) && body.items.length
@@ -45,7 +53,13 @@ export async function POST(req: NextRequest) {
     if (new Set(items.map((i) => i.id_articulo)).size !== items.length) {
       return NextResponse.json({ error: 'Hay dos renglones con el mismo artículo.' }, { status: 400 });
     }
+    // Mismo criterio que /api/gastos/nuevo: una compra pendiente sin proveedor es un monto
+    // suelto que nadie sabe a quién hay que pagarle.
+    if (pendiente && !proveedor) {
+      return NextResponse.json({ error: 'Una compra a pagar necesita el proveedor: si no, la deuda queda sin dueño.' }, { status: 400 });
+    }
 
+    await asegurarColumnas('Gastos', ['estado_pago', 'proveedor', 'vencimiento']);
     const [articulos, stocks, gastos] = await Promise.all([
       readSheet<Articulo>('Articulos'),
       readSheet<StockMes>('Stocks'),
@@ -78,8 +92,11 @@ export async function POST(req: NextRequest) {
       idsGasto.push(id_gasto);
       await appendRowObj('Gastos', {
         id_gasto, fecha: fechaGasto,
-        descripcion: `Compra: ${art.articulo}`,
+        descripcion: detalle ? `${detalle} — ${art.articulo}` : `Compra: ${art.articulo}`,
         categoria: 'insumos', monto, medio_pago,
+        estado_pago: pendiente ? 'pendiente' : '',
+        proveedor: pendiente ? proveedor : '',
+        vencimiento: pendiente ? vencimiento : '',
         usuario: user.email, fecha_carga: fechaCarga,
         id_articulo, cantidad: cant, aplicado_stock: 'SI',
       });

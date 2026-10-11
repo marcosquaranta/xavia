@@ -176,11 +176,26 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
   const [compraCantidad, setCompraCantidad] = useState('');
   const [compraPrecio, setCompraPrecio] = useState('');
   const [compraMedioPago, setCompraMedioPago] = useState('');
+  // La fecha de la compra. Antes no se preguntaba y el gasto quedaba con la fecha de HOY:
+  // cargando una compra de septiembre en octubre, el stock iba a septiembre y el gasto a
+  // octubre. El costo del mes y el saldo de la cuenta quedaban cada uno en un mes distinto.
+  const [compraFecha, setCompraFecha] = useState('');
+  const [compraDetalle, setCompraDetalle] = useState('');
+  // A 30 días: el costo es de este mes, la plata sale después.
+  const [compraPendiente, setCompraPendiente] = useState(false);
+  const [compraProveedor, setCompraProveedor] = useState('');
+  const [compraVencimiento, setCompraVencimiento] = useState('');
   const [guardandoCompra, setGuardandoCompra] = useState(false);
   const [errorCompra, setErrorCompra] = useState<string | null>(null);
 
+  // El último día del mes que se está cargando: es el default razonable para una compra que
+  // se registra al cerrar, y nunca cae fuera del mes al que va el stock.
+  const ultimoDiaDelMes = `${anio}-${String(mes).padStart(2, '0')}-${String(new Date(anio, mes, 0).getDate()).padStart(2, '0')}`;
+
   function resetFormCompra() {
     setCompraCantidad(''); setCompraPrecio(''); setCompraMedioPago(''); setErrorCompra(null);
+    setCompraFecha(ultimoDiaDelMes); setCompraDetalle('');
+    setCompraPendiente(false); setCompraProveedor(''); setCompraVencimiento('');
   }
   function abrirCompraGeneral() {
     setCompraGeneral(true); setCompraGeneralArticulo(''); setCreandoArticuloPara(null);
@@ -192,6 +207,10 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
     if (!(cant > 0)) { setErrorCompra('Ingresá una cantidad válida.'); return; }
     if (!(precio > 0)) { setErrorCompra('Ingresá un precio válido.'); return; }
     if (!compraMedioPago) { setErrorCompra('Elegí un medio de pago.'); return; }
+    if (compraPendiente && !compraProveedor.trim()) {
+      setErrorCompra('Una compra a pagar necesita el proveedor: si no, la deuda queda sin dueño.');
+      return;
+    }
     setGuardandoCompra(true); setErrorCompra(null);
     try {
       const items = [
@@ -207,7 +226,14 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
       }
       const res = await fetch('/api/stocks/comprar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ anio, mes, medio_pago: compraMedioPago, items }),
+        body: JSON.stringify({
+          anio, mes, medio_pago: compraMedioPago, items,
+          fecha: compraFecha || ultimoDiaDelMes,
+          descripcion: compraDetalle.trim(),
+          pendiente: compraPendiente,
+          proveedor: compraProveedor.trim(),
+          vencimiento: compraVencimiento,
+        }),
       });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || 'Error');
@@ -570,6 +596,12 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
     setCompraGeneralArticulo(id);
     setCreandoArticuloPara(null);
   }
+  async function crearArticuloParaExtra(i: number) {
+    const id = await crearArticulo();
+    if (!id) return;
+    setCompraExtra((p) => p.map((y, j) => j === i ? { ...y, id_articulo: id } : y));
+    setCreandoArticuloPara(null);
+  }
 
   return (
     <div>
@@ -679,10 +711,51 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                         {MEDIOS_PAGO.map((m) => <option key={m} value={m}>{m}</option>)}
                       </select>
                     </div>
+                    {/* La fecha de la compra. Antes no se preguntaba: el stock iba al mes
+                        elegido arriba y el gasto se cargaba con la fecha de HOY, así que
+                        cargando septiembre en octubre el costo y el stock quedaban en meses
+                        distintos. */}
+                    <div>
+                      <label style={{ fontSize: '10px' }}>Fecha de la compra</label>
+                      <input type="date" value={compraFecha} onChange={(e) => setCompraFecha(e.target.value)}
+                        disabled={guardandoCompra}
+                        title="La fecha del remito o la factura. El stock va al mes elegido arriba; esta fecha es la del gasto."
+                        style={{ fontSize: '12px', padding: '5px 8px' }} />
+                    </div>
+                    <div style={{ flex: '1 1 180px', minWidth: '160px' }}>
+                      <label style={{ fontSize: '10px' }}>Detalle (opcional)</label>
+                      <input type="text" value={compraDetalle} onChange={(e) => setCompraDetalle(e.target.value)}
+                        disabled={guardandoCompra} placeholder="Ej: remito 0012 Agroquímica"
+                        style={{ width: '100%', fontSize: '12px', padding: '5px 8px' }} />
+                    </div>
                     {Number(compraCantidad) > 0 && Number(compraPrecio) > 0 && (
                       <p style={{ margin: '0 0 8px', fontSize: '12px', color: '#6b7280' }}>
                         Total: <strong>${fmt(Number(compraCantidad) * Number(compraPrecio), 0)}</strong>
                       </p>
+                    )}
+                    {/* A 30 días. El costo pertenece a este mes igual —criterio devengado—
+                        pero la plata no salió, así que no puede bajar el saldo de la cuenta
+                        todavía. Sin esto, toda compra cargada acá quedaba como pagada el día
+                        de la compra y el saldo bajaba un mes antes de tiempo. */}
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11.5px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                      <input type="checkbox" checked={compraPendiente} disabled={guardandoCompra}
+                        onChange={(e) => setCompraPendiente(e.target.checked)} />
+                      Se paga después (a 30 días)
+                    </label>
+                    {compraPendiente && (
+                      <>
+                        <div>
+                          <label style={{ fontSize: '10px', color: '#dc2626', fontWeight: 700 }}>Proveedor</label>
+                          <input type="text" value={compraProveedor} onChange={(e) => setCompraProveedor(e.target.value)}
+                            disabled={guardandoCompra} placeholder="a quién se le debe"
+                            style={{ width: '160px', fontSize: '12px', padding: '5px 8px' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '10px' }}>Vence</label>
+                          <input type="date" value={compraVencimiento} onChange={(e) => setCompraVencimiento(e.target.value)}
+                            disabled={guardandoCompra} style={{ fontSize: '12px', padding: '5px 8px' }} />
+                        </div>
+                      </>
                     )}
                     <button onClick={() => setCompraExtra((p) => [...p, { id_articulo: '', cantidad: '', precio: '' }])}
                       disabled={guardandoCompra} className="btn secondary" style={{ fontSize: '12px', padding: '6px 14px' }}>
@@ -703,10 +776,23 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                 <div key={i} style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #bfdbfe' }}>
                   <div style={{ minWidth: '240px' }}>
                     <label style={{ fontSize: '10px' }}>Artículo</label>
-                    <select value={x.id_articulo} disabled={guardandoCompra}
-                      onChange={(e) => setCompraExtra((p) => p.map((y, j) => j === i ? { ...y, id_articulo: e.target.value } : y))}
-                      style={{ width: '100%', fontSize: '13px', padding: '6px 8px', color: x.id_articulo ? '#111827' : '#dc2626' }}>
+                    {/* También se puede crear acá. Que solo el primer renglón lo
+                        permitiera obligaba a cancelar la compra entera para dar de alta un
+                        insumo que aparecía recién en el tercer item del remito. */}
+                    <select value={creandoArticuloPara === `extra-${i}` ? '__nuevo__' : x.id_articulo} disabled={guardandoCompra}
+                      onChange={(e) => {
+                        if (e.target.value === '__nuevo__') {
+                          setCreandoArticuloPara(`extra-${i}`);
+                          setNuevoArt({ articulo: '', categoria: '', unidad_medida: '' });
+                          setErrorCrearArt(null);
+                        } else {
+                          setCreandoArticuloPara(null);
+                          setCompraExtra((p) => p.map((y, j) => j === i ? { ...y, id_articulo: e.target.value } : y));
+                        }
+                      }}
+                      style={{ width: '100%', fontSize: '13px', padding: '6px 8px', color: x.id_articulo || creandoArticuloPara === `extra-${i}` ? '#111827' : '#dc2626' }}>
                       <option value="">— elegir artículo —</option>
+                      <option value="__nuevo__">+ Crear artículo nuevo…</option>
                       {categorias.map((cat) => (
                         <optgroup key={cat} label={cat}>
                           {artActivos.filter((a) => a.categoria === cat).map((a) => <option key={a.id_articulo} value={a.id_articulo}>{a.articulo}</option>)}
@@ -714,6 +800,30 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                       ))}
                     </select>
                   </div>
+                  {creandoArticuloPara === `extra-${i}` && (
+                    <>
+                      <div>
+                        <label style={{ fontSize: '10px' }}>Nombre</label>
+                        <input type="text" value={nuevoArt.articulo} onChange={(e) => setNuevoArt((p) => ({ ...p, articulo: e.target.value }))}
+                          style={{ fontSize: '12px', padding: '5px 8px' }} placeholder="Ej: Cubos Oasis" disabled={guardandoArt} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '10px' }}>Categoría</label>
+                        <input type="text" value={nuevoArt.categoria} onChange={(e) => setNuevoArt((p) => ({ ...p, categoria: e.target.value }))}
+                          style={{ fontSize: '12px', padding: '5px 8px' }} placeholder="Ej: Sustratos" disabled={guardandoArt} list="categorias-existentes-top" />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '10px' }}>Unidad</label>
+                        <input type="text" value={nuevoArt.unidad_medida} onChange={(e) => setNuevoArt((p) => ({ ...p, unidad_medida: e.target.value }))}
+                          style={{ fontSize: '12px', padding: '5px 8px', width: '80px' }} placeholder="unidad" disabled={guardandoArt} />
+                      </div>
+                      <button onClick={() => crearArticuloParaExtra(i)} className="btn" style={{ fontSize: '12px', padding: '6px 14px' }}
+                        disabled={guardandoArt || !nuevoArt.articulo.trim() || !nuevoArt.categoria.trim() || !nuevoArt.unidad_medida.trim()}>
+                        {guardandoArt ? 'Creando…' : 'Crear y elegir'}
+                      </button>
+                      {errorCrearArt && <span style={{ fontSize: '11.5px', color: '#dc2626' }}>{errorCrearArt}</span>}
+                    </>
+                  )}
                   <div>
                     <label style={{ fontSize: '10px' }}>
                       Cantidad {x.id_articulo ? `(${artActivos.find((a) => a.id_articulo === x.id_articulo)?.unidad_medida || ''})` : ''}
@@ -738,7 +848,9 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
               {errorCrearArt && creandoArticuloPara === '__top__' && <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#dc2626' }}>{errorCrearArt}</p>}
               {errorCompra && <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#dc2626' }}>{errorCompra}</p>}
               <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#6b7280' }}>
-                Esto suma la cantidad a "Compras" del mes elegido y crea el gasto correspondiente (categoría Insumos, medio de pago obligatorio) en la planilla de Gastos.
+                Esto suma la cantidad a "Compras" del mes elegido y crea el gasto en la planilla de Gastos (categoría Insumos),
+                con todo lo que haría falta cargar allá: fecha, medio de pago, detalle y, si se paga después, el proveedor y el
+                vencimiento. No hay que volver a cargarlo en Gastos.
               </p>
             </div>
           )}
