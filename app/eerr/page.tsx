@@ -9,7 +9,7 @@ import { leerPrevisiones, previsionDelMes } from '@/lib/previsiones';
 import PrevisionesEditor from './PrevisionesEditor';
 import TablaEERR from './TablaEERR';
 import EnviarInforme from './EnviarInforme';
-import { leerCobranzas, leerSaldos, saldosDelMes, type Cobranza, type SaldoCuenta } from '@/lib/cuentas';
+import { leerCobranzas, leerSaldos, saldosDelMes, movimientosDeCuenta, type Cobranza, type SaldoCuenta } from '@/lib/cuentas';
 import { HOJA_COBRANZAS_CACHE, type CobranzaCache } from '@/lib/xubioCache';
 import CuentasEditor from './CuentasEditor';
 import { nombreClienteVisible } from '@/lib/clientes';
@@ -297,7 +297,15 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
           <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             Saldos y movimientos entre cuentas — {nombre}
           </p>
-          <CuentasEditor anio={anio} mes={mes} saldos={saldos}
+          {/* `key` por mes: sin eso, pasar de octubre a septiembre no vuelve a montar el
+              componente y el formulario se queda con la fecha y los saldos tipeados del mes
+              anterior — que es cómo terminaba una transferencia de septiembre cargada con
+              fecha de octubre. */}
+          <CuentasEditor key={`${anio}-${mes}`} anio={anio} mes={mes} saldos={saldos}
+            detalle={Object.fromEntries(saldos.map((s) => [
+              s.medio,
+              movimientosDeCuenta(s.medio, gastos, cobranzas, anio, mes, cobranzasXubio),
+            ]))}
             movimientos={gastos
               .filter((g) => g.categoria === 'movimiento_interno')
               .filter((g) => {

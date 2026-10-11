@@ -1,7 +1,7 @@
 import { asegurarHoja, readSheet, appendRowObj, updateRow, deleteRow } from './sheets';
 import { MEDIOS_PAGO, type MedioPagoGasto, type Gasto } from './types';
 
-import { pagadosEnRango } from './proveedores';
+import { pagadosEnRango, fechaDeCaja } from './proveedores';
 // ── Cobranzas y saldos de cuentas ─────────────────────────────────────────────────────
 //
 // Con esto la app puede decir cuánta plata hay en cada cuenta y en cada caja, que es lo
@@ -118,6 +118,90 @@ export interface SaldoMes {
   calculado: number;
   real: number | null;      // lo que dice el resumen, si se cargó
   diferencia: number | null;
+}
+
+// ── Cada movimiento de una cuenta, uno por uno ───────────────────────────────────────
+//
+// La tabla de saldos da cuatro totales por cuenta y el veredicto de si cierra. Cuando no
+// cierra, eso es todo lo que dice: "faltan $899.500" y arreglate. El que concilia tiene que
+// abrir la planilla de Gastos, filtrar por medio de pago, filtrar por fecha y comparar a
+// mano contra el resumen del banco — que es exactamente el trabajo que esta pantalla venía
+// a sacar.
+//
+// Esto es la otra mitad: el extracto de la cuenta como lo daría el banco. Mismo origen que
+// los totales de arriba, así que la suma de estas filas da el saldo calculado al peso; si
+// diera distinto, una de las dos estaría mintiendo y no habría forma de saber cuál.
+//
+// Lo que se busca acá es siempre lo mismo: el movimiento que está en el resumen y no está en
+// esta lista, o el que está acá dos veces.
+
+export interface MovimientoCuentaDetalle {
+  fecha: string;
+  descripcion: string;
+  // Firmado como lo mueve en ESTA cuenta: entra positivo, sale negativo.
+  monto: number;
+  tipo: 'cobro' | 'gasto' | 'entra' | 'sale';
+  // Para poder ir a corregirlo donde se cargó.
+  id_gasto?: string;
+}
+
+export function movimientosDeCuenta(
+  medio: string,
+  gastos: Gasto[], cobranzas: Cobranza[], anio: number, mes: number,
+  cobranzasXubio: { fecha: any; cuenta: any; importe: any; cliente?: any; numero?: any }[] = [],
+): MovimientoCuentaDetalle[] {
+  const mm = String(mes).padStart(2, '0');
+  const desde = `${anio}-${mm}-01`;
+  const hasta = `${anio}-${mm}-${String(new Date(anio, mes, 0).getDate()).padStart(2, '0')}`;
+  const kMedio = claveCuenta(medio);
+  const out: MovimientoCuentaDetalle[] = [];
+
+  // Los cobros: los que vienen de Xubio y los cargados a mano, con el mismo criterio de
+  // nombre de cuenta que usa el total de arriba.
+  for (const c of cobranzasXubio || []) {
+    const f = dia(c.fecha);
+    if (f < desde || f > hasta) continue;
+    if (!claveCuenta(c.cuenta).includes(kMedio)) continue;
+    out.push({
+      fecha: f,
+      descripcion: [String(c.cliente || '').trim(), String(c.numero || '').trim()].filter(Boolean).join(' · ') || 'Cobro',
+      monto: num(c.importe),
+      tipo: 'cobro',
+    });
+  }
+  for (const c of cobranzas || []) {
+    const f = dia(c.fecha);
+    if (f < desde || f > hasta) continue;
+    if (c.medio_pago !== medio) continue;
+    out.push({ fecha: f, descripcion: String(c.notas || '').trim() || 'Cobro cargado a mano', monto: num(c.monto), tipo: 'cobro' });
+  }
+
+  // Los gastos, por fecha de PAGO: un saldo no se mueve cuando se compra sino cuando sale la
+  // plata. Mismo filtro que el total.
+  for (const g of pagadosEnRango(gastos, desde, hasta)) {
+    const f = fechaDeCaja(g) || dia(g.fecha);
+    const esInterno = g.categoria === 'movimiento_interno';
+    if (g.medio_pago === medio) {
+      out.push({
+        fecha: f,
+        descripcion: String(g.descripcion || '').trim() || String(g.categoria || ''),
+        monto: -num(g.monto),
+        tipo: esInterno ? 'sale' : 'gasto',
+        id_gasto: String(g.id_gasto || ''),
+      });
+    }
+    if (esInterno && (g as any).medio_pago_destino === medio) {
+      out.push({
+        fecha: f,
+        descripcion: String(g.descripcion || '').trim() || `Desde ${g.medio_pago}`,
+        monto: num(g.monto),
+        tipo: 'entra',
+        id_gasto: String(g.id_gasto || ''),
+      });
+    }
+  }
+
+  return out.sort((a, b) => a.fecha.localeCompare(b.fecha) || Math.abs(b.monto) - Math.abs(a.monto));
 }
 
 export function saldosDelMes(
