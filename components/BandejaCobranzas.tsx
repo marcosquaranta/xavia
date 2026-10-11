@@ -24,7 +24,7 @@ interface ClienteOpt {
   // % que este cliente retiene al pagar. Se configura en Admin → Clientes de venta.
   retencionPct?: number;
 }
-interface FacturaCliente { numero: string; fecha: string; importe: number; yaCobrada: boolean; saldadaManual?: boolean; cubierta?: boolean }
+interface FacturaCliente { numero: string; fecha: string; importe: number; yaCobrada: boolean; saldadaManual?: boolean; cubierta?: boolean; imputadaManual?: boolean }
 
 const inputStyle: React.CSSProperties = {
   fontSize: '12.5px', padding: '5px 7px', border: '1px solid #d1d5db', borderRadius: '5px', width: '100%',
@@ -443,7 +443,7 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
               {verTodas && (
                 <div style={{ marginTop: '5px', maxHeight: '190px', overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '4px 6px' }}>
                   {facturas.map((f) => {
-                    const cerrada = f.yaCobrada || f.saldadaManual || f.cubierta;
+                    const cerrada = f.yaCobrada || f.saldadaManual || f.cubierta || f.imputadaManual;
                     return (
                       <label key={f.numero}
                         style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '11.5px', padding: '2px 0', cursor: 'pointer', opacity: cerrada ? 0.5 : 1 }}>

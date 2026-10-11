@@ -86,7 +86,7 @@ export default function FacturasViejas({
       .sort((a, b) => a.fecha.localeCompare(b.fecha));
   }, [facturasPorCliente, traidas, locales, idControl]);
 
-  const abiertas = useMemo(() => todas.filter((f) => !f.yaCobrada && !f.saldadaManual && !f.cubierta), [todas]);
+  const abiertas = useMemo(() => todas.filter((f) => !f.yaCobrada && !f.saldadaManual && !f.cubierta && !f.imputadaManual), [todas]);
   const visibles = verTodas ? todas : abiertas;
   // Solo se puede tildar lo que sigue abierto: marcar como saldada una que ya se cobró no
   // cambia nada y ensucia el registro con una decisión que nadie tomó.
@@ -240,7 +240,7 @@ export default function FacturasViejas({
             <tbody>
               {visibles.map((f) => {
                 const dias = diasDesde(f.fecha);
-                const cerrada = f.yaCobrada || f.saldadaManual || f.cubierta;
+                const cerrada = f.yaCobrada || f.saldadaManual || f.cubierta || f.imputadaManual;
                 return (
                   <tr key={f.numero} style={{ borderTop: '1px solid #f3f4f6', opacity: cerrada ? 0.55 : 1 }}>
                     <td style={{ padding: '4px 6px' }}>
@@ -258,6 +258,7 @@ export default function FacturasViejas({
                     <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmt(f.importe)}</td>
                     <td style={{ padding: '4px 6px', fontSize: '11.5px', color: cerrada ? '#059669' : '#b45309' }}>
                       {f.yaCobrada ? 'cobrada en la app'
+                        : f.imputadaManual ? 'imputada a un cobro'
                         : f.saldadaManual ? 'saldada a mano'
                         : f.cubierta ? 'cubierta por cobros de Xubio'
                         : 'abierta'}
