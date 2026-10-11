@@ -41,6 +41,14 @@ export interface OrigenAplicacion {
   cajaEsperada: number;
   cajaReal: number | null;   // null = no hay saldos cargados para comparar
   sinExplicar: number | null;
+  // El "sin explicar", partido en las dos cosas distintas que lo componen. Un solo número
+  // junta dos problemas que se arreglan en lugares diferentes, y entonces no se arregla
+  // ninguno: hay que saber cuánto es "falta cargar un movimiento" y cuánto es "el puente
+  // no llega".
+  porCuentasQueNoCierran: number | null;
+  porElPuente: number | null;
+  movimientoSinConfirmar: number;
+  cuentasSinReal: string[];
 }
 
 // Cuánto se debía a proveedores al cierre de un día: compras cargadas hasta esa fecha que
@@ -81,6 +89,24 @@ export interface EntradasFondos {
   stockFin: number | null;
   cajaInicio: number | null;
   cajaFin: number | null;
+  // ── Gastos que pagaron los socios de su bolsillo ────────────────────────────────
+  //
+  // 'Aporte socios' figura como un medio de pago más, así que un gasto pagado así entra al
+  // resultado como cualquier otro. Y está bien que entre: el costo existió. Pero la plata
+  // no salió de ninguna cuenta de la empresa, así que si no se dice, el puente pide que la
+  // caja haya bajado por algo que nunca la tocó.
+  //
+  // Hasta ahora quedaba escondido: 'Aporte socios' se sumaba al total de caja como si fuera
+  // un banco, con un saldo enormemente negativo, y el número se compensaba solo sin
+  // aparecer en ningún renglón. El total daba igual y la explicación no estaba en ninguna
+  // parte — que es la peor forma de tener razón.
+  gastosPagadosPorSocios: number;
+  // Lo que el resumen del banco dice y la app no registró: la suma de las diferencias de
+  // cada cuenta. Es la mitad del "sin explicar" que SÍ tiene nombre y cuenta.
+  diferenciaDeCuentas: number;
+  // Cuánto movimiento quedó sin confirmar porque esa cuenta no tiene saldo del resumen.
+  movimientoSinConfirmar: number;
+  cuentasSinReal: string[];
 }
 
 export function origenYAplicacion(e: EntradasFondos): OrigenAplicacion {
@@ -115,6 +141,15 @@ export function origenYAplicacion(e: EntradasFondos): OrigenAplicacion {
     });
   }
 
+  if (Math.round(e.gastosPagadosPorSocios) !== 0) {
+    lineas.push({
+      label: 'Gastos que pagaron los socios',
+      // El costo restó del resultado pero la plata no salió de ninguna cuenta de la empresa.
+      monto: Math.round(e.gastosPagadosPorSocios),
+      detalle: 'Cargados con medio de pago «Aporte socios»: no salieron de la caja',
+    });
+  }
+
   const hayStock = e.stockInicio !== null && e.stockFin !== null;
   const deltaStock = hayStock ? Math.round((e.stockFin as number) - (e.stockInicio as number)) : 0;
   if (hayStock && deltaStock !== 0) {
@@ -131,12 +166,30 @@ export function origenYAplicacion(e: EntradasFondos): OrigenAplicacion {
     ? Math.round((e.cajaFin as number) - (e.cajaInicio as number))
     : null;
 
+  const sinExplicar = cajaReal === null ? null : Math.round(cajaReal - cajaEsperada);
+
+  // Las dos mitades del sin explicar.
+  //
+  //   sinExplicar = (lo que el banco dice y la app no registró) + (lo que el puente no llega
+  //                  a explicar aunque todo esté registrado)
+  //
+  // La primera se arregla cargando el movimiento que falta, y la app ya sabe en qué cuenta
+  // está. La segunda no se arregla cargando nada: es que el puente le está errando a algún
+  // desfase entre lo devengado y lo pagado. Mezcladas en un solo número, cualquiera de las
+  // dos se lee como la otra y se busca donde no está.
+  const porCuentasQueNoCierran = cajaReal === null ? null : Math.round(e.diferenciaDeCuentas);
+  const porElPuente = sinExplicar === null ? null : Math.round(sinExplicar - (porCuentasQueNoCierran || 0));
+
   return {
     resultado: Math.round(e.resultado),
     lineas,
     cajaEsperada,
     cajaReal,
-    sinExplicar: cajaReal === null ? null : Math.round(cajaReal - cajaEsperada),
+    sinExplicar,
+    porCuentasQueNoCierran,
+    porElPuente,
+    movimientoSinConfirmar: Math.round(e.movimientoSinConfirmar),
+    cuentasSinReal: e.cuentasSinReal,
   };
 }
 

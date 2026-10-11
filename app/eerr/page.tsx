@@ -20,6 +20,7 @@ import InstruccionesCierre from './InstruccionesCierre';
 import { leerPasosManuales, marcadosDelMes } from '@/lib/cierreManual';
 import OrigenAplicacionCard from '@/components/OrigenAplicacion';
 import { origenYAplicacion, deudaProveedoresAlCierre, causasDeLaDiferencia } from '@/lib/origenAplicacion';
+import { pagadosEnRango } from '@/lib/proveedores';
 import { calcularValorizacionMes as valorizacionDelMes } from '@/lib/valorizacionStock';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 export const dynamic = 'force-dynamic';
@@ -145,11 +146,39 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   const finMesPrev = `${anioPrev}-${mmPrev}-${String(new Date(anioPrev, mesPrev, 0).getDate()).padStart(2, '0')}`;
   const valorAct = valorizacionDelMes(articulos, stocks, anio, mes);
   const valorPrev = valorizacionDelMes(articulos, stocks, anioPrev, mesPrev);
+  // 'Aporte socios' NO es una cuenta de caja.
+  //
+  // Es un medio de pago en la lista, así que aparece en la tabla de saldos como un banco
+  // más, con un saldo que se hunde cada vez que un socio paga algo de su bolsillo. Sumado al
+  // total de caja, hacía que la caja del mes cayera por plata que nunca estuvo en una cuenta
+  // de la empresa — y el puente se compensaba solo, sin que el número apareciera en ningún
+  // renglón. El total daba bien y la explicación no estaba en ninguna parte.
+  //
+  // Ahora sale de la caja y entra al puente como lo que es: un gasto real que no la tocó.
+  const esCaja = (x: { medio: string }) => x.medio !== 'Aporte socios';
+  const saldosCaja = saldos.filter(esCaja);
   const sumaSaldos = (xs: typeof saldos, campo: 'inicial' | 'calculado') =>
     xs.reduce((a, x) => a + (campo === 'inicial' ? x.inicial : (x.real ?? x.calculado)), 0);
   // Solo se compara contra la caja si hay saldos reales cargados: con los calculados, la
   // diferencia daría cero siempre y el bloque diría que todo cierra cuando no se sabe.
-  const hayCajaReal = saldos.some((x) => x.real !== null) && saldos.some((x) => x.hayInicial);
+  const hayCajaReal = saldosCaja.some((x) => x.real !== null) && saldosCaja.some((x) => x.hayInicial);
+
+  // Lo que los socios pagaron de su bolsillo este mes, por fecha de caja — el mismo criterio
+  // con el que se arma el saldo de cualquier cuenta.
+  const gastosSocios = pagadosEnRango(gastos, desdeMes, hastaMes)
+    .filter((g) => g.medio_pago === 'Aporte socios' && g.categoria !== 'movimiento_interno')
+    .reduce((a, g) => a + (Number(g.monto) || 0), 0);
+
+  // Lo que el resumen dice y la app no registró, sumado. Es la mitad del "sin explicar" que
+  // tiene nombre y cuenta; la otra mitad es que el puente no llega.
+  const difDeCuentas = saldosCaja
+    .filter((x) => x.real !== null)
+    .reduce((a, x) => a + (x.diferencia || 0), 0);
+  // Y cuánto movimiento quedó sin confirmar: el de las cuentas que no tienen saldo del
+  // resumen. No es un error, es incertidumbre — pero hay que poder ponerle un número, porque
+  // mientras sea grande el "sin explicar" no significa nada.
+  const sinReal = saldosCaja.filter((x) => x.real === null);
+  const movimientoSinConfirmar = sinReal.reduce((a, x) => a + Math.abs(x.calculado - x.inicial), 0);
 
   const fondos = origenYAplicacion({
     resultado: act.resultado,
@@ -160,8 +189,12 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
     previsionesMes: (previsionesDelMes?.despidos || 0) + (previsionesDelMes?.sac || 0),
     stockInicio: valorPrev.total ?? null,
     stockFin: valorAct.total ?? null,
-    cajaInicio: hayCajaReal ? sumaSaldos(saldos, 'inicial') : null,
-    cajaFin: hayCajaReal ? sumaSaldos(saldos, 'calculado') : null,
+    cajaInicio: hayCajaReal ? sumaSaldos(saldosCaja, 'inicial') : null,
+    cajaFin: hayCajaReal ? sumaSaldos(saldosCaja, 'calculado') : null,
+    gastosPagadosPorSocios: gastosSocios,
+    diferenciaDeCuentas: difDeCuentas,
+    movimientoSinConfirmar,
+    cuentasSinReal: sinReal.map((x) => x.medio),
   });
 
   const esMesActual = anio === hoy.getFullYear() && mes === (hoy.getMonth() + 1);
@@ -290,7 +323,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
         </div>
 
         <div id="fondos" style={{ scrollMarginTop: '16px' }}>
-          <OrigenAplicacionCard datos={fondos} causas={causasDeLaDiferencia(saldos)} nombreMes={nombre} />
+          <OrigenAplicacionCard datos={fondos} causas={causasDeLaDiferencia(saldosCaja)} nombreMes={nombre} />
         </div>
 
         <div className="card" id="cuentas" style={{ marginTop: '12px', scrollMarginTop: '16px' }}>

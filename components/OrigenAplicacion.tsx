@@ -14,6 +14,7 @@ const fmt = (n: number) => (n < 0 ? '−' : '') + '$' + Math.abs(Math.round(n)).
 
 export default function OrigenAplicacionCard({ datos, causas = [], nombreMes }: { datos: OrigenAplicacion; causas?: CausaDiferencia[]; nombreMes: string }) {
   const { resultado, lineas, cajaEsperada, cajaReal, sinExplicar } = datos;
+  const { porCuentasQueNoCierran, porElPuente, movimientoSinConfirmar, cuentasSinReal } = datos;
 
   return (
     <div className="card" style={{ marginBottom: '14px' }}>
@@ -75,6 +76,59 @@ export default function OrigenAplicacionCard({ datos, causas = [], nombreMes }: 
         </tbody>
       </table>
 
+      {/* ── De qué está hecho el "sin explicar" ─────────────────────────────────────
+          Un solo número junta dos problemas que se arreglan en lugares distintos, y
+          entonces no se arregla ninguno. Partido, cada mitad dice qué hacer:
+            · lo que el banco dice y la app no registró  → cargar el movimiento que falta,
+              y abajo está en qué cuenta;
+            · lo que el puente no llega a explicar       → no se arregla cargando nada: es
+              un desfase entre lo devengado y lo pagado que este puente todavía no modela. */}
+      {cajaReal !== null && Math.abs(sinExplicar || 0) > 1000 && (
+        <div style={{ marginTop: '10px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '7px', padding: '9px 11px' }}>
+          <p style={{ margin: '0 0 6px', fontSize: '11.5px', fontWeight: 700, color: '#92400e' }}>
+            Ese «sin explicar» son dos cosas distintas
+          </p>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+            <tbody>
+              <tr>
+                <td style={{ padding: '3px 0', color: '#374151' }}>
+                  Lo que el resumen dice y la app no registró
+                  <span style={{ display: 'block', fontSize: '11px', color: '#9ca3af' }}>
+                    Suma de las diferencias de cada cuenta. Se arregla cargando el movimiento que falta — abajo dice en cuál.
+                  </span>
+                </td>
+                <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                  {fmt(porCuentasQueNoCierran || 0)}
+                </td>
+              </tr>
+              <tr style={{ borderTop: '1px solid #fde68a' }}>
+                <td style={{ padding: '3px 0', color: '#374151' }}>
+                  Lo que el puente no llega a explicar
+                  <span style={{ display: 'block', fontSize: '11px', color: '#9ca3af' }}>
+                    Todo registrado y aun así la caja no coincide: queda un desfase entre lo que costó el mes y lo que
+                    efectivamente se pagó que estas líneas todavía no nombran. Cargar más movimientos no lo mueve.
+                  </span>
+                </td>
+                <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                  {fmt(porElPuente || 0)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          {/* Cuánto de todo esto es directamente incertidumbre. No es un error: es que no
+              hay con qué comparar. Mientras sea grande, el "sin explicar" no significa nada
+              y buscar el movimiento que falta es perder el tiempo. */}
+          {cuentasSinReal.length > 0 && (
+            <p style={{ margin: '7px 0 0', fontSize: '11.5px', color: '#92400e', lineHeight: 1.5 }}>
+              Antes de buscar nada: {cuentasSinReal.length === 1 ? 'la cuenta' : 'las cuentas'}{' '}
+              <strong>{cuentasSinReal.join(', ')}</strong> no {cuentasSinReal.length === 1 ? 'tiene' : 'tienen'} saldo
+              del resumen cargado, y entre todas movieron <strong>{fmt(movimientoSinConfirmar)}</strong> sin
+              confirmar. Mientras eso siga así, nada de lo de arriba se puede dar por cierto.
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Las causas CALCULADAS, con nombre y monto. Enumerar causas posibles obliga a salir a
           buscar cuál; decir "Caja MQ: faltan $180.000" termina la búsqueda ahí mismo. */}
       {causas.length > 0 && (
@@ -95,19 +149,6 @@ export default function OrigenAplicacionCard({ datos, causas = [], nombreMes }: 
               ))}
             </tbody>
           </table>
-          {(() => {
-            const explicado = causas.reduce((a, c) => a + c.monto, 0);
-            const resto = Math.round((sinExplicar || 0) - explicado);
-            if (Math.abs(resto) < 1000) return null;
-            // Lo que ni siquiera las cuentas explican. Casi siempre es un cobro o un gasto
-            // que pasó por una caja que no se está siguiendo.
-            return (
-              <p style={{ margin: '6px 0 0', fontSize: '11.5px', color: '#92400e' }}>
-                Quedan <strong>{fmt(resto)}</strong> que ninguna cuenta explica: suele ser plata que entró o salió
-                por un medio que no está en la lista de cuentas seguidas.
-              </p>
-            );
-          })()}
         </div>
       )}
 
