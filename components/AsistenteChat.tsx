@@ -16,14 +16,19 @@ interface Msg { rol: 'user' | 'assistant'; texto: string }
 const SUGERENCIAS_ADMIN = [
   '¿Cuánto nos debe cada cliente?',
   '¿Qué falta para cerrar el mes?',
-  '¿Cuánto dio el resultado del mes pasado?',
   '¿Qué cuenta no cierra contra el banco?',
-  '¿Cuánto stock de cubos queda?',
+  '¿Cuánto dio el resultado del mes pasado?',
+  '¿Qué insumo se consumió más que el mes pasado?',
+  '¿Cuánto le debemos a proveedores?',
+  '¿Cómo viene el precio de los cubos?',
 ];
 const SUGERENCIAS_OPERACION = [
   '¿Qué tareas hay hoy?',
   '¿Cuántas planchas sembramos hoy y de qué?',
   '¿Qué lotes de rúcula hay en F2?',
+  '¿Cuánto lugar libre hay en la nave 2?',
+  '¿Cuánto cosechamos esta semana?',
+  '¿Dónde se nos está yendo más planta por descarte?',
   '¿Cuántos cubos quedan en stock?',
 ];
 
@@ -68,7 +73,7 @@ export default function AsistenteChat({ esAdmin, nombre }: { esAdmin: boolean; n
         <span style={{ fontSize: '18px', lineHeight: 1 }}>💬</span>
         <span style={{ fontSize: '14px', fontWeight: 700, color: '#111827' }}>Preguntale a la app</span>
         <span style={{ fontSize: '12px', color: '#9ca3af' }}>
-          {esAdmin ? 'stock, deuda, saldos, resultado, cierre, lotes…' : 'tareas, siembra, lotes y stock'}
+          {esAdmin ? 'stock, lotes, cosechas, deuda, saldos, resultado, cierre…' : 'tareas, siembra, lotes, cosechas, descarte y stock'}
         </span>
         <span style={{ marginLeft: 'auto', fontSize: '11px', color: '#9ca3af' }}>{abierto ? 'cerrar' : 'abrir'}</span>
       </div>

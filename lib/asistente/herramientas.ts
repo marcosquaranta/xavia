@@ -182,6 +182,159 @@ export const HERRAMIENTAS: Herramienta[] = [
     },
   },
 
+  {
+    nombre: 'detalle_de_lote',
+    descripcion: 'Todo sobre un lote: variedad, fase, ubicación, fechas de cada fase, días en cada una, plantas, cosecha y descarte. Sirve para "cómo viene el lote L-0345".',
+    schema: {
+      type: 'object',
+      properties: { id_lote: { type: 'string', description: 'El código del lote, ej L-0345.' } },
+      required: ['id_lote'],
+    },
+    soloAdmin: false,
+    ejecutar: async (a, { p }) => {
+      const [lotes, movimientos] = await Promise.all([p.lotes(), p.movimientos()]);
+      const { calcularDiasPorFase } = await import('../lotes');
+      const id = String(a.id_lote || '').trim().toUpperCase();
+      const l = lotes.find((x) => String(x.id_lote).toUpperCase() === id);
+      if (!l) return { error: `No existe el lote ${id}.` };
+      const movs = movimientos
+        .filter((m) => String(m.id_lote).toUpperCase() === id)
+        .sort((x, y) => String(x.fecha).localeCompare(String(y.fecha)));
+      return {
+        lote: l.id_lote, variedad: l.variedad, fase: l.fase_actual, ubicacion: l.ubicacion_actual, estado: l.estado,
+        fecha_siembra: String(l.fecha_siembra || '').split('T')[0],
+        dias_por_fase: calcularDiasPorFase(l, movimientos),
+        plantines_iniciales: num(l.plantines_iniciales),
+        plantas_estimadas: num(l.plantas_estimadas_actual),
+        unidades_cosechadas: num(l.unidades_cosechadas),
+        plantas_por_unidad_real: num(l.plantas_por_unidad_real) || null,
+        descarte_reportado: num(l.descarte_reportado),
+        peso_total_estimado_kg: num(l.peso_total_estimado_kg) || null,
+        notas: String(l.notas || ''),
+        movimientos: movs.map((m) => ({
+          fecha: String(m.fecha).split('T')[0], tipo: m.tipo,
+          de: m.fase_origen || m.ubicacion_origen, a: m.fase_destino || m.ubicacion_destino,
+          plantas: num(m.plantas_estimadas) || null,
+          unidades_cosechadas: num(m.unidades_cosechadas) || null,
+          descarte: num(m.descarte_reportado) || null,
+          notas: String(m.notas || ''),
+        })),
+      };
+    },
+  },
+  {
+    nombre: 'cosechas_del_periodo',
+    descripcion: 'Qué se cosechó en un rango de fechas, por variedad y por lote: unidades, plantas y kilos. Sirve para "cuánto cosechamos esta semana" o "cuánta rúcula salió en septiembre".',
+    schema: {
+      type: 'object',
+      properties: {
+        desde: { type: 'string', description: 'YYYY-MM-DD' },
+        hasta: { type: 'string', description: 'YYYY-MM-DD' },
+      },
+      required: ['desde', 'hasta'],
+    },
+    soloAdmin: false,
+    ejecutar: async (a, { p }) => {
+      const [lotes, movimientos] = await Promise.all([p.lotes(), p.movimientos()]);
+      const desde = String(a.desde), hasta = String(a.hasta);
+      const porLote = new Map(lotes.map((l) => [String(l.id_lote), l]));
+      const porVariedad = new Map<string, { unidades: number; plantas: number; descarte: number; lotes: number }>();
+      const detalle: any[] = [];
+      for (const m of movimientos) {
+        if (String(m.tipo).toLowerCase() !== 'cosecha') continue;
+        const f = String(m.fecha || '').split(/[T ]/)[0];
+        if (f < desde || f > hasta) continue;
+        const l = porLote.get(String(m.id_lote));
+        const variedad = String(l?.variedad || 'sin variedad');
+        const prev = porVariedad.get(variedad) || { unidades: 0, plantas: 0, descarte: 0, lotes: 0 };
+        prev.unidades += num(m.unidades_cosechadas);
+        prev.plantas += num(m.plantas_estimadas);
+        prev.descarte += num(m.descarte_reportado);
+        prev.lotes += 1;
+        porVariedad.set(variedad, prev);
+        detalle.push({
+          fecha: f, lote: m.id_lote, variedad,
+          unidades: num(m.unidades_cosechadas), plantas: num(m.plantas_estimadas),
+          descarte: num(m.descarte_reportado), cosechador: String(m.cosechador || ''),
+        });
+      }
+      return {
+        desde, hasta,
+        por_variedad: [...porVariedad.entries()].map(([variedad, v]) => ({ variedad, ...v, unidades: Math.round(v.unidades), plantas: Math.round(v.plantas) })),
+        cosechas: detalle.sort((x, y) => y.fecha.localeCompare(x.fecha)).slice(0, 80),
+      };
+    },
+  },
+  {
+    nombre: 'descarte_por_fase',
+    descripcion: 'El descarte de los últimos meses abierto por fase (plantinera, F1, F2, cámara) y por cultivo, con el porcentaje sobre lo sembrado. Sirve para "dónde se nos está yendo la planta".',
+    schema: { type: 'object', properties: { meses: { type: 'number', description: 'Cuántos meses hacia atrás. Por defecto 6.' } } },
+    soloAdmin: false,
+    ejecutar: async (a, { p }) => {
+      const [lotes, movimientos, camara] = await Promise.all([
+        p.lotes(), p.movimientos(), p.hoja<any>('StockCamara'),
+      ]);
+      const { descartePorFaseMes, resumenDescartePorCultivo } = await import('../descarte');
+      const meses = descartePorFaseMes(lotes, movimientos, camara, Math.max(1, Math.min(12, Number(a?.meses) || 6)));
+      return { por_mes: meses, resumen_por_cultivo: resumenDescartePorCultivo(meses) };
+    },
+  },
+  {
+    nombre: 'ocupacion_de_naves',
+    descripcion: 'Cuántas posiciones hay ocupadas y libres hoy, por nave y por mesada. Sirve para "cuánto lugar libre tengo en la nave 2".',
+    schema: { type: 'object', properties: {} },
+    soloAdmin: false,
+    ejecutar: async (_a, { p }) => {
+      const [ubicaciones, lotes] = await Promise.all([p.ubicaciones(), p.lotes()]);
+      const { ocupacionPorNave, ocupacionPorMesada } = await import('../ocupacion');
+      return {
+        naves: ocupacionPorNave(ubicaciones, lotes),
+        mesadas: ocupacionPorMesada(ubicaciones, lotes)
+          .map((m) => ({ mesada: m.nombre, nave: m.nave, capacidad: m.capacidad, plantas: m.plantas_vivas, ocupacion_pct: m.ocupacion_pct, huecos: m.huecos_libres })),
+      };
+    },
+  },
+  {
+    nombre: 'consumo_historico_de_insumo',
+    descripcion: 'Cuánto se consumió de un artículo mes a mes, para ver si un consumo se fue de línea. Es el mismo informe comparativo de la pantalla de Stocks.',
+    schema: {
+      type: 'object',
+      properties: {
+        articulo: { type: 'string', description: 'Nombre del artículo (búsqueda por texto).' },
+        meses: { type: 'number', description: 'Cuántos meses hacia atrás. Por defecto 6.' },
+      },
+    },
+    soloAdmin: false,
+    ejecutar: async (a, { p, hoy }) => {
+      const [articulos, stocks] = await Promise.all([p.articulos(), p.stocks()]);
+      const { emparejarHistoricos, usoHistoricoDe } = await import('../usosHistoricos');
+      const pares = emparejarHistoricos(articulos.map((x) => x.articulo));
+      const norm = (x: any) => String(x || '').toLowerCase();
+      const n = Math.max(1, Math.min(18, Number(a?.meses) || 6));
+      const def = mesPorDefecto(hoy);
+      const serie: { anio: number; mes: number }[] = [];
+      let anio = def.anio, mes = def.mes;
+      for (let i = 0; i < n; i++) { serie.unshift({ anio, mes }); mes--; if (mes === 0) { mes = 12; anio--; } }
+      const elegidos = articulos
+        .filter((art) => String(art.activo) === 'SI')
+        .filter((art) => !a?.articulo || norm(art.articulo).includes(norm(a.articulo)) || norm(art.categoria).includes(norm(a.articulo)));
+      return {
+        meses: serie.map((x) => `${x.anio}-${String(x.mes).padStart(2, '0')}`),
+        articulos: elegidos.slice(0, 25).map((art) => ({
+          articulo: art.articulo, unidad: art.unidad_medida,
+          consumo: serie.map((x) => {
+            const hist = usoHistoricoDe(art.articulo, x.anio, x.mes, pares);
+            if (hist !== null) return hist;
+            const st = stocks.find((y) => String(y.id_articulo) === String(art.id_articulo)
+              && String(y.anio) === String(x.anio) && String(y.mes) === String(x.mes));
+            return st ? num(st.uso_calculado) : null;
+          }),
+        })),
+        nota: 'null = ese mes no tiene datos cargados, que no es lo mismo que consumo cero. Hasta agosto de 2026 los números salen del Excel anterior a la app.',
+      };
+    },
+  },
+
   // ── Plata: solo admin ─────────────────────────────────────────────────────────────
   {
     nombre: 'resultado_del_mes',
@@ -420,6 +573,65 @@ export const HERRAMIENTAS: Herramienta[] = [
         por_articulo: [...porArticulo.entries()].sort((x, y) => y[1] - x[1])
           .map(([articulo, unidades]) => ({ articulo, unidades: Math.round(unidades) })),
       };
+    },
+  },
+  {
+    nombre: 'deuda_a_proveedores',
+    descripcion: 'Lo que la empresa debe a proveedores: compras cargadas como pendientes de pago, agrupadas por proveedor, con lo que ya está vencido y lo que vence pronto.',
+    schema: { type: 'object', properties: {} },
+    soloAdmin: true,
+    ejecutar: async (_a, { p, hoy }) => {
+      const gastos = await p.gastos();
+      const { deudaProveedores, aVencerEn } = await import('../proveedores');
+      const deuda = deudaProveedores(gastos, hoy);
+      return {
+        total: $(deuda.reduce((s2, d) => s2 + d.total, 0)),
+        vencido: $(deuda.reduce((s2, d) => s2 + d.vencido, 0)),
+        a_vencer_7_dias: $(aVencerEn(gastos, hoy, 7)),
+        proveedores: deuda.map((d) => ({
+          proveedor: d.proveedor, total: $(d.total), vencido: $(d.vencido),
+          items: d.items.map((i: any) => ({ fecha: i.fecha, vencimiento: i.vencimiento, descripcion: i.descripcion, monto: $(num(i.monto)) })),
+        })),
+      };
+    },
+  },
+  {
+    nombre: 'compras_de_insumo',
+    descripcion: 'Las compras de un insumo a lo largo del tiempo: fecha, cantidad, precio unitario y medio de pago. Sirve para ver cómo evolucionó el precio o cuándo se compró por última vez.',
+    schema: {
+      type: 'object',
+      properties: {
+        articulo: { type: 'string', description: 'Nombre del artículo (búsqueda por texto).' },
+        meses: { type: 'number', description: 'Cuántos meses hacia atrás. Por defecto 12.' },
+      },
+      required: ['articulo'],
+    },
+    soloAdmin: true,
+    ejecutar: async (a, { p, hoy }) => {
+      const [articulos, gastos] = await Promise.all([p.articulos(), p.gastos()]);
+      const norm = (x: any) => String(x || '').toLowerCase();
+      const arts = articulos.filter((art) => norm(art.articulo).includes(norm(a.articulo)));
+      const ids = new Set(arts.map((x) => String(x.id_articulo)));
+      const n = Math.max(1, Math.min(36, Number(a?.meses) || 12));
+      const [ay, am] = hoy.split('-').map(Number);
+      const d = new Date(ay, am - 1 - n, 1);
+      const desde = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+      const compras = gastos
+        .filter((g) => ids.has(String(g.id_articulo)))
+        .filter((g) => String(g.fecha || '').split(/[T ]/)[0] >= desde)
+        .map((g) => {
+          const cant = num(g.cantidad), monto = num(g.monto);
+          return {
+            fecha: String(g.fecha).split('T')[0],
+            articulo: arts.find((x) => String(x.id_articulo) === String(g.id_articulo))?.articulo || '',
+            cantidad: cant, monto: $(monto),
+            precio_unitario: cant > 0 ? Math.round((monto / cant) * 100) / 100 : null,
+            medio_pago: g.medio_pago, proveedor: String(g.proveedor || ''),
+            descripcion: String(g.descripcion || ''),
+          };
+        })
+        .sort((x, y) => y.fecha.localeCompare(x.fecha));
+      return { desde, articulos_encontrados: arts.map((x) => x.articulo), compras: compras.slice(0, 60) };
     },
   },
   {
