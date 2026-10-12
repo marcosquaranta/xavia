@@ -25,6 +25,13 @@ export const DRIVERS = [
   { key: 'paquetes_vendidos_lechuga_sin_kg', label: 'Paquetes vendidos — lechuga sin kg' },
   { key: 'paquetes_vendidos_total_sin_kg',   label: 'Paquetes vendidos — total sin kg' },
   { key: 'paquetes_vendidos_albahaca',       label: 'Paquetes vendidos — albahaca' },
+  // Ensaladas: llevan su propio packaging —bandeja de cartón, bolsa, queso rallado— que no
+  // sigue a los paquetes ni a las planchas. Sin estos drivers, esos insumos quedaban sin
+  // fórmula de uso teórico, y un artículo sin fórmula no se puede estimar: la pantalla no
+  // sabe cuánto queda hasta que alguien lo cuenta a mano.
+  { key: 'ensaladas_vendidas_rucula',        label: 'Ensaladas vendidas — de rúcula y parmesano' },
+  { key: 'ensaladas_vendidas_lechuga',       label: 'Ensaladas vendidas — clásica (lechuga)' },
+  { key: 'ensaladas_vendidas_total',         label: 'Ensaladas vendidas — total' },
   { key: 'paquetes_cosechados_rucula',  label: 'Paquetes cosechados — rúcula' },
   { key: 'plantas_cosechadas_lechuga',  label: 'Plantas cosechadas — lechuga' },
   { key: 'paquetes_cosechados_albahaca', label: 'Paquetes cosechados — albahaca' },
@@ -91,6 +98,17 @@ export function calcularDriversMes(
   const rucBolsa = Math.max(0, ventasRango.rucula.unidades - rucKg - rucBandeja);
   const lechSinKg = Math.max(0, ventasRango.lechuga.unidades - ventasRango.lechuga.unidadesKg);
 
+  // Las ensaladas se cuentan de las filas de venta directamente y no de `ventasRango`: ahí
+  // una ensalada entra como las PLANTAS que consume (una lleva dos y media), y para el
+  // packaging lo que importa es cuántas ensaladas salieron — una bandeja por ensalada, no
+  // por planta.
+  const delMes = (ventas || []).filter((v) => {
+    const f = String(v.fecha || '').split(/[T ]/)[0];
+    return f >= desde && f <= hasta;
+  });
+  const ensRucula = delMes.reduce((a, v) => a + (Number((v as any).ensalada_rucula_parmesano) || 0), 0);
+  const ensLechuga = delMes.reduce((a, v) => a + (Number((v as any).ensalada_clasica) || 0), 0);
+
   return {
     planchas_sembradas_rucula: planchasRucula,
     planchas_sembradas_lechuga: planchasLechuga,
@@ -108,6 +126,9 @@ export function calcularDriversMes(
     paquetes_vendidos_lechuga_sin_kg: lechSinKg,
     paquetes_vendidos_total_sin_kg: rucBolsa + rucBandeja + lechSinKg,
     paquetes_vendidos_albahaca: ventasRango.albahaca.unidades,
+    ensaladas_vendidas_rucula: ensRucula,
+    ensaladas_vendidas_lechuga: ensLechuga,
+    ensaladas_vendidas_total: ensRucula + ensLechuga,
     paquetes_cosechados_rucula: paqRucula,
     plantas_cosechadas_lechuga: plantasLech,
     paquetes_cosechados_albahaca: paqAlbahaca,
