@@ -13,7 +13,11 @@ import { generarAlertas, motivoAlertaCosecha, alertasStockBajo, type MotivoAlert
 import { leerDescartes, sinDescartadas } from '@/lib/alertasDescartadas';
 import DescartarAlerta from '@/components/DescartarAlerta';
 import { calcularDriversMes } from '@/lib/usoTeorico';
-import { calcularCamara, diferenciaAjustesMes, ventasDeHoyYaDescontadas } from '@/lib/camara';
+import { calcularCamara, diferenciaAjustesMes, ventasDeHoyYaDescontadas, DIAS_CAMARA_ALERTA } from '@/lib/camara';
+
+const NOMBRE_CULTIVO_CAMARA: Record<string, string> = {
+  rucula: 'Rúcula', lechuga_crespa: 'Lechuga crespa', lechuga_roble: 'Lechuga roble', albahaca: 'Albahaca',
+};
 import { saldoPorCliente, alertasCajones } from '@/lib/cajones';
 import { descartePorFaseMes } from '@/lib/descarte';
 import { germinacionYSupervivenciaMes } from '@/lib/germinacion';
@@ -280,6 +284,23 @@ export default async function PanelPage() {
       ...alertas,
       ...sinDescartadas(alertasStockPanel, descartesPanel, hoy.getFullYear(), hoy.getMonth() + 1).map(a => ({ ...a, href: '/stocks' })),
     ];
+  } catch {}
+
+  // Producto viejo en cámara. El stock de cámara ya se muestra abajo, pero el número que
+  // ahí se ve es el total: 500 paquetes de ayer y 40 de hace ocho días se leen como stock
+  // sano, y esos 40 se tiran. Lo que hay que mirar es la punta vieja de la cola, y eso
+  // merece una alerta porque tiene fecha de vencimiento — mañana ya es tarde.
+  try {
+    for (const c of [camaraRucula, camaraLechugaCrespa, camaraLechugaRoble, camaraAlbahaca]) {
+      if (c.cantidadMasVieja <= 0 || c.diasMasViejo < DIAS_CAMARA_ALERTA) continue;
+      alertas = [...alertas, {
+        tipo: c.diasMasViejo >= DIAS_CAMARA_ALERTA * 2 ? 'error' as const : 'warn' as const,
+        msg: `${NOMBRE_CULTIVO_CAMARA[c.cultivo]}: ${c.cantidadMasVieja} u en cámara de hace ${c.diasMasViejo} días — sacarlas primero`,
+        categoria: 'general' as const,
+        href: '/ventas',
+        clave: `camara_viejo_${c.cultivo}`,
+      }];
+    }
   } catch {}
 
   // Agua de ósmosis fuera de límite en la última medición cargada: además del mail que se

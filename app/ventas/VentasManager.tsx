@@ -4,7 +4,8 @@ import Link from 'next/link';
 import type { ClienteVenta, PrecioVenta, VentaDia, PedidoFijo } from '@/lib/types';
 import { ventasCargadasSemana } from '@/lib/estadisticasVentas';
 import { nombreClienteVisible } from '@/lib/clientes';
-import { ARTICULOS_UNIDAD, KEYS_UNIDAD, KEYS_KG } from '@/lib/articulos';
+import { ARTICULOS_UNIDAD, KEYS_UNIDAD, KEYS_KG, KG_POR_CAJON, kgDeCajones, cajonesDeKg } from '@/lib/articulos';
+import { DIAS_CAMARA_ALERTA } from '@/lib/camara';
 
 // Los artículos salen del catálogo (lib/articulos.ts), no de una lista escrita acá: esa
 // lista estaba repetida en veinticinco archivos y agregar un producto significaba
@@ -33,16 +34,21 @@ function resumenCarga(lineas: LineaCarga[]): string {
   // El desglose por CULTIVO dentro de cada cliente, que es contra lo que se controla lo que
   // se subió al camión. El total por cliente solo no alcanza: "La Esperanza 60 u" no dice
   // si fueron 40 rúculas y 20 crespas o al revés, que es justo lo que hay que verificar.
-  const porCliente = new Map<string, { total: number; prods: Map<string, number> }>();
+  // Las unidades y los kilos se cuentan SEPARADOS.
+  //
+  // Antes iban al mismo total: un cliente con 40 rúculas y 22,5 kg aparecía como "62,5 u".
+  // No es un número con una unidad rara, es un número que no significa nada — y es contra
+  // ese número que se controla lo que se subió al camión. Ese era el "a veces suma mal".
+  const porCliente = new Map<string, { unidades: number; kilos: number; prods: Map<string, number> }>();
   const porProducto = new Map<string, number>();
   for (const l of lineas) {
     for (const p of claveProd) {
       const v = Number((l as any)[p.key]) || 0;
       if (v <= 0) continue;
       const etiqueta = `${p.label}${p.u === 'kg' ? ' (kg)' : ''}`;
-      if (!porCliente.has(l.nombre_cliente)) porCliente.set(l.nombre_cliente, { total: 0, prods: new Map() });
+      if (!porCliente.has(l.nombre_cliente)) porCliente.set(l.nombre_cliente, { unidades: 0, kilos: 0, prods: new Map() });
       const c = porCliente.get(l.nombre_cliente)!;
-      c.total += v;
+      if (p.u === 'kg') c.kilos += v; else c.unidades += v;
       c.prods.set(etiqueta, (c.prods.get(etiqueta) || 0) + v);
       porProducto.set(`${p.label} (${p.u})`, (porProducto.get(`${p.label} (${p.u})`) || 0) + v);
     }
@@ -50,13 +56,19 @@ function resumenCarga(lineas: LineaCarga[]): string {
 
   const fmt = (n:number) => n.toLocaleString('es-AR');
   const bloquesCliente = Array.from(porCliente.entries())
-    .sort((a,b)=>b[1].total-a[1].total)
+    // Por unidades y, a igualdad, por kilos: ordenar por la suma de las dos cosas sería
+    // volver a mezclarlas.
+    .sort((a,b)=> (b[1].unidades-a[1].unidades) || (b[1].kilos-a[1].kilos))
     .map(([cliente, d]) => {
       const detalle = Array.from(d.prods.entries())
         .sort((a,b)=>b[1]-a[1])
         .map(([prod, cant]) => `    ${fmt(cant)} ${prod}`)
         .join('\n');
-      return `${cliente.toUpperCase()} — ${fmt(d.total)} u\n${detalle}`;
+      const cabecera = [
+        d.unidades > 0 ? `${fmt(d.unidades)} u` : '',
+        d.kilos > 0 ? `${fmt(Math.round(d.kilos * 10) / 10)} kg` : '',
+      ].filter(Boolean).join(' · ');
+      return `${cliente.toUpperCase()} — ${cabecera}\n${detalle}`;
     })
     .join('\n\n');
   const lineasProducto = Array.from(porProducto.entries()).sort((a,b)=>b[1]-a[1]).map(([p,t])=>`· ${p}: ${fmt(t)}`).join('\n');
@@ -106,8 +118,25 @@ function mkFilas(cs: ClienteVenta[], freq: Record<string,number>): Fila[] {
   });
 }
 
+// La fecha de HOY en Argentina, no en UTC.
+//
+// `new Date().toISOString()` da la fecha UTC, y acá son UTC−3: entre las 21 y la medianoche
+// toISOString ya devuelve el día siguiente. Eso corría un día la fecha por defecto del
+// formulario y, peor, la ventana de "comprometido": las ventas de hoy se iban al bucket de
+// los próximos días. Cargando a la tarde-noche, que es cuando se carga, los totales daban
+// distinto que a la mañana — ese era el "a veces suma mal".
+function hoyArg(): string {
+  return new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().split('T')[0];
+}
+function sumarDiasStr(f: string, n: number): string {
+  const d = new Date(f + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+const soloDia = (v: any) => String(v || '').split(/[T ]/)[0];
+
 export default function VentasManager({clientes,precios,frecuencias,stats,pedidosFijos,initialFecha}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;pedidosFijos:PedidoFijo[];initialFecha?:string}) {
-  const hoy = new Date().toISOString().split('T')[0];
+  const hoy = hoyArg();
   const [fecha,setFecha]=useState(initialFecha || hoy);
   const [fc,setFc]=useState<Record<string,string>>({});
   const [ctds,setCtds]=useState<Ctds>({});
@@ -127,7 +156,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   const [correlaB,setCorrelaB]=useState<string>('');
   const [enviarEmail,setEnviarEmail]=useState(true);
   const [limpiando,setLimpiando]=useState(false);
-  const [stockCamara,setStockCamara]=useState<{rucula:{stockActual:number;diasPromedio:number};lechuga_crespa:{stockActual:number;diasPromedio:number};lechuga_roble:{stockActual:number;diasPromedio:number};albahaca:{stockActual:number;diasPromedio:number};factorGrPaq:{rucula:number;lechuga_crespa:number;lechuga_roble:number;albahaca:number};ventasHoyYaDescontadas:boolean}|null>(null);
+  type CamaraCultivo = { stockActual:number; diasPromedio:number; diasMasViejo:number; cantidadMasVieja:number };
+  const [stockCamara,setStockCamara]=useState<{rucula:CamaraCultivo;lechuga_crespa:CamaraCultivo;lechuga_roble:CamaraCultivo;albahaca:CamaraCultivo;factorGrPaq:{rucula:number;lechuga_crespa:number;lechuga_roble:number;albahaca:number};ventasHoyYaDescontadas:boolean}|null>(null);
   const [ctdsKg,setCtdsKg]=useState<CKG>({});
   const [ventas7,setVentas7]=useState<VentaDia[]>([]);
   const [facturadasHoy,setFacturadasHoy]=useState<VentaDia[]>([]);
@@ -202,7 +232,12 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       for(const v of data){
         const key=`${v.id_control}__${v.sucursal}`;
         c[key]=Object.fromEntries(KEYS_UNIDAD.map(k=>[k,String((v as any)[k]||'')])) as Record<PK,string>;
-        ckg[key]={rucula_kg:String(v.rucula_kg||''),lechuga_kg_crespa:String(v.lechuga_kg_crespa||''),lechuga_kg_roble:String(v.lechuga_kg_roble||'')};
+        // Lo guardado está en kilos; en pantalla se muestran cajones.
+        ckg[key]={
+          rucula_kg:v.rucula_kg?String(cajonesDeKg('rucula_kg',Number(v.rucula_kg))):'',
+          lechuga_kg_crespa:v.lechuga_kg_crespa?String(cajonesDeKg('lechuga_kg_crespa',Number(v.lechuga_kg_crespa))):'',
+          lechuga_kg_roble:v.lechuga_kg_roble?String(cajonesDeKg('lechuga_kg_roble',Number(v.lechuga_kg_roble))):'',
+        };
       }
       // Pedidos fijos de ese día de la semana: pre-cargan solo lo que todavía no tiene
       // nada guardado — nunca pisan una carga ya existente. Quedan editables y marcados
@@ -294,9 +329,10 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   async function saveKg(f:Fila){
     const domRefs=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];
     // Leer del DOM directamente — es la fuente más confiable (sin closures ni batching de React)
-    const rkg=Number(domRefs?.rucula_kg?.value)||0;
-    const lkgC=Number(domRefs?.lechuga_kg_crespa?.value)||0;
-    const lkgR=Number(domRefs?.lechuga_kg_roble?.value)||0;
+    // El input tiene CAJONES; a la hoja van KILOS.
+    const rkg=kgDeCajones('rucula_kg',Number(domRefs?.rucula_kg?.value)||0);
+    const lkgC=kgDeCajones('lechuga_kg_crespa',Number(domRefs?.lechuga_kg_crespa?.value)||0);
+    const lkgR=kgDeCajones('lechuga_kg_roble',Number(domRefs?.lechuga_kg_roble?.value)||0);
     KGK_ALL.forEach(k=>seKg(f.id_control,f.sucursal,k,'saving'));
     try{
       const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...vacio(0),rucula_kg:rkg,lechuga_kg_crespa:lkgC,lechuga_kg_roble:lkgR}]})});
@@ -316,7 +352,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       // Flush de todas las cantidades cargadas (igual que en exportar)
       const todasLineas = [
         ...filasNormales.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
-        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg_crespa:Number(dr?.lechuga_kg_crespa?.value)||0,lechuga_kg_roble:Number(dr?.lechuga_kg_roble?.value)||0};}),
+        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:kgDeCajones('rucula_kg',Number(dr?.rucula_kg?.value)||0),lechuga_kg_crespa:kgDeCajones('lechuga_kg_crespa',Number(dr?.lechuga_kg_crespa?.value)||0),lechuga_kg_roble:kgDeCajones('lechuga_kg_roble',Number(dr?.lechuga_kg_roble?.value)||0)};}),
       ].filter((l:LineaCarga)=>[...KEYS_UNIDAD,...KEYS_KG].some(k=>Number(l[k])>0));
       const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:todasLineas})});
       if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar ventas');}
@@ -344,7 +380,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       Object.values(tmrs.current).forEach(t=>clearTimeout(t));
       const todasLineas = [
         ...filasNormales.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
-        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:Number(dr?.rucula_kg?.value)||0,lechuga_kg_crespa:Number(dr?.lechuga_kg_crespa?.value)||0,lechuga_kg_roble:Number(dr?.lechuga_kg_roble?.value)||0};}),
+        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:kgDeCajones('rucula_kg',Number(dr?.rucula_kg?.value)||0),lechuga_kg_crespa:kgDeCajones('lechuga_kg_crespa',Number(dr?.lechuga_kg_crespa?.value)||0),lechuga_kg_roble:kgDeCajones('lechuga_kg_roble',Number(dr?.lechuga_kg_roble?.value)||0)};}),
       // Solo enviar líneas con al menos una cantidad > 0
       ].filter((l:LineaCarga)=>[...KEYS_UNIDAD,...KEYS_KG].some(k=>Number(l[k])>0));
       const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:todasLineas})});
@@ -449,12 +485,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       lechuga_roble: { hoy: 0, siguientes2: 0, mapaHoy: new Map(), mapaSiguientes2: new Map() },
       albahaca: { hoy: 0, siguientes2: 0, mapaHoy: new Map(), mapaSiguientes2: new Map() },
     };
-    const hoyReal = new Date();
-    const f = (d: Date) => d.toISOString().split('T')[0];
-    const hoyRealStr = f(hoyReal);
+    const hoyRealStr = hoyArg();
     const desdeVentana = hoyRealStr;
-    const hastaD = new Date(hoyReal); hastaD.setDate(hastaD.getDate() + 2);
-    const hastaVentana = f(hastaD);
+    const hastaVentana = sumarDiasStr(hoyRealStr, 2);
     const fechaEnVentana = fecha >= desdeVentana && fecha <= hastaVentana;
 
     function sumar(bucket: 'hoy' | 'siguientes2', nombre: string, valores: Record<CultivoStock, number>) {
@@ -467,7 +500,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       }
     }
     for (const v of ventasComprometidas) {
-      const vFecha = String(v.fecha || '').split(/[T ]/)[0];
+      const vFecha = soloDia(v.fecha);
       if (fechaEnVentana && vFecha === fecha) continue; // ese día se reemplaza por el vivo de abajo
       const bucket = vFecha === hoyRealStr ? 'hoy' : 'siguientes2';
       const nombre = nombreVisible(String(v.id_control), String(v.sucursal || ''), v.nombre_cliente);
@@ -477,7 +510,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       const bucket = fecha === hoyRealStr ? 'hoy' : 'siguientes2';
       for (const fl of filas) {
         const vals = ctds[`${fl.id_control}__${fl.sucursal}`]; if (!vals) continue;
-        const nombre = fl.nombre_display || fl.nombre_cliente;
+        // La MISMA función que la rama de arriba. Con dos formas de armar el nombre, el
+        // mismo cliente podía quedar bajo dos etiquetas y el detalle no sumaba el total.
+        const nombre = nombreVisible(String(fl.id_control), String(fl.sucursal || ''), fl.nombre_cliente);
         sumar(bucket, nombre, { rucula: Number(vals.rucula) || 0, lechuga_crespa: Number(vals.lechuga_crespa) || 0, lechuga_roble: Number(vals.hoja_roble) || 0, albahaca: Number(vals.albahaca) || 0 });
       }
     }
@@ -498,11 +533,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   // snapshot del server, para que el detalle nunca desentone con el total de arriba.
   interface DetalleComprometidoCliente { nombre: string; fecha: string; rucula: number; lechuga_crespa: number; lechuga_roble: number; total: number }
   function detalleComprometidoPorCliente(): DetalleComprometidoCliente[] {
-    const hoyReal = new Date();
-    const f = (d: Date) => d.toISOString().split('T')[0];
-    const desdeVentana = f(hoyReal);
-    const hastaD = new Date(hoyReal); hastaD.setDate(hastaD.getDate() + 2);
-    const hastaVentana = f(hastaD);
+    const desdeVentana = hoyArg();
+    const hastaVentana = sumarDiasStr(desdeVentana, 2);
     const fechaEnVentana = fecha >= desdeVentana && fecha <= hastaVentana;
 
     const map = new Map<string, DetalleComprometidoCliente>();
@@ -515,9 +547,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       else map.set(key, { nombre: nombreVisible(id_control, sucursal, nombre_cliente), fecha: fechaLinea, rucula, lechuga_crespa, lechuga_roble, total });
     }
     for (const v of ventasComprometidas) {
-      const vFecha = String(v.fecha || '').split(/[T ]/)[0];
+      const vFecha = soloDia(v.fecha);
       if (fechaEnVentana && vFecha === fecha) continue;
-      acumular(v.id_control, v.nombre_cliente, v.sucursal, v.fecha, Number(v.rucula) || 0, Number(v.lechuga_crespa) || 0, Number(v.hoja_roble) || 0);
+      acumular(v.id_control, v.nombre_cliente, v.sucursal, vFecha, Number(v.rucula) || 0, Number(v.lechuga_crespa) || 0, Number(v.hoja_roble) || 0);
     }
     if (fechaEnVentana) {
       for (const fl of filas) {
@@ -528,11 +560,10 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
     return Array.from(map.values()).sort((a, b) => a.fecha === b.fecha ? b.total - a.total : a.fecha.localeCompare(b.fecha));
   }
   const detalleComprometido = detalleComprometidoPorCliente();
-  const hoyDiff0 = new Date().toISOString().split('T')[0];
+  const hoyDiff0 = hoyArg();
   function etiquetaDia(f: string): string {
     if (f === hoyDiff0) return 'Hoy';
-    const d = new Date(hoyDiff0 + 'T12:00:00'); d.setDate(d.getDate() + 1);
-    if (f === d.toISOString().split('T')[0]) return 'Mañana';
+    if (f === sumarDiasStr(hoyDiff0, 1)) return 'Mañana';
     return 'Pasado';
   }
 
@@ -576,6 +607,23 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
                     Stock inicial de hoy <span style={{color: yaDescontadas ? '#166534' : '#b45309', fontWeight:600}}>({yaDescontadas ? 'ya cuenta las ventas de hoy' : 'no cuenta las ventas de hoy todavía'})</span>: <strong style={{color:'#111827'}}>{sc}</strong>
                   </span>
                 </div>
+                {/* Lo más viejo que queda. El promedio esconde justo esto: 500 paquetes de
+                    ayer y 40 de hace ocho días promedian día y medio, parece fresco, y hay
+                    40 a punto de tirarse. Va con la cantidad porque "hace 8 días" solo no
+                    dice si hay que correr: con 12 paquetes se regalan, con 600 hay que
+                    llamar a un cliente hoy. */}
+                {(() => {
+                  const cam = stockCamara?.[cultivo];
+                  if (!cam || !cam.cantidadMasVieja) return null;
+                  const viejo5 = cam.diasMasViejo >= DIAS_CAMARA_ALERTA;
+                  return (
+                    <span style={{fontSize:'10.5px', color: viejo5 ? '#dc2626' : '#6b7280', fontWeight: viejo5 ? 700 : 400}}
+                      title={`Lo más viejo que queda en cámara de este cultivo. A partir de ${DIAS_CAMARA_ALERTA} días conviene sacarlo.`}>
+                      {viejo5 ? '⚠ ' : ''}Lo más viejo: <strong>{cam.cantidadMasVieja} u</strong> de hace <strong>{cam.diasMasViejo} {cam.diasMasViejo === 1 ? 'día' : 'días'}</strong>
+                      {viejo5 ? ' — sacarlo primero' : ''}
+                    </span>
+                  );
+                })()}
                 <div style={{display:'flex',flexDirection:'column',gap:'2px'}}>
                   {([
                     { bucket:'hoy' as const, texto:'Ventas de hoy', valor:compHoy, detalle:comprometidoDia[cultivo].detalleHoy, extra: yaDescontadas ? ' (informativo, ya está en el stock)' : '' },
@@ -828,17 +876,25 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
         {filasKg.length>0&&(
           <div style={{marginTop:'16px',border:'1px solid #fde68a',borderRadius:'8px',overflow:'hidden'}}>
             <div style={{background:'#fffbeb',padding:'8px 14px',borderBottom:'1px solid #fde68a',display:'flex',alignItems:'center',gap:'8px'}}>
-              <span style={{fontSize:'13px',fontWeight:700,color:'#92400e'}}>📫 Venta por KG</span>
-              <span style={{fontSize:'11px',color:'#b45309'}}>Cajones · no descuenta paquetes</span>
+              <span style={{fontSize:'13px',fontWeight:700,color:'#92400e'}}>📫 Venta por cajón</span>
+              <span style={{fontSize:'11px',color:'#b45309'}}>
+                Rúcula {KG_POR_CAJON.rucula_kg} kg · Lechuga {KG_POR_CAJON.lechuga_kg_crespa} kg · no descuenta paquetes
+              </span>
             </div>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
               <thead>
                 <tr style={{background:'#fef3c7',borderBottom:'1px solid #fde68a'}}>
                   <th style={{textAlign:'left',padding:'8px 12px',minWidth:'150px'}}>Cliente</th>
-                  <th style={{textAlign:'center',padding:'8px 10px',color:'#166534',fontWeight:700,minWidth:'110px'}}>Rúcula KG</th>
-                  <th style={{textAlign:'center',padding:'8px 10px',color:'#4d7c0f',fontWeight:700,minWidth:'110px'}}>Lechuga Crespa KG</th>
-                  <th style={{textAlign:'center',padding:'8px 10px',color:'#65a30d',fontWeight:700,minWidth:'110px'}}>Lechuga Roble KG</th>
-                  <th style={{textAlign:'right',padding:'8px 10px',color:'#92400e',fontWeight:700,minWidth:'90px'}}>Total KG</th>
+                  <th style={{textAlign:'center',padding:'8px 10px',color:'#166534',fontWeight:700,minWidth:'110px'}}>
+                    Rúcula<span style={{display:'block',fontSize:'10px',fontWeight:400,color:'#b45309'}}>cajones de {KG_POR_CAJON.rucula_kg} kg</span>
+                  </th>
+                  <th style={{textAlign:'center',padding:'8px 10px',color:'#4d7c0f',fontWeight:700,minWidth:'110px'}}>
+                    Lechuga Crespa<span style={{display:'block',fontSize:'10px',fontWeight:400,color:'#b45309'}}>cajones de {KG_POR_CAJON.lechuga_kg_crespa} kg</span>
+                  </th>
+                  <th style={{textAlign:'center',padding:'8px 10px',color:'#65a30d',fontWeight:700,minWidth:'110px'}}>
+                    Lechuga Roble<span style={{display:'block',fontSize:'10px',fontWeight:400,color:'#b45309'}}>cajones de {KG_POR_CAJON.lechuga_kg_roble} kg</span>
+                  </th>
+                  <th style={{textAlign:'right',padding:'8px 10px',color:'#92400e',fontWeight:700,minWidth:'90px'}}>Total</th>
                   <th style={{textAlign:'center',padding:'8px 6px',color:'#9ca3af',minWidth:'92px',fontSize:'10px'}}>Fecha fact.</th>
                 </tr>
               </thead>
@@ -861,7 +917,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
                         return(
                           <td key={k} style={{padding:'3px 8px',textAlign:'center'}}>
                             <div style={{position:'relative',display:'inline-block'}}>
-                              <input type="number" min={0} step={0.1} value={val} placeholder="0"
+                              <input type="number" min={0} step={1} value={val} placeholder="0"
                                 ref={el=>{if(!kgInputRefs.current[`${f.id_control}__${f.sucursal}`])kgInputRefs.current[`${f.id_control}__${f.sucursal}`]={rucula_kg:null,lechuga_kg_crespa:null,lechuga_kg_roble:null};kgInputRefs.current[`${f.id_control}__${f.sucursal}`][k]=el;}}
                                 onChange={ev=>onChangeKg(f,k,ev.target.value)} onBlur={()=>saveKg(f)}
                                 style={{width:'90px',textAlign:'center',fontSize:'15px',fontWeight:700,
@@ -873,13 +929,26 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
                               {estKg==='saved'&&<span style={{position:'absolute',right:'4px',top:'50%',transform:'translateY(-50%)',fontSize:'9px',color:'#22c55e'}}>✓</span>}
                               {estKg==='error'&&<span style={{position:'absolute',right:'4px',top:'50%',transform:'translateY(-50%)',fontSize:'9px',color:'#ef4444'}}>✗</span>}
                             </div>
+                            {/* Los kilos que se van a guardar. Se cargan cajones pero se
+                                factura y se valoriza por kilo: tener el número a la vista
+                                evita la sorpresa al mirar la factura. */}
+                            {Number(val)>0&&(
+                              <span style={{display:'block',fontSize:'10px',color:'#b45309',marginTop:'1px'}}>
+                                {kgDeCajones(k,Number(val)).toFixed(1)} kg
+                              </span>
+                            )}
                           </td>
                         );
                       })}
                       <td style={{padding:'4px 10px',textAlign:'right'}}>
                         <p style={{margin:0,fontSize:'15px',fontWeight:800,color:act?'#92400e':'#d1d5db'}}>
-                          {act?(rkg+lkgC+lkgR).toFixed(1)+' kg':'—'}
+                          {act?`${rkg+lkgC+lkgR} cj`:'—'}
                         </p>
+                        {act&&(
+                          <span style={{fontSize:'10px',color:'#b45309'}}>
+                            {(kgDeCajones('rucula_kg',rkg)+kgDeCajones('lechuga_kg_crespa',lkgC)+kgDeCajones('lechuga_kg_roble',lkgR)).toFixed(1)} kg
+                          </span>
+                        )}
                       </td>
                       <td style={{padding:'3px 5px'}}>
                         <input type="date" value={fc[f.id_control]||fecha} onChange={ev=>setFc(p=>({...p,[f.id_control]:ev.target.value}))}
@@ -889,11 +958,19 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
                   );
                 })}
                 <tr style={{background:'#fef3c7',borderTop:'2px solid #fbbf24'}}>
-                  <td style={{padding:'8px 12px',fontSize:'12px',fontWeight:700,color:'#92400e'}}>Total KG</td>
-                  <td style={{textAlign:'center',padding:'8px',fontSize:'15px',fontWeight:800,color:totsKg.rucula_kg>0?'#166534':'#d1d5db'}}>{totsKg.rucula_kg>0?totsKg.rucula_kg.toFixed(1)+' kg':'—'}</td>
-                  <td style={{textAlign:'center',padding:'8px',fontSize:'15px',fontWeight:800,color:totsKg.lechuga_kg_crespa>0?'#4d7c0f':'#d1d5db'}}>{totsKg.lechuga_kg_crespa>0?totsKg.lechuga_kg_crespa.toFixed(1)+' kg':'—'}</td>
-                  <td style={{textAlign:'center',padding:'8px',fontSize:'15px',fontWeight:800,color:totsKg.lechuga_kg_roble>0?'#65a30d':'#d1d5db'}}>{totsKg.lechuga_kg_roble>0?totsKg.lechuga_kg_roble.toFixed(1)+' kg':'—'}</td>
-                  <td style={{textAlign:'right',padding:'8px 10px',fontSize:'16px',fontWeight:800,color:'#92400e'}}>{(totsKg.rucula_kg+totsKg.lechuga_kg_crespa+totsKg.lechuga_kg_roble).toFixed(1)} kg</td>
+                  <td style={{padding:'8px 12px',fontSize:'12px',fontWeight:700,color:'#92400e'}}>Total</td>
+                  {KGK_ALL.map(k=>(
+                    <td key={k} style={{textAlign:'center',padding:'8px',fontSize:'15px',fontWeight:800,color:totsKg[k]>0?(k==='rucula_kg'?'#166534':k==='lechuga_kg_crespa'?'#4d7c0f':'#65a30d'):'#d1d5db'}}>
+                      {totsKg[k]>0?`${totsKg[k]} cj`:'—'}
+                      {totsKg[k]>0&&<span style={{display:'block',fontSize:'10px',fontWeight:400,color:'#b45309'}}>{kgDeCajones(k,totsKg[k]).toFixed(1)} kg</span>}
+                    </td>
+                  ))}
+                  <td style={{textAlign:'right',padding:'8px 10px',fontSize:'16px',fontWeight:800,color:'#92400e'}}>
+                    {totsKg.rucula_kg+totsKg.lechuga_kg_crespa+totsKg.lechuga_kg_roble} cj
+                    <span style={{display:'block',fontSize:'10px',fontWeight:400}}>
+                      {KGK_ALL.reduce((a,k)=>a+kgDeCajones(k,totsKg[k]),0).toFixed(1)} kg
+                    </span>
+                  </td>
                   <td/>
                 </tr>
               </tbody>

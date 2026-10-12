@@ -132,6 +132,32 @@ export const KEYS_ACTIVAS = ARTICULOS_ACTIVOS.map((a) => a.key);
 export const ARTICULOS_UNIDAD = ARTICULOS_ACTIVOS.filter((a) => a.unidad === 'unidad');
 export const ARTICULOS_KG = ARTICULOS_ACTIVOS.filter((a) => a.unidad === 'kg');
 export const KEYS_UNIDAD = ARTICULOS_UNIDAD.map((a) => a.key);
+
+// ── La venta por kilo se carga en CAJONES ─────────────────────────────────────────────
+//
+// Los cajones son siempre los mismos: 5 kg de rúcula, 4 kg de lechuga. Quien carga la venta
+// cuenta cajones, no kilos — escribir "22,5 kg" obliga a hacer la cuenta a mano y es donde
+// aparecen los números raros.
+//
+// Lo que se GUARDA siguen siendo kilos. El precio por kilo, la valorización, el EERR y el
+// descuento de cámara trabajan en kilos desde siempre: cambiar la unidad guardada sería
+// tocar media app para ahorrar una multiplicación. Lo que cambia es la unidad de carga.
+export const KG_POR_CAJON: Record<string, number> = {
+  rucula_kg: 5,
+  lechuga_kg_crespa: 4,
+  lechuga_kg_roble: 4,
+  lechuga_kg: 4,
+};
+
+export const kgDeCajones = (k: string, cajones: number) => (Number(cajones) || 0) * (KG_POR_CAJON[k] || 1);
+// De kilos a cajones, para mostrar lo que ya está guardado. Se redondea a dos decimales en
+// vez de a entero: las ventas viejas se cargaron en kilos sueltos y forzarlas a un cajón
+// entero cambiaría la venta al volver a guardar la fila.
+export const cajonesDeKg = (k: string, kg: number) => {
+  const por = KG_POR_CAJON[k] || 1;
+  if (!Number(kg)) return 0;
+  return Math.round((Number(kg) / por) * 100) / 100;
+};
 export const KEYS_KG = ARTICULOS_KG.map((a) => a.key);
 
 // Todas las claves por unidad, incluidas las de baja: lo que lee ventas viejas necesita

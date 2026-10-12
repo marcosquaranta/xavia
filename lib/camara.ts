@@ -166,8 +166,20 @@ export interface ResultadoCamara {
   cultivo: CultivoCamara;
   stockActual: number;
   diasPromedio: number;
+  // ── Lo más viejo que queda en cámara ──────────────────────────────────────────────
+  //
+  // El promedio esconde justo lo que importa. Un cultivo con 500 paquetes de ayer y 40 de
+  // hace ocho días da un promedio de un día y medio: parece fresco, y hay 40 paquetes a
+  // punto de tirarse. Lo que decide si hay que sacar algo hoy es la punta vieja de la cola,
+  // no el centro.
+  diasMasViejo: number;
+  cantidadMasVieja: number;
   base: StockCamara | null;
 }
+
+// A partir de acá un lote de cámara deja de ser stock y pasa a ser un problema. Cinco días,
+// definido por Marcos.
+export const DIAS_CAMARA_ALERTA = 5;
 
 export function calcularCamara(
   cultivo: CultivoCamara,
@@ -195,10 +207,10 @@ export function calcularCamara(
       return cmp !== 0 ? cmp : b.i - a.i;
     })[0]?.r ?? null;
 
-  if (!base) return { cultivo, stockActual: 0, diasPromedio: 0, base: null };
+  if (!base) return { cultivo, stockActual: 0, diasPromedio: 0, diasMasViejo: 0, cantidadMasVieja: 0, base: null };
 
   const fechaBase = parseDate(base.fecha);
-  if (!fechaBase) return { cultivo, stockActual: 0, diasPromedio: 0, base };
+  if (!fechaBase) return { cultivo, stockActual: 0, diasPromedio: 0, diasMasViejo: 0, cantidadMasVieja: 0, base };
 
   const cantidadBase = Number(base.cantidad_paq) || 0;
 
@@ -267,14 +279,28 @@ export function calcularCamara(
   // Calcular días promedio ponderado de lo que queda
   const restantes = cola.filter(e => e.cantidad > 0);
   const totalRestante = restantes.reduce((a, e) => a + e.cantidad, 0);
-  if (totalRestante === 0) return { cultivo, stockActual, diasPromedio: 0, base };
+  if (totalRestante === 0) return { cultivo, stockActual, diasPromedio: 0, diasMasViejo: 0, cantidadMasVieja: 0, base };
 
   const diasProm = restantes.reduce((acc, e) => {
     const dias = Math.round((hoy.getTime() - e.fecha.getTime()) / 86400000);
     return acc + dias * e.cantidad;
   }, 0) / totalRestante;
 
-  return { cultivo, stockActual, diasPromedio: Math.round(diasProm), base };
+  // La entrada más vieja que todavía tiene unidades. La cola ya está en orden FIFO y las
+  // ventas se descontaron desde el principio, así que la primera que sobrevivió es la más
+  // vieja que queda en la cámara.
+  //
+  // Se informa junto con su cantidad y no sola: "hace 8 días" no dice si hay que correr o
+  // no — con 12 paquetes se resuelve regalándolos, con 600 hay que llamar a un cliente hoy.
+  //
+  // El stock se redondea arriba (`stockActual`) pero la cola trabaja con el crudo, así que
+  // la cantidad más vieja se acota al stock real: sin eso, con un stock de 0 por redondeo
+  // podría informar 0,4 unidades de hace ocho días.
+  const masVieja = restantes[0];
+  const diasMasViejo = Math.round((hoy.getTime() - masVieja.fecha.getTime()) / 86400000);
+  const cantidadMasVieja = Math.min(Math.round(masVieja.cantidad), stockActual);
+
+  return { cultivo, stockActual, diasPromedio: Math.round(diasProm), diasMasViejo, cantidadMasVieja, base };
 }
 
 // Diferencia entre una cantidad nueva (contada a mano) y lo que el sistema esperaba
