@@ -11,7 +11,7 @@ import {
   HOJA_COBRANZAS_CACHE, HOJA_COMPROBANTES, comprobantesDesdeCache, cobranzasDesdeCache,
   type CobranzaCache, type ComprobanteCache,
 } from '../xubioCache';
-import { facturasPorCliente } from '../facturasCliente';
+import { facturasPorCliente, diagnosticoReparto } from '../facturasCliente';
 import { leerSaldadas, numerosSaldados } from '../facturasSaldadas';
 import { leerEdiciones, imputacionesManuales } from '../cobranzasEdit';
 import { leerAjustes, ajustesPorFactura } from '../ajusteFactura';
@@ -143,7 +143,7 @@ export const HERRAMIENTAS: Herramienta[] = [
   },
   {
     nombre: 'stock_de_insumos',
-    descripcion: 'El stock de insumos de un mes: stock inicial, compras, stock final y consumo del mes por artículo. Con el valorizado solo si quien pregunta es admin. Sirve para "cuántos cubos quedan" o "cuánto se consumió de sustrato".',
+    descripcion: 'Cuánto hay de cada insumo. Si el mes ya está contado devuelve el stock final real; si todavía no se contó —el mes en curso— devuelve el stock ESTIMADO (inicial + compras − uso teórico), que es lo que hay que usar para saber si falta comprar. Sirve para "cuántos cubos quedan" o "cuántas bolsas hay".',
     schema: {
       type: 'object',
       properties: {
@@ -153,27 +153,62 @@ export const HERRAMIENTAS: Herramienta[] = [
     },
     soloAdmin: false,
     ejecutar: async (a, { p, rol, hoy }) => {
-      const def = mesPorDefecto(hoy);
-      const anio = Number(a?.anio) || def.anio, mes = Number(a?.mes) || def.mes;
-      const [articulos, stocks] = await Promise.all([p.articulos(), p.stocks()]);
+      // El mes EN CURSO por defecto, no el último cerrado: "cuántas bolsas quedan" es una
+      // pregunta sobre hoy. Para el consumo del mes cerrado está consumo_historico_de_insumo.
+      const [anioHoy, mesHoy] = hoy.split('-').map(Number);
+      const anio = Number(a?.anio) || anioHoy, mes = Number(a?.mes) || mesHoy;
+      const [articulos, stocks, lotes, ventas, precios, clientes] = await Promise.all([
+        p.articulos(), p.stocks(), p.lotes(), p.ventas(), p.precios(), p.clientes(),
+      ]);
+      const { calcularDriversMes, usoTeoricoDeArticulo } = await import('../usoTeorico');
+      const drivers = calcularDriversMes(lotes, ventas, precios, clientes, anio, mes);
       const norm = (x: any) => String(x || '').toLowerCase();
       const filas = articulos
         .filter((art) => String(art.activo) === 'SI')
         .filter((art) => !a?.articulo || norm(art.articulo).includes(norm(a.articulo)) || norm(art.categoria).includes(norm(a.articulo)))
         .map((art) => {
-          const s = stocks.find((x) => String(x.id_articulo) === String(art.id_articulo)
+          const st = stocks.find((x) => String(x.id_articulo) === String(art.id_articulo)
             && String(x.anio) === String(anio) && String(x.mes) === String(mes));
-          const ini = num(s?.stock_inicial), comp = num(s?.compras), fin = num(s?.stock_final);
+          const ini = num(st?.stock_inicial), comp = num(st?.compras);
+          const contado = String(st?.stock_final ?? '').trim() !== '' && num(st?.stock_final) > 0;
+          const fin = num(st?.stock_final);
+          const teorico = usoTeoricoDeArticulo(art, drivers);
+
+          // ── Lo que hay HOY ────────────────────────────────────────────────────────
+          //
+          // Mientras no se haga el recuento, `stock_final` vale 0 en la planilla, y 0 no es
+          // "no queda nada": es "todavía no se contó". Leerlo literal decía que no quedaban
+          // bolsas de nada y que se habían consumido 18.584 en doce días.
+          //
+          // Hasta que esté el recuento, lo que hay se estima: inicial + compras − uso
+          // teórico. Es una estimación y se informa como tal, pero es la única que sirve
+          // para decidir si hay que comprar.
           const base: any = {
             articulo: art.articulo, categoria: art.categoria, unidad: art.unidad_medida,
-            stock_inicial: ini, compras: comp, stock_final: fin,
-            consumo: ini + comp - fin,
-            recuento_cargado: String(s?.stock_final ?? '').trim() !== '',
+            stock_inicial: ini, compras: comp,
+            recuento_cargado: contado,
           };
-          if (rol === 'admin') base.precio_unitario = num(s?.precio_unitario) || null;
+          if (contado) {
+            base.stock_final_contado = fin;
+            base.consumo_real = ini + comp - fin;
+            base.uso_teorico = teorico;
+          } else {
+            base.stock_final_contado = null;
+            base.stock_estimado_hoy = teorico !== null ? Math.round((ini + comp - teorico) * 100) / 100 : null;
+            base.uso_teorico = teorico;
+            base.nota = teorico !== null
+              ? 'Sin recuento todavía: el stock de hoy es una ESTIMACIÓN (inicial + compras − uso teórico), no un dato contado.'
+              : 'Sin recuento y sin fórmula de uso teórico configurada para este artículo: no se puede estimar cuánto queda. Lo último cierto es el stock inicial del mes.';
+          }
+          if (rol === 'admin') base.precio_unitario = num(st?.precio_unitario) || null;
           return base;
         });
-      const out: any = { anio, mes, articulos: filas };
+      const out: any = {
+        anio, mes,
+        mes_en_curso: anio === anioHoy && mes === mesHoy,
+        articulos: filas,
+        nota: 'El stock inicial de un mes es el stock final contado del mes anterior. Mientras el mes no esté contado, "stock_estimado_hoy" es una estimación con el uso teórico; "stock_final_contado" en null significa que todavía nadie contó, NO que no quede nada.',
+      };
       if (rol === 'admin') {
         const v = calcularValorizacionMes(articulos, stocks, anio, mes);
         out.stock_valorizado_total = $(v.total);
@@ -456,34 +491,74 @@ export const HERRAMIENTAS: Herramienta[] = [
       // La caché guarda los comprobantes con otro nombre de campo que el bean de Xubio.
       const comprobantes = comprobantesDesdeCache(compsRaw, desde, hoy);
       const cobranzasXubio = cobranzasDesdeCache(cobsRaw, desde, hoy);
+      // El cobrado sin imputar de cada cliente: es el número que decide qué figura cubierto.
+      const diag: { cobradoSinImputar?: Map<string, number> } = {};
       const todas = facturasPorCliente(
         comprobantes, cobros, clientes, numerosSaldados(saldadasFilas), cobranzasXubio,
-        imputacionesManuales(edic, claveComprobante), ajustesPorFactura(ajustesRaw),
+        imputacionesManuales(edic, claveComprobante), ajustesPorFactura(ajustesRaw), diag,
       );
       const norm = (x: any) => String(x || '').toLowerCase();
       const filtro = norm(a?.cliente);
       const filas = clientes
         .map((c) => {
-          const abiertas = (todas[String(c.id_control)] || [])
+          const id = String(c.id_control);
+          const fs = todas[id] || [];
+          const abiertas = fs
             .filter((f) => !f.yaCobrada && !f.saldadaManual && !f.imputadaManual && !f.cubierta)
             .sort((x, y) => x.fecha.localeCompare(y.fecha));
-          return { cliente: nombreClienteVisible(c), id: String(c.id_control), abiertas };
+          const cobradoSinImputar = Math.round(diag.cobradoSinImputar?.get(id) || 0);
+          // ── Por qué este cliente figura debiendo esto ───────────────────────────────
+          //
+          // Lo que se da por cubierto se decide repartiendo lo cobrado de la factura más
+          // vieja a la más nueva, y el reparto SE CORTA en la primera que no entra entera.
+          // Si la que no entra es vieja, todas las que siguen quedan figurando impagas y el
+          // cliente aparece debiendo un año entero — sin que nada diga por qué.
+          //
+          // Por eso el corte viaja con la respuesta: es la diferencia entre "debe 30
+          // millones" (indiscutible y probablemente falso) y "el reparto se cortó el 13/10
+          // porque esa factura pedía más de lo que quedaba" (se revisa en un minuto).
+          const d = diagnosticoReparto(fs, cobradoSinImputar);
+          return {
+            cliente: nombreClienteVisible(c), id, abiertas,
+            resumen: {
+              facturas_en_la_ventana: fs.length,
+              facturado: $(fs.reduce((t, f) => t + f.importe, 0)),
+              imputadas_desde_un_cobro: fs.filter((f) => f.yaCobrada).length,
+              imputadas_a_mano: fs.filter((f) => f.imputadaManual).length,
+              dadas_por_saldadas_a_mano: fs.filter((f) => f.saldadaManual).length,
+              cubiertas_por_reparto: fs.filter((f) => f.cubierta).length,
+              cobrado_sin_imputar: cobradoSinImputar,
+              reparto_se_corto_en: d.corte
+                ? { numero: d.corte.numero, fecha: d.corte.fecha, importe: d.corte.importe, quedaba: d.corte.restaba }
+                : null,
+              sobro_sin_usar: d.sobro || null,
+            },
+          };
         })
         .filter((x) => x.abiertas.length > 0)
         .filter((x) => !filtro || norm(x.cliente).includes(filtro))
         .sort((x, y) => y.abiertas.reduce((s, f) => s + f.importe, 0) - x.abiertas.reduce((s, f) => s + f.importe, 0));
+      const cortados = filas.filter((x) => x.resumen.reparto_se_corto_en);
       return {
         total_adeudado: $(filas.reduce((s, x) => s + x.abiertas.reduce((t, f) => t + f.importe, 0), 0)),
+        ventana: `últimos 365 días (desde ${desde})`,
         clientes: filas.map((x) => ({
           cliente: x.cliente,
           facturas: x.abiertas.length,
           debe: $(x.abiertas.reduce((s, f) => s + f.importe, 0)),
           mas_vieja: x.abiertas[0]?.fecha || null,
+          ...x.resumen,
           // El detalle solo cuando se preguntó por un cliente: con todos sería una pared de
           // números que no se puede leer ni resumir bien.
           detalle: filtro ? x.abiertas.map((f) => ({ numero: f.numero, fecha: f.fecha, importe: $(f.importe), corregida: !!f.ajustada })) : undefined,
         })),
-        nota: 'Sale de los comprobantes de Xubio menos lo cobrado, lo imputado y lo dado por saldado a mano. No incluye cobros que todavía no llegaron a la copia local.',
+        clientes_con_el_reparto_cortado: cortados.map((x) => x.cliente),
+        nota: [
+          'Sale de los comprobantes de Xubio menos lo cobrado desde la app, lo imputado a mano, lo dado por saldado a mano y lo que cubre el reparto automático.',
+          'EL REPARTO: Xubio no dice qué factura cancela cada cobro, así que la app reparte lo cobrado de la más vieja a la más nueva y SE CORTA en la primera que no entra entera.',
+          'Si "reparto_se_corto_en" tiene valor, el saldo de ese cliente es un TECHO y no un dato: todas las facturas posteriores al corte figuran impagas aunque estén pagas. Hay que decirlo al contestar, no dar el número como si fuera cierto.',
+          'Para arreglarlo de verdad hay que imputar los cobros a sus facturas en Cobranzas → Cobranzas del mes → corregir / imputar, o marcar las viejas como saldadas.',
+        ].join(' '),
       };
     },
   },

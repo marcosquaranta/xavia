@@ -60,13 +60,27 @@ const soloFecha = (v: any) => String(v || '').split(/[T ]/)[0];
 // facturas concretas (ver facturasPorCliente). Si entra entera, esa plata se reparte dos
 // veces: una por la imputación y otra por el reparto, y el sobrante tapa facturas que nadie
 // pagó. Es el peor error posible acá — esconde deuda — y no se ve en ningún número.
-export function cubrirConCobrosDeXubio(
-  facturas: FacturaCliente[], totalCobrado: number,
-): FacturaCliente[] {
+// Dónde se cortó el reparto y qué quedaba. Es lo que convierte un número implausible en algo
+// que se puede revisar: "La Gallega debe $30 millones" no se puede discutir, "el reparto se
+// cortó en la factura del 13/10 porque pedía $1.2M y quedaban $300 mil" se revisa en un
+// minuto. Sin esto, cada vez que el reparto se corta temprano el cliente aparece debiendo un
+// año entero de facturas y no hay forma de saber por qué.
+export interface DiagnosticoReparto {
+  cubiertas: Set<string>;
+  // La factura que frenó el reparto, si lo frenó.
+  corte: { numero: string; fecha: string; importe: number; restaba: number } | null;
+  // Plata que sobró sin llegar a cubrir nada.
+  sobro: number;
+  cubiertasMonto: number;
+}
+
+function repartir(facturas: FacturaCliente[], totalCobrado: number): DiagnosticoReparto {
   let resto = Math.round(totalCobrado);
   // De la más vieja a la más nueva.
   const porFecha = [...facturas].sort((a, b) => a.fecha.localeCompare(b.fecha));
   const cubiertas = new Set<string>();
+  let corte: DiagnosticoReparto['corte'] = null;
+  let cubiertasMonto = 0;
   for (const f of porFecha) {
     // Lo que la app ya decidió no se vuelve a decidir: ni consume saldo ni se re-evalúa.
     // La plata de esos cobros tampoco está en `totalCobrado`, así que las cuentas cierran.
@@ -76,12 +90,33 @@ export function cubrirConCobrosDeXubio(
     // alguna más chica que sí entre. Saltear afirmaba algo bastante improbable —que el
     // cliente pagó la tercera factura pero no la segunda— y el costo del error es el peor
     // de los dos posibles: daba por cubierta una factura que hay que cobrar. Cortando, a lo
-    // sumo queda alguna figurando impaga de más, que se ve y se corrige a mano.
-    if (resto + 1 < Math.round(f.importe)) break;
+    // sumo queda alguna figurando impaga de más.
+    //
+    // "A lo sumo alguna" es optimista y por eso se informa el corte: si la que no entra es
+    // la más vieja, TODAS las que siguen quedan figurando impagas, y el cliente aparece
+    // debiendo un año entero.
+    if (resto + 1 < Math.round(f.importe)) {
+      corte = { numero: f.numero, fecha: f.fecha, importe: Math.round(f.importe), restaba: resto };
+      break;
+    }
     resto -= Math.round(f.importe);
+    cubiertasMonto += Math.round(f.importe);
     cubiertas.add(f.numero);
   }
+  return { cubiertas, corte, sobro: corte ? 0 : Math.max(0, resto), cubiertasMonto };
+}
+
+export function cubrirConCobrosDeXubio(
+  facturas: FacturaCliente[], totalCobrado: number,
+): FacturaCliente[] {
+  const { cubiertas } = repartir(facturas, totalCobrado);
   return facturas.map((f) => ({ ...f, cubierta: cubiertas.has(f.numero) }));
+}
+
+// El mismo reparto, mirado por dentro. Un solo loop y dos vistas: si fueran dos funciones
+// distintas, el diagnóstico explicaría un reparto que no es el que se hizo.
+export function diagnosticoReparto(facturas: FacturaCliente[], totalCobrado: number): DiagnosticoReparto {
+  return repartir(facturas, totalCobrado);
 }
 
 // ── Del nombre que trae el comprobante al cliente ────────────────────────────────────
@@ -159,6 +194,11 @@ export function facturasPorCliente(
   // Las facturas corregidas después de emitidas: ahí `importe` deja de ser el del
   // comprobante y pasa a ser lo que de verdad hay que cobrar (ver ajusteFactura.ts).
   ajustes?: Map<string, { importeApp: number; importeXubio: number }>,
+  // Caja de salida opcional. Lo que decide qué figura cubierto es cuánto cobró el cliente
+  // SIN imputar, y ese número no sale en el resultado: sin él, "esta factura está abierta"
+  // es un veredicto que no se puede discutir. Va como parámetro de salida y no en el retorno
+  // para no cambiarle la forma a los seis lugares que ya llaman a esta función.
+  diagnostico?: { cobradoSinImputar?: Map<string, number> },
 ): Record<string, FacturaCliente[]> {
   // Las facturas que la app ya imputó. No es lo mismo que "pagas" —Xubio no expone eso—
   // pero alcanza para no ofrecer dos veces la misma.
@@ -246,5 +286,6 @@ export function facturasPorCliente(
     if (cobranzas) out[id] = cubrirConCobrosDeXubio(out[id], cobradoPorCliente.get(id) || 0);
     out[id].sort((a, b) => b.fecha.localeCompare(a.fecha));
   }
+  if (diagnostico) diagnostico.cobradoSinImputar = cobradoPorCliente;
   return out;
 }

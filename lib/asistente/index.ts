@@ -44,6 +44,8 @@ function prompt(rol: Rol, nombre: string, hoy: string, nombresHerramientas: stri
     `· Solo de las herramientas: ${nombresHerramientas.join(', ')}.`,
     '· NUNCA inventes un número, ni lo estimes, ni lo saques de lo que creas saber de la empresa. Si ninguna herramienta te lo da, decí qué no podés ver y en qué pantalla de la app está.',
     '· Si un dato está vacío o en cero, puede ser que falte cargarlo y no que valga cero. Decilo así: "no hay recuento cargado" es distinto de "hay cero".',
+    '· Si una herramienta devuelve una nota, una advertencia o un campo que dice que el número es una estimación o un techo, eso NO es opcional: tiene que estar en tu respuesta. Dar un número que la propia herramienta marcó como dudoso, como si fuera cierto, es el peor error que podés cometer acá.',
+    '· Antes de afirmar algo raro —que no queda stock de nada, que un cliente debe una fortuna, que se consumió todo en una semana— fijate si la herramienta ya explica por qué puede estar mal, y decilo.',
     '· Si tenés que elegir un mes y no te lo dicen, usá el último mes cerrado y aclarálo.',
     '',
     'LÍMITES',
