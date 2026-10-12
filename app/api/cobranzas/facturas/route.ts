@@ -14,6 +14,7 @@ import { claveComprobante } from '@/lib/comprobantes';
 import { cubrirConCobrosDeXubio } from '@/lib/facturasCliente';
 import { comprobantesParaMirar, cobranzasParaMirar } from '@/lib/xubioLectura';
 import { leerEdiciones, imputacionesManuales } from '@/lib/cobranzasEdit';
+import { leerAjustes, ajustesPorFactura } from '@/lib/ajusteFactura';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
@@ -43,28 +44,39 @@ export async function GET(req: NextRequest) {
 
     const hoy = fechaArgentinaHoy();
     const desde = sumarDias(hoy, -dias);
-    const [comps, cobros, reclamos, cobranzas, saldadasFilas, edicionesRaw] = await Promise.all([
+    const [comps, cobros, reclamos, cobranzas, saldadasFilas, edicionesRaw, ajustesRaw] = await Promise.all([
       comprobantesParaMirar(desde, hoy),
       readSheet<CobroRegistrado>(HOJA_COBROS).catch(() => [] as CobroRegistrado[]),
       readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => [] as RecordatorioCobro[]),
       cobranzasParaMirar(desde, hoy),
       leerSaldadas(),
       leerEdiciones(),
+      leerAjustes(),
     ]);
     const saldadas = numerosSaldados(saldadasFilas);
     // Las imputaciones hechas a mano. Van por el mismo camino que en la pantalla de
     // Cobranzas: si acá se decidieran distinto, la misma factura figuraría cobrada en una
     // lista y abierta en la otra, que es exactamente el lío que esto viene a terminar.
     const imputadas = imputacionesManuales(edicionesRaw, claveComprobante);
+    // Las facturas corregidas después de emitidas: lo que hay que cobrar no es lo que dice
+    // el comprobante. Mismo criterio que la pantalla de Cobranzas.
+    const ajustes = ajustesPorFactura(ajustesRaw);
 
     const k = norm(cli.nombre_xubio || cli.nombre_display);
     const facturas = comps
       .filter((c: any) => Number(c?.tipo) === 1 && norm(nombreClienteComprobante(c)) === k)
-      .map((c: any) => ({
-        numero: String(c?.numeroDocumento || '').trim(),
-        fecha: soloFecha(c?.fecha),
-        importe: Number(c?.importetotal) || 0,
-      }))
+      .map((c: any) => {
+        const numero = String(c?.numeroDocumento || '').trim();
+        const importeXubio = Number(c?.importetotal) || 0;
+        const aj = ajustes.get(claveComprobante(numero));
+        return {
+          numero,
+          fecha: soloFecha(c?.fecha),
+          importe: aj ? aj.importeApp : importeXubio,
+          importeFactura: importeXubio,
+          ajustada: !!aj,
+        };
+      })
       .filter((f) => f.numero)
       // De la más reciente a la más vieja, que es como se las busca al cobrar.
       .sort((a, b) => b.fecha.localeCompare(a.fecha));

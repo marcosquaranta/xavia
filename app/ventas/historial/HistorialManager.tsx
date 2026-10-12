@@ -36,6 +36,7 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
   const [guardando, setGuardando] = useState(false);
   const [eliminandoFila, setEliminandoFila] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [ajustes, setAjustes] = useState<{ numero: string; de: number; a: number }[]>([]);
 
   useEffect(() => {
     fetch(`/api/ventas/fecha?id_exportacion=${idExportacion}`).then(r => r.json()).then((data: VentaDia[]) => {
@@ -68,7 +69,12 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
         };
       });
       const r = await fetch('/api/ventas/guardar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fecha, id_exportacion: idExportacion, lineas }) });
-      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Error'); }
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'Error');
+      // Lo que cambió el monto a cobrar. Se dice acá y no se deja para que alguien lo
+      // descubra en Cobranzas: corregir una venta ya facturada mueve la deuda del cliente, y
+      // eso tiene que verse en el momento en que se decide, no tres pantallas después.
+      setAjustes(Array.isArray(j.ajustes) ? j.ajustes : []);
       onGuardado();
     } catch (e: any) { setError(e.message); }
     setGuardando(false);
@@ -92,6 +98,19 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
   return (
     <div style={{ padding: '10px 12px', background: 'white', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
       {error && <p style={{ color: '#dc2626', fontSize: '12px', margin: '0 0 8px' }}>{error}</p>}
+      {ajustes.length > 0 && (
+        <div style={{ margin: '0 0 8px', padding: '8px 10px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', fontSize: '12px', color: '#92400e' }}>
+          <strong>Cambió lo que hay que cobrar.</strong> La factura en Xubio no se toca —para eso haría falta una nota de
+          crédito— pero la app ya reclama el importe corregido:
+          <ul style={{ margin: '5px 0 0', paddingLeft: '18px' }}>
+            {ajustes.map((a) => (
+              <li key={a.numero}>
+                <span style={{ fontFamily: 'ui-monospace, monospace' }}>{a.numero}</span>: ${Math.round(a.de).toLocaleString('es-AR')} → <strong>${Math.round(a.a).toLocaleString('es-AR')}</strong>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div style={{ overflowX: 'auto' }}>
         <table style={{ fontSize: '12px', width: '100%' }}>
           <thead><tr>

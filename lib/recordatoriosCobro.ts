@@ -7,6 +7,7 @@ import { claveComprobante } from './comprobantes';
 import { HOJA_COBROS } from './cobros';
 import { VENTANA_MINIMA_DIAS } from './cobranzasVentana';
 import { leerEdiciones, imputacionesManuales } from './cobranzasEdit';
+import { leerAjustes, ajustesPorFactura } from './ajusteFactura';
 
 // ── Recordatorios de cobro ────────────────────────────────────────────────────────────
 //
@@ -183,7 +184,13 @@ export function nombreClienteComprobante(c: any): string {
 }
 
 // Saldo por cliente (normalizado) = facturado − cobrado en la ventana. Positivo = debe.
-export function calcularSaldos(comprobantes: any[], cobranzas: any[], saldadas?: Set<string>): Map<string, number> {
+export function calcularSaldos(
+  comprobantes: any[], cobranzas: any[], saldadas?: Set<string>,
+  // Facturas corregidas después de emitidas: la guarda de saldo tiene que mirar lo que hay
+  // que cobrar, no lo que dice el comprobante. Si no, un cliente al que se le descontó
+  // mercadería seguiría figurando en rojo por la diferencia y se le escribiría igual.
+  ajustes?: Map<string, { importeApp: number }>,
+): Map<string, number> {
   const saldo = new Map<string, number>();
   for (const c of comprobantes) {
     const k = norm(nombreClienteComprobante(c));
@@ -195,7 +202,8 @@ export function calcularSaldos(comprobantes: any[], cobranzas: any[], saldadas?:
     // Las notas de crédito (tipo 3) restan: si no, un cliente al que se le anuló una
     // factura figuraría debiendo algo que ya no debe.
     const signo = Number(c?.tipo) === 3 ? -1 : 1;
-    saldo.set(k, (saldo.get(k) || 0) + signo * (Number(c?.importetotal) || 0));
+    const aj = Number(c?.tipo) === 1 ? ajustes?.get(claveComprobante(c?.numeroDocumento)) : undefined;
+    saldo.set(k, (saldo.get(k) || 0) + signo * (aj ? aj.importeApp : (Number(c?.importetotal) || 0)));
   }
   for (const cob of cobranzas) {
     const k = norm(nombreClienteComprobante(cob));
@@ -242,6 +250,8 @@ export function calcularEnvios(
     // la defensa principal contra reclamar algo ya cobrado: antes alcanzaba con que cada
     // comprobante entrara en un solo recordatorio.
     cobradas?: Set<string>;
+    // Facturas corregidas después de emitidas: ver lib/ajusteFactura.ts.
+    ajustes?: Map<string, { importeApp: number }>;
   } = {},
 ): { envios: EnvioRecordatorio[]; omitidos: EnvioOmitido[]; yaReclamadas: number } {
   let yaReclamadas = 0;
@@ -286,11 +296,18 @@ export function calcularEnvios(
     }
 
     const facturas = delCliente
-      .map((c) => ({
-        numero: String(c?.numeroDocumento || '').trim(),
-        fecha: soloFecha(c?.fecha),
-        importe: Number(c?.importetotal) || 0,
-      }))
+      .map((c) => {
+        const numero = String(c?.numeroDocumento || '').trim();
+        const aj = opciones.ajustes?.get(claveComprobante(numero));
+        return {
+          numero,
+          fecha: soloFecha(c?.fecha),
+          // Lo que hay que cobrar, no lo que dice el comprobante: si la venta se corrigió
+          // después de facturar, reclamar el importe de la factura es reclamarle al cliente
+          // algo que los dos saben que no debe — y es el reclamo el que pierde autoridad.
+          importe: aj ? aj.importeApp : (Number(c?.importetotal) || 0),
+        };
+      })
       .filter((f) => {
         if (!f.numero) return false;
         const k = claveComprobante(f.numero);
@@ -582,13 +599,15 @@ export async function correrRecordatoriosCobro(
     for (const k of imputacionesManuales(edicionesCobranzas, claveComprobante).porFactura.keys()) {
       cobradas.add(k);
     }
-    const saldos = calcularSaldos(comprobantes, cobranzas, saldadas);
+    const ajustes = ajustesPorFactura(await leerAjustes());
+    const saldos = calcularSaldos(comprobantes, cobranzas, saldadas, ajustes);
     // Insistir solo tiene sentido en el envío puntual: en la corrida completa reclamaría
     // de nuevo todo a todo el mundo.
     const { envios, omitidos, yaReclamadas } = calcularEnvios(hoy, activos, comprobantes, previos, saldos, {
       ignorarYaReclamadas: reclamarDeNuevo && !!soloCliente,
       saldadas,
       cobradas,
+      ajustes,
     });
     base.omitidos = omitidos;
     base.yaReclamadas = yaReclamadas;

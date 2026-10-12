@@ -17,6 +17,7 @@ import { facturasPorCliente, type FacturaCliente } from '@/lib/facturasCliente';
 import { cuentasFaltantes } from '@/lib/cuentasCobro';
 import { sugerirCombinaciones } from '@/lib/conciliacionCobro';
 import { claveComprobante } from '@/lib/comprobantes';
+import { leerAjustes, ajustesPorFactura } from '@/lib/ajusteFactura';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 import type { ClienteVenta } from '@/lib/types';
 import Header from '@/components/Header';
@@ -68,6 +69,7 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   let cacheXubio: { actualizado?: string }[] = [];
   let cobranzasCache: CobranzaCache[] = [];
   let edicionesRaw: Awaited<ReturnType<typeof leerEdiciones>> = [];
+  let ajustesRaw: Awaited<ReturnType<typeof leerAjustes>> = [];
   // Xubio arranca junto con las planillas, no después. Son las dos consultas más lentas de
   // la página y ninguna depende de la otra: esperarlas en serie hacía que entrar a
   // Cobranzas tardara la suma de las dos. Se lanzan acá y se esperan más abajo.
@@ -82,7 +84,7 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   ]).catch(() => [[], []] as [any[], any[]]);
 
   try {
-    [clientes, enviados, configRows, cobros, bandeja, aliasRows, saldadas, revisiones, cacheXubio, cobranzasCache, edicionesRaw] = await Promise.all([
+    [clientes, enviados, configRows, cobros, bandeja, aliasRows, saldadas, revisiones, cacheXubio, cobranzasCache, edicionesRaw, ajustesRaw] = await Promise.all([
       readSheet<ClienteVenta>('Clientes').catch(() => []),
       readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => []),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
@@ -99,6 +101,9 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
       // Las cobranzas tal como están en Xubio, para el movimiento del mes.
       readSheet<CobranzaCache>(HOJA_COBRANZAS_CACHE).catch(() => []),
       leerEdiciones(),
+      // Las facturas corregidas después de emitidas: ahí lo que hay que cobrar no es lo que
+      // dice el comprobante. La hoja no existe hasta la primera corrección.
+      leerAjustes(),
     ]);
   } catch {}
 
@@ -132,6 +137,7 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   // Las imputaciones hechas a mano sobre los cobros de Xubio: qué factura paga cada uno.
   // Mandan sobre el reparto automático — ver lib/cobranzasEdit.ts.
   const imputadas = imputacionesManuales(edicionesRaw, claveComprobante);
+  const ajustes = ajustesPorFactura(ajustesRaw);
 
   // Qué sección pesada se pidió ver. Plegar con <details> esconde pero NO ahorra: el
   // servidor arma el contenido igual y lo manda. Lo que hace lenta esta página es
@@ -190,7 +196,7 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   const deudaPorCliente: Record<string, { monto: number; cantidad: number; masVieja: string }> = {};
   try {
     const [comps, cobs] = await pedidoXubio;
-    const todas = facturasPorCliente(comps, cobros, clientes, saldadasSet, cobs, imputadas);
+    const todas = facturasPorCliente(comps, cobros, clientes, saldadasSet, cobs, imputadas, ajustes);
     for (const [id, fs] of Object.entries(todas)) {
       // Impaga = ni imputada desde la app, ni cubierta por los cobros de Xubio, ni dada por
       // saldada a mano. Es el mismo criterio con el que se decide qué reclamar, así que el

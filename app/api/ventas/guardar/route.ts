@@ -5,6 +5,10 @@ import type { VentaDia } from '@/lib/types';
 import { KEYS_UNIDAD } from '@/lib/articulos';
 
 import { asegurarColumnasArticulos } from '@/lib/articulosSheets';
+import { claveComprobante } from '@/lib/comprobantes';
+import { valorDeFactura, guardarAjuste } from '@/lib/ajusteFactura';
+import { HOJA_COMPROBANTES, type ComprobanteCache } from '@/lib/xubioCache';
+import type { PrecioVenta, ClienteVenta } from '@/lib/types';
 export async function POST(req: NextRequest) {
   // Las columnas de los artículos nuevos tienen que existir antes de escribir por nombre.
   await asegurarColumnasArticulos();
@@ -77,6 +81,53 @@ export async function POST(req: NextRequest) {
       await batchUpdateRows('Ventas', 'id_venta', toUpdate);
     }
 
-    return NextResponse.json({ ok: true });
+    // ── Si lo que se corrigió ya estaba facturado, el monto a cobrar cambia ──────────
+    //
+    // La factura en Xubio no se toca: formalmente lo que corresponde es una nota de crédito,
+    // y hasta que se emita el comprobante dice lo que dice. Pero la DEUDA es otra cosa, y
+    // hasta acá seguía siendo la de la factura vieja: se le descontaban 40 rúculas al cliente
+    // y la app le seguía reclamando el importe completo. Nadie lo notaba, porque el número
+    // que mostraba era el de la factura — correcto como comprobante y equivocado como deuda.
+    //
+    // Se calcula acá y no al leer para que quede asentado CUÁNDO se decidió y quién: si se
+    // recalculara en cada pantalla, el monto a cobrar cambiaría solo el día que se toque un
+    // precio, meses después de la venta.
+    const numeros = new Set<string>();
+    for (const l of lineas) {
+      const fila = l.id_venta ? ventas.find((v) => v.id_venta === l.id_venta) : null;
+      const exp = String(fila?.exportado || '').trim();
+      if (exp && exp !== 'PENDIENTE' && claveComprobante(exp)) numeros.add(exp);
+    }
+
+    const ajustes: { numero: string; de: number; a: number }[] = [];
+    if (numeros.size) {
+      // Se relee: los montos tienen que salir de lo que quedó guardado, no de lo que se
+      // mandó. Si una línea no entró, el ajuste tiene que reflejar eso y no lo que se quiso.
+      const [ventasAhora, precios, clientes, cache] = await Promise.all([
+        readSheet<VentaDia>('Ventas'),
+        readSheet<PrecioVenta>('Precios').catch(() => [] as PrecioVenta[]),
+        readSheet<ClienteVenta>('Clientes').catch(() => [] as ClienteVenta[]),
+        readSheet<ComprobanteCache>(HOJA_COMPROBANTES).catch(() => [] as ComprobanteCache[]),
+      ]);
+      for (const numero of numeros) {
+        const v = valorDeFactura(numero, ventasAhora, precios, clientes);
+        if (!v.filas || v.monto <= 0) continue;
+        const comp = cache.find((c) => claveComprobante(c.numero) === claveComprobante(numero));
+        const importeXubio = Math.round(Number(comp?.importe) || 0);
+        // Sin el comprobante en la copia local no hay contra qué comparar: anotar un ajuste
+        // con "antes = 0" diría que la factura entera cambió, que es peor que no anotar nada.
+        if (importeXubio <= 0) continue;
+        if (Math.abs(v.monto - importeXubio) < 1) continue;
+        await guardarAjuste({
+          numero, id_control: v.id_control, cliente: v.cliente,
+          importeXubio, importeApp: v.monto,
+          motivo: 'Se corrigieron las cantidades de la venta después de facturar',
+          usuario: user.email,
+        });
+        ajustes.push({ numero, de: importeXubio, a: v.monto });
+      }
+    }
+
+    return NextResponse.json({ ok: true, ajustes });
   } catch (err: any) { return NextResponse.json({ error: err.message }, { status: 500 }); }
 }

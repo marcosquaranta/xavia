@@ -177,6 +177,26 @@ function llevaIva(cliente: ClienteVenta | undefined): boolean {
   return String(cliente?.tipo_factura || '').trim().toUpperCase() === 'A';
 }
 
+// Cuanto vale una fila de venta, a los precios de ese cliente y esa sucursal, con el IVA de
+// los clientes con factura A — o sea, el importe con el que esa venta llega a un comprobante
+// de Xubio.
+//
+// Se exporta porque lo necesita el ajuste de facturas corregidas despues de emitidas (ver
+// lib/ajusteFactura.ts). Tiene que ser EXACTAMENTE esta cuenta y no una parecida: si el
+// ajuste valorizara distinto que el informe de facturacion, cada factura corregida
+// aparecería como una diferencia inventada en el informe de los lunes.
+export function valorDeVenta(v: VentaDia, precios: PrecioVenta[], clientes: ClienteVenta[]): number {
+  const cliente = clientes.find((c) => String(c.id_control) === String(v.id_control));
+  let monto = 0;
+  for (const key of PROD_KEYS) {
+    const qty = Number((v as any)[key]) || 0;
+    if (qty <= 0) continue;
+    monto += qty * precioDe(precios, String(v.id_control), v.sucursal, key, cliente?.sucursales);
+  }
+  if (monto <= 0) return 0;
+  return llevaIva(cliente) ? monto * (1 + IVA_FACTURA_A) : monto;
+}
+
 // Corre un día una fecha YYYY-MM-DD.
 function diaMas(fecha: string, n: number): string {
   const d = new Date(fecha + 'T12:00:00');

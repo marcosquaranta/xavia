@@ -29,6 +29,11 @@ export interface FacturaCliente {
   // Relacionada a mano con un cobro de Xubio desde la app (ver cobranzasEdit.ts). Es un
   // hecho, no una deducción: alguien miró el cobro y dijo qué paga. Gana sobre `cubierta`.
   imputadaManual?: boolean;
+  // Lo que dice el comprobante en Xubio, cuando NO es lo que hay que cobrar: la venta se
+  // corrigió después de facturar (ver ajusteFactura.ts). `importe` es siempre lo que se
+  // cobra; esto queda al lado para poder ver de dónde salió.
+  importeFactura?: number;
+  ajustada?: boolean;
 }
 
 const norm = (s: any) => String(s || '')
@@ -151,6 +156,9 @@ export function facturasPorCliente(
   // Las imputaciones hechas a mano sobre los cobros de Xubio. Mandan sobre el reparto
   // automático: ver cobranzasEdit.ts.
   imputadas?: ImputacionesManuales,
+  // Las facturas corregidas después de emitidas: ahí `importe` deja de ser el del
+  // comprobante y pasa a ser lo que de verdad hay que cobrar (ver ajusteFactura.ts).
+  ajustes?: Map<string, { importeApp: number; importeXubio: number }>,
 ): Record<string, FacturaCliente[]> {
   // Las facturas que la app ya imputó. No es lo mismo que "pagas" —Xubio no expone eso—
   // pero alcanza para no ofrecer dos veces la misma.
@@ -176,10 +184,17 @@ export function facturasPorCliente(
     if (!id) continue;
     const numero = String(c?.numeroDocumento || '').trim();
     if (!numero) continue;
+    const importeXubio = Number(c?.importetotal) || 0;
+    const aj = ajustes?.get(claveComprobante(numero));
     (out[id] ||= []).push({
       numero,
       fecha: soloFecha(c?.fecha),
-      importe: Number(c?.importetotal) || 0,
+      // Lo que hay que cobrar. Si la venta se corrigió después de facturar, es el importe
+      // corregido y no el del comprobante: reclamar el de la factura es reclamar algo que
+      // las dos partes ya saben que no se debe.
+      importe: aj ? aj.importeApp : importeXubio,
+      importeFactura: importeXubio,
+      ajustada: !!aj,
       yaCobrada: yaCobradas.has(claveComprobante(numero)),
       saldadaManual: !!saldadas?.has(claveComprobante(numero)),
       imputadaManual: !!imputadas?.porFactura.has(claveComprobante(numero)),

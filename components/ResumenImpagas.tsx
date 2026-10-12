@@ -209,7 +209,18 @@ export default function ResumenImpagas({
                     <td style={{ padding: '3px 6px', fontFamily: 'ui-monospace, monospace', fontSize: '11px' }}>{x.numero}</td>
                     <td style={{ padding: '3px 6px', color: '#6b7280' }}>{fmtFecha(x.fecha)}</td>
                     <td style={{ padding: '3px 6px', color: '#9ca3af' }}>{diasDesde(x.fecha)} días</td>
-                    <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmt(x.importe)}</td>
+                    <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                      {fmt(x.importe)}
+                      {/* Si la venta se corrigió después de facturar, se cobra otra cosa que
+                          lo que dice el comprobante. Hay que ver los dos: el de la factura
+                          es con el que el cliente va a discutir. */}
+                      {x.ajustada && x.importeFactura !== undefined && (
+                        <span title="La venta se corrigió después de facturar: la factura dice otra cosa y en Xubio sigue igual."
+                          style={{ display: 'block', fontSize: '10px', fontWeight: 400, color: '#b45309' }}>
+                          factura {fmt(x.importeFactura)}
+                        </span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

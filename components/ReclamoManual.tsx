@@ -13,6 +13,10 @@ interface Factura {
   saldadaManual?: boolean;
   imputadaManual?: boolean;
   cubierta?: boolean;
+  // La venta se corrigió después de facturar: `importe` es lo que hay que cobrar y esto es
+  // lo que dice el comprobante. Ver lib/ajusteFactura.ts.
+  importeFactura?: number;
+  ajustada?: boolean;
 }
 
 // Una factura está abierta si NINGUNO de los cuatro caminos la da por saldada. Es el mismo
@@ -102,6 +106,9 @@ export default function ReclamoManual({ clientes }: { clientes: ClienteOpt[] }) 
       + (seleccionadas.length > 6 ? `\n  …y ${seleccionadas.length - 6} más` : '')
       + (yaCobradas > 0 ? `\n\nOJO: ${yaCobradas} ya figura(n) saldada(s) en la app.` : '')
       + (yaReclamadas > 0 ? `\n\n${yaReclamadas} ya se había(n) reclamado antes.` : '')
+      + (seleccionadas.some((f) => f.ajustada)
+        ? '\n\nOJO: hay facturas corregidas después de emitidas. Se reclama el importe corregido, que NO es el que dice la factura en Xubio.'
+        : '')
       + '\n\nEl mail sale al cliente con copia a administración. ¿Confirmás?';
     if (!confirm(aviso)) return;
 
@@ -185,6 +192,12 @@ export default function ReclamoManual({ clientes }: { clientes: ClienteOpt[] }) 
                   <span style={{ color: '#6b7280', minWidth: '78px' }}>{fmtDia(f.fecha)}</span>
                   <span style={{ color: '#9ca3af', fontSize: '10.5px', minWidth: '46px' }}>{diasDesde(f.fecha)}d</span>
                   <span style={{ marginLeft: 'auto', fontWeight: 600 }}>{fmt$(f.importe)}</span>
+                  {f.ajustada && f.importeFactura !== undefined && (
+                    <span title={`La venta se corrigió después de facturar. La factura dice ${fmt$(f.importeFactura)} y en Xubio sigue así; lo que se reclama es el importe corregido.`}
+                      style={{ fontSize: '9.5px', background: '#fffbeb', color: '#92400e', padding: '1px 6px', borderRadius: '8px', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                      corregida · factura {fmt$(f.importeFactura)}
+                    </span>
+                  )}
                   {f.reclamadaEl && (
                     <span title={`Se reclamó el ${fmtDia(f.reclamadaEl)}`} style={{ fontSize: '9.5px', background: '#fffbeb', color: '#92400e', padding: '1px 6px', borderRadius: '8px', fontWeight: 700 }}>
                       reclamada {fmtDia(f.reclamadaEl).slice(0, 5)}
