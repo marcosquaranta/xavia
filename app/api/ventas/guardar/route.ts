@@ -5,6 +5,9 @@ import type { VentaDia } from '@/lib/types';
 import { KEYS_UNIDAD } from '@/lib/articulos';
 
 import { asegurarColumnasArticulos } from '@/lib/articulosSheets';
+import { avisarEntregasNuevas } from '@/lib/avisoCobroEntrega';
+
+const DESTINATARIOS_AVISO = ['administracion@xavia.com.ar'];
 import { claveComprobante } from '@/lib/comprobantes';
 import { valorDeFactura, guardarAjuste } from '@/lib/ajusteFactura';
 import { HOJA_COMPROBANTES, type ComprobanteCache } from '@/lib/xubioCache';
@@ -128,6 +131,24 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ ok: true, ajustes });
+    // ── Aviso de cobro contra entrega ───────────────────────────────────────────────
+    //
+    // También acá, y no solo en la carga del día: este es el otro camino por el que una
+    // venta llega a la planilla. Una venta cargada mal y corregida después nunca disparaba
+    // nada, y el repartidor iba sin saber que tenía que cobrar.
+    //
+    // No manda dos veces la misma entrega: ver lib/avisoEntregaEnviado.ts.
+    let avisoCobro: { sucursal: string }[] = [];
+    try {
+      const guardadas = await readSheet<VentaDia>('Ventas');
+      const ids = new Set(lineas.map((l: any) => String(l.id_venta || '')).filter(Boolean));
+      const tocadas = guardadas.filter((v) => ids.has(String(v.id_venta)));
+      const r = await avisarEntregasNuevas(tocadas.length ? tocadas : [], fecha, DESTINATARIOS_AVISO);
+      avisoCobro = r.avisadas.map((e) => ({ sucursal: e.sucursal }));
+    } catch (e) {
+      console.error('[ventas/guardar] no se pudo mandar el aviso de cobro en entrega:', e);
+    }
+
+    return NextResponse.json({ ok: true, ajustes, avisoCobro });
   } catch (err: any) { return NextResponse.json({ error: err.message }, { status: 500 }); }
 }

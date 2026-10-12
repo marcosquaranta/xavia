@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet, batchUpdateRows } from '@/lib/sheets';
 import { emitirPendientes } from '@/lib/facturacionEmitir';
-import { entregasConCobro, avisarCobroEnEntrega } from '@/lib/avisoCobroEntrega';
+import { avisarEntregasNuevas } from '@/lib/avisoCobroEntrega';
 import type { VentaDia, ClienteVenta } from '@/lib/types';
 import { PROD_KEYS } from '@/lib/articulos';
 
@@ -62,12 +62,8 @@ export async function POST(req: NextRequest) {
     // falle un mail no puede tirar abajo una carga de ventas que ya se hizo.
     let avisoCobro: { sucursal: string }[] = [];
     try {
-      const clientesRows = await readSheet<ClienteVenta>('Clientes');
-      const entregas = entregasConCobro(aCargar, clientesRows, fecha);
-      if (entregas.length) {
-        await avisarCobroEnEntrega(entregas, DESTINATARIOS_AVISO);
-        avisoCobro = entregas.map(e => ({ sucursal: e.sucursal }));
-      }
+      const r = await avisarEntregasNuevas(aCargar, fecha, DESTINATARIOS_AVISO);
+      avisoCobro = r.avisadas.map(e => ({ sucursal: e.sucursal }));
     } catch (e) {
       console.error('[ventas/cargar] no se pudo mandar el aviso de cobro en entrega:', e);
     }
