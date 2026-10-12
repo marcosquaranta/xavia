@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
-import { evaluarBandeja, CONFIG_ACTIVO, CONFIG_REMITENTES } from '@/lib/autoCobro';
+import { evaluarBandeja, CONFIG_ACTIVO } from '@/lib/autoCobro';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -14,10 +14,13 @@ const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 // EXACTAMENTE lo que el aviso dice haber pagado: esos no necesitan que nadie los mire, porque
 // no hay nada que interpretar. El resto queda en la bandeja como siempre.
 //
-// Mientras `auto_cobro_activo` no esté en SI, no registra nada: manda el mail diciendo qué
-// habría registrado. Eso es a propósito — es código que escribe en la contabilidad y que no se
-// pudo probar contra los datos reales. Una semana de ver la lista antes de prenderlo cuesta
-// una semana; un cobro mal cargado en Xubio cuesta encontrarlo después.
+// Está prendido. El freno de mano es `auto_cobro_activo = NO` en Configuración: con eso vuelve
+// a solo informar qué habría registrado, sin tocar nada.
+//
+// El mail de confirmación sale siempre que haya pasado algo, y trae el detalle completo —
+// cliente, importe, retención, facturas, cuenta y número de recibo— para que se pueda
+// controlar sin entrar a la app. Un "se registraron 3 cobros" obliga a ir a mirar qué fueron,
+// que es justo el trabajo que esto viene a sacar.
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get('authorization');
   const cronSecret = process.env.CRON_SECRET;
@@ -39,14 +42,30 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'RESEND_API_KEY no configurada', ...r }, { status: 500 });
     }
 
-    const filas = (xs: { cliente: string; importe: number; comprobantes?: string[]; retencion?: number; cuentaNombre?: string }[]) =>
-      xs.map((c) => `
+    const fmtDia = (f: string) => { const [y, m, d] = String(f || '').split('-'); return d ? `${d}/${m}` : String(f || ''); };
+
+    interface FilaMail {
+      cliente: string; importe: number; fecha?: string;
+      comprobantes?: string[]; retencion?: number; cuentaNombre?: string; numeroRecibo?: string;
+    }
+    const filas = (xs: FilaMail[]) => `
+      <tr style="background:#fafaf9;color:#6b7280;font-size:11px;text-transform:uppercase">
+        <td style="padding:4px 8px">Cliente</td>
+        <td style="padding:4px 8px">Fecha</td>
+        <td style="padding:4px 8px;text-align:right">Importe</td>
+        <td style="padding:4px 8px;text-align:right">Retención</td>
+        <td style="padding:4px 8px">Facturas</td>
+        <td style="padding:4px 8px">Cuenta</td>
+        <td style="padding:4px 8px">Recibo</td>
+      </tr>` + xs.map((c) => `
         <tr>
-          <td style="padding:5px 8px;border-top:1px solid #f3f4f6">${c.cliente}</td>
+          <td style="padding:5px 8px;border-top:1px solid #f3f4f6;font-weight:600">${c.cliente}</td>
+          <td style="padding:5px 8px;border-top:1px solid #f3f4f6;color:#6b7280">${fmtDia(c.fecha || '')}</td>
           <td style="padding:5px 8px;border-top:1px solid #f3f4f6;text-align:right;font-weight:700">${fmt$(c.importe)}</td>
-          <td style="padding:5px 8px;border-top:1px solid #f3f4f6;color:#6b7280">${c.retencion ? `ret. ${fmt$(c.retencion)}` : ''}</td>
-          <td style="padding:5px 8px;border-top:1px solid #f3f4f6;color:#6b7280;font-size:12px">${(c.comprobantes || []).join(', ')}</td>
+          <td style="padding:5px 8px;border-top:1px solid #f3f4f6;text-align:right;color:${c.retencion ? '#b45309' : '#d1d5db'}">${c.retencion ? fmt$(c.retencion) : '—'}</td>
+          <td style="padding:5px 8px;border-top:1px solid #f3f4f6;color:#374151;font-size:12px">${(c.comprobantes || []).join(', ')}</td>
           <td style="padding:5px 8px;border-top:1px solid #f3f4f6;color:#6b7280;font-size:12px">${c.cuentaNombre || ''}</td>
+          <td style="padding:5px 8px;border-top:1px solid #f3f4f6;color:#6b7280;font-size:12px">${c.numeroRecibo || ''}</td>
         </tr>`).join('');
 
     const bloque = (titulo: string, color: string, cuerpo: string) => cuerpo
@@ -54,21 +73,26 @@ export async function GET(req: NextRequest) {
          <table style="width:100%;border-collapse:collapse;font-size:13px">${cuerpo}</table>`
       : '';
 
+    const totalRegistrado = r.registrados.reduce((a, x) => a + x.importe, 0);
+    const totalRetenido = r.registrados.reduce((a, x) => a + x.retencion, 0);
+
     const html = `
       <div style="font-family:system-ui,Arial,sans-serif;color:#111;max-width:700px">
         <h2 style="margin:0 0 4px">Cobros que se registran solos</h2>
         <p style="margin:0 0 10px;color:#555;font-size:13px">
           ${r.activo
-            ? 'El registro automático está <strong>prendido</strong>.'
-            : 'El registro automático está <strong>apagado</strong>: esto es lo que se habría registrado. Para prenderlo, poné <code>auto_cobro_activo = SI</code> en Configuración.'}
-          Solo entran los avisos cuyas facturas suman exactamente lo que el aviso dice haber pagado, de un remitente habilitado
-          (<code>${CONFIG_REMITENTES}</code>) y con el cliente y la cuenta reconocidos. Todo lo demás queda en la bandeja.
+            ? 'Esto <strong>ya quedó imputado</strong> en Xubio y en la app: no hay que hacer nada. Está acá para controlarlo.'
+            : 'El registro automático está <strong>apagado</strong> (<code>auto_cobro_activo = NO</code>): esto es lo que se habría imputado.'}
+          Entra cualquier cliente cuyo aviso nombre las facturas: lo que habilita el registro no es quién manda el mail,
+          sino que esas facturas —abiertas y de ese cliente— sumen <strong>al peso</strong> lo que el aviso declara pagado,
+          más lo retenido. Además tienen que estar reconocidos el cliente y la cuenta de destino. Todo lo demás queda en la
+          bandeja para imputar a mano.
         </p>
 
-        ${bloque(r.activo ? 'Registrados' : 'Se habrían registrado', '#166534', filas(
-          r.activo
-            ? r.registrados.map((x) => ({ cliente: x.cliente, importe: x.importe }))
-            : r.candidatos))}
+        ${bloque(r.activo ? 'Imputados en Xubio' : 'Se habrían imputado', '#166534', filas(r.activo ? r.registrados : r.candidatos))}
+        ${r.activo && r.registrados.length ? `<p style="margin:8px 0 0;font-size:13px">
+          <strong>${r.registrados.length} cobro(s) · ${fmt$(totalRegistrado)}</strong>${totalRetenido ? ` · ${fmt$(totalRetenido)} de retenciones` : ''}
+        </p>` : ''}
 
         ${r.errores.length ? `<h3 style="margin:18px 0 6px;font-size:15px;color:#b91c1c">No se pudieron registrar</h3>
           <ul style="margin:0;padding-left:18px;font-size:13px;color:#374151">
@@ -96,8 +120,8 @@ export async function GET(req: NextRequest) {
         from: 'Xavia <ventas@xavia.com.ar>',
         to: DESTINATARIOS,
         subject: r.activo
-          ? `Cobros registrados solos: ${r.registrados.length}${r.errores.length ? ` · ${r.errores.length} con error` : ''}`
-          : `${r.candidatos.length} cobro(s) se habrían registrado solos — ${CONFIG_ACTIVO} está apagado`,
+          ? `Cobros imputados solos: ${r.registrados.length} · ${fmt$(totalRegistrado)}${r.errores.length ? ` · ${r.errores.length} con error` : ''}`
+          : `${r.candidatos.length} cobro(s) se habrían imputado solos — ${CONFIG_ACTIVO} está en NO`,
         html,
       }),
     });

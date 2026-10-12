@@ -26,12 +26,18 @@ import type { ClienteVenta } from './types';
 // remitente desconocido— sigue yendo a la bandeja como hasta ahora. La automatización no
 // reemplaza el criterio: se queda con los casos donde el criterio no aporta nada.
 //
-// ARRANCA APAGADO. Mientras `auto_cobro_activo` no diga SI en Configuración, esto solo
-// informa qué habría registrado. Es código que escribe en la contabilidad y que no se pudo
-// probar contra los datos reales: la primera semana se mira, no se ejecuta.
+// Está PRENDIDO, por decisión de Marcos. El freno de mano es `auto_cobro_activo = NO` en
+// Configuración: con eso vuelve a solo informar qué habría registrado, sin tocar nada.
+//
+// Que esté prendido no afloja ninguna verificación. Lo que se automatiza es el acto de
+// apretar el botón sobre los casos que ya no requerían criterio; todo lo que no pasa la
+// aritmética sigue yendo a la bandeja.
 
 export const CONFIG_ACTIVO = 'auto_cobro_activo';
-export const CONFIG_REMITENTES = 'auto_cobro_remitentes';
+export const CONFIG_EXCLUIDOS = 'auto_cobro_remitentes_excluidos';
+// Tope opcional: por encima de este importe no se registra solo, va a la bandeja. Vacío o 0
+// = sin tope. Existe para poder poner un freno sin apagar todo, el día que haga falta.
+export const CONFIG_TOPE = 'auto_cobro_tope';
 
 // Cuánto pueden diferir la suma de las facturas y lo que dice la orden. Un peso de redondeo
 // entre el total de la orden y la suma de los comprobantes es normal; mil pesos ya no es un
@@ -63,7 +69,14 @@ export interface ResultadoAuto {
   activo: boolean;
   candidatos: Candidato[];
   rechazados: Rechazo[];
-  registrados: { idItem: string; idCobro: string; cliente: string; importe: number }[];
+  // Lo imputado, con todo el detalle: el mail de confirmación tiene que poder leerse sin
+  // entrar a la app. Un "se registraron 3 cobros" obliga a ir a mirar qué fueron, que es
+  // exactamente el trabajo que esto venía a sacar.
+  registrados: {
+    idItem: string; idCobro: string; cliente: string; importe: number;
+    retencion: number; comprobantes: string[]; cuentaNombre: string; fecha: string;
+    numeroRecibo: string;
+  }[];
   errores: { idItem: string; cliente: string; error: string }[];
 }
 
@@ -71,21 +84,35 @@ const num = (v: any) => { const n = Number(v); return isNaN(n) ? 0 : n; };
 const norm = (s: any) => String(s || '')
   .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-// Los remitentes cuyos avisos se pueden registrar solos. Se configuran: agregar uno es una
-// decisión sobre la contabilidad, no algo que deba requerir un deploy — pero tampoco algo que
-// deba pasar sin que nadie lo decida.
-export function remitentesPermitidos(valor: any): string[] {
+// Remitentes que NUNCA se registran solos, por más que las cuentas den.
+//
+// Al revés de como empezó: ya no hay lista de habilitados. Cualquier cliente que mande una
+// orden de pago con las facturas y el importe entra por el mismo camino — era lo que faltaba
+// para que esto sirviera de verdad, porque no son solo dos los que mandan avisos completos.
+//
+// Lo que habilita el registro no es quién manda el mail: es que las facturas nombradas,
+// abiertas y de ese cliente, sumen al peso lo que el aviso declara. Esa verificación no
+// depende del remitente, y un remitente habilitado que mandara un número mal tampoco pasaría.
+//
+// La lista queda, invertida, por si algún día hay que excluir a alguno:
+// `auto_cobro_remitentes_excluidos` en Configuración.
+export function remitentesExcluidos(valor: any): string[] {
   return String(valor || '').split(/[,;\n]+/).map((x) => norm(x)).filter(Boolean);
 }
 
 export async function evaluarBandeja(): Promise<ResultadoAuto> {
   const hoy = fechaArgentinaHoy();
-  const [activoRaw, remitentesRaw] = await Promise.all([
+  const [activoRaw, excluidosRaw, topeRaw] = await Promise.all([
     readConfig(CONFIG_ACTIVO).catch(() => null),
-    readConfig(CONFIG_REMITENTES).catch(() => null),
+    readConfig(CONFIG_EXCLUIDOS).catch(() => null),
+    readConfig(CONFIG_TOPE).catch(() => null),
   ]);
-  const activo = String(activoRaw || '').trim().toUpperCase() === 'SI';
-  const permitidos = remitentesPermitidos(remitentesRaw);
+  // Prendido salvo que digan explícitamente que no. Al revés —apagado hasta que alguien
+  // escriba SI— significa que una clave mal tipeada deja la automatización muerta sin que
+  // nada avise, y eso se descubre un mes después.
+  const activo = String(activoRaw || '').trim().toUpperCase() !== 'NO';
+  const excluidos = remitentesExcluidos(excluidosRaw);
+  const tope = Math.max(0, Number(topeRaw) || 0);
 
   const [items, cobros, clientes, cacheComp, saldadasFilas] = await Promise.all([
     readSheet<ItemBandeja>(HOJA_BANDEJA).catch(() => [] as ItemBandeja[]),
@@ -131,14 +158,16 @@ export async function evaluarBandeja(): Promise<ResultadoAuto> {
     const retencion = Math.round(num((it as any).retencion));
     const rechazar = (motivo: string) => out.rechazados.push({ idItem: String(it.id_item), cliente, importe, motivo });
 
-    if (!permitidos.length) { rechazar('no hay remitentes habilitados para el registro automático'); continue; }
     const remitente = norm((it as any).remitente);
-    if (!remitente || !permitidos.some((p) => remitente.includes(p))) {
-      rechazar(`el remitente no está en la lista de los que se registran solos`); continue;
+    if (remitente && excluidos.some((x) => remitente.includes(x))) {
+      rechazar('el remitente está excluido del registro automático'); continue;
     }
     if (String((it as any).confianza || '') !== 'alta') { rechazar('la IA no quedó segura de lo que leyó'); continue; }
     if (!String(it.id_control || '').trim()) { rechazar('no se reconoció a qué cliente corresponde'); continue; }
     if (importe <= 0) { rechazar('no se pudo leer el importe'); continue; }
+    if (tope > 0 && importe > tope) {
+      rechazar(`supera el tope de $${tope.toLocaleString('es-AR')} para registrarse solo`); continue;
+    }
 
     const nums = String(it.comprobantes || '').split(',').map((x) => x.trim()).filter(Boolean);
     if (!nums.length) { rechazar('el aviso no nombra las facturas que paga'); continue; }
@@ -208,7 +237,11 @@ export async function evaluarBandeja(): Promise<ResultadoAuto> {
         estado: 'confirmado', id_cobro: r.idCobro || '', usuario: 'automático',
         nota: `registrado solo: las facturas suman exactamente lo que dice el aviso`,
       });
-      out.registrados.push({ idItem: c.idItem, idCobro: r.idCobro || '', cliente: c.cliente, importe: c.importe });
+      out.registrados.push({
+        idItem: c.idItem, idCobro: r.idCobro || '', cliente: c.cliente, importe: c.importe,
+        retencion: c.retencion, comprobantes: c.comprobantes, cuentaNombre: c.cuentaNombre,
+        fecha: c.fecha, numeroRecibo: r.numeroRecibo || '',
+      });
     } catch (e: any) {
       out.errores.push({ idItem: c.idItem, cliente: c.cliente, error: e?.message || 'error' });
     }

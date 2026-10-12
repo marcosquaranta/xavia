@@ -127,6 +127,11 @@ const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 
 async function acusarRecibo(args: {
   asunto: string; remitente: string; resultado: any; texto: string;
+  // Qué adjuntos se bajaron y se le pasaron al modelo. Va en el acuse porque es lo único
+  // que permite distinguir, desde afuera, "el PDF se leyó y no decía el importe" de "el PDF
+  // nunca se bajó". Sin esto los dos casos se ven iguales —un aviso que entró vacío— y el
+  // segundo es un problema de la app que nadie va a encontrar.
+  adjuntos?: string[];
 }): Promise<{ ok: boolean; detalle: string }> {
   if (!process.env.RESEND_API_KEY) return { ok: false, detalle: 'RESEND_API_KEY no configurada' };
   const r = args.resultado || {};
@@ -171,6 +176,11 @@ async function acusarRecibo(args: {
         De: ${args.remitente || '(sin remitente)'}<br>Asunto: ${args.asunto || '(sin asunto)'}
       </p>
       ${detalle}
+      <p style="margin:10px 0 0;font-size:12px;color:#6b7280">
+        ${args.adjuntos?.length
+          ? `Adjuntos leídos (${args.adjuntos.length}): <code>${args.adjuntos.join(', ')}</code>`
+          : 'Sin adjuntos: se leyó solo el cuerpo del mail.'}
+      </p>
       <p style="margin:16px 0 0">
         <a href="${URL_BANDEJA}" style="background:#166534;color:white;text-decoration:none;padding:9px 16px;border-radius:6px;font-weight:700;display:inline-block">
           Abrir la bandeja
@@ -270,7 +280,7 @@ export async function POST(req: NextRequest) {
       }).catch(() => ({ ok: false } as any));
       const acuseSin = await acusarRecibo({
         asunto: String(data?.subject || ''), remitente: String(data?.from || ''),
-        resultado: rSin, texto: '(no se pudo leer el cuerpo del mensaje)',
+        resultado: rSin, texto: '(no se pudo leer el cuerpo del mensaje)', adjuntos: [],
       });
       return NextResponse.json({ ok: true, sinContenido: true, resultado: rSin, acuse: acuseSin });
     }
@@ -300,6 +310,7 @@ export async function POST(req: NextRequest) {
     const acuse = await acusarRecibo({
       asunto: contenido.asunto, remitente: contenido.remitente,
       resultado: r, texto: contenido.texto,
+      adjuntos: pdfs.map((x) => x.nombre),
     });
 
     // Siempre 200: si se contesta un error, Resend reintenta y termina duplicando. Lo que
