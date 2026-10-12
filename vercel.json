@@ -39,6 +39,10 @@
     {
       "path": "/api/cron/previsiones",
       "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/auto-cobros",
+      "schedule": "0 15 * * *"
     }
   ]
 }

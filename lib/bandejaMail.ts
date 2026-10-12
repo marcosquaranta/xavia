@@ -9,7 +9,7 @@
 // registrar un cobro en Xubio, elegir un cliente por sí solo ni cambiar una configuración.
 // Esa es toda la protección que hace falta y es la razón por la que la bandeja existe.
 
-import { appendRowObj, asegurarHoja, readSheet } from './sheets';
+import { appendRowObj, asegurarHoja, asegurarColumnas, readSheet } from './sheets';
 import { parsearAvisoPago } from './avisosPago';
 import { extraerAvisoConIA, type AdjuntoIA, type ClienteParaIA } from './extraerAvisoIA';
 import { hashMovimiento } from './importacionBanco';
@@ -92,6 +92,9 @@ export async function crearItemDesdeAviso(args: {
   const asunto = String(args.asunto || '');
 
   await asegurarHoja(HOJA_BANDEJA, HEADERS_BANDEJA);
+  // Las columnas nuevas no existen en una hoja creada antes, y appendRowObj escribe por
+  // nombre: sin esto, los datos del aviso se perderían en silencio.
+  await asegurarColumnas(HOJA_BANDEJA, ['retencion', 'cuenta_destino', 'confianza', 'remitente']);
   const previos = await readSheet<ItemBandeja>(HOJA_BANDEJA).catch(() => [] as ItemBandeja[]);
   const hoy = fechaArgentinaHoy();
 
@@ -243,6 +246,12 @@ export async function crearItemDesdeAviso(args: {
       sinImporte ? 'falta el importe' : '',
       cand ? `reconocido por ${cand.confianza}${leidoCon === 'ia' ? ' (IA)' : ''}` : 'sin reconocer al cliente',
     ].filter(Boolean).join(' · '),
+    // En columnas, para que el registro automático pueda leerlas sin interpretar la
+    // descripción (ver lib/autoCobro.ts).
+    retencion: Number(retencion) || '',
+    cuenta_destino: cuentaDestino || '',
+    confianza: confianza || '',
+    remitente: String(args.remitente || ''),
   });
 
   return {

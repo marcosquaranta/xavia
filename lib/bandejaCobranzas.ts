@@ -17,6 +17,10 @@ export const HOJA_BANDEJA = 'CobranzasBandeja';
 export const HEADERS_BANDEJA = [
   'id_item', 'fecha_importacion', 'origen', 'fecha', 'importe', 'descripcion',
   'hash', 'id_control', 'cliente', 'comprobantes', 'estado', 'id_cobro', 'usuario', 'nota',
+  // Lo que la IA sacó del aviso, en columnas y no enterrado en el texto de la descripción.
+  // Mientras una persona confirmaba cada fila alcanzaba con que estuviera escrito ahí; para
+  // que la app pueda decidir sola tiene que poder leerlo sin interpretar una frase.
+  'retencion', 'cuenta_destino', 'confianza', 'remitente',
 ];
 
 // Aliases aprendidos: cómo aparece un cliente en el resumen del banco. El banco muestra la
@@ -44,6 +48,11 @@ export interface ItemBandeja {
   id_cobro: string;       // el cobro registrado en Xubio, si se confirmó
   usuario: string;
   nota: string;
+  // Lo que declaró el aviso. Vacío en las filas viejas y en las que vienen del banco.
+  retencion: number | string;
+  cuenta_destino: string;
+  confianza: 'alta' | 'media' | 'baja' | string;
+  remitente: string;
 }
 
 export interface AliasCobranza {
