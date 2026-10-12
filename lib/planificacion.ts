@@ -32,6 +32,28 @@ const fmt = (n: number) => Math.round(n).toLocaleString('es-AR');
 // redondea PARA ARRIBA (mejor sembrar de más que quedarse corto de plantines).
 export const planchas = (n: number) => Math.ceil(n);
 
+// ── El total de planchas es la SUMA DE LAS NAVES, no el redondeo del total ───────────
+//
+// Leo siembra por nave, y en cada nave la plancha es entera: no hay media bandeja en la
+// nave 1 que se complete con la otra mitad de la nave 2. Así que el total que hay que
+// sembrar es ceil(nave 1) + ceil(nave 2).
+//
+// Redondear el total de una sola vez da otro número. Con 2,4 y 4,4 planchas, ceil(6,8) = 7
+// mientras que las naves piden 3 y 5 = 8: el bloque de "Sembrar hoy" decía 7 y el detalle por
+// nave decía 3 y 5. Los dos números salían de la misma cuenta y ninguno estaba mal — pero el
+// que se puede ejecutar es el de las naves, y el otro deja a alguien parado en la plantinera
+// decidiendo cuál creer.
+export interface PlanchasSiembra {
+  rucN1: number; rucN2: number; ruc: number;
+  lecN1: number; lecN2: number; lec: number;
+}
+
+export function planchasSiembra(plan: Plan): PlanchasSiembra {
+  const rucN1 = planchas(plan.n1.rucPl), rucN2 = planchas(plan.n2.rucPl);
+  const lecN1 = planchas(plan.n1.lecPl), lecN2 = planchas(plan.n2.lecPl);
+  return { rucN1, rucN2, ruc: rucN1 + rucN2, lecN1, lecN2, lec: lecN1 + lecN2 };
+}
+
 export interface PlanNave { rucPos: number; rucPaq: number; rucPl: number; lote: number; lecPl: number; f1PerfNec: number; f1OK: number; rucTrasp: number; f1Trasp: number; f2Trasp: number }
 export interface Plan {
   n1: PlanNave; n2: PlanNave;
@@ -72,9 +94,7 @@ export function repartoHelpers(plan: Plan, reparto: Slot[]) {
   const sumPct = (c: Cultivo) => reparto.filter(s => s.cultivo === c).reduce((a, s) => a + s.pct, 0);
   const cosechaEnDia = (dia: number) => pctDia('lechuga', dia) > 0 || pctDia('rucula', dia) > 0;
   const trasplanteEnDia = (dia: number) => dia === DIA_SIEMBRA || (dia > 1 && cosechaEnDia(dia - 1));
-  const siembraRucPl = plan.n1.rucPos * CUBPOSRUC / CUB + plan.n2.rucPos * CUBPOSRUC / CUB;
-  const siembraLecPl = plan.n1.lote / CUB + plan.n2.lote / CUB;
-  return { pctDia, cosDia, cosNaveDia, sumPct, cosechaEnDia, trasplanteEnDia, siembraRucPl, siembraLecPl };
+  return { pctDia, cosDia, cosNaveDia, sumPct, cosechaEnDia, trasplanteEnDia };
 }
 
 export interface Tarea { icon: string; txt: string; color: string; href?: string }
@@ -106,10 +126,12 @@ export interface SiembraHoy { rucPl: number; lecPl: number; albPl: number }
 // no como línea de texto, para que los números por cultivo no se pierdan.
 export function siembraDelDia(plan: Plan, reparto: Slot[], jsDay: number): SiembraHoy | null {
   if (jsDay !== DIA_SIEMBRA) return null;
-  const h = repartoHelpers(plan, reparto);
+  // Mismo número que el detalle por nave de /planificacion: la suma de los dos redondeos,
+  // no el redondeo de la suma. Ver planchasSiembra.
+  const pl = planchasSiembra(plan);
   return {
-    rucPl: planchas(h.siembraRucPl),
-    lecPl: planchas(h.siembraLecPl),
+    rucPl: pl.ruc,
+    lecPl: pl.lec,
     albPl: PLANCHAS_ALBAHACA_SEMANA,
   };
 }

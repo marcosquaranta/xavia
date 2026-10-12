@@ -4,7 +4,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { calcularDiasPorFase } from '@/lib/lotes';
 import { calcularCapacidad, diasCicloDefault } from '@/lib/planificacionServer';
-import { calcularPlan, repartoHelpers, parseReparto, REPARTO_DEFAULT, DIA_SIEMBRA, CUB, planchas } from '@/lib/planificacion';
+import { calcularPlan, DIA_SIEMBRA, CUB, planchas, planchasSiembra } from '@/lib/planificacion';
 import { calcularCapacidadProductiva } from '@/lib/capacidadProductiva';
 import { productividadDeMes, productividadPlantasDeMes } from '@/lib/productividad';
 import { obtenerTemperaturasRosario, temperaturaPromedioPorMes } from '@/lib/clima';
@@ -407,11 +407,11 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
   try {
     const naves = calcularCapacidad(ubicaciones);
     const plan = calcularPlan(naves, diasCicloDefault(lotes, movimientos));
-    const cfgRep = configRows.find(i => i.clave === 'plan_reparto');
-    const reparto = cfgRep ? parseReparto(cfgRep.valor) : REPARTO_DEFAULT;
-    const h = repartoHelpers(plan, reparto);
-    const plPorSiembraRuc = planchas(h.siembraRucPl);
-    const plPorSiembraLec = planchas(h.siembraLecPl);
+    // Las mismas planchas que muestran el panel y la planificación: la suma de los
+    // redondeos por nave, no el redondeo del total. Ver planchasSiembra.
+    const pl = planchasSiembra(plan);
+    const plPorSiembraRuc = pl.ruc;
+    const plPorSiembraLec = pl.lec;
 
     // Miércoles (día de siembra) transcurridos este mes, hasta hoy inclusive
     const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
