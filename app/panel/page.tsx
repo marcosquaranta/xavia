@@ -23,6 +23,7 @@ import Header from '@/components/Header';
 import GraficoCiclosSemanas from '@/components/GraficoCiclosSemanas';
 import GraficoDistribucionMesadas from '@/components/GraficoDistribucionMesadas';
 import BuscadorLote from '@/components/BuscadorLote';
+import AsistenteChat from '@/components/AsistenteChat';
 import GruposLotes from '@/components/GruposLotes';
 import AjusteStockCard from '@/components/AjusteStockCard';
 import KilometrajeReminder from '@/components/KilometrajeReminder';
@@ -460,6 +461,12 @@ export default async function PanelPage() {
         </div>
 
         <BuscadorLote baseUrl="/cultivos" />
+
+        {/* Preguntas en castellano sobre los datos de la app. Va plegado: abierto de entrada
+            competiria con el trabajo del dia, que es lo que el panel tiene que mostrar
+            primero. Lo que contesta sale de las mismas funciones que calculan las pantallas
+            (ver lib/asistente/herramientas.ts), y el rol decide que puede consultar. */}
+        <AsistenteChat esAdmin={user.rol === 'admin'} nombre={user.nombre} />
 
         {user.rol === 'admin' && <TardanzasHoyBanner />}
 
