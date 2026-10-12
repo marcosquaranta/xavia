@@ -140,6 +140,10 @@ export interface DiferenciaDia {
   xubio: number;
   diferencia: number;
   comprobantes: string[]; // los de Xubio de ese día, para ir directo a buscarlos
+  // Con qué otro día se emparejó por importe exacto. No se muestra como diferencia, pero
+  // tenerlo permite explicar por qué un día que "no cuadra" no aparece en el informe — si
+  // no, la próxima vez que alguien mire la planilla va a creer que el informe se lo comió.
+  emparejadaCon?: string;
 }
 
 // Abajo de esto, un día no se nombra: es redondeo de precios, no un problema. El umbral
@@ -168,10 +172,42 @@ export const DIF_MINIMA_PCT = 2;
 // en el informe de septiembre, de $3,9 millones de "diferencia", casi todo era esto.
 export const IVA_FACTURA_A = 0.105;
 
-// Cuánto se puede correr la fecha del comprobante respecto de la entrega. Pasa seguido que
-// lo entregado un día se factura al siguiente; sin esta ventana cada uno de esos días
-// aparecía dos veces en el informe —uno "de más" y el otro "de menos"— por el mismo importe.
-export const DIAS_CORRIMIENTO = 1;
+// ── Cuánto se puede correr la fecha del comprobante respecto de la entrega ────────────
+//
+// Era 1 día, y 1 día no alcanza. Lo entregado el viernes y el sábado se factura el lunes:
+// son dos y tres días. Un cliente al que se le juntan varios remitos en una factura puede
+// estirarse más todavía. Con la ventana en 1, cada uno de esos casos salía como DOS
+// diferencias del mismo importe —una de más y otra de menos— y las dos eran la misma cosa
+// contada dos veces. El informe se llenaba de ruido y lo real quedaba enterrado.
+export const DIAS_CORRIMIENTO = 4;
+
+// ── Emparejar por importe, con la fecha mucho más suelta ──────────────────────────────
+//
+// Dos montos iguales del mismo cliente, uno en la app y otro en Xubio, dentro de la misma
+// quincena, son la misma venta facturada otro día. No hace falta que los días sean vecinos:
+// que el importe coincida AL PESO ya es una coincidencia demasiado grande para ser casual.
+//
+// Esto es lo que saca del informe los casos que más se repiten: la factura 0631 del 01/10 por
+// $188.000 contra la entrega del 10/10 por $188.000 no es una diferencia, es la misma venta.
+// La compensación por días vecinos nunca las iba a juntar porque están a nueve días.
+export const DIAS_MISMO_IMPORTE = 15;
+
+// Cuánto pueden diferir dos importes para considerarlos "el mismo". Fijo y chico: lo que se
+// busca son coincidencias exactas, no parecidos — emparejar dos montos que difieren en miles
+// taparía una diferencia real.
+export const TOLERANCIA_IMPORTE = 100;
+
+// Dos importes son el mismo si coinciden, o si coinciden cuando a uno se le suma el IVA de la
+// factura A. Lo segundo cubre al cliente con el tipo de factura mal cargado en la ficha: la
+// app valoriza neto, Xubio emite con IVA, y la diferencia es exactamente el 10,5% todos los
+// días del mes. Eso es un dato mal cargado, no plata que falte.
+export function mismoImporte(a: number, b: number): boolean {
+  const x = Math.abs(a), y = Math.abs(b);
+  if (Math.abs(x - y) <= TOLERANCIA_IMPORTE) return true;
+  if (Math.abs(x * (1 + IVA_FACTURA_A) - y) <= TOLERANCIA_IMPORTE) return true;
+  if (Math.abs(y * (1 + IVA_FACTURA_A) - x) <= TOLERANCIA_IMPORTE) return true;
+  return false;
+}
 
 function llevaIva(cliente: ClienteVenta | undefined): boolean {
   return String(cliente?.tipo_factura || '').trim().toUpperCase() === 'A';
@@ -195,6 +231,11 @@ export function valorDeVenta(v: VentaDia, precios: PrecioVenta[], clientes: Clie
   }
   if (monto <= 0) return 0;
   return llevaIva(cliente) ? monto * (1 + IVA_FACTURA_A) : monto;
+}
+
+// Días entre dos fechas YYYY-MM-DD (puede dar negativo).
+function diasEntreFechas(a: string, b: string): number {
+  return Math.round((new Date(b + 'T12:00:00').getTime() - new Date(a + 'T12:00:00').getTime()) / 86400000);
 }
 
 // Corre un día una fecha YYYY-MM-DD.
@@ -299,10 +340,36 @@ export function compararFacturado(
       if (Math.abs(dDif) < DIF_MINIMA_DIA) continue;
       dias.push({ fecha: f, app: dApp, xubio: dXu, diferencia: dDif, comprobantes: porDiaXubio.get(`${k}||${f}`)?.comprobantes || [] });
     }
-    // Se compensan los días consecutivos de signo opuesto antes de reportarlos: lo
-    // entregado un día y facturado al siguiente aparecía como dos diferencias del mismo
-    // importe, una en más y otra en menos, y las dos eran la misma cosa contada dos veces.
     dias.sort((a, b) => a.fecha.localeCompare(b.fecha));
+
+    // ── Primero, los que coinciden EXACTO en importe ────────────────────────────────
+    //
+    // Antes que cualquier otra cosa, porque es el emparejamiento más confiable que hay: dos
+    // montos iguales del mismo cliente dentro de la quincena son la misma venta facturada
+    // otro día. Se cancelan enteros los dos.
+    //
+    // Va primero y no después de la compensación por vecinos porque si no, un vecino puede
+    // "gastar" parte de un día que en realidad correspondía a su par exacto, y quedan dos
+    // restos chicos en vez de cero.
+    for (let i = 0; i < dias.length; i++) {
+      if (Math.abs(dias[i].diferencia) < DIF_MINIMA_DIA) continue;
+      const par = dias.find((x, j) =>
+        j !== i
+        && Math.abs(x.diferencia) >= DIF_MINIMA_DIA
+        && Math.sign(x.diferencia) !== Math.sign(dias[i].diferencia)
+        && Math.abs(diasEntreFechas(dias[i].fecha, x.fecha)) <= DIAS_MISMO_IMPORTE
+        && mismoImporte(dias[i].diferencia, x.diferencia));
+      if (!par) continue;
+      dias[i].emparejadaCon = par.fecha;
+      par.emparejadaCon = dias[i].fecha;
+      dias[i].diferencia = 0;
+      par.diferencia = 0;
+    }
+
+    // ── Después, los días cercanos, compensando parcialmente ────────────────────────
+    //
+    // Para lo que no coincide al peso: una entrega facturada junto con otra deja un resto que
+    // no empareja exacto con nada, pero que se explica con el día de al lado.
     for (let i = 0; i < dias.length; i++) {
       for (let n = 1; n <= DIAS_CORRIMIENTO; n++) {
         const vecino = dias.find((x) => x.fecha === diaMas(dias[i].fecha, n));

@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
   try {
-    const { fecha, lineas, id_exportacion } = await req.json();
+    const { fecha, lineas, id_exportacion, importeManual } = await req.json();
     const ventas = await readSheet<VentaDia>('Ventas');
     const fechaCarga = new Date().toISOString().split('T')[0];
 
@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
       if (exp && exp !== 'PENDIENTE' && claveComprobante(exp)) numeros.add(exp);
     }
 
-    const ajustes: { numero: string; de: number; a: number }[] = [];
+    const ajustes: { numero: string; de: number; a: number; manual?: boolean }[] = [];
     if (numeros.size) {
       // Se relee: los montos tienen que salir de lo que quedó guardado, no de lo que se
       // mandó. Si una línea no entró, el ajuste tiene que reflejar eso y no lo que se quiso.
@@ -114,20 +114,37 @@ export async function POST(req: NextRequest) {
       ]);
       for (const numero of numeros) {
         const v = valorDeFactura(numero, ventasAhora, precios, clientes);
-        if (!v.filas || v.monto <= 0) continue;
+        if (!v.filas) continue;
         const comp = cache.find((c) => claveComprobante(c.numero) === claveComprobante(numero));
         const importeXubio = Math.round(Number(comp?.importe) || 0);
         // Sin el comprobante en la copia local no hay contra qué comparar: anotar un ajuste
         // con "antes = 0" diría que la factura entera cambió, que es peor que no anotar nada.
         if (importeXubio <= 0) continue;
-        if (Math.abs(v.monto - importeXubio) < 1) continue;
+
+        // ── El importe puesto a mano gana ───────────────────────────────────────────
+        //
+        // Revalorizar las cantidades alcanza cuando lo que cambió son las cantidades. No
+        // alcanza cuando lo que se acordó con el cliente es otro PRECIO —una bonificación,
+        // un precio pactado por única vez, un redondeo— porque el precio sale del catálogo y
+        // el catálogo no sabe de ese acuerdo.
+        //
+        // Por eso se puede escribir el importe a cobrar directamente. Es un número decidido
+        // por una persona: le gana a cualquier cálculo, y queda guardado con quién lo puso y
+        // cuándo. Lo que NO hace es tocar Xubio ni el precio de catálogo del cliente: la
+        // factura sigue diciendo lo que dice y el próximo pedido se valoriza como siempre.
+        const manual = Math.round(Number(importeManual) || 0);
+        const monto = manual > 0 ? manual : v.monto;
+        if (monto <= 0) continue;
+        if (Math.abs(monto - importeXubio) < 1) continue;
         await guardarAjuste({
           numero, id_control: v.id_control, cliente: v.cliente,
-          importeXubio, importeApp: v.monto,
-          motivo: 'Se corrigieron las cantidades de la venta después de facturar',
+          importeXubio, importeApp: monto,
+          motivo: manual > 0
+            ? 'Importe a cobrar puesto a mano sobre una factura ya emitida'
+            : 'Se corrigieron las cantidades de la venta después de facturar',
           usuario: user.email,
         });
-        ajustes.push({ numero, de: importeXubio, a: v.monto });
+        ajustes.push({ numero, de: importeXubio, a: monto, manual: manual > 0 });
       }
     }
 

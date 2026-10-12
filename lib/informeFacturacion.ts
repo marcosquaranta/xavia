@@ -10,7 +10,7 @@
 // con el corrimiento de un día contemplados.
 
 import { readSheet } from './sheets';
-import { compararFacturado, controlFacturacion, DIF_MINIMA_PESOS, type ComparacionFacturado, type ControlFacturacion } from './controlFacturacion';
+import { compararFacturado, controlFacturacion, DIF_MINIMA_PESOS, DIAS_CORRIMIENTO, DIAS_MISMO_IMPORTE, type ComparacionFacturado, type ControlFacturacion } from './controlFacturacion';
 import { comprobantesParaMirar } from './xubioLectura';
 import { fechaArgentinaHoy } from './ocupacion';
 import type { VentaDia, PrecioVenta, ClienteVenta } from './types';
@@ -153,8 +153,10 @@ export function construirHtmlFacturacion(d: DatosInformeFacturacion): string {
     <h3 style="margin:20px 0 6px;font-size:14px">App vs. Xubio</h3>
     <p style="margin:0 0 8px;font-size:11.5px;color:#9ca3af">
       ${c.disponible ? `${fmtMoneda(c.totalApp)} según la app, ${fmtMoneda(c.totalXubio)} en Xubio. ` : ''}
-      Solo diferencias de más de ${fmtMoneda(DIF_MINIMA_PESOS)}. Ya está contemplado el IVA de la factura A
-      y que una entrega se facture al día siguiente: lo que aparece acá es diferencia de verdad.
+      Solo diferencias de más de ${fmtMoneda(DIF_MINIMA_PESOS)}. Antes de listar nada se descuenta el ruido de fechas:
+      el IVA de la factura A, lo entregado un día y facturado hasta ${DIAS_CORRIMIENTO} días después, y los días que
+      coinciden AL PESO con otro día del mismo cliente dentro de los ${DIAS_MISMO_IMPORTE} días (esa es la misma venta
+      facturada en otra fecha, no una diferencia). Lo que aparece acá es diferencia de verdad.
     </p>
     ${difHtml}
 

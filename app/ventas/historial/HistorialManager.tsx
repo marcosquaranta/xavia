@@ -36,7 +36,9 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
   const [guardando, setGuardando] = useState(false);
   const [eliminandoFila, setEliminandoFila] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [ajustes, setAjustes] = useState<{ numero: string; de: number; a: number }[]>([]);
+  const [ajustes, setAjustes] = useState<{ numero: string; de: number; a: number; manual?: boolean }[]>([]);
+  // Importe a cobrar puesto a mano. Vacío = se calcula de las cantidades, que es lo normal.
+  const [importeManual, setImporteManual] = useState('');
 
   useEffect(() => {
     fetch(`/api/ventas/fecha?id_exportacion=${idExportacion}`).then(r => r.json()).then((data: VentaDia[]) => {
@@ -68,7 +70,10 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
           rucula_kg: g('rucula_kg'), lechuga_kg_crespa: g('lechuga_kg_crespa'), lechuga_kg_roble: g('lechuga_kg_roble'),
         };
       });
-      const r = await fetch('/api/ventas/guardar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fecha, id_exportacion: idExportacion, lineas }) });
+      const r = await fetch('/api/ventas/guardar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fecha, id_exportacion: idExportacion, lineas, importeManual: Number(importeManual) || 0 }),
+      });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'Error');
       // Lo que cambió el monto a cobrar. Se dice acá y no se deja para que alguien lo
@@ -106,6 +111,7 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
             {ajustes.map((a) => (
               <li key={a.numero}>
                 <span style={{ fontFamily: 'ui-monospace, monospace' }}>{a.numero}</span>: ${Math.round(a.de).toLocaleString('es-AR')} → <strong>${Math.round(a.a).toLocaleString('es-AR')}</strong>
+                {a.manual && <span style={{ color: '#92400e' }}> (importe puesto a mano)</span>}
               </li>
             ))}
           </ul>
@@ -141,6 +147,26 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
           </tbody>
         </table>
       </div>
+      {/* ── El precio, cuando no son las cantidades lo que cambió ────────────────────
+          Corregir cantidades revaloriza al precio del catálogo. Si lo que se acordó fue otro
+          precio —una bonificación, un precio pactado por única vez— el catálogo no lo sabe.
+          Acá se escribe directamente lo que hay que cobrar: es un número decidido por una
+          persona y le gana a cualquier cálculo. */}
+      <div style={{ marginTop: '10px', padding: '8px 10px', background: '#fafaf9', border: '1px solid #e5e7eb', borderRadius: '6px' }}>
+        <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#374151', marginBottom: '3px' }}>
+          Importe a cobrar, si no es el que sale de las cantidades
+        </label>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <input type="number" min={0} step={1} value={importeManual} placeholder="dejalo vacío para calcularlo"
+            onChange={(e) => setImporteManual(e.target.value)} disabled={guardando}
+            style={{ width: '200px', fontSize: '13px', padding: '5px 8px', border: '1px solid #d1d5db', borderRadius: '5px' }} />
+          <span style={{ fontSize: '11px', color: '#6b7280', flex: 1, minWidth: '240px', lineHeight: 1.45 }}>
+            Para una bonificación o un precio pactado por única vez. No toca Xubio —la factura sigue diciendo lo que
+            dice— ni el precio de catálogo del cliente: el próximo pedido se valoriza como siempre.
+          </span>
+        </div>
+      </div>
+
       <div style={{ marginTop: '10px', display: 'flex', gap: '8px' }}>
         <button onClick={guardar} disabled={guardando} className="btn" style={{ fontSize: '12px', padding: '6px 14px' }}>
           {guardando ? 'Guardando…' : '✓ Guardar cambios'}
