@@ -1,12 +1,14 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import type { Articulo, StockMes, Lote, VentaDia, PrecioVenta, ClienteVenta, Gasto } from '@/lib/types';
+import type { Articulo, StockMes, Lote, VentaDia, PrecioVenta, ClienteVenta, Gasto, Variedad } from '@/lib/types';
 import Header from '@/components/Header';
 import StocksManager from './StocksManager';
 import CargarDescarteCamara from '@/components/CargarDescarteCamara';
 import { CULTIVOS_DESCARTE } from '@/lib/cultivosCamara';
 import { calcularValorizacionMes } from '@/lib/valorizacionStock';
+import { proyeccionSemanaQueViene } from '@/lib/proyeccionStock';
+import ProyeccionCosechaVenta from '@/components/ProyeccionCosechaVenta';
 import { calcularDriversMes } from '@/lib/usoTeorico';
 import { alertasStockBajo } from '@/lib/alertasPanel';
 import { leerDescartes, sinDescartadas } from '@/lib/alertasDescartadas';
@@ -20,9 +22,10 @@ export default async function StocksPage() {
   let articulos: Articulo[] = [], stocks: StockMes[] = [], lotes: Lote[] = [];
   let ventas: VentaDia[] = [];
   let precios: PrecioVenta[] = [], clientes: ClienteVenta[] = [], gastos: Gasto[] = [];
+  let variedades: Variedad[] = [];
   let err: string | null = null;
   try {
-    [articulos, stocks, lotes, ventas, precios, clientes, gastos] = await Promise.all([
+    [articulos, stocks, lotes, ventas, precios, clientes, gastos, variedades] = await Promise.all([
       readSheet<Articulo>('Articulos'),
       readSheet<StockMes>('Stocks'),
       readSheet<Lote>('Lotes'),
@@ -30,6 +33,7 @@ export default async function StocksPage() {
       readSheet<PrecioVenta>('Precios'),
       readSheet<ClienteVenta>('Clientes'),
       readSheet<Gasto>('Gastos').catch(() => []),
+      readSheet<Variedad>('Variedades').catch(() => []),
     ]);
   } catch (e: any) { err = e?.message || 'Error'; }
 
@@ -136,6 +140,11 @@ export default async function StocksPage() {
             </div>
           </div>
         )}
+
+        {/* Para JP: si lo que sale de las naves la semana que viene no se va a poder
+            vender, la diferencia termina en la camara. Cuando eso se ve en el stock
+            acumulado ya es tarde — la planta ya esta en el tubo. */}
+        <ProyeccionCosechaVenta p={proyeccionSemanaQueViene(ventas, lotes, variedades, hoy)} />
 
         <ComprasDelMes
           compras={compras}
