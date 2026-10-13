@@ -7,6 +7,7 @@ import { getCuentas, getCobranzas } from './xubio';
 import { nombreClienteVisible } from './clientes';
 import { numerosSaldados, leerSaldadas } from './facturasSaldadas';
 import { sumarDias } from './recordatoriosCobro';
+import { extraerCuentaDeclarada } from './cuentasCobro';
 import { fechaArgentinaHoy } from './ocupacion';
 import type { ClienteVenta } from './types';
 
@@ -76,6 +77,10 @@ export interface ResultadoAuto {
     idItem: string; idCobro: string; cliente: string; importe: number;
     retencion: number; comprobantes: string[]; cuentaNombre: string; fecha: string;
     numeroRecibo: string;
+    // Se registró SIN mandarle la retención a Xubio, porque Xubio no acepta esa cuenta como
+    // forma de cobro. Hay que decirlo: en Xubio esa factura queda abierta por el monto
+    // retenido, aunque acá figure cancelada.
+    retencionSoloLocal?: boolean;
   }[];
   errores: { idItem: string; cliente: string; error: string }[];
 }
@@ -83,6 +88,33 @@ export interface ResultadoAuto {
 const num = (v: any) => { const n = Number(v); return isNaN(n) ? 0 : n; };
 const norm = (s: any) => String(s || '')
   .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// ── Puente para las filas anteriores a las columnas ───────────────────────────────────
+//
+// `retencion`, `cuenta_destino` y `confianza` son columnas nuevas. Las filas que entraron a la
+// bandeja antes de que existieran las tienen vacías, y los datos están igual: escritos adentro
+// de la descripción, que es donde vivían hasta ahora.
+//
+// Sin esto, todo aviso que ya estaba en la bandeja queda rechazado por "la IA no quedó segura"
+// cuando en realidad sí lo estaba, y hay que imputarlo a mano sin entender por qué.
+//
+// No es parsear texto ajeno: ese texto lo arma la app (ver bandejaMail.ts) con un formato que
+// conocemos. Igual se usa SOLO cuando la columna está vacía — la columna siempre gana.
+function confianzaDe(it: any): string {
+  const col = String(it?.confianza || '').trim();
+  if (col) return col;
+  const m2 = String(it?.descripcion || '').match(/confianza\s+(alta|media|baja)/i);
+  return m2 ? m2[1].toLowerCase() : '';
+}
+
+function retencionDe(it: any): number {
+  const col = Number(it?.retencion);
+  if (isFinite(col) && col > 0) return Math.round(col);
+  const m2 = String(it?.descripcion || '').match(/retenci[oó]n\s+([\d.,]+)/i);
+  if (!m2) return 0;
+  const n = Number(String(m2[1]).replace(/\./g, '').replace(',', '.'));
+  return isFinite(n) ? Math.round(n) : 0;
+}
 
 // Remitentes que NUNCA se registran solos, por más que las cuentas den.
 //
@@ -100,7 +132,11 @@ export function remitentesExcluidos(valor: any): string[] {
   return String(valor || '').split(/[,;\n]+/).map((x) => norm(x)).filter(Boolean);
 }
 
-export async function evaluarBandeja(): Promise<ResultadoAuto> {
+// `soloItem` evalúa una sola fila, para correr esto en el momento en que el aviso llega en
+// vez de esperar al cron del día siguiente. Un cobro que se imputa 20 horas después igual se
+// imputa, pero mientras tanto aparece en la bandeja como pendiente y alguien lo hace a mano —
+// o peor, lo imputa dos veces.
+export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Promise<ResultadoAuto> {
   const hoy = fechaArgentinaHoy();
   const [activoRaw, excluidosRaw, topeRaw] = await Promise.all([
     readConfig(CONFIG_ACTIVO).catch(() => null),
@@ -122,7 +158,9 @@ export async function evaluarBandeja(): Promise<ResultadoAuto> {
     leerSaldadas(),
   ]);
 
-  const pendientes = items.filter((i) => String(i.estado || '').trim() === 'pendiente' && String(i.origen) === 'mail');
+  const pendientes = items
+    .filter((i) => String(i.estado || '').trim() === 'pendiente' && String(i.origen) === 'mail')
+    .filter((i) => !opciones.soloItem || String(i.id_item) === String(opciones.soloItem));
   const out: ResultadoAuto = { activo, candidatos: [], rechazados: [], registrados: [], errores: [] };
   if (!pendientes.length) return out;
 
@@ -155,14 +193,18 @@ export async function evaluarBandeja(): Promise<ResultadoAuto> {
   for (const it of pendientes) {
     const cliente = String(it.cliente || '') || String(it.id_control || '');
     const importe = Math.round(num(it.importe));
-    const retencion = Math.round(num((it as any).retencion));
+    const retencion = retencionDe(it);
     const rechazar = (motivo: string) => out.rechazados.push({ idItem: String(it.id_item), cliente, importe, motivo });
 
     const remitente = norm((it as any).remitente);
     if (remitente && excluidos.some((x) => remitente.includes(x))) {
       rechazar('el remitente está excluido del registro automático'); continue;
     }
-    if (String((it as any).confianza || '') !== 'alta') { rechazar('la IA no quedó segura de lo que leyó'); continue; }
+    const conf = confianzaDe(it);
+    if (conf !== 'alta') {
+      rechazar(conf ? `la IA leyó el aviso con confianza ${conf}` : 'no consta que la IA haya podido leer el aviso con seguridad');
+      continue;
+    }
     if (!String(it.id_control || '').trim()) { rechazar('no se reconoció a qué cliente corresponde'); continue; }
     if (importe <= 0) { rechazar('no se pudo leer el importe'); continue; }
     if (tope > 0 && importe > tope) {
@@ -205,9 +247,12 @@ export async function evaluarBandeja(): Promise<ResultadoAuto> {
       && Math.abs(num(c.importe) - importe) <= TOLERANCIA);
     if (duplicado) { rechazar('ya hay un cobro registrado de ese cliente, ese día y por ese importe'); continue; }
 
-    const declarada = norm((it as any).cuenta_destino);
+    // La cuenta declarada: la columna, o la marca que la app deja en la descripción en las
+    // filas anteriores a la columna.
+    const declaradaTexto = String((it as any).cuenta_destino || '').trim() || extraerCuentaDeclarada(String(it.descripcion || ''));
+    const declarada = norm(declaradaTexto);
     const cuenta = declarada ? cuentas.find((c) => norm(c.nombre).includes(declarada) || declarada.includes(norm(c.nombre))) : null;
-    if (!cuenta) { rechazar(declarada ? `no se pudo resolver la cuenta "${(it as any).cuenta_destino}"` : 'el aviso no dice a qué cuenta entró'); continue; }
+    if (!cuenta) { rechazar(declarada ? `no se pudo resolver la cuenta "${declaradaTexto}"` : 'el aviso no dice a qué cuenta entró'); continue; }
 
     out.candidatos.push({
       idItem: String(it.id_item), cliente, idControl: String(it.id_control),
@@ -226,21 +271,41 @@ export async function evaluarBandeja(): Promise<ResultadoAuto> {
   // dejarían cobros con forma distinta y uno de los dos sería el raro.
   for (const c of out.candidatos) {
     try {
-      const r = await registrarCobro({
+      const pedido = {
         idControl: c.idControl, fecha: c.fecha, importe: c.importe, cuentaId: c.cuentaId,
         comprobantes: c.comprobantes, retencion: c.retencion,
         observacion: `Registrado solo desde el aviso de pago (${c.comprobantes.join(', ')})`,
         usuario: 'automático',
-      });
+      };
+      let r = await registrarCobro(pedido);
+
+      // ── Xubio no acepta la cuenta de la retención ─────────────────────────────────
+      //
+      // Pasa con TODO cobro que traiga retención: "la cuenta Retención Ganancias Sufrida no
+      // tiene una categoría que impacte en disponibilidades". Es un problema del plan de
+      // cuentas de Xubio, no del cobro, y mientras no se arregle allá ningún aviso con
+      // retención se puede registrar — que son casi todos los de los supermercados.
+      //
+      // La pantalla ya ofrece la salida: registrar por el neto y dejar la retención anotada
+      // solo acá. Acá se toma la misma, porque es una decisión que ya está tomada y repetirla
+      // a mano cada vez no agrega criterio. Lo que no se puede es hacerlo en silencio: en
+      // Xubio esa factura queda ABIERTA por el monto retenido, y eso se avisa en el mail.
+      let soloLocal = false;
+      if (!r.ok && /no tiene una categor[ií]a que impacte en disponibilidades/i.test(String(r.error || ''))) {
+        r = await registrarCobro({ ...pedido, retencionSoloLocal: true });
+        soloLocal = r.ok;
+      }
       if (!r.ok) { out.errores.push({ idItem: c.idItem, cliente: c.cliente, error: r.error || 'Xubio lo rechazó' }); continue; }
       await updateRow(HOJA_BANDEJA, 'id_item', c.idItem, {
         estado: 'confirmado', id_cobro: r.idCobro || '', usuario: 'automático',
-        nota: `registrado solo: las facturas suman exactamente lo que dice el aviso`,
+        nota: soloLocal
+          ? 'registrado solo, SIN mandar la retención a Xubio (la cuenta no impacta en disponibilidades): allá la factura queda abierta por el monto retenido'
+          : 'registrado solo: las facturas suman exactamente lo que dice el aviso',
       });
       out.registrados.push({
         idItem: c.idItem, idCobro: r.idCobro || '', cliente: c.cliente, importe: c.importe,
         retencion: c.retencion, comprobantes: c.comprobantes, cuentaNombre: c.cuentaNombre,
-        fecha: c.fecha, numeroRecibo: r.numeroRecibo || '',
+        fecha: c.fecha, numeroRecibo: r.numeroRecibo || '', retencionSoloLocal: soloLocal,
       });
     } catch (e: any) {
       out.errores.push({ idItem: c.idItem, cliente: c.cliente, error: e?.message || 'error' });

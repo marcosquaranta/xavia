@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { crearItemDesdeAviso, htmlATexto } from '@/lib/bandejaMail';
+import { evaluarBandeja } from '@/lib/autoCobro';
 import type { AdjuntoIA } from '@/lib/extraerAvisoIA';
 
 export const dynamic = 'force-dynamic';
@@ -132,6 +133,10 @@ async function acusarRecibo(args: {
   // nunca se bajó". Sin esto los dos casos se ven iguales —un aviso que entró vacío— y el
   // segundo es un problema de la app que nadie va a encontrar.
   adjuntos?: string[];
+  // Si el cobro se registró solo al entrar. El acuse es el mail que llega en el momento, así
+  // que es el lugar donde hay que decirlo: avisar en el resumen del día siguiente que algo ya
+  // está hecho llega tarde para evitar que alguien lo haga a mano mientras tanto.
+  auto?: { registrado: boolean; idCobro?: string; motivo?: string; retencionSoloLocal?: boolean };
 }): Promise<{ ok: boolean; detalle: string }> {
   if (!process.env.RESEND_API_KEY) return { ok: false, detalle: 'RESEND_API_KEY no configurada' };
   const r = args.resultado || {};
@@ -143,7 +148,7 @@ async function acusarRecibo(args: {
     detalle = `<p style="font-size:14px">Código: <strong style="font-size:18px">${r.codigo || '(no se encontró en el mensaje)'}</strong></p>
       <p style="font-size:13px;color:#555">Pegalo en Gmail → Configuración → Reenvío y correo POP/IMAP. No uses el link del mail: falla cuando hay varias cuentas de Google abiertas.</p>`;
   } else if (r.ok) {
-    titulo = 'Aviso de pago procesado';
+    titulo = args.auto?.registrado ? 'Cobro registrado solo' : 'Aviso de pago procesado';
     detalle = `${r.leidoCon === 'ia'
       ? `<p style="font-size:12.5px;color:#5b21b6;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:7px 10px">
            Este lo leyó la IA (el texto solo no alcanzaba, o el dato estaba en un PDF). Confianza: <strong>${r.confianza}</strong>.
@@ -156,7 +161,20 @@ async function acusarRecibo(args: {
       <li>Cliente: ${r.cliente ? `<strong>${r.cliente}</strong>` : '<span style="color:#b45309">no lo reconocí — lo elegís al confirmar</span>'}</li>
       <li>Facturas: ${r.comprobantes?.length ? `<code>${r.comprobantes.join(', ')}</code>` : '<span style="color:#9ca3af">ninguna mencionada</span>'}</li>
     </ul>
-    <p style="font-size:13px;color:#555">Está en la bandeja esperando que lo confirmes. Todavía no se registró nada en Xubio.</p>`;
+    ${args.auto?.registrado
+      ? `<p style="font-size:14px;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:9px 11px">
+           <strong>Ya quedó registrado en Xubio.</strong> Las facturas que nombra el aviso suman exactamente lo que dice
+           haber pagado, así que no hacía falta revisarlo. No hay nada que hacer.
+           ${args.auto.retencionSoloLocal
+             ? '<br><br><span style="color:#991b1b"><strong>Pero la retención no se mandó a Xubio:</strong> rechaza la cuenta '
+               + '<em>Retención Ganancias Sufrida</em> porque no está marcada como una cuenta por la que pueda entrar un cobro. '
+               + 'El cobro entró por el neto, así que acá la factura figura cancelada y <strong>en Xubio queda abierta por el monto '
+               + 'retenido</strong>. Se arregla en Xubio: plan de cuentas → esa cuenta → categoría.</span>'
+             : ''}
+         </p>`
+      : `<p style="font-size:13px;color:#555">Está en la bandeja esperando que lo confirmes. Todavía no se registró nada en Xubio.${
+          args.auto?.motivo ? ` <br><span style="color:#92400e">No se registró solo porque ${args.auto.motivo}.</span>` : ''
+        }</p>`}`;
   } else if (r.motivo === 'duplicado') {
     titulo = 'Ese aviso ya estaba cargado';
     color = '#6b7280';
@@ -307,15 +325,41 @@ export async function POST(req: NextRequest) {
       pdfs,
     });
 
+    // ── Registrarlo en el momento, si no hace falta mirarlo ──────────────────────────
+    //
+    // El cron diario también lo hace, pero esperar hasta mañana tiene un costo real: mientras
+    // tanto el cobro figura pendiente en la bandeja y alguien lo imputa a mano — o lo imputa
+    // dos veces. El aviso llegó ahora y las cuentas se pueden verificar ahora.
+    //
+    // Va en su propio try: que falle el registro automático no puede hacer que se pierda el
+    // aviso, que ya está guardado en la bandeja.
+    let auto: { registrado: boolean; idCobro?: string; motivo?: string; retencionSoloLocal?: boolean } | undefined;
+    if ((r as any)?.ok && (r as any)?.idItem) {
+      try {
+        const ev = await evaluarBandeja({ soloItem: String((r as any).idItem) });
+        const reg = ev.registrados[0];
+        if (reg) auto = { registrado: true, idCobro: reg.idCobro, retencionSoloLocal: reg.retencionSoloLocal };
+        else {
+          const err = ev.errores[0]?.error;
+          const rech = ev.rechazados[0]?.motivo;
+          auto = { registrado: false, motivo: err ? `Xubio lo rechazó: ${err}` : (rech || undefined) };
+        }
+      } catch (e: any) {
+        console.error('[cobranzas/email] falló el registro automático:', e);
+        auto = { registrado: false, motivo: e?.message };
+      }
+    }
+
     const acuse = await acusarRecibo({
       asunto: contenido.asunto, remitente: contenido.remitente,
       resultado: r, texto: contenido.texto,
       adjuntos: pdfs.map((x) => x.nombre),
+      auto,
     });
 
     // Siempre 200: si se contesta un error, Resend reintenta y termina duplicando. Lo que
     // no se pudo interpretar queda avisado por el acuse y, si tenía importe, en la bandeja.
-    return NextResponse.json({ ok: true, resultado: r, acuse });
+    return NextResponse.json({ ok: true, resultado: r, acuse, auto });
   } catch (err: any) {
     console.error('[cobranzas/email] error procesando el correo:', err);
     return NextResponse.json({ ok: true, error: err?.message || 'error' });
