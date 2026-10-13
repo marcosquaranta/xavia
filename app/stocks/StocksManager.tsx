@@ -9,6 +9,7 @@ import { MEDIOS_PAGO } from '@/lib/types';
 import { calcularDriversMes, calcularUsoReferencia, categoriaSinUsoTeorico, usoTeoricoDeArticulo, DRIVERS } from '@/lib/usoTeorico';
 import { analizarDesviosDeUso, UMBRAL_PCT } from '@/lib/destacadosStock';
 import { matchArticuloPorTexto } from '@/lib/matchArticulo';
+import { UNIDADES_MEDIDA } from '@/lib/articulos';
 
 function copiarTSV(filas: (string | number)[][]) {
   const texto = filas.map((f) => f.join('\t')).join('\n');
@@ -72,7 +73,7 @@ function fmt(n: number, maxFrac = 3) { return n.toLocaleString('es-AR', { maximu
 // hace que un campo editable se vea como un número hasta que alguien lo va a tocar. Por eso
 // esto es CSS y no estilos inline como el resto del archivo.
 const CSS_TABLA = `
-.stk-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 760px; }
+.stk-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 860px; table-layout: fixed; }
 .stk-tbl th { font-weight: 600; font-size: 10px; letter-spacing: .4px; text-transform: uppercase;
   color: #9ca3af; padding: 0 8px 5px; vertical-align: bottom; white-space: nowrap; }
 .stk-bloques th { font-size: 9.5px; color: #c4c8cf; padding-bottom: 2px; text-align: left; }
@@ -81,11 +82,14 @@ const CSS_TABLA = `
 .stk-fila td { border-top: 1px solid #f4f5f7; }
 .stk-pend td { background: #fefce8; }
 .stk-art { text-align: left; min-width: 220px; }
-.stk-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stk-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; overflow-wrap: break-word; }
 /* Separador solo ENTRE bloques. Una línea por columna es una grilla de Excel: el ojo la
    recorre toda igual y no queda nada agrupado. */
 .stk-sep { border-left: 1px solid #e8eaed; }
-.stk-sub { display: block; font-size: 10px; font-weight: 400; margin-top: 1px; }
+/* La linea de abajo (mes pasado, % s/ teorico, cierre anterior) PUEDE cortarse. Con nowrap
+   se desbordaba de su columna y se metia encima de la de al lado, que es lo que hacia ver la
+   tabla torcida aunque los numeros estuvieran bien. */
+.stk-sub { display: block; font-size: 10px; font-weight: 400; margin-top: 1px; white-space: normal; line-height: 1.25; }
 .stk-sub-total td { border-top: 2px solid #e5e7eb; font-size: 11px; color: #6b7280; font-weight: 700; padding-top: 7px; }
 /* Campo editable: se ve como texto, el marco aparece recién al apuntarlo. */
 .stk-in { width: 100%; text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums;
@@ -281,10 +285,17 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
     return stockMes.find((s) => s.id_articulo === id_articulo);
   }
 
-  // El stock inicial NO se edita: por definicion es el stock final del mes anterior. Antes
-  // era un campo mas y podia quedar desalineado con el cierre del mes previo, que es
-  // justamente lo que rompe la cadena de `inicial + compras - final`.
-  function stockInicialDe(id: string): string {
+  // ── El stock inicial ──────────────────────────────────────────────────────────────
+  //
+  // Por definición es el stock final del mes anterior, y ese sigue siendo el valor que
+  // aparece solo. Pero no editarlo nunca tiene un costo: cuando el recuento del mes pasado
+  // quedó mal, o el artículo arranca a mitad de camino, la cadena no se puede corregir desde
+  // ningún lado y el consumo del mes sale mal para siempre.
+  //
+  // Así que se edita, y lo que se escribe se marca en ámbar cuando no coincide con el cierre
+  // del mes anterior. No se bloquea: a veces hay que romper la cadena a propósito. Lo que no
+  // puede pasar es romperla sin que se note.
+  function stockInicialHeredado(id: string): string {
     let mesPrev = mes - 1, anioPrev = anio;
     if (mesPrev === 0) { mesPrev = 12; anioPrev--; }
     const sPrev = stocks.find((st) => st.id_articulo === id && String(st.anio) === String(anioPrev) && String(st.mes) === String(mesPrev));
@@ -292,9 +303,13 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
   }
 
   function getEdit(id: string) {
-    const ini = stockInicialDe(id);
+    const heredado = stockInicialHeredado(id);
     const s = getStock(id);
-    if (editValues[id]) return { ...editValues[id], ini };
+    // Lo guardado gana sobre lo heredado: si alguien corrigió el inicial, corregirlo tiene
+    // que servir de algo. Cuando no hay nada guardado —que es el caso normal— vale la cadena.
+    const guardado = s && String(s.stock_inicial ?? '').trim() !== '' ? String(num(s.stock_inicial)) : '';
+    const ini = guardado || heredado;
+    if (editValues[id]) return { ...editValues[id] };
     if (s) return { ini, comp: String(num(s.compras)), fin: String(num(s.stock_final)), precio: num(s.precio_unitario) > 0 ? String(num(s.precio_unitario)) : '', notas: s.notas || '' };
     return { ini, comp: '', fin: '', precio: '', notas: '' };
   }
@@ -681,8 +696,11 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                     </div>
                     <div>
                       <label style={{ fontSize: '10px' }}>Unidad</label>
-                      <input type="text" value={nuevoArt.unidad_medida} onChange={(e) => setNuevoArt((p) => ({ ...p, unidad_medida: e.target.value }))}
-                        style={{ fontSize: '12px', padding: '5px 8px', width: '80px' }} placeholder="unidad" disabled={guardandoArt} />
+                      <select value={nuevoArt.unidad_medida} onChange={(e) => setNuevoArt((p) => ({ ...p, unidad_medida: e.target.value }))}
+                        style={{ fontSize: '12px', padding: '5px 8px', width: '110px' }} disabled={guardandoArt}>
+                        <option value="">— elegir —</option>
+                        {UNIDADES_MEDIDA.map((u) => <option key={u} value={u}>{u}</option>)}
+                      </select>
                     </div>
                     <button onClick={crearArticuloParaCompra} className="btn" style={{ fontSize: '12px', padding: '6px 14px' }}
                       disabled={guardandoArt || !nuevoArt.articulo.trim() || !nuevoArt.categoria.trim() || !nuevoArt.unidad_medida.trim()}>
@@ -814,8 +832,11 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                       </div>
                       <div>
                         <label style={{ fontSize: '10px' }}>Unidad</label>
-                        <input type="text" value={nuevoArt.unidad_medida} onChange={(e) => setNuevoArt((p) => ({ ...p, unidad_medida: e.target.value }))}
-                          style={{ fontSize: '12px', padding: '5px 8px', width: '80px' }} placeholder="unidad" disabled={guardandoArt} />
+                        <select value={nuevoArt.unidad_medida} onChange={(e) => setNuevoArt((p) => ({ ...p, unidad_medida: e.target.value }))}
+                          style={{ fontSize: '12px', padding: '5px 8px', width: '110px' }} disabled={guardandoArt}>
+                          <option value="">— elegir —</option>
+                          {UNIDADES_MEDIDA.map((u) => <option key={u} value={u}>{u}</option>)}
+                        </select>
                       </div>
                       <button onClick={() => crearArticuloParaExtra(i)} className="btn" style={{ fontSize: '12px', padding: '6px 14px' }}
                         disabled={guardandoArt || !nuevoArt.articulo.trim() || !nuevoArt.categoria.trim() || !nuevoArt.unidad_medida.trim()}>
@@ -1106,8 +1127,11 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                                 </div>
                                 <div>
                                   <label style={{ fontSize: '10px' }}>Unidad</label>
-                                  <input type="text" value={nuevoArt.unidad_medida} onChange={(e) => setNuevoArt((p) => ({ ...p, unidad_medida: e.target.value }))}
-                                    style={{ fontSize: '12px', padding: '4px 6px', width: '80px' }} placeholder="unidad" disabled={guardandoArt} />
+                                  <select value={nuevoArt.unidad_medida} onChange={(e) => setNuevoArt((p) => ({ ...p, unidad_medida: e.target.value }))}
+                                    style={{ fontSize: '12px', padding: '4px 6px', width: '105px' }} disabled={guardandoArt}>
+                                    <option value="">— elegir —</option>
+                                    {UNIDADES_MEDIDA.map((u) => <option key={u} value={u}>{u}</option>)}
+                                  </select>
                                 </div>
                                 <button onClick={() => crearArticuloYAsignar(g.id_gasto)} className="btn" style={{ fontSize: '11px', padding: '5px 10px' }}
                                   disabled={guardandoArt || !nuevoArt.articulo.trim() || !nuevoArt.categoria.trim() || !nuevoArt.unidad_medida.trim()}>
@@ -1251,8 +1275,15 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
             // La columna "Vs. teórico" solo existe si en este rubro hay algo con qué
             // comparar. Una columna de guiones ocupa el mismo ancho que una con datos y no
             // dice nada: en los rubros sin fórmula configurada era la mitad de la tabla.
+            // La columna "Vs. teórico" se muestra SIEMPRE, aunque el rubro no tenga fórmula.
+            //
+            // Antes se escondía cuando no había con qué comparar, y el resultado fue que cada
+            // rubro armaba su tabla con distinta cantidad de columnas: las de Packaging no
+            // quedaban alineadas con las de Sustratos y la pantalla entera se veía torcida.
+            // Una columna con guiones molesta menos que ocho columnas que bailan de bloque en
+            // bloque — y además se puede recorrer la página de arriba abajo leyendo en vertical.
             const hayTeorico = resumenCat.some((r) => r && (r.usoTeorico !== null || r.esReferencia));
-            const cols = hayTeorico ? 8 : 7;
+            const cols = 8;
             return (
               <div key={cat} className="card" style={{ marginBottom: '12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px', gap: '8px', flexWrap: 'wrap' }}>
@@ -1282,13 +1313,26 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                 </div>
                 <div style={{ overflowX: 'auto' }}>
                 <table className="stk-tbl">
+                  {/* Mismos anchos en todos los rubros: es lo que hace que las columnas se
+                      lean en vertical de arriba abajo de la pagina en vez de bailar en cada
+                      bloque. */}
+                  <colgroup>
+                    <col style={{ width: '24%' }} />
+                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '9%' }} />
+                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '13%' }} />
+                    <col style={{ width: '13%' }} />
+                    <col style={{ width: '11%' }} />
+                  </colgroup>
                   <thead>
                     {/* Los tres bloques. El ojo no tiene que elegir entre ocho columnas
                         sueltas, sino entre "cuánto hay", "cuánto se usó" y "cuánto vale". */}
                     <tr className="stk-bloques">
                       <th />
                       <th colSpan={4}>Inventario</th>
-                      <th colSpan={hayTeorico ? 2 : 1} className="stk-sep">Consumo</th>
+                      <th colSpan={2} className="stk-sep">Consumo</th>
                       <th className="stk-sep">Valorización</th>
                     </tr>
                     <tr>
@@ -1298,11 +1342,9 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                       <th className="stk-num">Precio</th>
                       <th className="stk-num">Stock final</th>
                       <th className="stk-num stk-sep">Uso real</th>
-                      {hayTeorico && (
-                        <th className="stk-num" title="Uso real contra el teórico de la fórmula configurada. ≈ = referencia estimada (sin fórmula), no un target preciso.">
-                          Vs. teórico
-                        </th>
-                      )}
+                      <th className="stk-num" title="Uso real contra el teórico de la fórmula configurada. ≈ = referencia estimada (sin fórmula), no un target preciso.">
+                        {hayTeorico ? 'Vs. teórico' : ''}
+                      </th>
                       <th className="stk-num stk-sep">Valor stock</th>
                     </tr>
                   </thead>
@@ -1326,9 +1368,30 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                               <span style={{ color: '#9ca3af', fontWeight: 400, fontSize: '11px' }}> · {art.unidad_medida}</span>
                             )}
                           </td>
-                          <td className="stk-num" title="No se edita: es el stock final del mes anterior">
-                            <span style={{ color: num(vals.ini) ? '#374151' : '#d1d5db' }}>{vals.ini ? fmt(num(vals.ini)) : '—'}</span>
-                          </td>
+                          {(() => {
+                            const heredado = stockInicialHeredado(art.id_articulo);
+                            // Rompió la cadena: lo que dice el inicial de este mes no es el
+                            // final del anterior. Puede ser a propósito, pero tiene que verse.
+                            const roto = heredado !== '' && Math.abs(num(vals.ini) - num(heredado)) > 0.0001;
+                            return (
+                              <td className="stk-num stk-edit">
+                                <input type="number" className="stk-in" value={vals.ini}
+                                  onChange={(e) => setField(art.id_articulo, 'ini', e.target.value)}
+                                  onBlur={() => autoguardar(art.id_articulo)}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                                  min={0} step={0.001} placeholder="—"
+                                  style={roto ? { borderColor: '#f59e0b', background: '#fffbeb', color: '#92400e', fontWeight: 600 } : undefined}
+                                  title={roto
+                                    ? `No coincide con el stock final del mes anterior (${fmt(num(heredado))}). Si es a propósito, está bien; si no, revisá el recuento del mes pasado.`
+                                    : 'Es el stock final del mes anterior. Se puede corregir: lo que escribas se guarda como el inicial de este mes.'} />
+                                {roto && (
+                                  <span className="stk-sub" style={{ color: '#b45309' }}>
+                                    cierre anterior {fmt(num(heredado))}
+                                  </span>
+                                )}
+                              </td>
+                            );
+                          })()}
                           {/* Compras: se edita, pero se ve como un número. El lápiz y el
                               borde aparecen al pasar por encima — un campo con marco en
                               cada fila convierte la tabla en un formulario. */}
@@ -1394,7 +1457,7 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                               </span>
                             )}
                           </td>
-                          {hayTeorico && (
+                          {(
                             <td className="stk-num">
                               {r.diff !== null && hayDatos ? (
                                 <>

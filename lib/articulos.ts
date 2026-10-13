@@ -142,6 +142,19 @@ export const KEYS_UNIDAD = ARTICULOS_UNIDAD.map((a) => a.key);
 // Lo que se GUARDA siguen siendo kilos. El precio por kilo, la valorización, el EERR y el
 // descuento de cámara trabajan en kilos desde siempre: cambiar la unidad guardada sería
 // tocar media app para ahorrar una multiplicación. Lo que cambia es la unidad de carga.
+// ── Unidades de medida de los insumos ─────────────────────────────────────────────────
+//
+// Escritas a mano, el mismo concepto termina con cuatro grafías: "unidad", "Unidad",
+// "unidades", "Unidades". No rompe nada hoy —la unidad es texto que se muestra— pero impide
+// cualquier cosa que agrupe o compare por unidad, y obliga a leer dos veces para entender si
+// dos artículos están en lo mismo.
+//
+// La lista se elige de un desplegable al crear. Las que ya están cargadas no se tocan: migrar
+// datos viejos para ganar prolijidad es la clase de cambio que rompe algo que andaba.
+export const UNIDADES_MEDIDA = [
+  'unidad', 'kg', 'gramo', 'litro', 'ml', 'bolsa', 'caja', 'rollo', 'plancha', 'metro', 'par',
+] as const;
+
 export const KG_POR_CAJON: Record<string, number> = {
   rucula_kg: 5,
   lechuga_kg_crespa: 4,
