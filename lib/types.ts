@@ -101,7 +101,7 @@ export interface StockMes {
 // no contarlas dos veces si además existiera un artículo de esa categoría.
 export type CategoriaGasto =
   | 'insumos' | 'gastos_generales' | 'sueldos' | 'adelanto_sueldo' | 'mantenimiento'
-  | 'inversion_equipamiento' | 'inversion_nave3' | 'abonos' | 'impuestos'
+  | 'inversion_equipamiento' | 'inversion_nave3' | 'abonos' | 'impuestos' | 'retenciones_sufridas'
   | 'alquiler' | 'staff' | 'fletes_combustible' | 'energia_agua' | 'cultivos_reventa'
   | 'otros_ingresos' | 'movimiento_interno';
 export const CATEGORIAS_GASTO: { value: CategoriaGasto; label: string }[] = [
@@ -122,6 +122,13 @@ export const CATEGORIAS_GASTO: { value: CategoriaGasto; label: string }[] = [
   { value: 'inversion_nave3', label: 'Inversión 3ra Nave' },
   { value: 'abonos', label: 'Abonos' },
   { value: 'impuestos', label: 'Impuestos' },
+  // La retención que un cliente descuenta de la factura y le paga a AFIP en nombre nuestro.
+  // Se carga sola al registrar el cobro, con el medio de pago de la cuenta donde entró: así el
+  // saldo de esa cuenta recibe el neto aunque en Xubio la factura figure cancelada entera.
+  //
+  // Categoría propia y no 'impuestos' porque es plata que se recupera —es un crédito fiscal,
+  // no un impuesto pagado— y mezclarla con los impuestos reales esconde las dos cosas.
+  { value: 'retenciones_sufridas', label: 'Retenciones sufridas (las descuenta el cliente)' },
   { value: 'otros_ingresos', label: 'Otros ingresos (FCI, intereses)' },
   { value: 'movimiento_interno', label: 'Movimiento entre medios de pago (no es gasto)' },
 ];

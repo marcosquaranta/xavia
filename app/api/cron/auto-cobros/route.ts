@@ -47,7 +47,6 @@ export async function GET(req: NextRequest) {
     interface FilaMail {
       cliente: string; importe: number; fecha?: string;
       comprobantes?: string[]; retencion?: number; cuentaNombre?: string; numeroRecibo?: string;
-      retencionSoloLocal?: boolean;
     }
     const filas = (xs: FilaMail[]) => `
       <tr style="background:#fafaf9;color:#6b7280;font-size:11px;text-transform:uppercase">
@@ -63,7 +62,7 @@ export async function GET(req: NextRequest) {
           <td style="padding:5px 8px;border-top:1px solid #f3f4f6;font-weight:600">${c.cliente}</td>
           <td style="padding:5px 8px;border-top:1px solid #f3f4f6;color:#6b7280">${fmtDia(c.fecha || '')}</td>
           <td style="padding:5px 8px;border-top:1px solid #f3f4f6;text-align:right;font-weight:700">${fmt$(c.importe)}</td>
-          <td style="padding:5px 8px;border-top:1px solid #f3f4f6;text-align:right;color:${c.retencion ? (c.retencionSoloLocal ? '#b91c1c' : '#b45309') : '#d1d5db'}">${c.retencion ? fmt$(c.retencion) : '—'}${c.retencionSoloLocal ? '<br><span style="font-size:10px">solo en la app</span>' : ''}</td>
+          <td style="padding:5px 8px;border-top:1px solid #f3f4f6;text-align:right;color:${c.retencion ? '#b45309' : '#d1d5db'}">${c.retencion ? fmt$(c.retencion) : '—'}${c.retencion ? '<br><span style="font-size:10px;color:#6b7280">como gasto</span>' : ''}</td>
           <td style="padding:5px 8px;border-top:1px solid #f3f4f6;color:#374151;font-size:12px">${(c.comprobantes || []).join(', ')}</td>
           <td style="padding:5px 8px;border-top:1px solid #f3f4f6;color:#6b7280;font-size:12px">${c.cuentaNombre || ''}</td>
           <td style="padding:5px 8px;border-top:1px solid #f3f4f6;color:#6b7280;font-size:12px">${c.numeroRecibo || ''}</td>
@@ -107,17 +106,12 @@ export async function GET(req: NextRequest) {
           <p style="margin:8px 0 0;font-size:12px;color:#6b7280">
             Estos no son errores: son los casos donde hace falta mirar. Se imputan como siempre desde Cobranzas.
           </p>` : ''}
-
-        ${r.registrados.some((x) => x.retencionSoloLocal) ? `
-          <div style="margin:14px 0 0;background:#fef2f2;border:1px solid #fecaca;border-radius:7px;padding:10px 12px;font-size:13px;color:#991b1b">
-            <strong>Las retenciones marcadas "solo en la app" NO se mandaron a Xubio.</strong>
-            Xubio rechaza la cuenta <em>Retención Ganancias Sufrida</em> porque en su plan de cuentas no está marcada como una
-            cuenta por la que pueda entrar un cobro. El cobro se registró por el neto, así que acá la factura figura cancelada
-            pero <strong>en Xubio queda abierta por el monto retenido</strong>.
-            <br><br>
-            Se arregla una sola vez, en Xubio: plan de cuentas → esa cuenta → categoría, y que impacte en disponibilidades.
-            Hasta entonces va a pasar con todos los cobros con retención.
-          </div>` : ''}
+        ${r.registrados.some((x) => x.retencion > 0) ? `
+          <p style="margin:12px 0 0;font-size:12.5px;color:#374151;background:#fafaf9;border:1px solid #e5e7eb;border-radius:7px;padding:9px 11px">
+            Los cobros con retención se registran en Xubio por el <strong>total de la factura</strong>, así que allá la factura
+            queda cancelada entera. Acá la retención se carga como <strong>gasto</strong> de la misma cuenta, de modo que el
+            saldo de esa cuenta refleja lo que entró de verdad y el monto retenido aparece en el resultado.
+          </p>` : ''}
 
         <p style="margin:18px 0 0;font-size:12px;color:#6b7280">
           Lo que habilita el registro automático no es confiar en el mail: es que las facturas nombradas, abiertas y de ese

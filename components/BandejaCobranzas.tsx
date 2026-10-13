@@ -113,7 +113,6 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
   // Cuando Xubio rechaza la cuenta de la retención, se ofrece registrar igual dejando la
   // retención anotada solo acá. No se hace solo: cambia lo que va a quedar en la
   // contabilidad, así que lo tiene que decidir una persona.
-  const [ofrecerSoloLocal, setOfrecerSoloLocal] = useState(false);
   const [verTodasCuentasRet, setVerTodasCuentasRet] = useState(false);
 
   function alternarFactura(numero: string) {
@@ -192,7 +191,7 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
     return base;
   }, [facturas, objetivo, item.comprobantes]);
 
-  async function accion(accion: 'confirmar' | 'descartar', retencionSoloLocal = false) {
+  async function accion(accion: 'confirmar' | 'descartar') {
     if (accion === 'confirmar') {
       if (!idControl) { setErr('Elegí de qué cliente es.'); return; }
       if (!cuentaId) { setErr('Elegí en qué cuenta entró.'); return; }
@@ -206,8 +205,14 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
       const avisoImporte = importeCambiado
         ? `\n\nOJO: el importe se corrigió a mano. El mail decía ${fmt$(item.importe)}.`
         : '';
-      if (!retencionSoloLocal
-        && !window.confirm(`Se va a registrar en Xubio un cobro de ${fmt$(importeNum)} de ${nombre}, con fecha ${fmtDia(item.fecha)}.${avisoImporte}\n\nEsto impacta en la contabilidad. ¿Confirmás?`)) return;
+      const retNum = Number(retencion) || 0;
+      // Lo que se va a registrar, dicho antes de hacerlo: en Xubio la factura se cancela por
+      // el total y acá la retención se carga como gasto de esa misma cuenta. Es un solo
+      // camino, así que el aviso también es uno solo.
+      const avisoRet = retNum > 0
+        ? `\n\nEn Xubio se cancela por ${fmt$(importeNum + retNum)} (el total de la factura) y acá se carga un gasto de ${fmt$(retNum)} por la retención, así la cuenta queda con los ${fmt$(importeNum)} que entraron de verdad.`
+        : '';
+      if (!window.confirm(`Se va a registrar en Xubio un cobro de ${fmt$(importeNum)} de ${nombre}, con fecha ${fmtDia(item.fecha)}.${avisoImporte}${avisoRet}\n\nEsto impacta en la contabilidad. ¿Confirmás?`)) return;
     } else {
       if (!window.confirm('Se va a descartar este movimiento: no se registra ningún cobro y no vuelve a aparecer en la bandeja. ¿Confirmás?')) return;
     }
@@ -220,8 +225,6 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
           id_control: idControl, cuentaId: Number(cuentaId), comprobantes: elegidas,
           importe: importeNum,
           retencion: Number(retencion) || 0,
-          retencionSoloLocal,
-          cuentaRetencionId: Number(cuentaRet) || 0,
         }),
       });
       const j = await r.json();
@@ -232,7 +235,6 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
       router.refresh();
     } catch (e: any) {
       setErr(e.message);
-      setOfrecerSoloLocal(/impacte en disponibilidades/i.test(String(e?.message || '')));
       setTrabajando(false);
     }
   }
@@ -498,19 +500,6 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
           )}
 
           {err && <p style={{ margin: '0 0 8px', fontSize: '11.5px', color: '#dc2626' }}>{err}</p>}
-          {ofrecerSoloLocal && (
-            <div style={{ margin: '0 0 8px', padding: '8px 10px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px' }}>
-              <p style={{ margin: '0 0 6px', fontSize: '11.5px', color: '#92400e' }}>
-                Hasta que esa cuenta se habilite en Xubio, se puede registrar el cobro por los <strong>{fmt$(importeNum)}</strong> que
-                entraron y dejar los <strong>{fmt$(Number(retencion) || 0)}</strong> de retención anotados solo acá.
-                Las facturas quedan canceladas en la app; <strong>en Xubio esa factura va a quedar abierta por el monto retenido</strong>.
-              </p>
-              <button type="button" onClick={() => accion('confirmar', true)} disabled={trabajando}
-                style={{ fontSize: '11.5px', padding: '5px 12px', background: '#b45309', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 700 }}>
-                {trabajando ? 'Registrando…' : 'Registrar sin mandar la retención a Xubio'}
-              </button>
-            </div>
-          )}
 
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {(() => {

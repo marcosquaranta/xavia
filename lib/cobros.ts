@@ -45,10 +45,10 @@ export interface CobroRegistrado {
 // fila mintiendo que se registró; si falla el registro local, el cobro igual está en Xubio
 // y se ve allá (mucho menos malo que al revés).
 
-import { appendRowObj, asegurarHoja, asegurarColumna, readSheet } from './sheets';
-import { crearCobranza, getClientesXubio, matchClienteXubio, getCircuitosContables, circuitoPorDefecto, getCobranzas, diagnosticoCircuitos, datosMonedaDeCobranzas, plantillaInstrumento, type DatosMoneda } from './xubio';
+import { appendRowObj, asegurarHoja, asegurarColumna, asegurarColumnas, readSheet } from './sheets';
+import { crearCobranza, getClientesXubio, matchClienteXubio, getCircuitosContables, circuitoPorDefecto, getCobranzas, getCuentas, diagnosticoCircuitos, datosMonedaDeCobranzas, plantillaInstrumento, type DatosMoneda } from './xubio';
 import { fechaArgentinaHoy } from './ocupacion';
-import type { ClienteVenta } from './types';
+import { MEDIOS_PAGO, type ClienteVenta } from './types';
 
 // Los últimos cuatro dígitos de un comprobante: "A-00002-00000849" → "0849". Si el texto
 // no tiene la forma esperada se devuelve como vino, que es preferible a recortar a ciegas
@@ -66,27 +66,32 @@ export interface PedidoCobro {
   observacion?: string;
   comprobantes?: string[];
   usuario: string;
-  // Lo que el cliente retuvo. El importe de arriba es lo que ENTRÓ a la cuenta; la factura
-  // se cancela por la suma de los dos. Sin esto, cada cobro con retención dejaba la factura
-  // figurando impaga por el monto retenido, para siempre.
+  // ── Lo que el cliente retuvo ──────────────────────────────────────────────────────
+  //
+  // `importe` es lo que ENTRÓ a la cuenta; la factura se cancela por la suma de los dos.
+  //
+  // En Xubio la cobranza va por el TOTAL contra la cuenta donde entró la plata, no partida en
+  // dos instrumentos. Partirla es lo correcto en teoría, pero Xubio exige que la cuenta de
+  // cada instrumento impacte en "disponibilidades", y una retención es un crédito fiscal: la
+  // cuenta contablemente correcta es justamente la que rechaza. Hubo tres intentos y tres
+  // rechazos.
+  //
+  // Entonces: en Xubio la factura queda cancelada entera —que es lo que importa allá, porque
+  // es donde vive la cuenta corriente del cliente— y acá la diferencia se registra como un
+  // GASTO con el medio de pago de esa misma cuenta. El saldo de la cuenta termina recibiendo
+  // el neto, que es lo que de verdad pasó, y el monto retenido aparece en el resultado.
+  //
+  // El precio de esto es que el saldo CONTABLE de esa cuenta en Xubio queda alto por el monto
+  // retenido. Se asume a propósito: la conciliación bancaria se hace en la app, no en Xubio,
+  // y acá el número es correcto.
   retencion?: number;
-  cuentaRetencionId?: number;
-  // Salida de emergencia: registrar el cobro en Xubio por el NETO y dejar la retención
-  // anotada solo acá.
-  //
-  // Existe porque Xubio puede rechazar la cuenta de la retención ("no tiene una categoría
-  // que impacte en disponibilidades") y, hasta que eso se arregle en su plan de cuentas, la
-  // alternativa era no poder registrar el cobro. Entre un cobro con la retención anotada
-  // solo en la app y ningún cobro, lo primero es muchísimo mejor.
-  //
-  // Consecuencia, que la pantalla avisa: en Xubio esa factura queda abierta por el monto
-  // retenido. Acá queda cancelada, porque la app ya es la que decide qué está cobrado.
-  retencionSoloLocal?: boolean;
 }
 
 export interface ResultadoCobro {
   ok: boolean;
   idCobro?: string;
+  // El gasto que se cargó por la retención, si hubo.
+  idGastoRetencion?: string;
   transaccionid?: number;
   numeroRecibo?: string;
   circuito?: string;
@@ -115,19 +120,12 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
   const observacion = String(p.observacion || '').trim();
   const comprobantes = (p.comprobantes || []).map(x => String(x).trim()).filter(Boolean);
   const retencion = Math.round(Number(p.retencion) || 0);
-  // Igual que arriba: una cuenta de retención también puede tener id negativo.
-  const cuentaRetencionId = Number.isFinite(Number(p.cuentaRetencionId)) ? Number(p.cuentaRetencionId) : 0;
 
   if (!idControl) return { ok: false, error: 'Falta el cliente.', status: 400 };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return { ok: false, error: 'La fecha tiene que ser válida.', status: 400 };
   if (!(importe > 0)) return { ok: false, error: 'El importe tiene que ser mayor a 0.', status: 400 };
   if (!Number.isFinite(cuentaId) || cuentaId === 0) {
     return { ok: false, error: 'Elegí en qué cuenta entró la plata.', status: 400 };
-  }
-  // Una retención sin cuenta no se puede imputar, y mandarla a la cuenta bancaria diría que
-  // entró plata que no entró: el saldo del banco dejaría de cuadrar contra el extracto.
-  if (retencion > 0 && !cuentaRetencionId && !p.retencionSoloLocal) {
-    return { ok: false, error: 'Elegí a qué cuenta va la retención.', status: 400 };
   }
 
   const clientes = await readSheet<ClienteVenta>('Clientes');
@@ -186,13 +184,25 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
     };
   }
 
-  const obsFinal = retencion > 0 && p.retencionSoloLocal
-    ? `${observacionXubio} — el cliente retuvo $${retencion.toLocaleString('es-AR')} (no imputado acá)`
+  // En Xubio va el TOTAL: importe que entró + lo retenido. Así la factura queda cancelada
+  // entera allá y el cliente no figura debiendo el monto retenido.
+  const totalCobranza = importe + retencion;
+  const obsFinal = retencion > 0
+    ? `${observacionXubio} — incluye $${retencion.toLocaleString('es-AR')} de retención`
     : observacionXubio;
-  const r = await crearCobranza({ clienteId, fecha, importe, cuentaId, observacion: obsFinal, circuitoId,
-    retenciones: retencion > 0 && !p.retencionSoloLocal
-      ? [{ cuentaId: cuentaRetencionId, importe: retencion, descripcion: 'Retención sufrida' }]
-      : [],
+  // Las cuentas de Xubio, para poder traducir cuentaId al medio de pago de la app cuando haya
+  // que cargar el gasto de la retención.
+  let cuentasConocidas: { id: number; nombre: string }[] = [];
+  if (retencion > 0) {
+    try {
+      const d2 = new Date(fechaArgentinaHoy() + 'T12:00:00'); d2.setDate(d2.getDate() - 180);
+      const desde2 = `${d2.getFullYear()}-${String(d2.getMonth() + 1).padStart(2, '0')}-${String(d2.getDate()).padStart(2, '0')}`;
+      cuentasConocidas = (await getCuentas(await getCobranzas(desde2, fechaArgentinaHoy()).catch(() => []))).cuentas;
+    } catch { cuentasConocidas = []; }
+  }
+
+  const r = await crearCobranza({ clienteId, fecha, importe: totalCobranza, cuentaId, observacion: obsFinal, circuitoId,
+    retenciones: [],
     moneda: datosMoneda.moneda,
     cotizacion: datosMoneda.cotizacion,
     utilizaMonedaExtranjera: datosMoneda.utilizaMonedaExtranjera,
@@ -222,5 +232,55 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
     estado: 'registrado',
     usuario: p.usuario,
   });
-  return { ok: true, idCobro, transaccionid: r.transaccionid, numeroRecibo: r.numeroRecibo, circuito: circuitoNombre };
+  // ── La retención, como gasto ──────────────────────────────────────────────────────
+  //
+  // En Xubio la cobranza entró por el total, así que de ese lado la factura está cancelada.
+  // Acá hace falta la otra mitad: esa plata NO llegó a la cuenta, se la quedó AFIP.
+  //
+  // Se registra como un gasto con el medio de pago de la MISMA cuenta donde entró el cobro.
+  // El saldo de esa cuenta termina recibiendo el neto —entró el total, salió la retención—
+  // que es exactamente lo que dice el extracto del banco. Y aparece en el resultado por el
+  // camino normal de los gastos, sin ninguna cañería aparte.
+  //
+  // Va después del cobro y en su propio try: si esto falla, el cobro ya está hecho y se ve.
+  // Al revés sería un gasto sin cobro, que es un faltante inventado.
+  let idGastoRetencion = '';
+  if (retencion > 0) {
+    try {
+      await asegurarColumnas('Gastos', ['estado_pago', 'proveedor', 'vencimiento']);
+      const gastos = await readSheet<{ id_gasto: string }>('Gastos').catch(() => []);
+      const maxId = gastos
+        .map((g) => parseInt(String(g.id_gasto).replace('GAS-', '') || '0', 10))
+        .filter((n) => !isNaN(n))
+        .reduce((m, n) => Math.max(m, n), 0);
+      idGastoRetencion = `GAS-${String(maxId + 1).padStart(4, '0')}`;
+      await appendRowObj('Gastos', {
+        id_gasto: idGastoRetencion,
+        fecha,
+        descripcion: `Retención de ${cli.nombre_display || cli.nombre_xubio}${comprobantes.length ? ` — ${comprobantes.map(cortoDeComprobante).join(', ')}` : ''}`,
+        categoria: 'retenciones_sufridas',
+        monto: retencion,
+        // La misma cuenta donde entró el cobro: es de ahí de donde "falta" la plata.
+        medio_pago: nombreDeCuenta(cuentaId, cuentasConocidas) || '',
+        usuario: p.usuario,
+        fecha_carga: new Date().toISOString().split('T')[0],
+        aplicado_stock: 'SI', // no es un insumo: que no aparezca como sugerencia de compra
+      });
+    } catch (e) {
+      console.error('[cobros] el cobro se registró pero no se pudo cargar el gasto de la retención:', e);
+    }
+  }
+
+  return { ok: true, idCobro, transaccionid: r.transaccionid, numeroRecibo: r.numeroRecibo, circuito: circuitoNombre, idGastoRetencion };
+}
+
+// El nombre del medio de pago de la app que corresponde a una cuenta de Xubio. El gasto de la
+// retención tiene que salir de la MISMA cuenta donde entró el cobro: si saliera de otra, el
+// saldo de las dos quedaría mal y la conciliación acusaría dos diferencias en vez de ninguna.
+function nombreDeCuenta(cuentaId: number, cuentas: { id: number; nombre: string }[]): string {
+  const x = cuentas.find((c) => Number(c.id) === Number(cuentaId));
+  if (!x) return '';
+  const norm = (v: any) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const k = norm(x.nombre);
+  return MEDIOS_PAGO.find((m) => norm(m).includes(k) || k.includes(norm(m))) || '';
 }

@@ -136,7 +136,7 @@ async function acusarRecibo(args: {
   // Si el cobro se registró solo al entrar. El acuse es el mail que llega en el momento, así
   // que es el lugar donde hay que decirlo: avisar en el resumen del día siguiente que algo ya
   // está hecho llega tarde para evitar que alguien lo haga a mano mientras tanto.
-  auto?: { registrado: boolean; idCobro?: string; motivo?: string; retencionSoloLocal?: boolean };
+  auto?: { registrado: boolean; idCobro?: string; motivo?: string; retencion?: number };
 }): Promise<{ ok: boolean; detalle: string }> {
   if (!process.env.RESEND_API_KEY) return { ok: false, detalle: 'RESEND_API_KEY no configurada' };
   const r = args.resultado || {};
@@ -165,11 +165,9 @@ async function acusarRecibo(args: {
       ? `<p style="font-size:14px;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:9px 11px">
            <strong>Ya quedó registrado en Xubio.</strong> Las facturas que nombra el aviso suman exactamente lo que dice
            haber pagado, así que no hacía falta revisarlo. No hay nada que hacer.
-           ${args.auto.retencionSoloLocal
-             ? '<br><br><span style="color:#991b1b"><strong>Pero la retención no se mandó a Xubio:</strong> rechaza la cuenta '
-               + '<em>Retención Ganancias Sufrida</em> porque no está marcada como una cuenta por la que pueda entrar un cobro. '
-               + 'El cobro entró por el neto, así que acá la factura figura cancelada y <strong>en Xubio queda abierta por el monto '
-               + 'retenido</strong>. Se arregla en Xubio: plan de cuentas → esa cuenta → categoría.</span>'
+           ${args.auto.retencion
+             ? `<br><br>Tenía <strong>$${Math.round(args.auto.retencion).toLocaleString('es-AR')}</strong> de retención: en Xubio la factura
+                se cancela por el total y acá quedó cargado un gasto por ese monto, así la cuenta refleja lo que entró de verdad.`
              : ''}
          </p>`
       : `<p style="font-size:13px;color:#555">Está en la bandeja esperando que lo confirmes. Todavía no se registró nada en Xubio.${
@@ -333,12 +331,12 @@ export async function POST(req: NextRequest) {
     //
     // Va en su propio try: que falle el registro automático no puede hacer que se pierda el
     // aviso, que ya está guardado en la bandeja.
-    let auto: { registrado: boolean; idCobro?: string; motivo?: string; retencionSoloLocal?: boolean } | undefined;
+    let auto: { registrado: boolean; idCobro?: string; motivo?: string; retencion?: number } | undefined;
     if ((r as any)?.ok && (r as any)?.idItem) {
       try {
         const ev = await evaluarBandeja({ soloItem: String((r as any).idItem) });
         const reg = ev.registrados[0];
-        if (reg) auto = { registrado: true, idCobro: reg.idCobro, retencionSoloLocal: reg.retencionSoloLocal };
+        if (reg) auto = { registrado: true, idCobro: reg.idCobro, retencion: reg.retencion };
         else {
           const err = ev.errores[0]?.error;
           const rech = ev.rechazados[0]?.motivo;

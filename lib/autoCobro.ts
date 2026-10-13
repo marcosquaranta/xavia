@@ -150,11 +150,10 @@ export function remitentesExcluidos(valor: any): string[] {
 // o peor, lo imputa dos veces.
 export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Promise<ResultadoAuto> {
   const hoy = fechaArgentinaHoy();
-  const [activoRaw, excluidosRaw, topeRaw, cuentaRetRaw] = await Promise.all([
+  const [activoRaw, excluidosRaw, topeRaw] = await Promise.all([
     readConfig(CONFIG_ACTIVO).catch(() => null),
     readConfig(CONFIG_EXCLUIDOS).catch(() => null),
     readConfig(CONFIG_TOPE).catch(() => null),
-    readConfig(CONFIG_CUENTA_RETENCION).catch(() => null),
   ]);
   // Prendido salvo que digan explícitamente que no. Al revés —apagado hasta que alguien
   // escriba SI— significa que una clave mal tipeada deja la automatización muerta sin que
@@ -282,58 +281,25 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
   // Mismo camino que la confirmación a mano: registrarCobro crea la cobranza en Xubio con su
   // retención y deja el rastro. Si hubiera dos caminos distintos, el automático y el manual
   // dejarían cobros con forma distinta y uno de los dos sería el raro.
-  // La cuenta de retención configurada, resuelta contra las cuentas que Xubio acepta. Si no
-  // hay ninguna configurada —o la que hay no está entre las que Xubio admite como forma de
-  // cobro— no se intenta mandarla: `registrarCobro` cortaría con "elegí a qué cuenta va la
-  // retención" antes de hablar con Xubio, y el aviso quedaría sin registrar por un motivo que
-  // no tiene nada que ver con el aviso.
-  const nombreCtaRet = String(cuentaRetRaw || '').trim();
-  const cuentaRet = nombreCtaRet
-    ? cuentas.find((x) => norm(x.nombre).includes(norm(nombreCtaRet)) || norm(nombreCtaRet).includes(norm(x.nombre)))
-    : null;
-
   for (const c of out.candidatos) {
     try {
       const pedido = {
         idControl: c.idControl, fecha: c.fecha, importe: c.importe, cuentaId: c.cuentaId,
         comprobantes: c.comprobantes, retencion: c.retencion,
-        cuentaRetencionId: cuentaRet?.id || 0,
-        // Sin cuenta de retención que Xubio acepte, se va derecho por el neto. Intentarlo
-        // igual solo produce un rechazo garantizado y un cobro sin registrar.
-        retencionSoloLocal: c.retencion > 0 && !cuentaRet,
         observacion: `Registrado solo desde el aviso de pago (${c.comprobantes.join(', ')})`,
         usuario: 'automático',
       };
-      let r = await registrarCobro(pedido);
-      let soloLocalDesdeElPrincipio = c.retencion > 0 && !cuentaRet;
+      const r = await registrarCobro(pedido);
 
-      // ── Xubio no acepta la cuenta de la retención ─────────────────────────────────
-      //
-      // Pasa con TODO cobro que traiga retención: "la cuenta Retención Ganancias Sufrida no
-      // tiene una categoría que impacte en disponibilidades". Es un problema del plan de
-      // cuentas de Xubio, no del cobro, y mientras no se arregle allá ningún aviso con
-      // retención se puede registrar — que son casi todos los de los supermercados.
-      //
-      // La pantalla ya ofrece la salida: registrar por el neto y dejar la retención anotada
-      // solo acá. Acá se toma la misma, porque es una decisión que ya está tomada y repetirla
-      // a mano cada vez no agrega criterio. Lo que no se puede es hacerlo en silencio: en
-      // Xubio esa factura queda ABIERTA por el monto retenido, y eso se avisa en el mail.
-      let soloLocal = soloLocalDesdeElPrincipio && r.ok;
-      if (!r.ok && /no tiene una categor[ií]a que impacte en disponibilidades/i.test(String(r.error || ''))) {
-        r = await registrarCobro({ ...pedido, retencionSoloLocal: true });
-        soloLocal = r.ok;
-      }
       if (!r.ok) { out.errores.push({ idItem: c.idItem, cliente: c.cliente, error: r.error || 'Xubio lo rechazó' }); continue; }
       await updateRow(HOJA_BANDEJA, 'id_item', c.idItem, {
         estado: 'confirmado', id_cobro: r.idCobro || '', usuario: 'automático',
-        nota: soloLocal
-          ? 'registrado solo, SIN mandar la retención a Xubio (la cuenta no impacta en disponibilidades): allá la factura queda abierta por el monto retenido'
-          : 'registrado solo: las facturas suman exactamente lo que dice el aviso',
+        nota: 'registrado solo: las facturas suman exactamente lo que dice el aviso',
       });
       out.registrados.push({
         idItem: c.idItem, idCobro: r.idCobro || '', cliente: c.cliente, importe: c.importe,
         retencion: c.retencion, comprobantes: c.comprobantes, cuentaNombre: c.cuentaNombre,
-        fecha: c.fecha, numeroRecibo: r.numeroRecibo || '', retencionSoloLocal: soloLocal,
+        fecha: c.fecha, numeroRecibo: r.numeroRecibo || '',
       });
     } catch (e: any) {
       out.errores.push({ idItem: c.idItem, cliente: c.cliente, error: e?.message || 'error' });

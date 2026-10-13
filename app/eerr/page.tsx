@@ -96,26 +96,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   // previsiones— y la segunda ya con las previsiones adentro del resultado. Sin la primera
   // habría que elegir entre no previsionar o previsionar sobre un número que todavía no se
   // calculó.
-  // ── Las retenciones del mes ────────────────────────────────────────────────────────
-  //
-  // Lo que los clientes descontaron de las facturas y pagaron a AFIP por nosotros. Sale de los
-  // cobros registrados, que es donde queda anotado el monto retenido de cada uno.
-  //
-  // NO toca el saldo de ninguna cuenta: a la cuenta entró el neto y eso ya está bien contado
-  // —el saldo sale de las cobranzas de Xubio, que son por el neto—. Lo que sí hace es entrar
-  // al resultado como línea propia y contarse como cobrado para el puente de caja.
-  const retencionesDe = (a: number, m: number) => {
-    const mm2 = String(m).padStart(2, '0');
-    const d1 = `${a}-${mm2}-01`;
-    const d2 = `${a}-${mm2}-${String(new Date(a, m, 0).getDate()).padStart(2, '0')}`;
-    return cobrosApp
-      .filter((c) => String(c.estado) !== 'anulado')
-      .filter((c) => { const f = String(c.fecha || '').split(/[T ]/)[0]; return f >= d1 && f <= d2; })
-      .reduce((acc, c) => acc + (Number(c.retencion) || 0), 0);
-  };
-  const retencionesMes = retencionesDe(anio, mes);
-
-  const base = calcularEERR({ ...datos, retenciones: retencionesMes }, anio, mes);
+  const base = calcularEERR(datos, anio, mes);
   const guardada = previsionDelMes(previsiones, anio, mes);
   const prev = previsionesSugeridas(base.masaSalarial);
   // Manda lo guardado. La sugerencia solo se usa mientras nadie la confirmó: un mes cerrado
@@ -123,7 +104,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   const previsionesDelMes = guardada
     ? { despidos: Number(guardada.despidos) || 0, sac: Number(guardada.sac) || 0 }
     : null;
-  const act = calcularEERR({ ...datos, previsiones: previsionesDelMes, retenciones: retencionesMes }, anio, mes);
+  const act = calcularEERR({ ...datos, previsiones: previsionesDelMes }, anio, mes);
 
   const guardadaPrev = previsionDelMes(previsiones, anioPrev, mesPrev);
   const ant = calcularEERR({
@@ -131,9 +112,6 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
     previsiones: guardadaPrev
       ? { despidos: Number(guardadaPrev.despidos) || 0, sac: Number(guardadaPrev.sac) || 0 }
       : null,
-    // También en el mes anterior: si solo se contaran las de este, la comparación mostraría un
-    // costo que "aparece" de la nada.
-    retenciones: retencionesDe(anioPrev, mesPrev),
   }, anioPrev, mesPrev);
 
   const mm = String(mes).padStart(2, '0');
@@ -144,21 +122,15 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
     .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
   const saldos = saldosDelMes(gastos, cobranzas, saldosGuardados, anio, mes, cobranzasXubio);
 
-  // Lo cobrado, contando la retención como cobrada.
-  //
-  // El cliente pagó la factura ENTERA: una parte entró a la cuenta y la otra se la pagó a AFIP
-  // en nombre nuestro. Si solo se contara lo que entró al banco, el puente diría que la deuda
-  // del cliente creció por el monto retenido — y no creció, el cliente no debe nada.
-  //
-  // Esto es lo que hace que el puente cierre con la retención como línea del resultado: la
-  // venta entra entera, la deuda del cliente no se mueve, el costo de la retención explica por
-  // qué a la cuenta llegó menos, y la caja real coincide.
+  // Lo cobrado del mes. Las cobranzas de Xubio vienen por el TOTAL de la factura —la retención
+  // incluida— así que esto ya cuenta la factura como cobrada entera, que es lo correcto: el
+  // cliente no quedó debiendo nada. Lo retenido vuelve a salir como gasto (ver lib/cobros.ts),
+  // y eso es lo que explica por qué a la cuenta entró menos.
   const cobradoMesTotal =
     cobranzasMes.reduce((a, c) => a + (Number(c.monto) || 0), 0)
     + cobranzasXubio
       .filter((c) => { const f = String(c.fecha || '').split(/[T ]/)[0]; return f >= desdeMes && f <= hastaMes; })
-      .reduce((a, c) => a + (Number(c.importe) || 0), 0)
-    + retencionesMes;
+      .reduce((a, c) => a + (Number(c.importe) || 0), 0);
   const pasos = pasosDelCierre({
     eerr: act, gastos, stocks, articulos, saldos, hayPrevision: !!guardada, anio, mes,
     previsionGuardada: guardada

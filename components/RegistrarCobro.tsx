@@ -172,7 +172,6 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
           id_control: cliente, fecha, importe: Number(importe), cuentaId: Number(cuentaId),
           observacion, comprobantes: elegidas,
           retencion: Number(retencion) || 0,
-          cuentaRetencionId: Number(retencion) > 0 ? Number(cuentaRet) || 0 : 0,
         }),
       });
       const j = await r.json().catch(() => ({}));

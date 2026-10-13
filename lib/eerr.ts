@@ -67,6 +67,7 @@ export const FIJOS: { label: string; cats: CategoriaGasto[]; esInversion?: boole
   { label: 'Mantenimiento', cats: ['mantenimiento'] },
   { label: 'Inversión en equipamiento', cats: ['inversion_equipamiento', 'inversion_nave3'], esInversion: true },
   { label: 'Impuestos (autónomos, IVA, IIBB)', cats: ['impuestos'] },
+  { label: 'Retenciones sufridas', cats: ['retenciones_sufridas'] },
   { label: 'Alquiler', cats: ['alquiler'] },
   { label: 'Staff (contador, marketing, asesoramiento)', cats: ['staff'] },
   { label: 'Otros (abonos, seguros, trámites)', cats: ['abonos', 'gastos_generales'] },
@@ -120,20 +121,7 @@ export interface DatosEERR {
   // Solo despidos y SAC: alquiler y EPE también se cargan como previsión, pero esos SÍ se
   // registran como gasto cuando se pagan, así que sumarlos acá los contaría dos veces.
   previsiones?: { despidos: number; sac: number } | null;
-  // ── Retenciones sufridas del mes ────────────────────────────────────────────────
-  //
-  // Plata que el cliente descontó de la factura y pagó a AFIP en nombre nuestro. La factura
-  // se cobra entera —el cliente no debe nada— pero a la cuenta entró menos.
-  //
-  // Va como línea del resultado porque es la forma de que el número aparezca: estrictamente
-  // es un crédito fiscal, no un gasto, y se recupera contra Ganancias. O sea que el resultado
-  // queda un poco subestimado. Se muestra como línea propia y no sumada a Impuestos justamente
-  // para poder sacarla de la cuenta cuando se mire con el contador.
-  //
-  // Y es lo que hace que el puente de caja cierre: el cobro cuenta por el total de la factura,
-  // de modo que no crece la deuda del cliente, y esta línea explica por qué entraron $7.800
-  // menos de los que se cobraron.
-  retenciones?: number;
+
   ventas: VentaDia[];
   precios: PrecioVenta[];
   clientes: ClienteVenta[];
@@ -212,11 +200,6 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
   //
   // Ojo con la masa salarial: sale de los GASTOS de sueldos, no de esta línea. Si saliera de
   // acá, las previsiones se calcularían sobre sí mismas y creciendo mes a mes.
-  const montoRetenciones = Math.round(Number(d.retenciones) || 0);
-  if (montoRetenciones > 0) {
-    lineasFijas.push({ label: 'Retenciones sufridas', monto: montoRetenciones, fuente: 'gastos' as const });
-  }
-
   const montoPrevisiones = Math.round((d.previsiones?.despidos || 0) + (d.previsiones?.sac || 0));
   if (montoPrevisiones > 0) {
     const sueldos = lineasFijas.find((l) => l.label === 'Sueldos equipo');

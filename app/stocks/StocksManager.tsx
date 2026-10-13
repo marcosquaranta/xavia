@@ -328,6 +328,41 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
     return num(candidatos[candidatos.length - 1].precio_unitario);
   }
 
+  // ── El último precio pagado por unidad, y de cuándo es ────────────────────────────
+  //
+  // `precioUltimoConocido` ya devuelve el precio pero no de qué mes, y eso cambia cuánto vale
+  // el dato: un precio de hace dos meses en un insumo importado no sirve para estimar nada, y
+  // hay que poder verlo antes de usarlo.
+  //
+  // Las comparaciones van con String() de los dos lados: readSheet convierte las columnas que
+  // parecen numéricas, así que el mismo id puede ser 7 en un lado y "7" en el otro.
+  function precioHistorico(id_articulo: string): { precio: number; anio: number; mes: number } | null {
+    const claveActual = anio * 12 + mes;
+    const candidatos = stocks
+      .filter((x) => String(x.id_articulo) === String(id_articulo) && num(x.precio_unitario) > 0
+        && (Number(x.anio) * 12 + Number(x.mes)) <= claveActual)
+      .sort((a, b) => (Number(a.anio) * 12 + Number(a.mes)) - (Number(b.anio) * 12 + Number(b.mes)));
+    const ult = candidatos[candidatos.length - 1];
+    if (!ult) return null;
+    return { precio: num(ult.precio_unitario), anio: Number(ult.anio), mes: Number(ult.mes) };
+  }
+
+  // Lo que se puede decir del artículo elegido en una fila de sugerencias: en qué unidad hay
+  // que cargar la cantidad, a cuánto se pagó la última vez, y cuánta cantidad daría ese
+  // importe a ese precio.
+  //
+  // Lo último es lo que de verdad hace falta: el gasto dice $59.524 y el remito no está a
+  // mano. Con el precio por unidad la cantidad deja de ser una adivinanza — y se ofrece como
+  // sugerencia para apretar, no se completa sola: el precio pudo cambiar, y una cantidad
+  // puesta por la app sin que nadie la mire entra al stock como si fuera un dato contado.
+  function pistaDeCantidad(id_articulo: string, monto: number) {
+    const art = artActivos.find((a) => String(a.id_articulo) === String(id_articulo));
+    if (!art) return null;
+    const h = precioHistorico(id_articulo);
+    const estimada = h && h.precio > 0 && monto > 0 ? Math.round((monto / h.precio) * 100) / 100 : null;
+    return { unidad: String(art.unidad_medida || ''), hist: h, estimada };
+  }
+
   function setField(id: string, field: string, val: string) {
     const cur = getEdit(id);
     setEditValues((prev) => ({ ...prev, [id]: { ...cur, [field]: val } }));
@@ -1045,9 +1080,45 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                             </select>
                           </td>
                           <td style={{ padding: '2px 4px' }}>
-                            <input type="number" min={0} step={0.001} value={cantidadDefault}
-                              onChange={(e) => setCantidadGasto((p) => ({ ...p, [g.id_gasto]: e.target.value }))}
-                              style={{ width: '100%', textAlign: 'right', fontSize: '12px' }} placeholder="cant." />
+                            {(() => {
+                              const pista = idSel && idSel !== '__nuevo__' ? pistaDeCantidad(String(idSel), num(g.monto)) : null;
+                              return (
+                                <>
+                                  <input type="number" min={0} step={0.001} value={cantidadDefault}
+                                    onChange={(e) => setCantidadGasto((p) => ({ ...p, [g.id_gasto]: e.target.value }))}
+                                    style={{ width: '100%', textAlign: 'right', fontSize: '12px' }}
+                                    placeholder={pista?.unidad || 'cant.'} />
+                                  {pista && (
+                                    <span style={{ display: 'block', fontSize: '10px', color: '#6b7280', textAlign: 'right', marginTop: '2px', lineHeight: 1.35 }}>
+                                      {/* La unidad va SIEMPRE que haya artículo: es lo que hace
+                                          falta para saber qué escribir, y no depende de que
+                                          haya historial de precios. */}
+                                      <span style={{ display: 'block', color: '#374151' }}>
+                                        en <strong>{pista.unidad || 'unidad sin definir'}</strong>
+                                      </span>
+                                      {pista.hist ? (
+                                        <>
+                                          <span style={{ display: 'block' }}
+                                            title={`Último precio unitario conocido, de ${MESES[pista.hist.mes - 1]} ${pista.hist.anio}`}>
+                                            ${fmt(pista.hist.precio, 1)}/{pista.unidad || 'u'} · {MESES[pista.hist.mes - 1].slice(0, 3).toLowerCase()} {String(pista.hist.anio).slice(2)}
+                                          </span>
+                                          {pista.estimada !== null && (
+                                            <button type="button"
+                                              onClick={() => setCantidadGasto((p) => ({ ...p, [g.id_gasto]: String(pista.estimada) }))}
+                                              title="Usar esta cantidad. Es una estimación con el último precio conocido: si el precio cambió, no da."
+                                              style={{ background: 'none', border: 'none', padding: 0, color: '#2563eb', cursor: 'pointer', fontSize: '10px', fontWeight: 700 }}>
+                                              ≈ {fmt(pista.estimada, 2)} {pista.unidad} →
+                                            </button>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <span style={{ display: 'block', color: '#b45309' }}>sin precio anterior</span>
+                                      )}
+                                    </span>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </td>
                           <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
                             <button onClick={() => confirmarGasto(g, idSel, cantidadDefault)} disabled={procesandoGasto === g.id_gasto || !idSel || idSel === '__nuevo__' || !(Number(cantidadDefault) > 0)}
@@ -1086,9 +1157,30 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
                               </select>
                             </td>
                             <td style={{ padding: '2px 4px' }}>
-                              <input type="number" min={0} step={0.001} value={it.cantidad}
-                                onChange={(e) => cambiarItem(g.id_gasto, i, 'cantidad', e.target.value)}
-                                style={{ width: '100%', textAlign: 'right', fontSize: '12px' }} placeholder="cant." />
+                              {(() => {
+                                const pista = it.id_articulo ? pistaDeCantidad(String(it.id_articulo), Number(it.monto) || 0) : null;
+                                return (
+                                  <>
+                                    <input type="number" min={0} step={0.001} value={it.cantidad}
+                                      onChange={(e) => cambiarItem(g.id_gasto, i, 'cantidad', e.target.value)}
+                                      style={{ width: '100%', textAlign: 'right', fontSize: '12px' }}
+                                      placeholder={pista?.unidad || 'cant.'} />
+                                    {pista && (
+                                      <span style={{ display: 'block', fontSize: '10px', color: '#6b7280', textAlign: 'right', marginTop: '2px' }}>
+                                        en <strong>{pista.unidad || 'unidad sin definir'}</strong>
+                                        {pista.hist && <> · ${fmt(pista.hist.precio, 1)}/{pista.unidad || 'u'}</>}
+                                        {pista.estimada !== null && (
+                                          <button type="button"
+                                            onClick={() => cambiarItem(g.id_gasto, i, 'cantidad', String(pista.estimada))}
+                                            style={{ background: 'none', border: 'none', padding: '0 0 0 4px', color: '#2563eb', cursor: 'pointer', fontSize: '10px', fontWeight: 700 }}>
+                                            ≈ {fmt(pista.estimada, 2)} →
+                                          </button>
+                                        )}
+                                      </span>
+                                    )}
+                                  </>
+                                );
+                              })()}
                             </td>
                             <td style={{ textAlign: 'center' }}>
                               <button onClick={() => sacarItem(g.id_gasto, i)}
