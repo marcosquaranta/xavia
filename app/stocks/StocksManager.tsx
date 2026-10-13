@@ -1129,6 +1129,9 @@ export default function StocksManager({ articulos, stocks, lotes, ventas, precio
               <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#92400e' }}>
                 Confirmar suma la cantidad indicada a "Compras" del artículo para este mes. Descartar la oculta sin tocar el stock (ej: gastos que no son insumos físicos).
                 Si el gasto ya trae artículo y cantidad cargados (Gastos → detalle de insumo), quedan pre-completados acá.
+                {' '}Debajo de cada cantidad va <strong>en qué unidad</strong> se carga ese artículo y <strong>a cuánto se pagó la última vez</strong>, con el mes.
+                El <strong>≈</strong> es la cantidad que daría ese importe a ese precio: se ofrece para apretar, no se completa sola — si el precio cambió no da,
+                y una cantidad puesta por la app sin que nadie la mire entra al stock como si fuera un dato contado.
               </p>
             </div>
           )}
