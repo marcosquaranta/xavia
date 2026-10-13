@@ -39,6 +39,18 @@ export const CONFIG_EXCLUIDOS = 'auto_cobro_remitentes_excluidos';
 // Tope opcional: por encima de este importe no se registra solo, va a la bandeja. Vacío o 0
 // = sin tope. Existe para poder poner un freno sin apagar todo, el día que haga falta.
 export const CONFIG_TOPE = 'auto_cobro_tope';
+// ── A qué cuenta de Xubio va la retención ─────────────────────────────────────────────
+//
+// Xubio exige que la cuenta del instrumento de cobro impacte en "disponibilidades" — o sea
+// que sea plata disponible. Una retención contablemente NO es eso: es un crédito fiscal, y
+// por eso la cuenta correcta (Activo Corriente > Otros Créditos > Créditos Fiscales) es
+// justamente la que Xubio rechaza. No es un error de configuración: es que Xubio modela el
+// instrumento de cobro como plata que entra.
+//
+// Mientras eso no se resuelva allá, el cobro se registra por el neto y la retención queda
+// anotada solo en la app. Si en algún momento hay una cuenta que Xubio sí acepte, se escribe
+// su nombre acá y el automático la usa.
+export const CONFIG_CUENTA_RETENCION = 'auto_cobro_cuenta_retencion';
 
 // Cuánto pueden diferir la suma de las facturas y lo que dice la orden. Un peso de redondeo
 // entre el total de la orden y la suma de los comprobantes es normal; mil pesos ya no es un
@@ -138,10 +150,11 @@ export function remitentesExcluidos(valor: any): string[] {
 // o peor, lo imputa dos veces.
 export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Promise<ResultadoAuto> {
   const hoy = fechaArgentinaHoy();
-  const [activoRaw, excluidosRaw, topeRaw] = await Promise.all([
+  const [activoRaw, excluidosRaw, topeRaw, cuentaRetRaw] = await Promise.all([
     readConfig(CONFIG_ACTIVO).catch(() => null),
     readConfig(CONFIG_EXCLUIDOS).catch(() => null),
     readConfig(CONFIG_TOPE).catch(() => null),
+    readConfig(CONFIG_CUENTA_RETENCION).catch(() => null),
   ]);
   // Prendido salvo que digan explícitamente que no. Al revés —apagado hasta que alguien
   // escriba SI— significa que una clave mal tipeada deja la automatización muerta sin que
@@ -269,15 +282,30 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
   // Mismo camino que la confirmación a mano: registrarCobro crea la cobranza en Xubio con su
   // retención y deja el rastro. Si hubiera dos caminos distintos, el automático y el manual
   // dejarían cobros con forma distinta y uno de los dos sería el raro.
+  // La cuenta de retención configurada, resuelta contra las cuentas que Xubio acepta. Si no
+  // hay ninguna configurada —o la que hay no está entre las que Xubio admite como forma de
+  // cobro— no se intenta mandarla: `registrarCobro` cortaría con "elegí a qué cuenta va la
+  // retención" antes de hablar con Xubio, y el aviso quedaría sin registrar por un motivo que
+  // no tiene nada que ver con el aviso.
+  const nombreCtaRet = String(cuentaRetRaw || '').trim();
+  const cuentaRet = nombreCtaRet
+    ? cuentas.find((x) => norm(x.nombre).includes(norm(nombreCtaRet)) || norm(nombreCtaRet).includes(norm(x.nombre)))
+    : null;
+
   for (const c of out.candidatos) {
     try {
       const pedido = {
         idControl: c.idControl, fecha: c.fecha, importe: c.importe, cuentaId: c.cuentaId,
         comprobantes: c.comprobantes, retencion: c.retencion,
+        cuentaRetencionId: cuentaRet?.id || 0,
+        // Sin cuenta de retención que Xubio acepte, se va derecho por el neto. Intentarlo
+        // igual solo produce un rechazo garantizado y un cobro sin registrar.
+        retencionSoloLocal: c.retencion > 0 && !cuentaRet,
         observacion: `Registrado solo desde el aviso de pago (${c.comprobantes.join(', ')})`,
         usuario: 'automático',
       };
       let r = await registrarCobro(pedido);
+      let soloLocalDesdeElPrincipio = c.retencion > 0 && !cuentaRet;
 
       // ── Xubio no acepta la cuenta de la retención ─────────────────────────────────
       //
@@ -290,7 +318,7 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
       // solo acá. Acá se toma la misma, porque es una decisión que ya está tomada y repetirla
       // a mano cada vez no agrega criterio. Lo que no se puede es hacerlo en silencio: en
       // Xubio esa factura queda ABIERTA por el monto retenido, y eso se avisa en el mail.
-      let soloLocal = false;
+      let soloLocal = soloLocalDesdeElPrincipio && r.ok;
       if (!r.ok && /no tiene una categor[ií]a que impacte en disponibilidades/i.test(String(r.error || ''))) {
         r = await registrarCobro({ ...pedido, retencionSoloLocal: true });
         soloLocal = r.ok;
