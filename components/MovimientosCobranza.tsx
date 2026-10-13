@@ -23,8 +23,10 @@ export interface CobranzaUI {
   nota?: string;
   oculta?: boolean;
   importeXubio?: number;
-  // Las facturas que este cobro paga, dichas a mano desde acá. Ver lib/cobranzasEdit.ts.
+  // Las facturas que este cobro paga. Pueden venir de la imputación a mano (cobranzasEdit)
+  // o de haberse elegido al registrar el cobro desde la app (CobrosRegistrados).
   comprobantes?: string[];
+  imputadoAlRegistrar?: boolean;
 }
 
 // Un cliente con su id: hace falta para poder pedir sus facturas. El nombre solo no alcanza
@@ -289,8 +291,10 @@ export default function MovimientosCobranza({
                           factura figura cobrada: sin verlo acá, el único lugar donde está
                           esa decisión es la planilla. */}
                       {c.comprobantes && c.comprobantes.length > 0 ? (
-                        <span title={c.comprobantes.join(', ')} style={{ display: 'block', fontSize: '10px', fontWeight: 600, color: '#166534' }}>
+                        <span title={`${c.comprobantes.join(', ')}${c.imputadoAlRegistrar ? ' — se eligieron al registrar el cobro desde la app' : ' — imputado a mano desde esta pantalla'}`}
+                          style={{ display: 'block', fontSize: '10px', fontWeight: 600, color: '#166534' }}>
                           paga {c.comprobantes.length === 1 ? c.comprobantes[0] : `${c.comprobantes.length} facturas`}
+                          {c.imputadoAlRegistrar && <span style={{ fontWeight: 400, color: '#9ca3af' }}> · al registrarlo</span>}
                         </span>
                       ) : (
                         <span style={{ display: 'block', fontSize: '10px', color: '#9ca3af' }}>sin imputar</span>

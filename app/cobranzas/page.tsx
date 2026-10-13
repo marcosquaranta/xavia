@@ -139,6 +139,30 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   const imputadas = imputacionesManuales(edicionesRaw, claveComprobante);
   const ajustes = ajustesPorFactura(ajustesRaw);
 
+  // ── Qué factura paga cada cobranza de Xubio ─────────────────────────────────────────
+  //
+  // Hay DOS lugares donde eso puede estar dicho, y la pantalla miraba uno solo:
+  //
+  //   · la imputación a mano, que se guarda en XubioCobranzasEdit;
+  //   · el cobro registrado DESDE la app —desde la bandeja, desde "Registrar cobro" o por el
+  //     registro automático—, que guarda sus comprobantes en CobrosRegistrados junto con el
+  //     transaccionid que devolvió Xubio.
+  //
+  // Mirando solo el primero, todos los cobros que la app registró ella misma aparecían como
+  // "sin imputar" aunque se hubiera elegido la factura al cargarlos. Y es el peor lugar para
+  // equivocarse: invita a imputar de nuevo algo que ya estaba imputado.
+  //
+  // El transaccionid es el mismo número de los dos lados, así que une una cosa con la otra sin
+  // adivinar nada.
+  const comprobantesDeCobros = new Map<string, string[]>();
+  for (const c of cobros) {
+    if (String(c.estado) === 'anulado') continue;
+    const tid = String(c.transaccionid || '').trim();
+    const nums = String(c.comprobantes || '').split(',').map((x) => x.trim()).filter(Boolean);
+    if (!tid || !nums.length) continue;
+    comprobantesDeCobros.set(tid, nums);
+  }
+
   // Qué sección pesada se pidió ver. Plegar con <details> esconde pero NO ahorra: el
   // servidor arma el contenido igual y lo manda. Lo que hace lenta esta página es
   // justamente eso —el detalle de facturas de un año, serializado y transferido—, así que
@@ -518,14 +542,26 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
           </p>
           <div style={{ marginTop: '10px' }}>
             <MovimientosCobranza
-              cobranzas={cobranzasCache.map((c) => aplicarEdicion({
-                transaccionid: String(c.transaccionid || ''),
-                fecha: String(c.fecha || '').slice(0, 10),
-                cliente: String(c.cliente || ''),
-                importe: Number(c.importe) || 0,
-                cuenta: String(c.cuenta || ''),
-                numero: String(c.numero || ''),
-              }, edicionesCobranzas))}
+              cobranzas={cobranzasCache.map((c) => {
+                const fila = aplicarEdicion({
+                  transaccionid: String(c.transaccionid || ''),
+                  fecha: String(c.fecha || '').slice(0, 10),
+                  cliente: String(c.cliente || ''),
+                  importe: Number(c.importe) || 0,
+                  cuenta: String(c.cuenta || ''),
+                  numero: String(c.numero || ''),
+                }, edicionesCobranzas);
+                // La imputación a mano gana sobre la del registro: si alguien la corrigió
+                // después de cargar el cobro, fue porque la original estaba mal.
+                const delCobro = comprobantesDeCobros.get(String(c.transaccionid || '').trim()) || [];
+                return {
+                  ...fila,
+                  comprobantes: fila.comprobantes.length ? fila.comprobantes : delCobro,
+                  // De dónde salió, para poder decirlo en la fila: imputarlo al registrarlo no
+                  // es lo mismo que haberlo relacionado a mano después.
+                  imputadoAlRegistrar: !fila.comprobantes.length && delCobro.length > 0,
+                };
+              })}
               clientesApp={clientes.map((c) => nombreClienteVisible(c)).filter(Boolean).sort()}
               // Con el id, para poder traer las facturas del cliente y decir cuál paga cada
               // cobro. El nombre solo no alcanza: el de Xubio y el de la app pueden diferir.
