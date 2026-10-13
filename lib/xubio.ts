@@ -670,6 +670,57 @@ export async function emitirFactura(args: { clienteId: number; esA: boolean; fec
   return { ok: true, numeroDocumento: res.data?.numeroDocumento, cae: res.data?.cae || res.data?.CAE, transaccionid: res.data?.transaccionid };
 }
 
+// ── Nota de crédito ───────────────────────────────────────────────────────────────────
+//
+// El mismo endpoint y el mismo cuerpo que la factura, con `tipo: 3`. No es una suposición:
+// se leyeron las 41 notas ya emitidas en Xubio y traen EXACTAMENTE las mismas claves que las
+// facturas —mismo punto de venta, mismo circuito, mismo depósito— con los importes en
+// negativo y su CAE. O sea que Xubio arma la NC con lo mismo y se encarga de la parte fiscal.
+//
+// Las cantidades y los precios van en POSITIVO, igual que en una factura: lo que convierte la
+// NC en un crédito es el tipo, no el signo. Los importes vuelven en negativo al leerla, que es
+// como la app ya los interpreta en los saldos.
+//
+// SOBRE EL COMPROBANTE ASOCIADO: las notas que ya existen no exponen ningún campo que lo
+// referencie —se compararon sus claves contra las de las facturas y no hay ninguna de más—,
+// así que por API no hay dónde declararlo. Lo que sí se puede es escribirlo en `descripcion`,
+// que en las notas existentes viene vacío: no reemplaza la asociación formal, pero deja el
+// número de la factura en el comprobante en vez de dejarlo en ningún lado.
+export async function emitirNotaCredito(args: {
+  clienteId: number; esA: boolean; fecha: string; items: FacturaItem[]; facturaOriginal: string;
+}): Promise<{ ok: boolean; numeroDocumento?: string; cae?: string; transaccionid?: number; error?: string }> {
+  const body = {
+    tipo: 3,
+    cliente: { ID: args.clienteId },
+    fecha: args.fecha,
+    fechaVto: args.fecha,
+    puntoVenta: { ID: args.esA ? PV_ID_A : PV_ID_B },
+    condicionDePago: 1,
+    deposito: { codigo: 'DEPOSITO_UNIVERSAL' },
+    descripcion: `NC por la factura ${args.facturaOriginal}`,
+    transaccionProductoItems: args.items.map((it) => ({
+      producto: { nombre: it.codigo },
+      descripcion: it.descripcion || '',
+      cantidad: it.cantidad,
+      precio: it.precio,
+      precioconivaincluido: it.precio,
+      montoExento: 0,
+      porcentajeDescuento: 0,
+    })),
+  };
+  const res = await xubioPost<any>('facturar', body);
+  if (!res.ok) {
+    const err = res.data?.description || res.data?.error || res.crudo?.slice(0, 300) || `HTTP ${res.status}`;
+    return { ok: false, error: String(err) };
+  }
+  return {
+    ok: true,
+    numeroDocumento: res.data?.numeroDocumento,
+    cae: res.data?.cae || res.data?.CAE,
+    transaccionid: res.data?.transaccionid,
+  };
+}
+
 export interface VentaMes { mes: string; total: number; cantidad: number; }
 
 // Ventas (facturadas en Xubio) por mes en $, últimos N meses

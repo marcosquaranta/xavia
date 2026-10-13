@@ -39,6 +39,16 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
   const [ajustes, setAjustes] = useState<{ numero: string; de: number; a: number; manual?: boolean }[]>([]);
   // Importe a cobrar puesto a mano. Vacío = se calcula de las cantidades, que es lo normal.
   const [importeManual, setImporteManual] = useState('');
+  // ── Cómo se corrige esta factura ────────────────────────────────────────────────
+  //
+  // Las dos formas son EXCLUYENTES y por eso se eligen, no se combinan. Con la nota de
+  // crédito la deuda baja en Xubio; con el ajuste baja solo del lado de la app. Hacer las
+  // dos sobre la misma factura la bajaría dos veces, y ese error es silencioso.
+  const [modo, setModo] = useState<'app' | 'nc'>('app');
+  // Cuánto acreditar de cada (fila, artículo).
+  const [aAcreditar, setAAcreditar] = useState<Record<string, string>>({});
+  const [emitiendo, setEmitiendo] = useState(false);
+  const [resultadoNC, setResultadoNC] = useState<{ numeroNC?: string; cae?: string; importe?: number } | null>(null);
 
   useEffect(() => {
     fetch(`/api/ventas/fecha?id_exportacion=${idExportacion}`).then(r => r.json()).then((data: VentaDia[]) => {
@@ -97,12 +107,83 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
     setEliminandoFila(null);
   }
 
+  // El número de la factura que cubre estas filas. Si hay más de uno, no se puede emitir una
+  // NC desde acá: habría que elegir cuál se corrige, y adivinar sería emitir contra la
+  // equivocada.
+  const numerosFactura = Array.from(new Set(
+    filas.map((f) => String((f as any).exportado || '').trim()).filter((x) => x && x !== 'PENDIENTE'),
+  ));
+  const numeroFactura = numerosFactura.length === 1 ? numerosFactura[0] : '';
+
+  async function emitirNC() {
+    const lineas = filas.flatMap((f) => CAMPOS
+      .map((c) => ({ id_venta: f.id_venta, key: c.key, cantidad: Number(aAcreditar[`${f.id_venta}__${c.key}`]) || 0 }))
+      .filter((l) => l.cantidad > 0));
+    if (!lineas.length) { setError('Poné qué cantidad acreditar en al menos un producto.'); return; }
+    const total = lineas.reduce((a, l) => a + l.cantidad, 0);
+    if (!confirm(`Se va a emitir una NOTA DE CRÉDITO en Xubio sobre la factura ${numeroFactura}, por ${total} unidad(es) en total.\n\n`
+      + 'Es un comprobante fiscal: una vez emitido no se deshace desde la app.\n\n¿Confirmás?')) return;
+    setEmitiendo(true); setError(null); setResultadoNC(null);
+    try {
+      const r = await fetch('/api/ventas/nota-credito', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ numeroFactura, lineas }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'No se pudo emitir');
+      setResultadoNC({ numeroNC: j.numeroNC, cae: j.cae, importe: j.importe });
+      setAAcreditar({});
+      onGuardado();
+    } catch (e: any) { setError(e.message); }
+    setEmitiendo(false);
+  }
+
   if (loading) return <p style={{ fontSize: '12px', color: '#9ca3af', margin: '8px 0' }}>Cargando detalle…</p>;
   if (filas.length === 0) return <p style={{ fontSize: '12px', color: '#9ca3af', margin: '8px 0' }}>No se encontraron filas para editar.</p>;
 
   return (
     <div style={{ padding: '10px 12px', background: 'white', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
       {error && <p style={{ color: '#dc2626', fontSize: '12px', margin: '0 0 8px' }}>{error}</p>}
+
+      {/* ── Cómo se corrige esta factura ──────────────────────────────────────────────
+          Se elige, no se combina. Con la nota de crédito la deuda baja en Xubio; con la
+          corrección interna baja solo del lado de la app. Hacer las dos sobre la misma
+          factura la bajaría DOS VECES, y ese error no se ve: aparece como un cliente que
+          debe de menos, meses después. */}
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '9px', flexWrap: 'wrap' }}>
+        {([
+          { k: 'app' as const, t: 'Corregir sin Xubio', d: 'Cambia lo que la app reclama. La factura sigue diciendo lo que dice.' },
+          { k: 'nc' as const, t: 'Emitir nota de crédito', d: 'Emite la NC en Xubio. Es la corrección formal: el cliente la recibe y AFIP la ve.' },
+        ]).map((o) => (
+          <button key={o.k} type="button" onClick={() => { setModo(o.k); setError(null); }} title={o.d}
+            style={{
+              fontSize: '12px', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 700,
+              border: `1px solid ${modo === o.k ? '#2563eb' : '#e5e7eb'}`,
+              background: modo === o.k ? '#eff6ff' : 'white',
+              color: modo === o.k ? '#1d4ed8' : '#6b7280',
+            }}>
+            {o.t}
+          </button>
+        ))}
+        <span style={{ fontSize: '11px', color: '#9ca3af', alignSelf: 'center', flex: 1, minWidth: '220px' }}>
+          {modo === 'nc'
+            ? 'Poné cuánto acreditar de cada producto. Las cantidades de la venta bajan solas al emitir.'
+            : 'Corregí las cantidades, o escribí abajo el importe a cobrar.'}
+        </span>
+      </div>
+
+      {resultadoNC && (
+        <div style={{ margin: '0 0 9px', padding: '9px 11px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', fontSize: '12.5px', color: '#166534' }}>
+          <strong>Nota de crédito emitida: {resultadoNC.numeroNC}</strong>
+          {resultadoNC.importe ? ` · $${Math.round(resultadoNC.importe).toLocaleString('es-AR')}` : ''}
+          {resultadoNC.cae ? ` · CAE ${resultadoNC.cae}` : ''}
+          <span style={{ display: 'block', fontSize: '11.5px', color: '#15803d', marginTop: '3px' }}>
+            Las cantidades de la venta ya quedaron corregidas y, si había una corrección interna sobre esta factura, se anuló
+            para no descontar dos veces.
+          </span>
+        </div>
+      )}
+
       {ajustes.length > 0 && (
         <div style={{ margin: '0 0 8px', padding: '8px 10px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', fontSize: '12px', color: '#92400e' }}>
           <strong>Cambió lo que hay que cobrar.</strong> La factura en Xubio no se toca —para eso haría falta una nota de
@@ -128,13 +209,39 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
             {filas.map(f => (
               <tr key={f.id_venta}>
                 <td style={{ padding: '4px 6px', fontWeight: 600, whiteSpace: 'nowrap' }}>{f.sucursal}</td>
-                {CAMPOS.map(c => (
-                  <td key={c.key} style={{ padding: '3px 4px' }}>
-                    <input type="number" min={0} step="any" value={valores[f.id_venta]?.[c.key] ?? ''}
-                      onChange={ev => setVal(f.id_venta, c.key, ev.target.value)}
-                      style={{ width: '72px', textAlign: 'center', fontSize: '12px', padding: '4px' }} />
-                  </td>
-                ))}
+                {CAMPOS.map(c => {
+                  const facturado = Number(valores[f.id_venta]?.[c.key]) || 0;
+                  if (modo !== 'nc') return (
+                    <td key={c.key} style={{ padding: '3px 4px' }}>
+                      <input type="number" min={0} step="any" value={valores[f.id_venta]?.[c.key] ?? ''}
+                        onChange={ev => setVal(f.id_venta, c.key, ev.target.value)}
+                        style={{ width: '72px', textAlign: 'center', fontSize: '12px', padding: '4px' }} />
+                    </td>
+                  );
+                  // En modo NC lo facturado NO se edita: se muestra, y abajo se pone cuánto
+                  // acreditar. Editar las dos cosas a la vez permitiría emitir una NC por más
+                  // de lo que dice la factura.
+                  const k = `${f.id_venta}__${c.key}`;
+                  const cred = Number(aAcreditar[k]) || 0;
+                  return (
+                    <td key={c.key} style={{ padding: '3px 4px', textAlign: 'center' }}>
+                      <span style={{ display: 'block', fontSize: '11px', color: facturado > 0 ? '#374151' : '#d1d5db' }}>
+                        {facturado > 0 ? facturado : '—'}
+                      </span>
+                      {facturado > 0 && (
+                        <input type="number" min={0} max={facturado} step="any" value={aAcreditar[k] ?? ''} placeholder="0"
+                          onChange={ev => setAAcreditar(p => ({ ...p, [k]: ev.target.value }))}
+                          title={`Cuánto acreditar de ${c.label}. Máximo ${facturado}.`}
+                          style={{
+                            width: '72px', textAlign: 'center', fontSize: '12px', padding: '4px', marginTop: '2px',
+                            border: `1px solid ${cred > facturado ? '#dc2626' : cred > 0 ? '#fbbf24' : '#e5e7eb'}`,
+                            borderRadius: '4px',
+                            background: cred > 0 ? '#fffbeb' : 'white',
+                          }} />
+                      )}
+                    </td>
+                  );
+                })}
                 <td style={{ padding: '3px 4px' }}>
                   <button onClick={() => eliminarFila(f.id_venta)} disabled={eliminandoFila === f.id_venta}
                     title="Eliminar esta fila (ej. venta duplicada)"
@@ -147,6 +254,34 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
           </tbody>
         </table>
       </div>
+      {modo === 'nc' ? (
+        <div style={{ marginTop: '10px' }}>
+          {!numeroFactura ? (
+            <p style={{ margin: 0, fontSize: '12px', color: '#b45309' }}>
+              {numerosFactura.length > 1
+                ? `Estas filas están en más de una factura (${numerosFactura.join(', ')}). Para emitir una NC hay que hacerlo sobre una sola: elegí la fecha de esa factura en el historial.`
+                : 'Estas ventas todavía no tienen factura emitida, así que no hay nada que acreditar. Corregí las cantidades directamente.'}
+            </p>
+          ) : (
+            <>
+              <p style={{ margin: '0 0 7px', fontSize: '12px', color: '#6b7280' }}>
+                Nota de crédito sobre la factura <strong style={{ fontFamily: 'ui-monospace, monospace', color: '#111827' }}>{numeroFactura}</strong>.
+                Sale por el mismo punto de venta que la factura y al mismo precio con el que se facturó.
+              </p>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <button onClick={emitirNC} disabled={emitiendo} className="btn" style={{ fontSize: '12px', padding: '6px 14px', background: '#b45309' }}>
+                  {emitiendo ? 'Emitiendo…' : 'Emitir nota de crédito'}
+                </button>
+                <button onClick={onCerrar} className="btn secondary" style={{ fontSize: '12px', padding: '6px 14px' }} disabled={emitiendo}>Cerrar</button>
+                <span style={{ fontSize: '11px', color: '#9ca3af' }}>
+                  Es un comprobante fiscal: una vez emitido no se deshace desde la app.
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+      ) : (
+      <>
       {/* ── El precio, cuando no son las cantidades lo que cambió ────────────────────
           Corregir cantidades revaloriza al precio del catálogo. Si lo que se acordó fue otro
           precio —una bonificación, un precio pactado por única vez— el catálogo no lo sabe.
@@ -173,6 +308,8 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
         </button>
         <button onClick={onCerrar} className="btn secondary" style={{ fontSize: '12px', padding: '6px 14px' }}>Cerrar</button>
       </div>
+      </>
+      )}
     </div>
   );
 }
