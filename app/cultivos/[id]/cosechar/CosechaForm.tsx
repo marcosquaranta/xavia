@@ -3,6 +3,7 @@ import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Lote, Variedad } from '@/lib/types';
 import NumberInput from '@/components/NumberInput';
+import { equivalenciaDeCajones, kgPorCajonDe } from '@/lib/cosechaCajones';
 const HOY = new Date().toISOString().split('T')[0];
 
 export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: { lote: Lote; variedad: Variedad; esPorPaquete: boolean; usuario: string }) {
@@ -15,6 +16,10 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
   const [paquetes, setPaquetes] = useState(0);
   const [plantasPorPaqueteManual, setPlantasPorPaqueteManual] = useState(3); // editable, default 3 — solo para estimar CANTIDAD de paquetes, no interviene en el peso
   const [pesoPaqGr, setPesoPaqGr] = useState(0); // peso del paquete pesado DIRECTAMENTE en la balanza — nunca se multiplica
+  // Cosecha en cajones, en la misma tanda que los paquetes. Los kilos por cajón salen del
+  // cultivo y son fijos, pero quedan editables por si un día se arma distinto.
+  const [cajones, setCajones] = useState(0);
+  const [kgPorCajon, setKgPorCajon] = useState(() => kgPorCajonDe(lote.variedad));
   const [bandejas, setBandejas] = useState(0);
   const [tubosBandejas, setTubosBandejas] = useState(0);
   const [pesoBandGr, setPesoBandGr] = useState(0);
@@ -40,10 +45,22 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
 
   // Para rúcula: paquetes estimados = plantas / plantasPorPaqueteManual
   const paquetesEstimados = esRucula && plantasDeEstaTanda > 0 ? Math.round(plantasDeEstaTanda / plantasPorPaqueteManual) : 0;
-  // Plantas/paquete calculado desde paquetes reales ingresados
+  // Los cajones, convertidos a paquetes-equivalente por peso. Ver lib/cosechaCajones.ts.
+  const eqCajones = useMemo(
+    () => equivalenciaDeCajones({ variedad: lote.variedad, cajones, kgPorCajon, pesoPaqueteGr: pesoPaqGr }),
+    [lote.variedad, cajones, kgPorCajon, pesoPaqGr],
+  );
+  // Lo que de verdad salió del lote, en una sola unidad.
+  const unidadesTotales = paquetes + eqCajones.paquetesEquivalentes;
+
+  // Plantas/paquete sobre el TOTAL, no solo sobre los paquetes armados.
+  //
+  // Si se dividieran todas las plantas del lote por los paquetes reales, una cosecha que salió
+  // mitad en cajones mostraría el doble de plantas por paquete — y esa es justo la alerta que
+  // frena la carga cuando pasa de 4. El cajón también lleva plantas: entra en el divisor.
   const plantasPorPaqReal = useMemo(
-    () => esPorPaquete && paquetes > 0 ? Math.round((plantasDeEstaTanda / paquetes) * 10) / 10 : 0,
-    [esPorPaquete, plantasDeEstaTanda, paquetes],
+    () => esPorPaquete && unidadesTotales > 0 ? Math.round((plantasDeEstaTanda / unidadesTotales) * 10) / 10 : 0,
+    [esPorPaquete, plantasDeEstaTanda, unidadesTotales],
   );
 
   // Alertas de calidad — mismo umbral que el Panel ("Desvíos y calidad de cosecha"):
@@ -57,7 +74,7 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
     e.preventDefault(); setLoading(true); setError(null);
     if (!esPorPaquete && plantas <= 0) { setError('Ingresá la cantidad de plantas cosechadas'); setLoading(false); return; }
     if (!esPorPaquete && pesoGr <= 0) { setError('Ingresá el pesaje testigo (peso del paquete en gramos)'); setLoading(false); return; }
-    if (esPorPaquete && paquetes <= 0) { setError('Ingresá la cantidad de paquetes armados'); setLoading(false); return; }
+    if (esPorPaquete && paquetes <= 0 && cajones <= 0) { setError('Ingresá los paquetes armados, los cajones, o las dos cosas'); setLoading(false); return; }
     if (esPorPaquete && pesoPaqGr <= 0) { setError('Ingresá el pesaje testigo (peso del paquete en gramos)'); setLoading(false); return; }
     if (parcial && (plantasQuedan <= 0 || plantasQuedan >= plantasEst)) { setError(`En cosecha parcial, las plantas que quedan deben ser entre 1 y ${plantasEst - 1}`); setLoading(false); return; }
     if (descarteAlto && !window.confirm(`Descarte alto: ${descarteAuto} plantas, ${descartePct}% de la cosecha (más de 5%). ¿Confirmás registrar la cosecha igual?`)) { setLoading(false); return; }
@@ -75,6 +92,7 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
           // nunca, y si el equipo arma a 2 ninguna estadística podía notarlo.
           plantas_por_paquete: esPorPaquete ? (plantasPorPaqReal > 0 ? plantasPorPaqReal : plantasPorPaqueteManual) : 1,
           peso_muestra_paquete_gr: pesoPaqGr, bandejas_armadas: bandejas,
+          cajones_armados: cajones, kg_por_cajon: kgPorCajon,
           tubos_consumidos_bandejas: tubosBandejas, peso_muestra_bandeja_gr: pesoBandGr,
           plantas_estimadas_lote: plantasEst, usuario,
           parcial, plantas_quedan: parcial ? plantasQuedan : 0,
@@ -172,10 +190,52 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
           </div>
           <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#6b7280' }}>Pesá el paquete armado directamente en la balanza — es el peso final, no se multiplica por la cantidad de plantas por paquete.</p>
 
-          {paquetes > 0 && (
+          {/* ── Cajones ───────────────────────────────────────────────────────────────
+              Van en la misma tanda que los paquetes, no en una carga aparte: es la misma
+              cosecha del mismo lote saliendo de dos formas. Se convierten a paquetes-
+              equivalente por peso para que el stock de cámara y las estadísticas sigan
+              hablando en una sola unidad. */}
+          <div style={{ marginTop: '14px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '12px 14px' }}>
+            <p style={{ margin: '0 0 8px', fontSize: '12px', fontWeight: 700, color: '#92400e' }}>
+              ¿Salió algo en cajones?
+              <span style={{ fontWeight: 400, color: '#b45309' }}> — dejalo en cero si todo fue a paquete</span>
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px' }}>
+              <div><label>Cajones armados</label><NumberInput value={cajones} onChange={setCajones} min={0} disabled={loading} /></div>
+              <div><label>Kg por cajón</label><NumberInput value={kgPorCajon} onChange={setKgPorCajon} min={0} disabled={loading} /></div>
+            </div>
+            {cajones > 0 && (
+              <div style={{ marginTop: '10px', fontSize: '12px', color: '#92400e' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{cajones} cajón(es) × {kgPorCajon} kg</span>
+                  <strong>{eqCajones.kgTotales.toLocaleString('es-AR')} kg</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '5px', borderTop: '1px solid #fde68a', marginTop: '5px' }}>
+                  <span>Equivalen a</span>
+                  <strong>{eqCajones.paquetesEquivalentes.toLocaleString('es-AR')} paquetes</strong>
+                </div>
+                <p style={{ margin: '6px 0 0', fontSize: '10.5px', lineHeight: 1.45 }}>
+                  Calculado con {eqCajones.gramosPorPaquete} g por paquete ({eqCajones.origenPeso}).
+                  {eqCajones.origenPeso === 'referencia del cultivo'
+                    ? ' Cargá el pesaje testigo de arriba y el número se ajusta al peso de hoy.'
+                    : ''}
+                  {' '}Se guardan como paquetes para que el stock de cámara y las estadísticas queden en una sola unidad; los
+                  cajones quedan registrados igual.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {unidadesTotales > 0 && (
             <div style={{ marginTop: '12px', padding: '10px 12px', background: '#f0fdf4', borderRadius: '6px', fontSize: '12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#6b7280' }}>Plantas del lote</span><span>{plantasEst.toLocaleString('es-AR')}</span></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#6b7280' }}>Paquetes armados</span><span>{paquetes}</span></div>
+              {eqCajones.paquetesEquivalentes > 0 && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#6b7280' }}>En cajones (equivalente)</span><span>{eqCajones.paquetesEquivalentes}</span></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}><span style={{ color: '#6b7280' }}>Total que entra a cámara</span><span>{unidadesTotales}</span></div>
+                </>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 500, paddingTop: '6px', borderTop: '1px solid #e5e7eb', marginTop: '6px', color: '#166534' }}>
                 <span>Plantas/paquete configurado</span>
                 <span>{plantasPorPaqueteManual} {plantasPorPaqReal !== plantasPorPaqueteManual && <span style={{ color: '#9ca3af' }}>(real: {plantasPorPaqReal})</span>}</span>

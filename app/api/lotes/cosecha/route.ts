@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { appendRow, appendRowObj, readSheet, updateRow } from '@/lib/sheets';
 import { calcularDesvioCosecha, codigoCultivo } from '@/lib/lotes';
+import { equivalenciaDeCajones } from '@/lib/cosechaCajones';
 import { proximoIdMovimiento } from '@/lib/movimientos';
 import { generarIdDivision, completarIdEnTrasplante } from '@/lib/loteId';
 import type { Lote, Movimiento } from '@/lib/types';
@@ -70,7 +71,20 @@ export async function POST(req: NextRequest) {
       descarteEf = 0;
       pesoKg = Number(peso_total_kg_cajon) || (unidades * (Number(kg_por_cajon) || 0));
     } else {
-      unidades = Number(paquetes_armados) || 0;
+      // ── Paquetes y cajones en la misma tanda ────────────────────────────────────────
+      //
+      // Una cosecha puede salir parte en paquetes y parte en cajones. Los cajones se cuentan
+      // como PAQUETES-EQUIVALENTE por peso (ver lib/cosechaCajones.ts): si entraran como
+      // unidades sueltas, diez cajones sumarían diez al stock de cámara cuando son más de
+      // doscientos paquetes, y el peso promedio y las plantas por paquete quedarían corridos.
+      const eq = equivalenciaDeCajones({
+        variedad: String(lote.variedad || ''),
+        cajones: Number(cajones_armados) || 0,
+        kgPorCajon: Number(kg_por_cajon) || 0,
+        pesoPaqueteGr: Number(peso_muestra_paquete_gr) || 0,
+      });
+      const paquetesReales = Number(paquetes_armados) || 0;
+      unidades = paquetesReales + eq.paquetesEquivalentes;
       if (esRuculaLote) {
         plantasUsadas = plantasEst;
         descarteEf = 0;
@@ -78,7 +92,8 @@ export async function POST(req: NextRequest) {
         descarteEf = Math.max(0, plantasEst - unidades);
         plantasUsadas = unidades + descarteEf;
       }
-      pesoKg = ((Number(peso_muestra_paquete_gr) || 0) * unidades + (Number(peso_muestra_bandeja_gr) || 0) * (Number(bandejas_armadas) || 0)) / 1000;
+      pesoKg = ((Number(peso_muestra_paquete_gr) || 0) * paquetesReales + (Number(peso_muestra_bandeja_gr) || 0) * (Number(bandejas_armadas) || 0)) / 1000
+        + eq.kgTotales;
     }
 
     const { desvio, nivel } = calcularDesvioCosecha(plantasUsadas, plantasEst);
@@ -157,7 +172,7 @@ export async function POST(req: NextRequest) {
         descarte_reportado: descarteHijo,
         peso_muestra_kg: pesoMuestra,
         peso_total_estimado_kg: pesoKg > 0 ? pesoKg.toFixed(3) : '',
-        cajones_armados: modoFinal === 'cajon' ? (Number(cajones_armados) || 0) : '',
+        cajones_armados: Number(cajones_armados) > 0 ? Number(cajones_armados) : '',
         peso_muestra_paquete_gr: modoFinal === 'paquete' ? (Number(peso_muestra_paquete_gr) || '') : '',
         destino_cosecha: destino,
         estado: 'cosechado',
