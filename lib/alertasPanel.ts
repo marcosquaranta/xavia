@@ -243,9 +243,19 @@ export function alertasStockBajo(
         : estimado
           ? `estimado desde el último cierre contado (${ultimoCierre!.mes}/${ultimoCierre!.anio}: ${fmt(numAP(ultimoCierre!.stock_final))} ${u}) = ~${fmt(stockActual)} ${u} — falta cargar el cierre del mes anterior`
           : `stock inicial ${fmt(ini)} ${u}${comp > 0 ? ` + compras ${fmt(comp)} ${u}` : ''} − uso teórico al día ${diasTranscurridos} (${fmt(usoTeoricoActual ?? 0)} ${u}) = stock teórico ${fmt(stockActual)} ${u}`;
+      // El motivo adelante, y la cuenta atrás.
+      //
+      // Antes el mensaje arrancaba con la cuenta y terminaba con "(mínimo 60d) — reponer", así
+      // que un artículo con 42 días de stock se leía como urgente cuando lo único que pasaba
+      // era que el mínimo configurado para ese artículo es alto. El dato que decide si hay que
+      // hacer algo es la comparación, no el detalle del cálculo: va primero.
+      const quedanTxt = `quedan ~${diasTxt} días y el mínimo de este artículo es ${umbralArticulo}`;
       alertas.push({
         tipo: 'error',
-        msg: `${art.articulo}: ${cuenta} · ritmo ${fmt(usoPorDia)} ${u}/día → dura ~${diasTxt}d más (mínimo ${umbralArticulo}d) — reponer`,
+        msg: `${art.articulo}: ${quedanTxt} → reponer, o ajustá el mínimo · ${cuenta} · ritmo ${fmt(usoPorDia)} ${u}/día`,
+        // A la ficha del artículo, abierta: es donde se cambia el mínimo. Sin el link hay que
+        // acordarse de que eso se configura, y dónde.
+        href: `/admin/articulos?art=${encodeURIComponent(String(art.id_articulo))}`,
         // Por artículo, no por texto: el mensaje lleva números que cambian todos los días y
         // un descarte atado al texto duraría hasta el próximo recálculo.
         clave: `stockbajo__${art.id_articulo}`,

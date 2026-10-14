@@ -1,19 +1,27 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import type { Articulo } from '@/lib/types';
 import { DRIVERS } from '@/lib/usoTeorico';
+import { diasSeguridadDeArticulo } from '@/lib/alertasPanel';
 
 interface Props { articulos: Articulo[]; }
 
-function ArticuloRow({ a, onSaved }: { a: Articulo; onSaved: () => void }) {
-  const [open, setOpen] = useState(false);
+function ArticuloRow({ a, onSaved, abrir }: { a: Articulo; onSaved: () => void; abrir?: boolean }) {
+  const [open, setOpen] = useState(!!abrir);
+  const ref = useRef<HTMLTableRowElement>(null);
+  // Venir desde la alerta tiene que dejar el artículo abierto y a la vista: si solo se abriera
+  // la pantalla, habría que buscarlo entre ochenta filas, que es justo lo que el link evita.
+  useEffect(() => {
+    if (abrir) ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [abrir]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [fields, setFields] = useState({
     categoria: a.categoria, articulo: a.articulo, unidad_medida: a.unidad_medida,
     formula_uso: a.formula_uso || '', factor_uso: String(a.factor_uso ?? ''),
+    dias_stock_seguridad: String((a as any).dias_stock_seguridad ?? ''),
   });
 
   async function guardar() {
@@ -21,7 +29,13 @@ function ArticuloRow({ a, onSaved }: { a: Articulo; onSaved: () => void }) {
     try {
       const res = await fetch('/api/admin/articulos', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_articulo: a.id_articulo, ...fields, factor_uso: Number(fields.factor_uso) || 0 }),
+        body: JSON.stringify({
+          id_articulo: a.id_articulo, ...fields,
+          factor_uso: Number(fields.factor_uso) || 0,
+          // Vacío y no cero: cero significaría "avisame cuando no quede nada", y lo que se
+          // quiere decir con el campo vacío es "usá el default de la categoría".
+          dias_stock_seguridad: Number(fields.dias_stock_seguridad) > 0 ? Number(fields.dias_stock_seguridad) : '',
+        }),
       });
       if (!res.ok) { const j = await res.json(); throw new Error(j.error); }
       onSaved();
@@ -45,7 +59,7 @@ function ArticuloRow({ a, onSaved }: { a: Articulo; onSaved: () => void }) {
 
   return (
     <>
-      <tr style={{ opacity: a.activo === 'NO' ? 0.5 : 1, cursor: 'pointer' }} onClick={() => setOpen((o) => !o)}>
+      <tr ref={ref} style={{ opacity: a.activo === 'NO' ? 0.5 : 1, cursor: 'pointer', background: abrir ? '#fffbeb' : undefined }} onClick={() => setOpen((o) => !o)}>
         <td style={{ fontFamily: 'monospace', color: '#6b7280', fontSize: '11px' }}>{a.id_articulo}</td>
         <td style={{ fontWeight: 500 }}>{a.articulo}</td>
         <td style={{ color: '#6b7280', fontSize: '12px' }}>{a.categoria}</td>
@@ -84,6 +98,16 @@ function ArticuloRow({ a, onSaved }: { a: Articulo; onSaved: () => void }) {
                   <label style={{ fontSize: '11px' }}>Factor (por unidad del driver)</label>
                   <input type="number" step="0.0001" value={fields.factor_uso} onChange={(e) => setFields((f) => ({ ...f, factor_uso: e.target.value }))} disabled={saving} placeholder="Ej: 3 (cubos por plancha)" />
                 </div>
+                <div>
+                  <label style={{ fontSize: '11px' }}>Stock de seguridad (días)</label>
+                  <input type="number" min={0} step={1} value={fields.dias_stock_seguridad}
+                    onChange={(e) => setFields((f) => ({ ...f, dias_stock_seguridad: e.target.value }))}
+                    disabled={saving} placeholder={`${diasSeguridadDeArticulo(a)} (por defecto)`} />
+                  <span style={{ display: 'block', fontSize: '10.5px', color: '#9ca3af', marginTop: '2px', lineHeight: 1.4 }}>
+                    Con menos días de stock que esto, salta la alerta de reponer. Vacío = {diasSeguridadDeArticulo(a)} días,
+                    el default de su categoría. Subilo para algo que tarda en llegar, bajalo para lo que se consigue a la vuelta.
+                  </span>
+                </div>
               </div>
               <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#9ca3af' }}>
                 Uso teórico del mes = valor del driver elegido × factor. Ej: Bolsas → "Paquetes vendidos — rúcula" × 1; Espumas/cubos → "Planchas sembradas — total" × N.
@@ -105,6 +129,9 @@ function ArticuloRow({ a, onSaved }: { a: Articulo; onSaved: () => void }) {
 }
 
 export default function ArticulosManager({ articulos }: Props) {
+  // El artículo que trae el link de una alerta de stock bajo. Llega abierto y resaltado: la
+  // alerta dice "ajustá el mínimo" y el link tiene que dejar a mano justo ese campo.
+  const destacado = useSearchParams()?.get('art') || '';
   const router = useRouter();
   const [mostrarForm, setMostrarForm] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -169,11 +196,11 @@ export default function ArticulosManager({ articulos }: Props) {
             </tr>
           </thead>
           <tbody>
-            {activos.map((a) => <ArticuloRow key={a.id_articulo} a={a} onSaved={() => router.refresh()} />)}
+            {activos.map((a) => <ArticuloRow key={a.id_articulo} a={a} onSaved={() => router.refresh()} abrir={String(a.id_articulo) === destacado} />)}
             {inactivos.length > 0 && (
               <>
                 <tr><td colSpan={6} style={{ padding: '8px 6px 4px', fontSize: '11px', color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase' }}>Inactivos</td></tr>
-                {inactivos.map((a) => <ArticuloRow key={a.id_articulo} a={a} onSaved={() => router.refresh()} />)}
+                {inactivos.map((a) => <ArticuloRow key={a.id_articulo} a={a} onSaved={() => router.refresh()} abrir={String(a.id_articulo) === destacado} />)}
               </>
             )}
           </tbody>

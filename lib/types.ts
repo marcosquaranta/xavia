@@ -75,6 +75,11 @@ export interface Articulo {
   activo: string;
   formula_uso: string;   // clave de DriverKey (ver lib/usoTeorico.ts), vacío = sin fórmula configurada
   factor_uso: number | string;  // uso teórico = driver(formula_uso) × factor_uso
+  // Con cuántos días de stock se avisa que hay que reponer. Vacío = el default de su
+  // categoría (ver lib/alertasPanel.ts). Es el número que decide si una alerta sale o no, así
+  // que tiene que poder cambiarse sin tocar código: lo que para un insumo con un proveedor a
+  // la vuelta son 15 días, para algo importado son 60.
+  dias_stock_seguridad?: number | string;
 }
 
 export interface StockMes {

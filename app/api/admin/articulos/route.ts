@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
-import { appendRowObj, readSheet, updateRow } from '@/lib/sheets';
+import { appendRowObj, asegurarColumna, readSheet, updateRow } from '@/lib/sheets';
 import type { Articulo } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
@@ -35,6 +35,10 @@ export async function PATCH(req: NextRequest) {
   try {
     const { id_articulo, ...fields } = await req.json();
     if (!id_articulo) return NextResponse.json({ error: 'id_articulo requerido' }, { status: 400 });
+    // `updateRow` tira si la columna no existe en la hoja, y los días de seguridad por
+    // artículo son una columna nueva: sin esto, guardar desde Admin falla con un error que
+    // no dice qué pasó.
+    await asegurarColumna('Articulos', 'dias_stock_seguridad');
     const updated = await updateRow('Articulos', 'id_articulo', String(id_articulo), fields);
     if (!updated) return NextResponse.json({ error: 'articulo_no_encontrado' }, { status: 404 });
     return NextResponse.json({ ok: true });
