@@ -348,6 +348,10 @@ export interface StockCamara {
   // stock — ver calcularCamara en lib/camara.ts.
   tipo: 'inicial' | 'ajuste' | 'descarte';
   cantidad_paq: number | string;
+  // El recuento de CAJONES de ese mismo conteo. Vacío en los registros anteriores a que se
+  // cosechara en cajones: ahí la pila arranca en cero y lo que se ve es lo cosechado menos lo
+  // vendido, igual que pasaba con los paquetes antes del primer conteo.
+  cantidad_cajones?: number | string;
   notas: string;
   usuario: string;
   fecha_carga: string;

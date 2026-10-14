@@ -292,14 +292,26 @@ export default async function PanelPage() {
   // merece una alerta porque tiene fecha de vencimiento — mañana ya es tarde.
   try {
     for (const c of [camaraRucula, camaraLechugaCrespa, camaraLechugaRoble, camaraAlbahaca]) {
-      if (c.cantidadMasVieja <= 0 || c.diasMasViejo < DIAS_CAMARA_ALERTA) continue;
-      alertas = [...alertas, {
-        tipo: c.diasMasViejo >= DIAS_CAMARA_ALERTA * 2 ? 'error' as const : 'warn' as const,
-        msg: `${NOMBRE_CULTIVO_CAMARA[c.cultivo]}: ${c.cantidadMasVieja} u en cámara de hace ${c.diasMasViejo} días — sacarlas primero`,
-        categoria: 'general' as const,
-        href: '/ventas',
-        clave: `camara_viejo_${c.cultivo}`,
-      }];
+      if (c.cantidadMasVieja > 0 && c.diasMasViejo >= DIAS_CAMARA_ALERTA) {
+        alertas = [...alertas, {
+          tipo: c.diasMasViejo >= DIAS_CAMARA_ALERTA * 2 ? 'error' as const : 'warn' as const,
+          msg: `${NOMBRE_CULTIVO_CAMARA[c.cultivo]}: ${c.cantidadMasVieja} paquetes en cámara de hace ${c.diasMasViejo} días — sacarlos primero`,
+          categoria: 'general' as const,
+          href: '/ventas',
+          clave: `camara_viejo_${c.cultivo}`,
+        }];
+      }
+      // Los cajones avisan con la misma regla y por separado: son otro bulto y se sacan
+      // aparte, así que "hay paquetes viejos" no dice nada sobre los cajones.
+      if (c.cajones.cantidadMasVieja > 0 && c.cajones.diasMasViejo >= DIAS_CAMARA_ALERTA) {
+        alertas = [...alertas, {
+          tipo: c.cajones.diasMasViejo >= DIAS_CAMARA_ALERTA * 2 ? 'error' as const : 'warn' as const,
+          msg: `${NOMBRE_CULTIVO_CAMARA[c.cultivo]}: ${c.cajones.cantidadMasVieja} cajón(es) en cámara de hace ${c.cajones.diasMasViejo} días — sacarlos primero`,
+          categoria: 'general' as const,
+          href: '/ventas',
+          clave: `camara_viejo_cajones_${c.cultivo}`,
+        }];
+      }
     }
   } catch {}
 
@@ -762,10 +774,10 @@ export default async function PanelPage() {
         <div id="stock-camara" style={{ marginBottom:'14px' }}>
           <AjusteStockCard
             compact
-            rucula={{ actual: camaraRucula.stockActual, ajusteMes: ajusteMesRucula.acumulado }}
-            lechugaCrespa={{ actual: camaraLechugaCrespa.stockActual, ajusteMes: ajusteMesLechugaCrespa.acumulado }}
-            lechugaRoble={{ actual: camaraLechugaRoble.stockActual, ajusteMes: ajusteMesLechugaRoble.acumulado }}
-            albahaca={{ actual: camaraAlbahaca.stockActual, ajusteMes: ajusteMesAlbahaca.acumulado }}
+            rucula={{ actual: camaraRucula.stockActual, ajusteMes: ajusteMesRucula.acumulado , cajones: camaraRucula.cajones}}
+            lechugaCrespa={{ actual: camaraLechugaCrespa.stockActual, ajusteMes: ajusteMesLechugaCrespa.acumulado , cajones: camaraLechugaCrespa.cajones}}
+            lechugaRoble={{ actual: camaraLechugaRoble.stockActual, ajusteMes: ajusteMesLechugaRoble.acumulado , cajones: camaraLechugaRoble.cajones}}
+            albahaca={{ actual: camaraAlbahaca.stockActual, ajusteMes: ajusteMesAlbahaca.acumulado , cajones: camaraAlbahaca.cajones}}
             ventasHoyYaDescontadas={ventasDeHoyYaDescontadas()}
           />
         </div>

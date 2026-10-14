@@ -3,6 +3,7 @@ import { pesoPromedioRango } from './estadisticas';
 import { GR_PAQ_RUCULA, GR_PAQ_LECHUGA } from './estadisticasVentas';
 
 import { plantasDeVenta } from './articulos';
+import { equivalenciaDeCajones, kgPorCajonDe } from './cosechaCajones';
 export type CultivoCamara = 'rucula' | 'lechuga_crespa' | 'lechuga_roble' | 'albahaca';
 
 function parseDate(s: any): Date | null {
@@ -127,8 +128,30 @@ function gramosPorPaqueteUltimaSemana(cultivo: CultivoCamara, lotes: Lote[], mom
 // matchCultivo) se reconvierten a paquetes-equivalente con el peso promedio de la
 // semana — antes NO se descontaban del stock de cámara en absoluto (un cliente por kg
 // podía vaciar la cámara entera sin que el stock se moviera un solo paquete).
+// Los CAJONES vendidos en el período: la venta por kilo sale de la cámara en cajones, no en
+// paquetes. Es la misma plata y la misma planta, pero el bulto que se saca de la cámara es
+// distinto, y por eso se cuentan en pilas separadas (ver calcularCamara).
+function cajonesVendidosEntre(cultivo: CultivoCamara, ventas: VentaDia[], desde: Date, momentoRef: Date): number {
+  const kgPorCajon = kgPorCajonDe(cultivo === 'rucula' ? 'rucula' : 'lechuga');
+  if (!(kgPorCajon > 0)) return 0;
+  const kg = ventas
+    .filter((v) => {
+      if (!v.exportado || String(v.exportado).trim() === '') return false;
+      const f = parseDate(v.fecha);
+      if (!f || !(f > desde)) return false;
+      return yaConcretado(v.fecha, momentoRef);
+    })
+    .reduce((acc, v) => {
+      if (cultivo === 'rucula') return acc + (Number(v.rucula_kg) || 0);
+      if (cultivo === 'lechuga_crespa') return acc + (Number(v.lechuga_kg_crespa) || 0);
+      if (cultivo === 'albahaca') return acc;
+      return acc + (Number(v.lechuga_kg_roble) || 0) + (Number(v.lechuga_kg) || 0);
+    }, 0);
+  return kg / kgPorCajon;
+}
+
+// Lo vendido en PAQUETES. Lo que sale por kilo ya no entra acá: se cuenta como cajones.
 function vendidoEntre(cultivo: CultivoCamara, ventas: VentaDia[], lotes: Lote[], desde: Date, momentoRef: Date): number {
-  const gramosPorPaquete = gramosPorPaqueteUltimaSemana(cultivo, lotes, momentoRef);
   return ventas
     .filter(v => {
       if (!v.exportado || String(v.exportado).trim() === '') return false;
@@ -139,12 +162,11 @@ function vendidoEntre(cultivo: CultivoCamara, ventas: VentaDia[], lotes: Lote[],
     .reduce((acc, v) => {
       if (cultivo === 'rucula') {
         const directo = (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0);
-        const kg = ((Number(v.rucula_kg) || 0) * 1000) / gramosPorPaquete;
         // Las ensaladas consumen plantas de la cámara igual que un paquete, solo que varias
         // por unidad vendida. Sin esto, vender ensaladas vaciaba la cámara sin que el stock
         // lo reflejara nunca.
         const ensaladas = plantasDeVenta(v, 'rucula') - directo;
-        return acc + directo + kg + Math.max(0, ensaladas);
+        return acc + directo + Math.max(0, ensaladas);
       }
       if (cultivo === 'albahaca') {
         // Solo por unidad: no hay venta de albahaca por kg.
@@ -152,13 +174,9 @@ function vendidoEntre(cultivo: CultivoCamara, ventas: VentaDia[], lotes: Lote[],
       }
       if (cultivo === 'lechuga_crespa') {
         // Incluye las plantas de crespa que se van en ensaladas: salen de la misma cámara.
-        const directo = plantasDeVenta(v, 'lechuga', 'crespa');
-        const kg = ((Number(v.lechuga_kg_crespa) || 0) * 1000) / gramosPorPaquete;
-        return acc + directo + kg;
+        return acc + plantasDeVenta(v, 'lechuga', 'crespa');
       }
-      const directo = Number(v.hoja_roble) || 0;
-      const kg = ((Number(v.lechuga_kg_roble) || 0) + (Number(v.lechuga_kg) || 0)) * 1000 / gramosPorPaquete;
-      return acc + directo + kg;
+      return acc + (Number(v.hoja_roble) || 0);
     }, 0);
 }
 
@@ -175,6 +193,21 @@ export interface ResultadoCamara {
   diasMasViejo: number;
   cantidadMasVieja: number;
   base: StockCamara | null;
+  // ── La pila de cajones ────────────────────────────────────────────────────────────
+  //
+  // Un cajón no es un paquete: es otro bulto, se arma distinto y se vende a otro cliente. En
+  // la cámara ocupan lugares distintos y se sacan por separado, así que se cuentan por
+  // separado — con las mismas reglas: entra lo cosechado, sale lo vendido por kilo, se
+  // descuenta FIFO y lo más viejo avisa a los mismos días.
+  //
+  // Mezclarlos en una sola pila convertida a paquetes daba un número que no se podía contar
+  // contra nada: nadie cuenta "paquetes equivalentes" en la cámara, se cuentan cajones.
+  cajones: {
+    stockActual: number;
+    diasPromedio: number;
+    diasMasViejo: number;
+    cantidadMasVieja: number;
+  };
 }
 
 // A partir de acá un lote de cámara deja de ser stock y pasa a ser un problema. Cinco días,
@@ -207,10 +240,10 @@ export function calcularCamara(
       return cmp !== 0 ? cmp : b.i - a.i;
     })[0]?.r ?? null;
 
-  if (!base) return { cultivo, stockActual: 0, diasPromedio: 0, diasMasViejo: 0, cantidadMasVieja: 0, base: null };
+  if (!base) return { cultivo, stockActual: 0, diasPromedio: 0, diasMasViejo: 0, cantidadMasVieja: 0, base: null, cajones: { stockActual: 0, diasPromedio: 0, diasMasViejo: 0, cantidadMasVieja: 0 } };
 
   const fechaBase = parseDate(base.fecha);
-  if (!fechaBase) return { cultivo, stockActual: 0, diasPromedio: 0, diasMasViejo: 0, cantidadMasVieja: 0, base };
+  if (!fechaBase) return { cultivo, stockActual: 0, diasPromedio: 0, diasMasViejo: 0, cantidadMasVieja: 0, base, cajones: { stockActual: 0, diasPromedio: 0, diasMasViejo: 0, cantidadMasVieja: 0 } };
 
   const cantidadBase = Number(base.cantidad_paq) || 0;
 
@@ -227,11 +260,29 @@ export function calcularCamara(
       if (!f || !(f > fechaBase)) return false;
       return yaConcretado(fechaCosecha, hoy);
     })
-    .map(l => ({ fecha: parseDate(l.fecha_cosecha || l.fecha_ult_movimiento)!, cantidad: Number(l.unidades_cosechadas) || 0 }))
-    .filter(e => e.cantidad > 0);
+    .map((l) => {
+      // `unidades_cosechadas` trae el TOTAL en paquetes-equivalente, cajones incluidos (ver
+      // lib/cosechaCajones.ts). Para la pila de paquetes hay que sacarle esa parte: si no, lo
+      // que salió en cajones estaría contado en las dos pilas.
+      const cajones = Number(l.cajones_armados) || 0;
+      const eq = cajones > 0
+        ? equivalenciaDeCajones({
+            variedad: String(l.variedad || ''),
+            cajones,
+            pesoPaqueteGr: Number(l.peso_muestra_paquete_gr) || 0,
+          }).paquetesEquivalentes
+        : 0;
+      return {
+        fecha: parseDate(l.fecha_cosecha || l.fecha_ult_movimiento)!,
+        cantidad: Math.max(0, (Number(l.unidades_cosechadas) || 0) - eq),
+        cajones,
+      };
+    })
+    .filter(e => e.cantidad > 0 || e.cajones > 0);
 
   const totalVendido = vendidoEntre(cultivo, ventas, lotes, fechaBase, hoy);
   const totalCosechado = cosechas.reduce((a, c) => a + c.cantidad, 0);
+  const totalCajonesCosechados = cosechas.reduce((a, c) => a + c.cajones, 0);
   // Lo que se tiró desde el último recuento. Sale del stock igual que una venta: el
   // producto ya no está. Sin esto, cada descarte reaparecería como un faltante inexplicable
   // en el próximo conteo — que es justo el número que se usa para detectar problemas.
@@ -279,7 +330,12 @@ export function calcularCamara(
   // Calcular días promedio ponderado de lo que queda
   const restantes = cola.filter(e => e.cantidad > 0);
   const totalRestante = restantes.reduce((a, e) => a + e.cantidad, 0);
-  if (totalRestante === 0) return { cultivo, stockActual, diasPromedio: 0, diasMasViejo: 0, cantidadMasVieja: 0, base };
+  if (totalRestante === 0) {
+    return {
+      cultivo, stockActual, diasPromedio: 0, diasMasViejo: 0, cantidadMasVieja: 0, base,
+      cajones: pilaDeCajones(cultivo, base, fechaBase, cosechas, totalCajonesCosechados, ventas, hoy),
+    };
+  }
 
   const diasProm = restantes.reduce((acc, e) => {
     const dias = Math.round((hoy.getTime() - e.fecha.getTime()) / 86400000);
@@ -300,7 +356,59 @@ export function calcularCamara(
   const diasMasViejo = Math.round((hoy.getTime() - masVieja.fecha.getTime()) / 86400000);
   const cantidadMasVieja = Math.min(Math.round(masVieja.cantidad), stockActual);
 
-  return { cultivo, stockActual, diasPromedio: Math.round(diasProm), diasMasViejo, cantidadMasVieja, base };
+  return {
+    cultivo, stockActual, diasPromedio: Math.round(diasProm), diasMasViejo, cantidadMasVieja, base,
+    cajones: pilaDeCajones(cultivo, base, fechaBase, cosechas, totalCajonesCosechados, ventas, hoy),
+  };
+}
+
+// La pila de cajones, con las mismas reglas que la de paquetes: base contada + cosechado −
+// vendido, FIFO de lo más viejo a lo más nuevo, y la punta vieja informada aparte del
+// promedio.
+//
+// La base sale de `cantidad_cajones` del último recuento. Mientras nadie haya contado cajones
+// nunca, arranca en cero y lo que se ve es lo cosechado menos lo vendido — que es exactamente
+// lo que pasa con los paquetes antes del primer conteo.
+function pilaDeCajones(
+  cultivo: CultivoCamara,
+  base: StockCamara,
+  fechaBase: Date,
+  cosechas: { fecha: Date; cajones: number }[],
+  totalCosechado: number,
+  ventas: VentaDia[],
+  hoy: Date,
+): ResultadoCamara['cajones'] {
+  const cantidadBase = Number((base as any).cantidad_cajones) || 0;
+  const vendidos = cajonesVendidosEntre(cultivo, ventas, fechaBase, hoy);
+  const stockActual = Math.round(Math.max(0, cantidadBase + totalCosechado - vendidos));
+
+  const cola: { fecha: Date; cantidad: number }[] = [
+    { fecha: fechaBase, cantidad: cantidadBase },
+    ...cosechas.filter((c) => c.cajones > 0).map((c) => ({ fecha: c.fecha, cantidad: c.cajones }))
+      .sort((a, b) => a.fecha.getTime() - b.fecha.getTime()),
+  ];
+  let porDescontar = vendidos;
+  for (const e of cola) {
+    if (porDescontar <= 0) break;
+    const desc = Math.min(e.cantidad, porDescontar);
+    e.cantidad -= desc;
+    porDescontar -= desc;
+  }
+  const restantes = cola.filter((e) => e.cantidad > 0);
+  const total = restantes.reduce((a, e) => a + e.cantidad, 0);
+  if (total === 0 || stockActual === 0) return { stockActual, diasPromedio: 0, diasMasViejo: 0, cantidadMasVieja: 0 };
+
+  const diasProm = restantes.reduce((acc, e) => {
+    const dias = Math.round((hoy.getTime() - e.fecha.getTime()) / 86400000);
+    return acc + dias * e.cantidad;
+  }, 0) / total;
+  const masVieja = restantes[0];
+  return {
+    stockActual,
+    diasPromedio: Math.round(diasProm),
+    diasMasViejo: Math.round((hoy.getTime() - masVieja.fecha.getTime()) / 86400000),
+    cantidadMasVieja: Math.min(Math.round(masVieja.cantidad), stockActual),
+  };
 }
 
 // Diferencia entre una cantidad nueva (contada a mano) y lo que el sistema esperaba

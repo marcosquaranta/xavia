@@ -158,7 +158,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   const [correlaB,setCorrelaB]=useState<string>('');
   const [enviarEmail,setEnviarEmail]=useState(true);
   const [limpiando,setLimpiando]=useState(false);
-  type CamaraCultivo = { stockActual:number; diasPromedio:number; diasMasViejo:number; cantidadMasVieja:number };
+  type CamaraCultivo = { stockActual:number; diasPromedio:number; diasMasViejo:number; cantidadMasVieja:number; cajones?:{stockActual:number;diasPromedio:number;diasMasViejo:number;cantidadMasVieja:number} };
   const [stockCamara,setStockCamara]=useState<{rucula:CamaraCultivo;lechuga_crespa:CamaraCultivo;lechuga_roble:CamaraCultivo;albahaca:CamaraCultivo;factorGrPaq:{rucula:number;lechuga_crespa:number;lechuga_roble:number;albahaca:number};ventasHoyYaDescontadas:boolean}|null>(null);
   const [ctdsKg,setCtdsKg]=useState<CKG>({});
   const [ventas7,setVentas7]=useState<VentaDia[]>([]);
@@ -642,6 +642,21 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
                       title={`Lo más viejo que queda en cámara de este cultivo. A partir de ${DIAS_CAMARA_ALERTA} días conviene sacarlo.`}>
                       {viejo5 ? '⚠ ' : ''}Lo más viejo: <strong>{cam.cantidadMasVieja} u</strong> de hace <strong>{cam.diasMasViejo} {cam.diasMasViejo === 1 ? 'día' : 'días'}</strong>
                       {viejo5 ? ' — sacarlo primero' : ''}
+                    </span>
+                  );
+                })()}
+                {/* Los cajones son una pila aparte: otro bulto, otro cliente, y se sacan de
+                    la cámara por separado. Mezclarlos con los paquetes daba un número que no
+                    se podía contar contra nada — nadie cuenta "paquetes equivalentes". */}
+                {(() => {
+                  const caj = stockCamara?.[cultivo]?.cajones;
+                  if (!caj || caj.stockActual <= 0) return null;
+                  const viejoCaj = caj.diasMasViejo >= DIAS_CAMARA_ALERTA;
+                  return (
+                    <span style={{fontSize:'10.5px', color: viejoCaj ? '#dc2626' : '#6b7280', fontWeight: viejoCaj ? 700 : 400}}>
+                      {viejoCaj ? '⚠ ' : ''}Cajones en cámara: <strong>{caj.stockActual}</strong>
+                      {caj.cantidadMasVieja > 0 && <> · el más viejo de hace <strong>{caj.diasMasViejo}d</strong></>}
+                      {viejoCaj ? ' — sacarlo primero' : ''}
                     </span>
                   );
                 })()}

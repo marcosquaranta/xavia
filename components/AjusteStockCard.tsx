@@ -2,9 +2,15 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import CargarDescarteCamara from './CargarDescarteCamara';
-import type { CultivoCamara } from '@/lib/camara';
+import { DIAS_CAMARA_ALERTA, type CultivoCamara } from '@/lib/camara';
 
-interface CultivoStock { actual: number; ajusteMes: number }
+interface CultivoStock {
+  actual: number;
+  ajusteMes: number;
+  // La pila de cajones del mismo cultivo (ver lib/camara.ts). Opcional para no romper a
+  // quien todavía no la pase; cuando falta, la tarjeta simplemente no la muestra.
+  cajones?: { stockActual: number; diasMasViejo: number; cantidadMasVieja: number };
+}
 
 export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, albahaca, ventasHoyYaDescontadas, compact = false }: {
   rucula: CultivoStock; lechugaCrespa: CultivoStock; lechugaRoble: CultivoStock; albahaca: CultivoStock; ventasHoyYaDescontadas: boolean;
@@ -15,6 +21,10 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, a
 }) {
   const [abierto, setAbierto] = useState<CultivoCamara | null>(null);
   const [cantidad, setCantidad] = useState('');
+  // El recuento de cajones del mismo conteo. Arranca con el stock calculado, no vacío: un
+  // recuento escribe una base nueva y la pila de cajones se reconstruye desde ahí, así que
+  // dejarlo en blanco pondría los cajones en cero sin que nadie lo haya querido.
+  const [cantidadCaj, setCantidadCaj] = useState('');
   const [notas, setNotas] = useState('');
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; s: string } | null>(null);
@@ -29,10 +39,12 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, a
   const diff = abierto && cantidad !== '' ? Math.round(Number(cantidad) - stockAbierto) : null;
 
   function abrir(key: CultivoCamara) {
-    setAbierto(key); setCantidad(''); setNotas(''); setMsg(null);
+    const caj = cultivos.find(c => c.key === key)!.data.cajones;
+    setAbierto(key); setCantidad(''); setCantidadCaj(caj && caj.stockActual > 0 ? String(caj.stockActual) : '');
+    setNotas(''); setMsg(null);
   }
   function cerrar() {
-    setAbierto(null); setCantidad(''); setNotas('');
+    setAbierto(null); setCantidad(''); setCantidadCaj(''); setNotas('');
   }
 
   async function registrar() {
@@ -43,7 +55,8 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, a
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           cultivo: abierto, fecha: new Date().toISOString().slice(0, 10),
-          tipo: 'ajuste', cantidad_paq: Number(cantidad), notas,
+          tipo: 'ajuste', cantidad_paq: Number(cantidad),
+          cantidad_cajones: cantidadCaj === '' ? 0 : Number(cantidadCaj), notas,
         }),
       });
       const j = await r.json().catch(() => ({}));
@@ -88,6 +101,20 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, a
                 </span>
               )}
             </div>
+            {/* Los cajones, con las mismas reglas que los paquetes: pila propia, FIFO propio y
+                el mismo aviso de antigüedad. Son otro bulto y se sacan de la cámara aparte,
+                así que contarlos juntos daba un número que no se podía chequear con nada. */}
+            {c.data.cajones && c.data.cajones.stockActual > 0 && (() => {
+              const caj = c.data.cajones!;
+              const viejo = caj.diasMasViejo >= DIAS_CAMARA_ALERTA;
+              return (
+                <p style={{ margin: compact ? '0 0 4px' : '0 0 6px', fontSize: '10.5px', color: viejo ? '#dc2626' : '#6b7280', fontWeight: viejo ? 700 : 400 }}
+                  title={`Cajones que quedan en cámara. A partir de ${DIAS_CAMARA_ALERTA} días conviene sacarlos.`}>
+                  {viejo ? '⚠ ' : ''}<strong>{caj.stockActual}</strong> cajones
+                  {caj.cantidadMasVieja > 0 && <> · el más viejo de hace <strong>{caj.diasMasViejo}d</strong></>}
+                </p>
+              );
+            })()}
             {compact ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <Link href={`/stocks/${c.key}`} style={{ fontSize: '10.5px', color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}>
@@ -121,6 +148,8 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, a
                     {diff === 0 ? 'Sin faltante' : `${diff > 0 ? '+' : ''}${diff} paq de faltante`}
                   </span>
                 )}
+                <input type="number" placeholder="Cajones contados" value={cantidadCaj} onChange={e => setCantidadCaj(e.target.value)} disabled={loading}
+                  style={{ fontSize: '12px', padding: '4px 6px', border: '1px solid #d1d5db', borderRadius: '5px' }} />
                 <input type="text" placeholder="Notas (opcional)" value={notas} onChange={e => setNotas(e.target.value)} disabled={loading}
                   style={{ fontSize: '12px', padding: '4px 6px', border: '1px solid #d1d5db', borderRadius: '5px' }} />
                 <div style={{ display: 'flex', gap: '6px' }}>
