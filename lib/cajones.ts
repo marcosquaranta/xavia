@@ -1,5 +1,5 @@
 import type { CajonMovimiento, ClienteVenta, VentaDia } from './types';
-import { GR_PAQ_RUCULA, GR_PAQ_LECHUGA } from './estadisticasVentas';
+import { paquetesDeKg, GRAMAJE_NOMINAL, type Gramaje } from './estadisticasVentas';
 import { mapaNombresClientes } from './clientes';
 
 // Vive acá (y no en app/api/cajones/config/route.ts) porque un route.ts de Next solo
@@ -94,17 +94,17 @@ function m_nombreFallback(movimientos: CajonMovimiento[], id_control: string): s
 // Para los cajones lo que importa es cuántos BULTOS salen, no cuántas plantas llevan
 // adentro: una ensalada ocupa lugar en el cajón como un paquete, no como dos plantas y
 // media. Por eso acá se cuenta de a uno y no con el factor de consumo.
-function unidadesRuculaVenta(v: VentaDia): number {
+function unidadesRuculaVenta(v: VentaDia, g: Gramaje = GRAMAJE_NOMINAL): number {
   const directas = (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0)
     + (Number(v.ensalada_rucula_parmesano) || 0);
-  const kgEnPaq = ((Number(v.rucula_kg) || 0) * 1000) / GR_PAQ_RUCULA;
-  return directas + kgEnPaq;
+  return directas + paquetesDeKg('rucula_kg', Number(v.rucula_kg) || 0, g);
 }
-function unidadesLechugaVenta(v: VentaDia): number {
+function unidadesLechugaVenta(v: VentaDia, g: Gramaje = GRAMAJE_NOMINAL): number {
   const directas = (Number(v.lechuga_crespa) || 0) + (Number(v.hoja_roble) || 0) + (Number(v.albahaca) || 0)
     + (Number(v.ensalada_clasica) || 0);
-  const kgEnPaq = (((Number(v.lechuga_kg) || 0) + (Number(v.lechuga_kg_crespa) || 0) + (Number(v.lechuga_kg_roble) || 0)) * 1000) / GR_PAQ_LECHUGA;
-  return directas + kgEnPaq;
+  const enCajon = ['lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble']
+    .reduce((a, k) => a + paquetesDeKg(k, Number((v as any)[k]) || 0, g), 0);
+  return directas + enCajon;
 }
 
 export interface TeoricoCajonCliente {

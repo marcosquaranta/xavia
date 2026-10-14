@@ -1,4 +1,4 @@
-import type { Articulo, StockMes, Gasto, VentaDia, PrecioVenta, ClienteVenta, CategoriaGasto } from './types';
+import type { Articulo, StockMes, Gasto, VentaDia, PrecioVenta, ClienteVenta, CategoriaGasto, Lote } from './types';
 import { ARTICULOS } from './articulos';
 import { nombreClienteVisible } from './clientes';
 import { precioFinal } from './estadisticasVentas';
@@ -125,6 +125,12 @@ export interface DatosEERR {
   ventas: VentaDia[];
   precios: PrecioVenta[];
   clientes: ClienteVenta[];
+  // Opcional, y solo para las UNIDADES: con los lotes, los kilos vendidos se pasan a
+  // paquetes con el peso real de lo cosechado en el mes (ver gramajeDeRango); sin ellos,
+  // con el gramaje nominal. La plata del EERR no depende de esto — las ventas por kilo se
+  // valorizan por kilo — así que ninguna pantalla hace una lectura extra de Lotes solo
+  // para esto, pero la que ya los tiene los pasa y el número cierra con los gráficos.
+  lotes?: Lote[];
 }
 
 export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
@@ -133,7 +139,7 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
   const hasta = `${anio}-${mm}-${String(new Date(anio, mes, 0).getDate()).padStart(2, '0')}`;
 
   // ── Ventas ──
-  const vr = ventasEnRango(d.ventas, d.precios, d.clientes, desde, hasta);
+  const vr = ventasEnRango(d.ventas, d.precios, d.clientes, desde, hasta, d.lotes || []);
   const porCultivo: LineaVenta[] = [
     { label: 'Rúcula', unidades: vr.rucula.unidades, monto: vr.rucula.monto },
     { label: 'Lechuga', unidades: vr.lechuga.unidades, monto: vr.lechuga.monto },

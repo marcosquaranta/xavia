@@ -5,7 +5,7 @@ import { cosechasEstimadasPorLote, ciclosPorSemana, pesoPromedioRango, pesoProme
 import { calcularCamara, diferenciaAjustesRango } from './camara';
 import { nombreClienteVisible } from './clientes';
 import { POSPAQ } from './planificacion'; // 3 posiciones (plantas) por paquete de rúcula
-import { ventasPorCultivoUltimasSemanas, resumenMesActual, ventasEnRango, GR_PAQ_RUCULA, GR_PAQ_LECHUGA, type PuntoVentaCultivoSemana, type VentasRango, type ResumenMesActual } from './estadisticasVentas';
+import { ventasPorCultivoUltimasSemanas, resumenMesActual, ventasEnRango, gramajeDeRango, paquetesDeKg, esKeyKg, GRAMAJE_NOMINAL, type Gramaje, type PuntoVentaCultivoSemana, type VentasRango, type ResumenMesActual } from './estadisticasVentas';
 import { plantasPerdidasPorSubocupacion, type PlantasPerdidasSubocupacion } from './kpisOperativos';
 import { getComprobantes } from './xubio';
 import { KEYS_UNIDAD_HISTORICAS } from './articulos';
@@ -31,21 +31,25 @@ const esRuculaV = (v: string) => { const x = String(v || '').toLowerCase(); retu
 // Unidades vendidas totales de una fila de Ventas (todo lo que factura, kg convertidos a
 // paquete-equivalente con el mismo factor que el resto de la app) — para comparar
 // clientes en volumen real, no en kg crudo (que los haría ver artificialmente chicos).
-function unidadesVentaFila(v: VentaDia): number {
+function unidadesVentaFila(v: VentaDia, gramaje: Gramaje = GRAMAJE_NOMINAL): number {
   // Todos los artículos por unidad, incluidos los dados de baja: es volumen vendido, y una
   // venta vieja de bandeja de rúcula fue volumen igual. Al salir del catálogo, un artículo
   // nuevo entra solo en vez de quedar sin contar hasta que alguien se acuerde.
   const directas = KEYS_UNIDAD_HISTORICAS.reduce((a, k) => a + (Number((v as any)[k]) || 0), 0);
-  const kgR = ((Number(v.rucula_kg) || 0) * 1000) / GR_PAQ_RUCULA;
-  const kgL = (((Number(v.lechuga_kg) || 0) + (Number(v.lechuga_kg_crespa) || 0) + (Number(v.lechuga_kg_roble) || 0)) * 1000) / GR_PAQ_LECHUGA;
-  return directas + kgR + kgL;
+  // Los kilos, por la misma división que el resto de la app (ver paquetesDeKg). Acá el
+  // gramaje por defecto solo lo usa el chequeo de "esta fila tiene algo cargado", donde el
+  // valor exacto no cambia la respuesta.
+  const enCajon = ['rucula_kg', 'lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble']
+    .reduce((a, k) => a + paquetesDeKg(k, Number((v as any)[k]) || 0, gramaje), 0);
+  return directas + enCajon;
 }
-function sumaPorClienteEnRango(ventas: VentaDia[], desde: string, hasta: string): Map<string, number> {
+function sumaPorClienteEnRango(ventas: VentaDia[], desde: string, hasta: string, lotes: Lote[]): Map<string, number> {
+  const gramaje = gramajeDeRango(lotes, new Date(desde + 'T00:00:00'), new Date(hasta + 'T23:59:59'));
   const map = new Map<string, number>();
   for (const v of ventas) {
     const f = String(v.fecha || '').split(/[T ]/)[0];
     if (!f || f < desde || f > hasta) continue;
-    const t = unidadesVentaFila(v); if (t <= 0) continue;
+    const t = unidadesVentaFila(v, gramaje); if (t <= 0) continue;
     map.set(v.id_control, (map.get(v.id_control) || 0) + t);
   }
   return map;
@@ -83,9 +87,9 @@ function facturasPorClienteEnRango(
 }
 // Principales clientes de la semana (por volumen), con cuánto subieron/bajaron en
 // cantidad y % vs. la semana anterior — mismas ventanas de fecha que "Ventas — últimos 7 días".
-function clientesConVariacionSemana(ventas: VentaDia[], clientes: ClienteVenta[], desde: string, hasta: string, desdeAnt: string, hastaAnt: string, topN = 6): ClienteVariacionSemana[] {
-  const actual = sumaPorClienteEnRango(ventas, desde, hasta);
-  const anterior = sumaPorClienteEnRango(ventas, desdeAnt, hastaAnt);
+function clientesConVariacionSemana(ventas: VentaDia[], clientes: ClienteVenta[], desde: string, hasta: string, desdeAnt: string, hastaAnt: string, topN = 6, lotes: Lote[] = []): ClienteVariacionSemana[] {
+  const actual = sumaPorClienteEnRango(ventas, desde, hasta, lotes);
+  const anterior = sumaPorClienteEnRango(ventas, desdeAnt, hastaAnt, lotes);
   const facturas = facturasPorClienteEnRango(ventas, clientes, desde, hasta);
   const facturasAnt = facturasPorClienteEnRango(ventas, clientes, desdeAnt, hastaAnt);
   const nombreMap = new Map(clientes.map(c => [c.id_control, nombreClienteVisible(c)]));
@@ -542,8 +546,8 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const desdeSemana = fmtISO(new Date(hoy.getTime() - 6 * 86400000));
   const hastaAnt = fmtISO(new Date(hoy.getTime() - 7 * 86400000));
   const desdeAnt = fmtISO(new Date(hoy.getTime() - 13 * 86400000));
-  const ventasSemana = ventasEnRango(ventas, precios, clientes, desdeSemana, hastaHoy);
-  const ventasSemanaAnterior = ventasEnRango(ventas, precios, clientes, desdeAnt, hastaAnt);
+  const ventasSemana = ventasEnRango(ventas, precios, clientes, desdeSemana, hastaHoy, lotes);
+  const ventasSemanaAnterior = ventasEnRango(ventas, precios, clientes, desdeAnt, hastaAnt, lotes);
 
   // ── Descarte: esta semana, la anterior y el mes ──
   //
@@ -573,9 +577,9 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const kmSemanaAnterior = kmEnRango(registrosKm, VEHICULO_PARTNER, desdeAnt, hastaAnt);
 
   // ── Ventas del mes en curso: acumulado a hoy, proyección a fin de mes y total real del mes pasado ──
-  const ventasMesActual = resumenMesActual(ventas, precios, clientes, hoy);
+  const ventasMesActual = resumenMesActual(ventas, precios, clientes, hoy, undefined, lotes);
   const diasEnMesPasado = new Date(mesPasadoRef.getFullYear(), mesPasadoRef.getMonth() + 1, 0).getDate();
-  const resumenMesPasado = resumenMesActual(ventas, precios, clientes, mesPasadoRef, diasEnMesPasado);
+  const resumenMesPasado = resumenMesActual(ventas, precios, clientes, mesPasadoRef, diasEnMesPasado, lotes);
   const ventasMesAnteriorTotal = resumenMesPasado.unidadesMes;
   const ventasMesAnteriorMonto = resumenMesPasado.montoMes;
 
@@ -715,7 +719,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const mesadasVacias = mesadasVaciasEnLaSemana(ocupacionHistorial, desdeSemana, hastaHoy, 2);
 
   // ── Ventas por cultivo, últimas 4 semanas calendario completas (lunes a domingo) ──
-  const ventasSemanas = ventasPorCultivoUltimasSemanas(ventas, precios, clientes, 4);
+  const ventasSemanas = ventasPorCultivoUltimasSemanas(ventas, precios, clientes, 4, hoy, lotes);
 
   // ── Stock en cámara + faltante acumulado por ajustes del mes en curso ──
   const stock = {

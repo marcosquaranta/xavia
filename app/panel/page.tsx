@@ -191,16 +191,16 @@ export default async function PanelPage() {
   } catch {}
 
   // ── Evolución de venta por artículo + indicadores del mes (mismo cálculo que Ventas) ──
-  const evolArticuloPanel = evolucionVentaPorArticulo(ventasPanel, 12, historicasPanel);
+  const evolArticuloPanel = evolucionVentaPorArticulo(ventasPanel, 12, historicasPanel, undefined, lotes);
   const ahora = new Date();
   const mesPasadoRef = mesAnteriorClamp(ahora);
-  const resumenMesPanel = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, ahora);
+  const resumenMesPanel = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, ahora, undefined, lotes);
   // Mes pasado completo, para comparar contra la proyección (que estima un mes entero).
   // OJO: sin el diaCorte explícito acá, resumenMesActual usa mesPasadoRef.getDate() como
   // corte (el mismo día que hoy) en vez del mes completo — quedaba idéntico al
   // "comparable" de abajo e inflaba la variación de la proyección.
   const diasEnMesPasado = new Date(mesPasadoRef.getFullYear(), mesPasadoRef.getMonth() + 1, 0).getDate();
-  const resumenMesPasadoCompleto = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, mesPasadoRef, diasEnMesPasado);
+  const resumenMesPasadoCompleto = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, mesPasadoRef, diasEnMesPasado, lotes);
   // Referencia para "venta al día": el RITMO de todo el mes pasado (total real / días del mes),
   // prorrateado a los días que ya pasaron este mes — NO el total real de "mes pasado, mismos
   // primeros N días", que quedaba a merced de en qué día cayó algún pedido grande de un

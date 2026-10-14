@@ -12,6 +12,11 @@ import GraficoValorComercial from './GraficoValorComercial';
 // amarillo/magenta quedan bajo 3:1 de contraste sobre blanco, por eso cada gráfico
 // con esos colores tiene su tabla de datos como respaldo (relief rule).
 const CATEGORICOS = ['#2a78d6', '#1baf7a', '#eda100', '#008300', '#4a3aa7', '#e34948', '#e87ba4', '#eb6834'];
+// El mismo producto que sale a granel en cajón, en el tono claro del color de su cultivo:
+// se lee como "esto es rúcula igual, pero por el otro canal" en vez de como otra cosa.
+// Los labels de esos tramos van en tinta oscura — blanco sobre estos tonos no se lee.
+const CAJON_RUCULA = '#a8c9ef';
+const CAJON_LECHUGA = '#a2dcc5';
 const INK_SECUNDARIA = '#52514e';
 const INK_MUTED = '#898781';
 const GRID = '#e1e0d9';
@@ -34,6 +39,43 @@ function TooltipCard({ active, payload, label, formatter }: any) {
           <strong style={{ color: '#111827' }}>{formatter ? formatter(p.value) : p.value}</strong>
         </div>
       ))}
+    </div>
+  );
+}
+
+// El tramo de cajón mide paquete-equivalente (para poder apilarlo con los paquetes), pero
+// nadie pide "mil doscientos paquetes-equivalentes": pide cajones. Así que en el tooltip va
+// la altura de la barra Y los bultos, que es la unidad en la que se carga y se habla.
+const CAJONES_DE: Record<string, string> = { ruculaCaj: 'ruculaCajones', lechugaCaj: 'lechugaCajones' };
+function TooltipArticulo({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  const filas = payload.filter((p: any) => p.value > 0 && !String(p.dataKey).startsWith('proy'));
+  if (!filas.length) return null;
+  const datum = filas[0]?.payload || {};
+  return (
+    <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
+      <p style={{ margin: '0 0 4px', fontWeight: 700, color: '#111827' }}>{label}</p>
+      {filas.map((p: any, i: number) => {
+        const claveCaj = CAJONES_DE[String(p.dataKey)];
+        const cajones = claveCaj ? Number(datum[claveCaj]) || 0 : 0;
+        return (
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: '14px', color: INK_SECUNDARIA }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: p.color, display: 'inline-block' }} />
+              {p.name}
+            </span>
+            <strong style={{ color: '#111827' }}>
+              {fmtEntero(p.value)}{cajones > 0 ? ` · ${fmtEntero(cajones)} cj` : ''}
+            </strong>
+          </div>
+        );
+      })}
+      {Number(datum.pctCajones) > 0 && (
+        <p style={{ margin: '5px 0 0', paddingTop: '5px', borderTop: '1px solid #f1f0eb', fontSize: '11px', color: INK_MUTED }}>
+          {datum.pctCajones}% del volumen salió en cajón
+          {Number(datum.cajones) > 0 ? ` · ${fmtEntero(datum.cajones)} cajones en el mes` : ''}
+        </p>
+      )}
     </div>
   );
 }
@@ -64,31 +106,59 @@ const titleStyle: React.CSSProperties = { margin: '0 0 12px', fontSize: '13px', 
 const labelProyeccion = ({ x, y, width, value }: any) =>
   value > 0 ? <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={10} fontWeight={700} fill={INK_SECUNDARIA}>≈{fmtEntero(value)}</text> : null;
 
+// El label de los tramos de cajón: el número de BULTOS, no la altura de la barra. Es el dato
+// que sirve para hablar con el galpón y con el cliente, y el que no está en ningún otro lado.
+const labelCajones = ({ x, y, width, height, value }: any) =>
+  value > 0 && height > 13
+    ? <text x={x + width / 2} y={y + height / 2 + 3.5} textAnchor="middle" fontSize={10} fontWeight={700} fill="#1f2937">{fmtEntero(value)} cj</text>
+    : null;
+
 export function GraficoVentaPorArticulo({ datos }: { datos: PuntoArticulo[] }) {
+  const ultimo = datos[datos.length - 1];
   return (
     <div style={cardStyle}>
       <p style={titleStyle}>Evolución de venta por artículo <span style={{ fontWeight: 400, color: '#9ca3af' }}>· el contorno punteado del mes en curso es la proyección a fin de mes</span></p>
+      {/* El total por cultivo no contesta por dónde creció el volumen: un mes puede subir
+          entero por el canal de cajón y la barra se ve igual que si hubieran subido los
+          paquetes. El tramo claro de cada barra es lo que salió a granel, rotulado en
+          cajones. */}
+      <p style={{ margin: '-6px 0 10px', fontSize: '11px', color: INK_SECUNDARIA }}>
+        El tramo claro de cada barra es lo que salió <strong>en cajón</strong> (rotulado en cajones; la altura es su equivalente en paquetes).
+        {ultimo && ultimo.cajones > 0 && (
+          <> Este mes: <strong>{fmtEntero(ultimo.cajones)} cajones</strong>, {ultimo.pctCajones}% del volumen.</>
+        )}
+      </p>
       <ResponsiveContainer width="100%" height={260}>
         <BarChart data={datos} margin={{ top: 20, right: 8, left: 0, bottom: 0 }} barCategoryGap="24%">
           <CartesianGrid stroke={GRID} vertical={false} />
           <XAxis dataKey="label" tick={{ fontSize: 11, fill: INK_MUTED }} axisLine={{ stroke: '#c3c2b7' }} tickLine={false} />
           <YAxis tick={{ fontSize: 11, fill: INK_MUTED }} axisLine={false} tickLine={false} tickFormatter={fmtMiles} width={36} />
-          <Tooltip content={<TooltipCard formatter={fmtEntero} />} />
+          <Tooltip content={<TooltipArticulo />} />
           {/* payload explícito: legendType="none" en las barras de proyección solo saca el
               ícono, la entrada de todos modos aparece (con el dataKey como texto) — hay que
               decirle a la leyenda cuáles 3 entradas mostrar en vez de dejar que arme una por
               cada <Bar>. */}
           <Legend wrapperStyle={{ fontSize: '12px', color: INK_SECUNDARIA }} payload={[
             { value: 'Rúcula (paq.)', type: 'circle', color: CATEGORICOS[0] },
+            { value: 'Rúcula en cajón', type: 'circle', color: CAJON_RUCULA },
             { value: 'Lechuga (pl.)', type: 'circle', color: CATEGORICOS[1] },
+            { value: 'Lechuga en cajón', type: 'circle', color: CAJON_LECHUGA },
             { value: 'Albahaca (pl.)', type: 'circle', color: CATEGORICOS[2] },
           ]} />
-          <Bar dataKey="rucula" name="Rúcula (paq.)" stackId="a" fill={CATEGORICOS[0]} stroke="#fff" strokeWidth={2}>
-            <LabelList dataKey="rucula" position="inside" fill="#fff" fontSize={10} fontWeight={700} formatter={(v: number) => v > 0 ? fmtEntero(v) : ''} />
+          {/* Cada cultivo va partido en sus dos canales, apilados juntos: el total de la
+              barra sigue siendo el mismo de antes, pero ahora se ve de dónde sale. */}
+          <Bar dataKey="ruculaPaq" name="Rúcula (paq.)" stackId="a" fill={CATEGORICOS[0]} stroke="#fff" strokeWidth={2}>
+            <LabelList dataKey="ruculaPaq" position="inside" fill="#fff" fontSize={10} fontWeight={700} formatter={(v: number) => v > 0 ? fmtEntero(v) : ''} />
+          </Bar>
+          <Bar dataKey="ruculaCaj" name="Rúcula en cajón" stackId="a" fill={CAJON_RUCULA} stroke="#fff" strokeWidth={2}>
+            <LabelList dataKey="ruculaCajones" content={labelCajones} />
           </Bar>
           <Bar dataKey="proyRucula" stackId="a" fill={CATEGORICOS[0]} fillOpacity={0.12} stroke={CATEGORICOS[0]} strokeWidth={1.5} strokeDasharray="3 3" legendType="none" />
-          <Bar dataKey="lechuga" name="Lechuga (pl.)" stackId="a" fill={CATEGORICOS[1]} stroke="#fff" strokeWidth={2}>
-            <LabelList dataKey="lechuga" position="inside" fill="#fff" fontSize={10} fontWeight={700} formatter={(v: number) => v > 0 ? fmtEntero(v) : ''} />
+          <Bar dataKey="lechugaPaq" name="Lechuga (pl.)" stackId="a" fill={CATEGORICOS[1]} stroke="#fff" strokeWidth={2}>
+            <LabelList dataKey="lechugaPaq" position="inside" fill="#fff" fontSize={10} fontWeight={700} formatter={(v: number) => v > 0 ? fmtEntero(v) : ''} />
+          </Bar>
+          <Bar dataKey="lechugaCaj" name="Lechuga en cajón" stackId="a" fill={CAJON_LECHUGA} stroke="#fff" strokeWidth={2}>
+            <LabelList dataKey="lechugaCajones" content={labelCajones} />
           </Bar>
           <Bar dataKey="proyLechuga" stackId="a" fill={CATEGORICOS[1]} fillOpacity={0.12} stroke={CATEGORICOS[1]} strokeWidth={1.5} strokeDasharray="3 3" legendType="none" />
           <Bar dataKey="albahaca" name="Albahaca (pl.)" stackId="a" fill={CATEGORICOS[2]} stroke="#fff" strokeWidth={2} radius={[4, 4, 0, 0]}>
@@ -102,9 +172,22 @@ export function GraficoVentaPorArticulo({ datos }: { datos: PuntoArticulo[] }) {
       <TablaToggle>
         {() => (
           <table style={{ fontSize: '12px', width: '100%' }}>
-            <thead><tr><th style={{ textAlign: 'left' }}>Mes</th><th style={{ textAlign: 'right' }}>Rúcula</th><th style={{ textAlign: 'right' }}>Lechuga</th><th style={{ textAlign: 'right' }}>Albahaca</th></tr></thead>
+            <thead><tr>
+              <th style={{ textAlign: 'left' }}>Mes</th>
+              <th style={{ textAlign: 'right' }}>Rúcula</th><th style={{ textAlign: 'right' }}>· en cajón</th>
+              <th style={{ textAlign: 'right' }}>Lechuga</th><th style={{ textAlign: 'right' }}>· en cajón</th>
+              <th style={{ textAlign: 'right' }}>Albahaca</th><th style={{ textAlign: 'right' }}>Cajones</th>
+            </tr></thead>
             <tbody>{datos.map((d) => (
-              <tr key={d.mes}><td>{d.label}</td><td style={{ textAlign: 'right' }}>{fmtEntero(d.rucula)}</td><td style={{ textAlign: 'right' }}>{fmtEntero(d.lechuga)}</td><td style={{ textAlign: 'right' }}>{fmtEntero(d.albahaca)}</td></tr>
+              <tr key={d.mes}>
+                <td>{d.label}</td>
+                <td style={{ textAlign: 'right' }}>{fmtEntero(d.rucula)}</td>
+                <td style={{ textAlign: 'right', color: INK_MUTED }}>{d.ruculaCajones > 0 ? `${fmtEntero(d.ruculaCajones)} cj` : '—'}</td>
+                <td style={{ textAlign: 'right' }}>{fmtEntero(d.lechuga)}</td>
+                <td style={{ textAlign: 'right', color: INK_MUTED }}>{d.lechugaCajones > 0 ? `${fmtEntero(d.lechugaCajones)} cj` : '—'}</td>
+                <td style={{ textAlign: 'right' }}>{fmtEntero(d.albahaca)}</td>
+                <td style={{ textAlign: 'right', fontWeight: 600 }}>{d.cajones > 0 ? `${fmtEntero(d.cajones)} cj` : '—'}</td>
+              </tr>
             ))}</tbody>
           </table>
         )}
@@ -248,9 +331,13 @@ export function GraficoPrecioPromedio({ datos }: { datos: PuntoPrecio[] }) {
 
 export function TarjetaIndicadores({ datos }: { datos: ResumenMesActual }) {
   const items = [
-    { label: 'Unidades vendidas este mes', valor: fmtEntero(datos.unidadesMes) },
-    { label: 'Proyección del mes', valor: fmtEntero(datos.proyeccionMes) },
-    { label: 'Precio promedio', valor: fmtMoneda(datos.precioPromedioMes) },
+    { label: 'Unidades vendidas este mes', valor: fmtEntero(datos.unidadesMes), pie: '' },
+    { label: 'Proyección del mes', valor: fmtEntero(datos.proyeccionMes), pie: '' },
+    { label: 'Precio promedio', valor: fmtMoneda(datos.precioPromedioMes), pie: '' },
+    // Los cajones van en su propio indicador, en bultos: es la unidad en la que se carga la
+    // venta y en la que se habla con el galpón. Dentro de "unidades vendidas" están, pero
+    // convertidos a paquete-equivalente, y ahí el dato se pierde.
+    { label: 'Salido en cajón', valor: `${fmtEntero(datos.cajonesMes)} cj`, pie: datos.cajonesMes > 0 ? `${datos.pctCajones}% del volumen` : 'sin ventas por kilo' },
   ];
   return (
     <div style={{ ...cardStyle, padding: '12px 16px' }}>
@@ -260,6 +347,7 @@ export function TarjetaIndicadores({ datos }: { datos: ResumenMesActual }) {
           <div key={it.label}>
             <p style={{ margin: '0 0 2px', fontSize: '11px', color: INK_SECUNDARIA, lineHeight: 1.3 }}>{it.label}</p>
             <strong style={{ fontSize: '22px', color: '#111827', lineHeight: 1 }}>{it.valor}</strong>
+            {it.pie && <p style={{ margin: '3px 0 0', fontSize: '10.5px', color: INK_MUTED }}>{it.pie}</p>}
           </div>
         ))}
       </div>

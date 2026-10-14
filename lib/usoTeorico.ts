@@ -88,7 +88,7 @@ export function calcularDriversMes(
 
   const desde = inicioMes.toISOString().slice(0, 10);
   const hasta = finMes.toISOString().slice(0, 10);
-  const ventasRango = ventasEnRango(ventas, precios, clientes, desde, hasta);
+  const ventasRango = ventasEnRango(ventas, precios, clientes, desde, hasta, lotes);
 
   // Desglose para los drivers de packaging: de las unidades totales de rúcula se sacan las
   // que vinieron por kg (van en cajón, sin bolsa) y las bandejas (packaging propio), y

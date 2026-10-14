@@ -1,6 +1,6 @@
 import type { Lote, VentaDia, Variedad } from './types';
 import { proyeccionCosechaSemanal } from './estadisticas';
-import { GR_PAQ_RUCULA, GR_PAQ_LECHUGA } from './estadisticasVentas';
+import { gramajeDeRango, paquetesDeKg, type Gramaje } from './estadisticasVentas';
 
 // ── Vamos a estar largos o cortos la semana que viene ─────────────────────────────────
 //
@@ -64,13 +64,14 @@ const dm = (f: string) => { const [, m, d] = f.split('-'); return `${d}/${m}`; }
 // Las unidades de un cultivo en una fila de venta, con los kilos convertidos a paquetes con
 // el mismo gramaje que usa el resto de la app. Sin convertirlos, un cliente que compra por
 // kilo no contaría como demanda y la cosecha parecería sobrar.
-function unidadesDe(v: VentaDia, cultivo: CultivoProy): number {
+function unidadesDe(v: VentaDia, cultivo: CultivoProy, g: Gramaje): number {
   if (cultivo === 'rucula') {
-    return num(v.rucula) + (num(v.rucula_kg) * 1000) / GR_PAQ_RUCULA;
+    return num(v.rucula) + paquetesDeKg('rucula_kg', num(v.rucula_kg), g);
   }
   if (cultivo === 'lechuga') {
-    const kg = num(v.lechuga_kg) + num(v.lechuga_kg_crespa) + num(v.lechuga_kg_roble);
-    return num(v.lechuga_crespa) + num(v.hoja_roble) + (kg * 1000) / GR_PAQ_LECHUGA;
+    const enCajon = ['lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble']
+      .reduce((a, k) => a + paquetesDeKg(k, num((v as any)[k]), g), 0);
+    return num(v.lechuga_crespa) + num(v.hoja_roble) + enCajon;
   }
   return num(v.albahaca);
 }
@@ -88,6 +89,11 @@ export function proyeccionSemanaQueViene(
 
   // La proyección de cosecha por semana, empezando por la semana en curso. El índice 1 es la
   // que viene.
+  // El gramaje de la ventana que se está midiendo (las dos semanas de referencia), igual
+  // que el resto de la app: si las plantas vinieron pesadas, el mismo kilo son menos
+  // paquetes y la demanda que se compara contra la cosecha es otra.
+  const gramaje = gramajeDeRango(lotes, new Date(semanas[0].desde + 'T00:00:00'), new Date(semanas[1].hasta + 'T23:59:59'));
+
   const puntos = proyeccionCosechaSemanal(lotes, variedades, 3, 7);
   const proxima = puntos[1] || { rucula: 0, lechuga: 0, albahaca: 0, label: '' };
 
@@ -98,7 +104,7 @@ export function proyeccionSemanaQueViene(
     const porSemana = semanas.map((s) => {
       const u = ventas
         .filter((v) => { const f = soloFecha(v.fecha); return f >= s.desde && f <= s.hasta; })
-        .reduce((a, v) => a + unidadesDe(v, cultivo), 0);
+        .reduce((a, v) => a + unidadesDe(v, cultivo, gramaje), 0);
       return { label: `${dm(s.desde)}–${dm(s.hasta)}`, unidades: Math.round(u) };
     });
     const ventaPromedio = Math.round(porSemana.reduce((a, s) => a + s.unidades, 0) / (porSemana.length || 1));

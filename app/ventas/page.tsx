@@ -74,11 +74,11 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
   const frecuencias: Record<string,number> = {};
   for (const v of ventas) frecuencias[v.id_control] = (frecuencias[v.id_control]||0) + 1;
 
-  const evolArticulo = evolucionVentaPorArticulo(ventas, 12, historicas);
-  const evolClienteSemanal = evolucionVentaPorClienteSemanal(ventas, clientes, 6, 5);
-  const evolClienteMensual = evolucionVentaPorCliente(ventas, clientes, 6, 5);
+  const evolArticulo = evolucionVentaPorArticulo(ventas, 12, historicas, undefined, lotes);
+  const evolClienteSemanal = evolucionVentaPorClienteSemanal(ventas, clientes, 6, 5, lotes);
+  const evolClienteMensual = evolucionVentaPorCliente(ventas, clientes, 6, 5, lotes);
   const evolPrecio = evolucionPrecioPromedio(ventas, precios, clientes, 12, lotes);
-  const resumenMes = resumenMesActual(ventas, precios, clientes);
+  const resumenMes = resumenMesActual(ventas, precios, clientes, undefined, undefined, lotes);
   const clientesPrecioVolumen = clientesPrecioVsVolumen(ventas, precios, clientes, lotes);
   const ultimaSuba = await ultimaSubaPorClienteRecord();
 

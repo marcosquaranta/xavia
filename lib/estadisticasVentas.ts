@@ -8,9 +8,91 @@ import { pesoPromedioRango } from './estadisticas';
 export const GR_PAQ_RUCULA = 210;
 export const GR_PAQ_LECHUGA = 330;
 
+// ── Una sola cuenta para "cuántos paquetes son estos kilos" ───────────────────────────
+//
+// La venta por cajón se guarda en kilos, pero el volumen se mira en paquetes: sin convertir,
+// un cliente de 50 kg quedaba en "50" al lado de clientes de miles de paquetes y se caía del
+// top del gráfico siendo grande.
+//
+// La conversión necesita un gramaje, y ahí estaba el problema: algunas pantallas usaban el
+// peso REAL de lo cosechado en el período y otras el nominal de 210/330 g fijo. Eran dos
+// cuentas para el mismo número, y en un mes de plantas pesadas la diferencia pasaba el 15%:
+// el mismo cliente tenía volúmenes distintos según desde dónde se lo mirara.
+//
+// Ahora la división vive en un solo lugar (`paquetesDeKg`) y el gramaje sale de un solo
+// lugar (`gramajeDeRango`): peso real del período, arrastrando el último conocido si el
+// período no tiene cosechas pesadas, y recién al final el nominal. `reales` dice cuál se usó,
+// para poder avisarlo en pantalla en vez de que el número salga sin aclaración.
+export interface Gramaje {
+  rucula: number; lechugaCrespa: number; lechugaRoble: number; lechuga: number;
+  realRucula: boolean; realLechuga: boolean;
+  reales: boolean; // los dos cultivos con peso real — es lo que se avisa en pantalla
+}
+export const GRAMAJE_NOMINAL: Gramaje = {
+  rucula: GR_PAQ_RUCULA, lechugaCrespa: GR_PAQ_LECHUGA, lechugaRoble: GR_PAQ_LECHUGA,
+  lechuga: GR_PAQ_LECHUGA, realRucula: false, realLechuga: false, reales: false,
+};
+
+export function gramajeDeRango(lotes: Lote[], desde: Date, hasta: Date, arrastre: Gramaje = GRAMAJE_NOMINAL): Gramaje {
+  const peso = pesoPromedioRango(lotes || [], desde, hasta);
+  const tomar = (real: number, previo: number) => real > 0 ? real : previo;
+  const realRucula = peso.rucula > 0 || arrastre.realRucula;
+  const realLechuga = peso.lechuga > 0 || arrastre.realLechuga;
+  return {
+    rucula: tomar(peso.rucula, arrastre.rucula),
+    lechugaCrespa: tomar(peso.lechugaCrespa, arrastre.lechugaCrespa),
+    lechugaRoble: tomar(peso.lechugaRoble, arrastre.lechugaRoble),
+    lechuga: tomar(peso.lechuga, arrastre.lechuga),
+    realRucula, realLechuga, reales: realRucula && realLechuga,
+  };
+}
+
+// Gramos por paquete de cada clave de venta por kilo.
+export function gramosDeKeyKg(key: string, g: Gramaje): number {
+  if (key === 'rucula_kg') return g.rucula;
+  if (key === 'lechuga_kg_crespa') return g.lechugaCrespa;
+  if (key === 'lechuga_kg_roble') return g.lechugaRoble;
+  return g.lechuga; // lechuga_kg legado, cargado antes del split por variedad
+}
+export const esKeyKg = (key: string) =>
+  key === 'rucula_kg' || key === 'lechuga_kg' || key === 'lechuga_kg_crespa' || key === 'lechuga_kg_roble';
+
+// LA división. Si alguna pantalla vuelve a mostrar un volumen distinto de otra, es que no
+// pasó por acá.
+export function paquetesDeKg(key: string, kg: number, g: Gramaje): number {
+  const gr = gramosDeKeyKg(key, g);
+  return gr > 0 ? ((Number(kg) || 0) * 1000) / gr : 0;
+}
+
+// El rango que cubre una clave de período: "2026-10" es ese mes, "2026-10-12" la semana que
+// arranca ese lunes (es lo que devuelve semanaKey). Una clave que no sea ninguna de las dos
+// da fechas inválidas, el rango no matchea ninguna cosecha y el gramaje queda en el que se
+// venía arrastrando — que es el comportamiento correcto, no un cero.
+function rangoDeClave(clave: string): { desde: Date; hasta: Date } {
+  if (/^\d{4}-\d{2}$/.test(clave)) {
+    const [a, m] = clave.split('-').map(Number);
+    return { desde: new Date(a, m - 1, 1), hasta: new Date(a, m, 0, 23, 59, 59) };
+  }
+  const [a, m, d] = clave.split('-').map(Number);
+  return { desde: new Date(a, m - 1, d), hasta: new Date(a, m - 1, d + 6, 23, 59, 59) };
+}
+
+// El gramaje de cada período de una serie, en orden, arrastrando el último conocido. Es lo
+// que usan todos los gráficos que recorren meses o semanas.
+export function gramajePorClave(lotes: Lote[], claves: string[]): Map<string, Gramaje> {
+  const out = new Map<string, Gramaje>();
+  let arrastre = GRAMAJE_NOMINAL;
+  for (const clave of [...claves].sort()) {
+    arrastre = gramajeDeRango(lotes, rangoDeClave(clave).desde, rangoDeClave(clave).hasta, arrastre);
+    out.set(clave, arrastre);
+  }
+  return out;
+}
+export const gramajeDe = (mapa: Map<string, Gramaje>, clave: string) => mapa.get(clave) || GRAMAJE_NOMINAL;
+
 const MESES_CORTO = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sept', 'oct', 'nov', 'dic'];
 // lechuga_kg queda (legacy) para no perder ventas por kg cargadas antes del split crespa/roble.
-import { PROD_KEYS, KEYS_UNIDAD_HISTORICAS } from './articulos';
+import { PROD_KEYS, KEYS_UNIDAD_HISTORICAS, cajonesDeKg } from './articulos';
 
 function mesKey(fecha: string): string { return String(fecha || '').slice(0, 7); } // YYYY-MM
 function mesLabel(mk: string): string {
@@ -115,8 +197,22 @@ export function precioFinal(precios: PrecioVenta[], id_control: string, sucursal
 export interface PuntoArticulo {
   mes: string; label: string; rucula: number; lechuga: number; albahaca: number;
   proyRucula: number; proyLechuga: number; proyAlbahaca: number; totalConProyeccion: number;
+  // ── Cuánto del volumen salió en cajones ──────────────────────────────────────────────
+  //
+  // `rucula` y `lechuga` siguen siendo el total, pero partido en las dos formas en que el
+  // producto sale de la planta: armado en paquete, o a granel en cajón. Es la pregunta que
+  // el total solo no contesta — un mes puede crecer entero por el canal de cajón y en la
+  // barra se ve igual que si hubieran crecido los paquetes.
+  //
+  // `*Caj` está en paquete-equivalente (para poder apilarlo con los paquetes en la misma
+  // barra) y `*Cajones` es el bulto real, que es la unidad en la que se habla y se carga.
+  ruculaPaq: number; ruculaCaj: number; ruculaCajones: number;
+  lechugaPaq: number; lechugaCaj: number; lechugaCajones: number;
+  cajones: number;     // cajones totales del mes (rúcula + lechuga)
+  pctCajones: number;  // qué parte del volumen del mes salió en cajón, 0–100
+  gramajeReal: boolean; // false = este mes no tenía cosechas pesadas, se usó el nominal
 }
-export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas: VentaHistorica[] = [], fechaRef: Date = new Date()): PuntoArticulo[] {
+export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas: VentaHistorica[] = [], fechaRef: Date = new Date(), lotes: Lote[] = []): PuntoArticulo[] {
   const historicasNorm = historicas
     .map((h) => ({
       mes: normalizarMesHistorico(campo(h as any, 'mes', 'Mes', 'MES')),
@@ -131,6 +227,7 @@ export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas
   ])).sort();
   const meses = claves.slice(-n);
   const historicasPorMes = new Map(historicasNorm.map((h) => [h.mes, h]));
+  const gramajes = gramajePorClave(lotes, meses);
 
   // Mismo criterio de prorrateo que resumenMesActual: por días de venta habituales, no por
   // días de calendario (si no, la proyección se desploma cada fin de semana). Se calcula acá
@@ -141,16 +238,43 @@ export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas
   return meses.map((mes) => {
     const historica = historicasPorMes.get(mes);
     if (historica) {
-      return { mes, label: mesLabel(mes), rucula: Number(historica.rucula) || 0, lechuga: Number(historica.lechuga) || 0, albahaca: 0, proyRucula: 0, proyLechuga: 0, proyAlbahaca: 0, totalConProyeccion: 0 };
+      // La planilla histórica trae solo los totales por cultivo: no hay desagregado de kg,
+      // así que el reparto paquete/cajón de esos meses no se puede inventar.
+      const r = Number(historica.rucula) || 0, l = Number(historica.lechuga) || 0;
+      return {
+        mes, label: mesLabel(mes), rucula: r, lechuga: l, albahaca: 0,
+        proyRucula: 0, proyLechuga: 0, proyAlbahaca: 0, totalConProyeccion: 0,
+        ruculaPaq: r, ruculaCaj: 0, ruculaCajones: 0,
+        lechugaPaq: l, lechugaCaj: 0, lechugaCajones: 0,
+        cajones: 0, pctCajones: 0, gramajeReal: false,
+      };
     }
     const delMes = ventas.filter((v) => mesKey(v.fecha) === mes);
-    const ruculaKgEnPaq = delMes.reduce((a, v) => a + (Number(v.rucula_kg) || 0), 0) * 1000 / GR_PAQ_RUCULA;
-    const lechugaKgEnPaq = delMes.reduce((a, v) => a + (Number(v.lechuga_kg) || 0) + (Number(v.lechuga_kg_crespa) || 0) + (Number(v.lechuga_kg_roble) || 0), 0) * 1000 / GR_PAQ_LECHUGA;
-    const rucula = delMes.reduce((a, v) => a + (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0), 0) + Math.round(ruculaKgEnPaq);
-    const lechuga = delMes.reduce((a, v) => a + (Number(v.lechuga_crespa) || 0) + (Number(v.hoja_roble) || 0), 0) + Math.round(lechugaKgEnPaq);
-    const albahaca = delMes.reduce((a, v) => a + (Number(v.albahaca) || 0), 0);
+    const g = gramajeDe(gramajes, mes);
+    // Los kilos se suman primero y se convierten una sola vez: convertir fila por fila
+    // arrastra el redondeo de cada venta al total del mes.
+    const kgDe = (key: string) => delMes.reduce((a, v) => a + (Number((v as any)[key]) || 0), 0);
+    const KEYS_L_KG = ['lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'];
 
-    if (mes !== mesActual) return { mes, label: mesLabel(mes), rucula, lechuga, albahaca, proyRucula: 0, proyLechuga: 0, proyAlbahaca: 0, totalConProyeccion: 0 };
+    const ruculaPaq = delMes.reduce((a, v) => a + (Number(v.rucula) || 0) + (Number(v.bandeja_rucula) || 0), 0);
+    const ruculaCaj = Math.round(paquetesDeKg('rucula_kg', kgDe('rucula_kg'), g));
+    const ruculaCajones = Math.round(cajonesDeKg('rucula_kg', kgDe('rucula_kg')));
+    const lechugaPaq = delMes.reduce((a, v) => a + (Number(v.lechuga_crespa) || 0) + (Number(v.hoja_roble) || 0), 0);
+    const lechugaCaj = Math.round(KEYS_L_KG.reduce((a, k) => a + paquetesDeKg(k, kgDe(k), g), 0));
+    const lechugaCajones = Math.round(KEYS_L_KG.reduce((a, k) => a + cajonesDeKg(k, kgDe(k)), 0));
+
+    const rucula = ruculaPaq + ruculaCaj;
+    const lechuga = lechugaPaq + lechugaCaj;
+    const albahaca = delMes.reduce((a, v) => a + (Number(v.albahaca) || 0), 0);
+    const totalMes = rucula + lechuga + albahaca;
+    const corteCajones = {
+      ruculaPaq, ruculaCaj, ruculaCajones, lechugaPaq, lechugaCaj, lechugaCajones,
+      cajones: ruculaCajones + lechugaCajones,
+      pctCajones: totalMes > 0 ? Math.round(((ruculaCaj + lechugaCaj) / totalMes) * 100) : 0,
+      gramajeReal: g.reales,
+    };
+
+    if (mes !== mesActual) return { mes, label: mesLabel(mes), rucula, lechuga, albahaca, proyRucula: 0, proyLechuga: 0, proyAlbahaca: 0, totalConProyeccion: 0, ...corteCajones };
 
     const corte = fechaRef.getDate();
     const diasEnMes = new Date(fechaRef.getFullYear(), fechaRef.getMonth() + 1, 0).getDate();
@@ -168,6 +292,7 @@ export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas
     return {
       mes, label: mesLabel(mes), rucula, lechuga, albahaca, proyRucula, proyLechuga, proyAlbahaca,
       totalConProyeccion: rucula + lechuga + albahaca + proyRucula + proyLechuga + proyAlbahaca,
+      ...corteCajones,
     };
   });
 }
@@ -176,37 +301,36 @@ export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas
 export interface SerieCliente { id_control: string; nombre: string; total: number }
 export interface EvolucionClientes { meses: { mes: string; label: string }[]; series: SerieCliente[]; puntos: Record<string, number>[] }
 
-export function evolucionVentaPorCliente(ventas: VentaDia[], clientes: ClienteVenta[], n = 12, topN = 6): EvolucionClientes {
+export function evolucionVentaPorCliente(ventas: VentaDia[], clientes: ClienteVenta[], n = 12, topN = 6, lotes: Lote[] = []): EvolucionClientes {
   const mesesKeys = ultimosNMeses(ventas, n);
-  return construirEvolucionCliente(ventas, clientes, mesesKeys, mesLabel, mesKey, topN);
+  return construirEvolucionCliente(ventas, clientes, mesesKeys, mesLabel, mesKey, topN, lotes);
 }
 
-export function evolucionVentaPorClienteSemanal(ventas: VentaDia[], clientes: ClienteVenta[], n = 10, topN = 6): EvolucionClientes {
+export function evolucionVentaPorClienteSemanal(ventas: VentaDia[], clientes: ClienteVenta[], n = 10, topN = 6, lotes: Lote[] = []): EvolucionClientes {
   const semanasKeys = ultimasNSemanas(ventas, n);
   // La semana en curso se etiqueta distinto: comparar media semana contra semanas enteras
   // sin decirlo hace parecer que las ventas se cayeron.
   const etiqueta = (k: string) => esSemanaActual(k) ? `${semanaLabel(k)} (en curso)` : semanaLabel(k);
-  return construirEvolucionCliente(ventas, clientes, semanasKeys, etiqueta, semanaKey, topN);
+  return construirEvolucionCliente(ventas, clientes, semanasKeys, etiqueta, semanaKey, topN, lotes);
 }
 
 function construirEvolucionCliente(
-  ventas: VentaDia[], clientes: ClienteVenta[], claves: string[], etiqueta: (k: string) => string, keyFn: (fecha: string) => string, topN: number
+  ventas: VentaDia[], clientes: ClienteVenta[], claves: string[], etiqueta: (k: string) => string, keyFn: (fecha: string) => string, topN: number, lotes: Lote[] = []
 ): EvolucionClientes {
   const meses = claves.map((k) => ({ mes: k, label: etiqueta(k) }));
+  const gramajes = gramajePorClave(lotes, claves);
   const porCliente = new Map<string, Record<string, number>>();
   for (const v of ventas) {
     const k = keyFn(v.fecha);
     if (!claves.includes(k)) continue;
-    // Los campos _kg (venta por cajón) se convierten a paquete/planta-equivalente antes
-    // de sumar — si no, un cliente que compra 50kg quedaba con "total" = 50, invisible
-    // al lado de clientes que compran cientos/miles de paquetes, aunque en volumen real
-    // fuera un cliente grande. Antes esto directamente los sacaba del top N del gráfico.
+    // Los campos _kg (venta por cajón) se convierten a paquete-equivalente antes de sumar
+    // — si no, un cliente que compra 50 kg quedaba con "total" = 50, invisible al lado de
+    // clientes de cientos de paquetes, y se caía del top N del gráfico siendo grande.
+    const g = gramajeDe(gramajes, k);
     const total = PROD_KEYS.reduce((a, kk) => {
       const qty = Number((v as any)[kk]) || 0;
       if (qty <= 0) return a;
-      if (kk === 'rucula_kg') return a + (qty * 1000) / GR_PAQ_RUCULA;
-      if (kk === 'lechuga_kg' || kk === 'lechuga_kg_crespa' || kk === 'lechuga_kg_roble') return a + (qty * 1000) / GR_PAQ_LECHUGA;
-      return a + qty;
+      return a + (esKeyKg(kk) ? paquetesDeKg(kk, qty, g) : qty);
     }, 0);
     if (total <= 0) continue;
     if (!porCliente.has(v.id_control)) porCliente.set(v.id_control, {});
@@ -274,7 +398,7 @@ export function evolucionPrecioPromedio(ventas: VentaDia[], precios: PrecioVenta
 
   // Precio por paquete-equivalente de lo vendido por kg: importe total de esas líneas
   // dividido por las unidades que representan esos kilos.
-  const promedioKg = (delMes: VentaDia[], keysKg: readonly string[], gramosPorUnidad: number) => {
+  const promedioKg = (delMes: VentaDia[], keysKg: readonly string[], g: Gramaje) => {
     let ingresos = 0, unidades = 0;
     for (const v of delMes) {
       const cliente = clienteMap.get(v.id_control);
@@ -282,7 +406,7 @@ export function evolucionPrecioPromedio(ventas: VentaDia[], precios: PrecioVenta
         const kg = Number((v as any)[key]) || 0;
         if (kg <= 0) continue;
         ingresos += kg * precioFinal(precios, v.id_control, v.sucursal, key, cliente);
-        unidades += (kg * 1000) / gramosPorUnidad;
+        unidades += paquetesDeKg(key, kg, g);
       }
     }
     return unidades > 0 ? Math.round((ingresos / unidades) * 100) / 100 : 0;
@@ -290,24 +414,19 @@ export function evolucionPrecioPromedio(ventas: VentaDia[], precios: PrecioVenta
   const KEYS_RUCULA_KG = ['rucula_kg'] as const;
   const KEYS_LECHUGA_KG = ['lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
 
-  // Peso real de cosecha mes a mes. Se recorre en orden para poder arrastrar el último
-  // gramaje conocido a los meses sin cosechas cargadas.
-  let ultimoR = 0, ultimoL = 0;
+  // El peso real de cosecha mes a mes, con el arrastre del último conocido, sale del mismo
+  // lugar que el de todos los demás gráficos.
+  const gramajes = gramajePorClave(lotes, meses);
 
   return meses.map((mes) => {
     const delMes = ventas.filter((v) => mesKey(v.fecha) === mes);
-    const [anio, mm] = mes.split('-').map(Number);
-    const peso = pesoPromedioRango(lotes, new Date(anio, mm - 1, 1), new Date(anio, mm, 0, 23, 59, 59));
-    if (peso.rucula > 0) ultimoR = peso.rucula;
-    if (peso.lechuga > 0) ultimoL = peso.lechuga;
-    const gramosRucula = peso.rucula || ultimoR || GR_PAQ_RUCULA;
-    const gramosLechuga = peso.lechuga || ultimoL || GR_PAQ_LECHUGA;
-    const gramosReales = (peso.rucula > 0 || ultimoR > 0) && (peso.lechuga > 0 || ultimoL > 0);
+    const g = gramajeDe(gramajes, mes);
+    const gramosRucula = g.rucula, gramosLechuga = g.lechuga, gramosReales = g.reales;
 
     const precioRucula = promedioPonderado(delMes, KEYS_RUCULA);
     const precioLechuga = promedioPonderado(delMes, KEYS_LECHUGA);
-    const precioRuculaKg = promedioKg(delMes, KEYS_RUCULA_KG, gramosRucula);
-    const precioLechugaKg = promedioKg(delMes, KEYS_LECHUGA_KG, gramosLechuga);
+    const precioRuculaKg = promedioKg(delMes, KEYS_RUCULA_KG, g);
+    const precioLechugaKg = promedioKg(delMes, KEYS_LECHUGA_KG, g);
     return {
       mes, label: mesLabel(mes),
       precioRucula, precioLechuga, precioRuculaKg, precioLechugaKg,
@@ -391,14 +510,8 @@ export function clientesPrecioVsVolumen(
   // Gramos por unidad para convertir los kilos, tomados de lo REALMENTE cosechado en la
   // misma ventana: si las plantas vienen más chicas, el mismo kilo son más unidades y el
   // precio por unidad que paga ese cliente baja. Sin cosechas en la ventana (o sin lotes,
-  // que es como la llaman los tests) cae al gramaje fijo de siempre.
-  const peso = pesoPromedioRango(lotes, desdeD, hasta);
-  const gramosDe = (key: string): number => {
-    if (key === 'rucula_kg') return peso.rucula > 0 ? peso.rucula : GR_PAQ_RUCULA;
-    if (key === 'lechuga_kg_crespa') return peso.lechugaCrespa > 0 ? peso.lechugaCrespa : GR_PAQ_LECHUGA;
-    if (key === 'lechuga_kg_roble') return peso.lechugaRoble > 0 ? peso.lechugaRoble : GR_PAQ_LECHUGA;
-    return peso.lechuga > 0 ? peso.lechuga : GR_PAQ_LECHUGA; // lechuga_kg legado, sin split
-  };
+  // que es como la llaman los tests) cae al gramaje nominal.
+  const gramaje = gramajeDeRango(lotes, desdeD, hasta);
 
   const acc = new Map<string, { unidades: number; monto: number; ingComparable: number; uComparable: number; ultima: string }>();
   for (const v of ventas) {
@@ -418,7 +531,7 @@ export function clientesPrecioVsVolumen(
       if ((KEYS_KG as readonly string[]).includes(key)) {
         // qty son KILOS: se pasan a unidades-equivalente con el peso real de la ventana, y
         // el mismo importe dividido por esas unidades da el precio por unidad equivalente.
-        const uEquivalentes = (qty * 1000) / gramosDe(key);
+        const uEquivalentes = paquetesDeKg(key, qty, gramaje);
         a.unidades += uEquivalentes;
         a.ingComparable += qty * precio;
         a.uComparable += uEquivalentes;
@@ -466,9 +579,13 @@ export interface ResumenMesActual {
   // cliente (IVA incluido según su tipo de factura), incluidas las ventas por kg y las
   // bandejas — no es unidades × precio promedio, que se desviaría según el mix.
   montoMes: number; proyeccionMonto: number;
+  // Cuánto del volumen del mes salió en cajón en vez de en paquete. `cajonesMes` es el
+  // bulto real (la unidad en la que se carga y se habla) y `unidadesEnCajones` lo mismo en
+  // paquete-equivalente, que es lo que suma a `unidadesMes`.
+  cajonesMes: number; unidadesEnCajones: number; pctCajones: number;
 }
 export function resumenMesActual(
-  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], fechaRef: Date = new Date(), diaCorte?: number
+  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], fechaRef: Date = new Date(), diaCorte?: number, lotes: Lote[] = []
 ): ResumenMesActual {
   const mk = mesKey(fechaRef.toISOString().slice(0, 10));
   const corte = diaCorte ?? fechaRef.getDate();
@@ -511,7 +628,14 @@ export function resumenMesActual(
       }
     }
   }
-  unidades += Math.round((ruculaKgTotal * 1000) / GR_PAQ_RUCULA) + Math.round((lechugaKgTotal * 1000) / GR_PAQ_LECHUGA);
+  // Mismo gramaje que los gráficos: el peso real de lo cosechado en el mes (ver
+  // gramajeDeRango). Antes acá se usaba el nominal fijo y el total de unidades del
+  // indicador no cerraba con el del gráfico de arriba, que sí usaba el real.
+  const gramaje = gramajeDeRango(lotes, new Date(fechaRef.getFullYear(), fechaRef.getMonth(), 1), new Date(fechaRef.getFullYear(), fechaRef.getMonth() + 1, 0, 23, 59, 59));
+  const unidadesEnCajones = Math.round(paquetesDeKg('rucula_kg', ruculaKgTotal, gramaje))
+    + Math.round(paquetesDeKg('lechuga_kg', lechugaKgTotal, gramaje));
+  const cajonesMes = Math.round(cajonesDeKg('rucula_kg', ruculaKgTotal) + cajonesDeKg('lechuga_kg', lechugaKgTotal));
+  unidades += unidadesEnCajones;
 
   // Proyección a fin de mes. Antes era (unidades / díasCalendarioTranscurridos) × díasDelMes,
   // y eso hacía que el número subiera y bajara fuerte de un día para el otro: los domingos
@@ -540,7 +664,11 @@ export function resumenMesActual(
   // que evolucionPrecioPromedio) — mezclar bandeja/kg inflaba el promedio al combinar
   // unidades de venta distintas.
   const precioPromedioMes = unidadesComparables > 0 ? Math.round((ingresosComparables / unidadesComparables) * 100) / 100 : 0;
-  return { unidadesMes: unidades, proyeccionMes, precioPromedioMes, montoMes: Math.round(monto), proyeccionMonto };
+  return {
+    unidadesMes: unidades, proyeccionMes, precioPromedioMes, montoMes: Math.round(monto), proyeccionMonto,
+    cajonesMes, unidadesEnCajones,
+    pctCajones: unidades > 0 ? Math.round((unidadesEnCajones / unidades) * 100) : 0,
+  };
 }
 
 // ── Ventas por cultivo (unidades y $ final IVA incluido) en un rango de fechas [desde,hasta]
@@ -554,17 +682,21 @@ export function resumenMesActual(
 export interface VentasRangoCultivo {
   unidades: number; monto: number;
   unidadesKg: number;      // parte del total que vino de ventas por kg (cajón — sin packaging individual)
+  cajones: number;         // lo mismo contado en bultos: la unidad en la que se carga la venta
   unidadesBandeja: number; // solo rúcula: bandejas (packaging propio, no bolsa). Siempre 0 en lechuga.
 }
 // Albahaca va aparte: no es lechuga (antes directamente no se contaba en este rango, así
 // que su venta no aparecía en ningún total que saliera de acá).
 export interface VentasRango { rucula: VentasRangoCultivo; lechuga: VentasRangoCultivo; albahaca: VentasRangoCultivo }
-export function ventasEnRango(ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], desde: string, hasta: string): VentasRango {
+export function ventasEnRango(ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], desde: string, hasta: string, lotes: Lote[] = []): VentasRango {
   const clienteMap = new Map(clientes.map((c) => [c.id_control, c]));
+  // Mismo gramaje que todo lo demás: peso real de lo cosechado en la ventana (ver
+  // gramajeDeRango), nominal solo si no hay cosechas pesadas.
+  const gramaje = gramajeDeRango(lotes, new Date(desde + 'T00:00:00'), new Date(hasta + 'T23:59:59'));
   const acc: VentasRango = {
-    rucula: { unidades: 0, monto: 0, unidadesKg: 0, unidadesBandeja: 0 },
-    lechuga: { unidades: 0, monto: 0, unidadesKg: 0, unidadesBandeja: 0 },
-    albahaca: { unidades: 0, monto: 0, unidadesKg: 0, unidadesBandeja: 0 },
+    rucula: { unidades: 0, monto: 0, unidadesKg: 0, cajones: 0, unidadesBandeja: 0 },
+    lechuga: { unidades: 0, monto: 0, unidadesKg: 0, cajones: 0, unidadesBandeja: 0 },
+    albahaca: { unidades: 0, monto: 0, unidadesKg: 0, cajones: 0, unidadesBandeja: 0 },
   };
   for (const v of ventas) {
     const f = String(v.fecha || '').split(/[T ]/)[0];
@@ -580,9 +712,10 @@ export function ventasEnRango(ventas: VentaDia[], precios: PrecioVenta[], client
     }
     const kgR = Number(v.rucula_kg) || 0;
     if (kgR > 0) {
-      const enPaq = Math.round((kgR * 1000) / GR_PAQ_RUCULA);
+      const enPaq = Math.round(paquetesDeKg('rucula_kg', kgR, gramaje));
       acc.rucula.unidades += enPaq;
       acc.rucula.unidadesKg += enPaq;
+      acc.rucula.cajones += cajonesDeKg('rucula_kg', kgR);
       acc.rucula.monto += kgR * precioFinal(precios, v.id_control, v.sucursal, 'rucula_kg', cliente);
     }
 
@@ -597,9 +730,10 @@ export function ventasEnRango(ventas: VentaDia[], precios: PrecioVenta[], client
     for (const keyKg of ['lechuga_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const) {
       const kgL = Number((v as any)[keyKg]) || 0;
       if (kgL <= 0) continue;
-      const enPaq = Math.round((kgL * 1000) / GR_PAQ_LECHUGA);
+      const enPaq = Math.round(paquetesDeKg(keyKg, kgL, gramaje));
       acc.lechuga.unidades += enPaq;
       acc.lechuga.unidadesKg += enPaq;
+      acc.lechuga.cajones += cajonesDeKg(keyKg, kgL);
       acc.lechuga.monto += kgL * precioFinal(precios, v.id_control, v.sucursal, keyKg, cliente);
     }
     // Albahaca: solo por unidad (no hay albahaca_kg ni bandeja).
@@ -612,6 +746,8 @@ export function ventasEnRango(ventas: VentaDia[], precios: PrecioVenta[], client
   acc.rucula.monto = Math.round(acc.rucula.monto);
   acc.lechuga.monto = Math.round(acc.lechuga.monto);
   acc.albahaca.monto = Math.round(acc.albahaca.monto);
+  acc.rucula.cajones = Math.round(acc.rucula.cajones);
+  acc.lechuga.cajones = Math.round(acc.lechuga.cajones);
   return acc;
 }
 
@@ -641,11 +777,14 @@ const fmtISOLocal = (d: Date) => {
 // hacía parecer "actual" un dato de varios meses atrás. ──
 export interface PuntoVentaCultivoSemana {
   semana: string; label: string; rucula: number; lechuga: number;
+  // La parte del volumen de la semana que salió en cajón: en paquete-equivalente (lo que
+  // suma a rucula/lechuga) y en bultos, que es como se cuenta en el galpón.
+  ruculaCaj: number; lechugaCaj: number; cajones: number;
   enCurso?: boolean;        // la semana todavía no terminó
   diasTranscurridos?: number; // cuántos de los 7 días ya pasaron
 }
 export function ventasPorCultivoUltimasSemanas(
-  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], n = 4, hoy: Date = new Date()
+  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], n = 4, hoy: Date = new Date(), lotes: Lote[] = []
 ): PuntoVentaCultivoSemana[] {
   const lunesActual = lunesDeSemana(hoy);
   const hoyStr = fmtISOLocal(hoy);
@@ -654,7 +793,7 @@ export function ventasPorCultivoUltimasSemanas(
     const lunes = new Date(lunesActual); lunes.setDate(lunes.getDate() - i * 7);
     const domingo = new Date(lunes); domingo.setDate(domingo.getDate() + 6);
     const desde = fmtISOLocal(lunes), hasta = fmtISOLocal(domingo);
-    const r = ventasEnRango(ventas, precios, clientes, desde, hasta);
+    const r = ventasEnRango(ventas, precios, clientes, desde, hasta, lotes);
     const enCurso = i === 0;
     // Los días que ya pasaron, contando el de hoy: es lo que permite leer la barra sin
     // confundir una semana que empieza con una semana mala.
@@ -665,6 +804,8 @@ export function ventasPorCultivoUltimasSemanas(
       semana: desde,
       label: `${String(lunes.getDate()).padStart(2, '0')}/${String(lunes.getMonth() + 1).padStart(2, '0')}`,
       rucula: r.rucula.unidades, lechuga: r.lechuga.unidades,
+      ruculaCaj: r.rucula.unidadesKg, lechugaCaj: r.lechuga.unidadesKg,
+      cajones: r.rucula.cajones + r.lechuga.cajones,
       enCurso, diasTranscurridos,
     });
   }
