@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import type { ClienteVenta, PrecioVenta, VentaDia, PedidoFijo } from '@/lib/types';
-import { ventasCargadasSemana } from '@/lib/estadisticasVentas';
+import { ventasCargadasSemana, precioFinal } from '@/lib/estadisticasVentas';
 import { nombreClienteVisible } from '@/lib/clientes';
 import { ARTICULOS_UNIDAD, KEYS_UNIDAD, KEYS_KG, KG_POR_CAJON, kgDeCajones, cajonesDeKg } from '@/lib/articulos';
 import { DIAS_CAMARA_ALERTA } from '@/lib/camara';
@@ -151,6 +151,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   const [exp,setExp]=useState(false);
   const [msg,setMsg]=useState<{t:'ok'|'err';s:string}|null>(null);
   const [showP,setShowP]=useState(false);
+  // Mostrar también los clientes sin precio de paquete. Apagado: son los que no compran así.
+  const [mostrarSinPrecio,setMostrarSinPrecio]=useState(false);
   const [showPreExport,setShowPreExport]=useState(false);
   const [correlaA,setCorrelaA]=useState<string>('');
   const [correlaB,setCorrelaB]=useState<string>('');
@@ -400,7 +402,26 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
     setExp(false);
   }
 
-  const filasNormales = filas.filter(f=>f.unidad!=='kg');
+  // ── Quién entra en la grilla de paquetes ────────────────────────────────────────────
+  //
+  // Un cliente sin ningún precio cargado para los artículos por unidad no compra por paquete:
+  // tenerlo en la grilla es una fila más entre cuarenta donde hay que mirar si tiene algo
+  // cargado, y si alguien le escribe una cantidad por error la venta se emite a precio cero.
+  //
+  // Se usa `precioFinal` y no el precio exacto de la sucursal porque un cliente puede tener la
+  // lista cargada a nivel cliente y no por sucursal: comparar literal lo escondería teniendo
+  // precio.
+  function tienePrecioPaquete(f: Fila): boolean {
+    const cli = clientes.find((c) => String(c.id_control) === String(f.id_control));
+    return ALL.some((a) => precioFinal(precios, String(f.id_control), f.sucursal, a.key, cli) > 0)
+      || ENSALADAS.some((a) => precioFinal(precios, String(f.id_control), f.sucursal, a.key, cli) > 0);
+  }
+
+  const porPaquete = filas.filter(f=>f.unidad!=='kg');
+  const sinPrecioPaquete = porPaquete.filter((f) => !tienePrecioPaquete(f));
+  // Se pueden mostrar igual. Esconder a alguien que SÍ compra porque falta cargarle el precio
+  // dejaría una venta sin forma de cargarse, y eso es peor que la fila de más.
+  const filasNormales = mostrarSinPrecio ? porPaquete : porPaquete.filter(tienePrecioPaquete);
   const filasKg = filas.filter(f=>f.unidad==='kg');
   const tots:Record<PK,number>=vacio(0);
   for(const f of filasNormales)for(const p of ALL)tots[p.key]+=Number(q(f.id_control,f.sucursal,p.key))||0;
@@ -780,6 +801,23 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
           </div>
         );
       })()}
+
+      {/* Los que no compran por paquete.
+          Se esconden —son fila de ruido entre cuarenta— pero se dice cuántos son y se pueden
+          traer de vuelta: si a alguien que SÍ compra le falta cargar el precio, esconderlo
+          dejaría su venta sin forma de cargarse, y eso es peor que la fila de más. */}
+      {!loading && sinPrecioPaquete.length > 0 && (
+        <p style={{margin:'0 0 6px',fontSize:'11.5px',color:'#9ca3af'}}>
+          {mostrarSinPrecio
+            ? `Se están mostrando ${sinPrecioPaquete.length} cliente(s) sin precio de paquete cargado. Si les cargás una cantidad, la venta sale a precio cero.`
+            : `${sinPrecioPaquete.length} cliente(s) no aparecen acá porque no tienen precio de paquete cargado.`}
+          {' '}
+          <button type="button" onClick={()=>setMostrarSinPrecio(v=>!v)}
+            style={{background:'none',border:'none',padding:0,color:'#2563eb',cursor:'pointer',fontSize:'11.5px',fontWeight:600}}>
+            {mostrarSinPrecio ? 'ocultarlos' : 'mostrarlos igual'}
+          </button>
+        </p>
+      )}
 
       {/* Tabla */}
       {loading?<div style={{textAlign:'center',padding:'24px',color:'#9ca3af'}}>Cargando…</div>:(
