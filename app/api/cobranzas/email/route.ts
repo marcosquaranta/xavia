@@ -148,12 +148,27 @@ async function acusarRecibo(args: {
     detalle = `<p style="font-size:14px">Código: <strong style="font-size:18px">${r.codigo || '(no se encontró en el mensaje)'}</strong></p>
       <p style="font-size:13px;color:#555">Pegalo en Gmail → Configuración → Reenvío y correo POP/IMAP. No uses el link del mail: falla cuando hay varias cuentas de Google abiertas.</p>`;
   } else if (r.ok) {
-    titulo = args.auto?.registrado ? 'Cobro registrado solo' : 'Aviso de pago procesado';
+    titulo = args.auto?.registrado
+      ? 'Cobro registrado solo'
+      : r.estadoPago === 'pendiente' ? 'Aviso de un pago que todavía no entró' : 'Aviso de pago procesado';
+    if (r.estadoPago === 'pendiente') color = '#b45309';
     detalle = `${r.leidoCon === 'ia'
       ? `<p style="font-size:12.5px;color:#5b21b6;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:7px 10px">
            Este lo leyó la IA (el texto solo no alcanzaba, o el dato estaba en un PDF). Confianza: <strong>${r.confianza}</strong>.
            ${r.comentarioIA ? `<br>${r.comentarioIA}` : ''}
            ${r.confianza !== 'alta' ? '<br><strong>Revisá el importe antes de confirmar.</strong>' : ''}
+         </p>`
+      : ''}
+    ${r.estadoPago === 'pendiente'
+      ? `<p style="font-size:13.5px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:9px 11px">
+           <strong>Este pago todavía NO se acreditó.</strong> El aviso dice que está programado o pendiente, así que la plata
+           no entró y la factura sigue impaga. Queda en la bandeja para imputarlo el día que entre — no se registra solo.
+         </p>`
+      : ''}
+    ${(r.idsExtra?.length || 0) > 0
+      ? `<p style="font-size:13.5px;color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:9px 11px">
+           El aviso mostraba <strong>${(r.idsExtra?.length || 0) + 1} pagos</strong>. Se cargó uno por cada uno, con su propio
+           importe y su fecha: son cobros distintos y se imputan por separado.
          </p>`
       : ''}
     <ul style="font-size:14px;color:#111">

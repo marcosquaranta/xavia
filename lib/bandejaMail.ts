@@ -76,6 +76,11 @@ export interface ResultadoItemAviso {
   leidoCon?: 'patrones' | 'ia';
   confianza?: 'alta' | 'media' | 'baja';
   comentarioIA?: string;
+  // Si el aviso dice que el pago está programado y todavía no se acreditó. Va al acuse: es
+  // la diferencia entre "ya está cobrado" y "avisá en la fecha".
+  estadoPago?: 'acreditado' | 'pendiente';
+  // Los otros pagos del mismo aviso, cuando la captura mostraba varios.
+  idsExtra?: string[];
 }
 
 export async function crearItemDesdeAviso(args: {
@@ -133,6 +138,13 @@ export async function crearItemDesdeAviso(args: {
   let pagador = '';
   let cuentaDestino = '';
   let fechaIA = '';
+  // Los pagos que el aviso trae ADEMÁS del primero. Una captura de una app de pagos muestra
+  // varios, uno abajo del otro: son cobros distintos, con fechas distintas, y cada uno se
+  // imputa por separado. Metidos en una sola fila habría que separarlos a mano, y sumarlos
+  // sería peor todavía.
+  let pagosExtra: { importe: number; fecha: string | null; comprobantes: string[]; retencion: number | null; estado: string }[] = [];
+  // Si el aviso dice que el pago está programado y todavía no entró.
+  let estadoPago: 'acreditado' | 'pendiente' = 'acreditado';
 
   // Matcheo por texto primero: alias aprendidos y nombres. Es gratis y determinístico.
   let cand = proponerCliente(`${args.remitente || ''} ${asunto} ${texto}`, clientes, aliases);
@@ -181,6 +193,12 @@ export async function crearItemDesdeAviso(args: {
       }
       pagador = ia.nombrePagador || '';
       cuentaDestino = ia.cuentaDestino || '';
+      if (ia.pagos?.length) {
+        estadoPago = ia.pagos[0].estado;
+        pagosExtra = ia.pagos.slice(1)
+          .filter((x) => Number(x.importe) > 0)
+          .map((x) => ({ importe: Number(x.importe), fecha: x.fecha, comprobantes: x.comprobantes, retencion: x.retencion, estado: x.estado }));
+      }
       // El cliente que eligió la IA solo se usa si el matcheo por texto no encontró nada:
       // un alias confirmado por una persona vale más que una deducción del modelo.
       if (!cand && ia.idCliente) {
@@ -218,6 +236,7 @@ export async function crearItemDesdeAviso(args: {
   // poder desconfiar.
   const descripcion = [
     sinImporte ? 'NO SE PUDO LEER EL IMPORTE — completálo a mano' : '',
+    estadoPago === 'pendiente' ? 'PAGO PENDIENTE — el aviso dice que todavía no se acreditó' : '',
     args.remitente ? `De ${args.remitente}` : '',
     asunto || 'Aviso de pago',
     comprobantes.length ? `facturas ${comprobantes.join(', ')}` : '',
@@ -244,19 +263,71 @@ export async function crearItemDesdeAviso(args: {
     usuario: args.usuario,
     nota: [
       sinImporte ? 'falta el importe' : '',
+      estadoPago === 'pendiente' ? 'programado, todavía no se acreditó — no se registra solo' : '',
       cand ? `reconocido por ${cand.confianza}${leidoCon === 'ia' ? ' (IA)' : ''}` : 'sin reconocer al cliente',
     ].filter(Boolean).join(' · '),
     // En columnas, para que el registro automático pueda leerlas sin interpretar la
     // descripción (ver lib/autoCobro.ts).
     retencion: Number(retencion) || '',
     cuenta_destino: cuentaDestino || '',
-    confianza: confianza || '',
+    // Un pago que todavía no se acreditó no se registra solo por más que la lectura sea
+    // perfecta: lo que falta no es certeza sobre el dato, es que la plata entre.
+    confianza: estadoPago === 'pendiente' ? 'pendiente_de_acreditar' : (confianza || ''),
     remitente: String(args.remitente || ''),
   });
+
+  // ── Los demás pagos del mismo aviso ──────────────────────────────────────────────
+  //
+  // Una fila por cada uno, con el mismo cliente y la misma cuenta pero su propio importe y su
+  // propia fecha. El hash lleva el importe, así que no chocan entre sí ni con el primero.
+  const idsExtra: string[] = [];
+  for (const extra of pagosExtra) {
+    try {
+      const fechaExtra = /^\d{4}-\d{2}-\d{2}$/.test(String(extra.fecha || '')) ? String(extra.fecha) : fecha;
+      const hashExtra = hashMovimiento(fechaExtra, extra.importe, `aviso ${extra.comprobantes.join(',')} ${asunto}`);
+      if (previos.some((x) => String(x.hash) === hashExtra)) continue;
+      const idExtra = nuevoIdItem([...previos, ...idsExtra.map((x) => ({ id_item: x } as ItemBandeja))]);
+      idsExtra.push(idExtra);
+      await appendRowObj(HOJA_BANDEJA, {
+        id_item: idExtra,
+        fecha_importacion: hoy,
+        origen: args.origen || 'mail',
+        fecha: fechaExtra,
+        importe: Math.round(extra.importe * 100) / 100,
+        descripcion: [
+          extra.estado === 'pendiente' ? 'PAGO PENDIENTE — el aviso dice que todavía no se acreditó' : '',
+          `Pago ${idsExtra.length + 1} del mismo aviso`,
+          args.remitente ? `De ${args.remitente}` : '',
+          asunto || 'Aviso de pago',
+          extra.comprobantes.length ? `facturas ${extra.comprobantes.join(', ')}` : '',
+          extra.retencion ? `retención ${extra.retencion}` : '',
+          cuentaDestino ? marcarCuentaDeclarada(cuentaDestino) : '',
+        ].filter(Boolean).join(' · '),
+        hash: hashExtra,
+        id_control: cand?.id_control || '',
+        cliente: cand?.cliente || '',
+        comprobantes: extra.comprobantes.join(', '),
+        estado: 'pendiente',
+        id_cobro: '',
+        usuario: args.usuario,
+        nota: extra.estado === 'pendiente'
+          ? 'programado, todavía no se acreditó — no se registra solo'
+          : 'segundo pago del mismo aviso',
+        retencion: Number(extra.retencion) || '',
+        cuenta_destino: cuentaDestino || '',
+        confianza: extra.estado === 'pendiente' ? 'pendiente_de_acreditar' : (confianza || ''),
+        remitente: String(args.remitente || ''),
+      });
+    } catch (e) {
+      console.error('[bandejaMail] no se pudo crear la fila de un pago adicional:', e);
+    }
+  }
 
   return {
     ok: true, idItem, importe: Number(importe),
     comprobantes, cliente: cand?.cliente,
     leidoCon, confianza, comentarioIA,
+    estadoPago,
+    idsExtra,
   };
 }
