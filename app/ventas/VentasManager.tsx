@@ -655,6 +655,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
                   return (
                     <span style={{fontSize:'10.5px', color: viejoCaj ? '#dc2626' : '#6b7280', fontWeight: viejoCaj ? 700 : 400}}>
                       {viejoCaj ? '⚠ ' : ''}Cajones en cámara: <strong>{caj.stockActual}</strong>
+                      {' '}(≈{Math.round((KG_POR_CAJON[cultivo === 'rucula' ? 'rucula_kg' : 'lechuga_kg_crespa'] * 1000) / (stockCamara?.factorGrPaq?.[cultivo] || (cultivo === 'rucula' ? 210 : 330)))} paq cada uno)
                       {caj.cantidadMasVieja > 0 && <> · el más viejo de hace <strong>{caj.diasMasViejo}d</strong></>}
                       {viejoCaj ? ' — sacarlo primero' : ''}
                     </span>
@@ -933,6 +934,25 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
               <span style={{fontSize:'11px',color:'#b45309'}}>
                 Rúcula {KG_POR_CAJON.rucula_kg} kg · Lechuga {KG_POR_CAJON.lechuga_kg_crespa} kg · no descuenta paquetes
               </span>
+              {/* A cuántos paquetes equivale un cajón, dicho en texto y con la cuenta a la
+                  vista. Es la pregunta que aparece siempre al mirar un número en cajones al
+                  lado de uno en paquetes, y la respuesta cambia con el peso de la planta:
+                  acá se usa el ÚLTIMO pesaje testigo (el de la cámara), que es el peso de lo
+                  que se está entregando hoy. */}
+              {(() => {
+                const grR = stockCamara?.factorGrPaq?.rucula || 210;
+                const grL = stockCamara?.factorGrPaq?.lechuga_crespa || 330;
+                const paqR = Math.round((KG_POR_CAJON.rucula_kg * 1000) / grR);
+                const paqL = Math.round((KG_POR_CAJON.lechuga_kg_crespa * 1000) / grL);
+                return (
+                  <span style={{fontSize:'11px',color:'#92400e',fontWeight:600,marginLeft:'auto',textAlign:'right',lineHeight:1.4}}>
+                    1 cajón ≈ <strong>{paqR} paquetes</strong> de rúcula · ≈ <strong>{paqL}</strong> de lechuga
+                    <span style={{display:'block',fontWeight:400,color:'#b45309',fontSize:'10px'}}>
+                      con el último pesaje ({grR} g / {grL} g) — cambia con el peso de la planta
+                    </span>
+                  </span>
+                );
+              })()}
             </div>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
               <thead>

@@ -214,6 +214,14 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
                   <span>Equivalen a</span>
                   <strong>{eqCajones.paquetesEquivalentes.toLocaleString('es-AR')} paquetes</strong>
                 </div>
+                {/* El total no dice si la cuenta tiene sentido; el por-cajón sí. "Un cajón ≈
+                    24 paquetes" se chequea de memoria contra lo que se acaba de armar. */}
+                {cajones > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
+                    <span>O sea, 1 cajón ≈</span>
+                    <strong>{Math.round(eqCajones.paquetesEquivalentes / cajones)} paquetes</strong>
+                  </div>
+                )}
                 <p style={{ margin: '6px 0 0', fontSize: '10.5px', lineHeight: 1.45 }}>
                   Calculado con {eqCajones.gramosPorPaquete} g por paquete ({eqCajones.origenPeso}).
                   {eqCajones.origenPeso === 'referencia del cultivo'

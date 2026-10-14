@@ -71,10 +71,19 @@ function TooltipArticulo({ active, payload, label }: any) {
         );
       })}
       {Number(datum.pctCajones) > 0 && (
-        <p style={{ margin: '5px 0 0', paddingTop: '5px', borderTop: '1px solid #f1f0eb', fontSize: '11px', color: INK_MUTED }}>
-          {datum.pctCajones}% del volumen salió en cajón
-          {Number(datum.cajones) > 0 ? ` · ${fmtEntero(datum.cajones)} cajones en el mes` : ''}
-        </p>
+        <div style={{ margin: '5px 0 0', paddingTop: '5px', borderTop: '1px solid #f1f0eb', fontSize: '11px', color: INK_MUTED }}>
+          <p style={{ margin: 0 }}>
+            {datum.pctCajones}% del volumen salió en cajón
+            {Number(datum.cajones) > 0 ? ` · ${fmtEntero(datum.cajones)} cajones en el mes` : ''}
+          </p>
+          {/* La equivalencia de ESE mes, no la de hoy: con otro peso de planta el mismo
+              cajón son otros paquetes, y es lo que explica la altura del tramo. */}
+          {datum.paqPorCajon && (
+            <p style={{ margin: '2px 0 0' }}>
+              Ese mes: 1 cajón ≈ {datum.paqPorCajon.rucula} paq de rúcula · ≈ {datum.paqPorCajon.lechuga} de lechuga
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
@@ -122,10 +131,20 @@ export function GraficoVentaPorArticulo({ datos }: { datos: PuntoArticulo[] }) {
           entero por el canal de cajón y la barra se ve igual que si hubieran subido los
           paquetes. El tramo claro de cada barra es lo que salió a granel, rotulado en
           cajones. */}
-      <p style={{ margin: '-6px 0 10px', fontSize: '11px', color: INK_SECUNDARIA }}>
+      <p style={{ margin: '-6px 0 10px', fontSize: '11px', color: INK_SECUNDARIA, lineHeight: 1.5 }}>
         El tramo claro de cada barra es lo que salió <strong>en cajón</strong> (rotulado en cajones; la altura es su equivalente en paquetes).
         {ultimo && ultimo.cajones > 0 && (
           <> Este mes: <strong>{fmtEntero(ultimo.cajones)} cajones</strong>, {ultimo.pctCajones}% del volumen.</>
+        )}
+        {ultimo && (
+          <>
+            <br />
+            <span style={{ color: INK_MUTED }}>
+              Hoy <strong style={{ color: INK_SECUNDARIA }}>1 cajón de rúcula ≈ {ultimo.paqPorCajon.rucula} paquetes</strong> (5 kg ÷ {ultimo.paqPorCajon.gramosRucula} g)
+              {' '}y <strong style={{ color: INK_SECUNDARIA }}>1 de lechuga ≈ {ultimo.paqPorCajon.lechuga}</strong> (4 kg ÷ {ultimo.paqPorCajon.gramosLechuga} g).
+              {' '}La equivalencia cambia mes a mes con el peso de la planta{ultimo.gramajeReal ? '' : ' — este mes no hay cosechas pesadas cargadas, así que va con el peso de referencia'}.
+            </span>
+          </>
         )}
       </p>
       <ResponsiveContainer width="100%" height={260}>
@@ -337,7 +356,12 @@ export function TarjetaIndicadores({ datos }: { datos: ResumenMesActual }) {
     // Los cajones van en su propio indicador, en bultos: es la unidad en la que se carga la
     // venta y en la que se habla con el galpón. Dentro de "unidades vendidas" están, pero
     // convertidos a paquete-equivalente, y ahí el dato se pierde.
-    { label: 'Salido en cajón', valor: `${fmtEntero(datos.cajonesMes)} cj`, pie: datos.cajonesMes > 0 ? `${datos.pctCajones}% del volumen` : 'sin ventas por kilo' },
+    {
+      label: 'Salido en cajón', valor: `${fmtEntero(datos.cajonesMes)} cj`,
+      pie: datos.cajonesMes > 0
+        ? `${datos.pctCajones}% del volumen · 1 cj ≈ ${datos.paqPorCajon.rucula} paq de rúcula, ≈ ${datos.paqPorCajon.lechuga} de lechuga`
+        : 'sin ventas por kilo este mes',
+    },
   ];
   return (
     <div style={{ ...cardStyle, padding: '12px 16px' }}>

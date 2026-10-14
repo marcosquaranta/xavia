@@ -90,9 +90,22 @@ export function gramajePorClave(lotes: Lote[], claves: string[]): Map<string, Gr
 }
 export const gramajeDe = (mapa: Map<string, Gramaje>, clave: string) => mapa.get(clave) || GRAMAJE_NOMINAL;
 
+// A cuántos paquetes equivale UN cajón, con el gramaje de ese período. Es la cuenta que hace
+// legible todo lo demás: el cajón es un bulto de 5 o 4 kg, y cuántos paquetes son depende de
+// cuánto pesa la planta, que cambia mes a mes. Sin este número a la vista, "238 paquetes en
+// cajón" y "10 cajones" parecen datos de dos cosas distintas.
+export interface PaquetesPorCajon { rucula: number; lechuga: number; gramosRucula: number; gramosLechuga: number }
+export function paquetesPorCajon(g: Gramaje): PaquetesPorCajon {
+  return {
+    rucula: g.rucula > 0 ? Math.round((KG_POR_CAJON.rucula_kg * 1000) / g.rucula) : 0,
+    lechuga: g.lechuga > 0 ? Math.round((KG_POR_CAJON.lechuga_kg_crespa * 1000) / g.lechuga) : 0,
+    gramosRucula: g.rucula, gramosLechuga: g.lechuga,
+  };
+}
+
 const MESES_CORTO = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sept', 'oct', 'nov', 'dic'];
 // lechuga_kg queda (legacy) para no perder ventas por kg cargadas antes del split crespa/roble.
-import { PROD_KEYS, KEYS_UNIDAD_HISTORICAS, cajonesDeKg } from './articulos';
+import { PROD_KEYS, KEYS_UNIDAD_HISTORICAS, cajonesDeKg, KG_POR_CAJON } from './articulos';
 
 function mesKey(fecha: string): string { return String(fecha || '').slice(0, 7); } // YYYY-MM
 function mesLabel(mk: string): string {
@@ -211,6 +224,9 @@ export interface PuntoArticulo {
   cajones: number;     // cajones totales del mes (rúcula + lechuga)
   pctCajones: number;  // qué parte del volumen del mes salió en cajón, 0–100
   gramajeReal: boolean; // false = este mes no tenía cosechas pesadas, se usó el nominal
+  // A cuántos paquetes equivalió un cajón ESE mes — se dice en texto en la pantalla, porque
+  // es lo que vuelve comparables las dos unidades.
+  paqPorCajon: PaquetesPorCajon;
 }
 export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas: VentaHistorica[] = [], fechaRef: Date = new Date(), lotes: Lote[] = []): PuntoArticulo[] {
   const historicasNorm = historicas
@@ -247,6 +263,7 @@ export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas
         ruculaPaq: r, ruculaCaj: 0, ruculaCajones: 0,
         lechugaPaq: l, lechugaCaj: 0, lechugaCajones: 0,
         cajones: 0, pctCajones: 0, gramajeReal: false,
+        paqPorCajon: paquetesPorCajon(GRAMAJE_NOMINAL),
       };
     }
     const delMes = ventas.filter((v) => mesKey(v.fecha) === mes);
@@ -272,6 +289,7 @@ export function evolucionVentaPorArticulo(ventas: VentaDia[], n = 12, historicas
       cajones: ruculaCajones + lechugaCajones,
       pctCajones: totalMes > 0 ? Math.round(((ruculaCaj + lechugaCaj) / totalMes) * 100) : 0,
       gramajeReal: g.reales,
+      paqPorCajon: paquetesPorCajon(g),
     };
 
     if (mes !== mesActual) return { mes, label: mesLabel(mes), rucula, lechuga, albahaca, proyRucula: 0, proyLechuga: 0, proyAlbahaca: 0, totalConProyeccion: 0, ...corteCajones };
@@ -583,6 +601,7 @@ export interface ResumenMesActual {
   // bulto real (la unidad en la que se carga y se habla) y `unidadesEnCajones` lo mismo en
   // paquete-equivalente, que es lo que suma a `unidadesMes`.
   cajonesMes: number; unidadesEnCajones: number; pctCajones: number;
+  paqPorCajon: PaquetesPorCajon;
 }
 export function resumenMesActual(
   ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], fechaRef: Date = new Date(), diaCorte?: number, lotes: Lote[] = []
@@ -668,6 +687,7 @@ export function resumenMesActual(
     unidadesMes: unidades, proyeccionMes, precioPromedioMes, montoMes: Math.round(monto), proyeccionMonto,
     cajonesMes, unidadesEnCajones,
     pctCajones: unidades > 0 ? Math.round((unidadesEnCajones / unidades) * 100) : 0,
+    paqPorCajon: paquetesPorCajon(gramaje),
   };
 }
 
