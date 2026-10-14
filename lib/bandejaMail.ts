@@ -81,6 +81,11 @@ export interface ResultadoItemAviso {
   estadoPago?: 'acreditado' | 'pendiente';
   // Los otros pagos del mismo aviso, cuando la captura mostraba varios.
   idsExtra?: string[];
+  // Lo que el aviso dijo del pagador y de la cuenta, aunque no haya alcanzado para
+  // identificar al cliente. Sin esto, "no reconocí al cliente" tapa dos cosas distintas: que
+  // el nombre no esté en nuestra lista, o que se haya leído el nombre equivocado.
+  pagador?: string;
+  cuentaDestino?: string;
 }
 
 export async function crearItemDesdeAviso(args: {
@@ -329,5 +334,10 @@ export async function crearItemDesdeAviso(args: {
     leidoCon, confianza, comentarioIA,
     estadoPago,
     idsExtra,
+    // Qué leyó el aviso, aunque no haya servido para identificar a nadie. Es lo que distingue
+    // "el nombre del pagador no está en nuestra lista" de "se leyó el nombre equivocado"
+    // —p. ej. la razón social de Xavia, que en un comprobante de transferencia figura
+    // primera—, y los dos casos se ven iguales desde afuera: un aviso sin cliente.
+    pagador, cuentaDestino,
   };
 }

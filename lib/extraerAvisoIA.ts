@@ -121,6 +121,26 @@ EL ESTADO DE CADA PAGO — esto es tan importante como el importe:
 - Una captura que dice "Pendiente" al lado del importe es "pendiente", aunque el monto y el nombre estén perfectos.
 - Ante la duda, "pendiente": dar por cobrado algo que todavía no entró descuadra la cuenta del banco y hace que al cliente se le deje de reclamar una factura que sigue impaga.
 
+COMPROBANTES DE TRANSFERENCIA BANCARIA (Interbanking, home banking, Macro, Santander, etc.):
+Este formato NO dice "pago" ni "aviso": muestra dos bloques de datos, uno por cada punta de la
+transferencia, y hay que saber cuál es cuál porque los dos traen razón social, CUIT y banco.
+
+- "Datos de la cuenta CRÉDITO" (o "acreditación", "destino", "beneficiario", "cuenta destino")
+  es DONDE ENTRA la plata: somos NOSOTROS. De ahí sale cuentaDestino (el banco), nunca el pagador.
+- "Datos de la cuenta DÉBITO" (u "origen", "ordenante", "cuenta débito", "titular que paga")
+  es DE DÓNDE SALE la plata: ese es el PAGADOR, el cliente. De ahí sale nombrePagador.
+
+Ojo con el orden: el bloque de crédito suele venir PRIMERO, así que la primera razón social del
+comprobante es casi siempre la nuestra, no la del cliente. No tomes la primera que ves.
+
+XAVIA LIFE SRL (CUIT 30-71840929-9 / 30718409299) somos nosotros, los que cobramos. Nunca es el
+pagador y nunca es un cliente: si te aparece como "Denominación", es el bloque de crédito, y el
+pagador es el OTRO. Si el único nombre que aparece es Xavia, devolvé nombrePagador null.
+
+Un comprobante de transferencia casi nunca menciona facturas: en ese caso "comprobantes" va
+vacío y no es un error ni baja la confianza. El importe sí está, y suele estar rotulado
+"Importe" — ese es el dato principal.
+
 Sobre cuentaDestino: es la cuenta de XAVIA donde entra la plata, la del que COBRA. Un aviso suele nombrar los dos bancos —el del que paga y el del que cobra— y son cosas distintas: "transferencia desde nuestra cuenta del Banco Galicia a Banco Macro" tiene cuentaDestino "Banco Macro", no "Banco Galicia".
 - Poné el nombre tal cual aparece, sin normalizar ("Bco. Macro" se devuelve así).
 - Si el aviso nombra un solo banco y no queda claro si es el que paga o el que cobra, poné null. Una cuenta de destino equivocada manda la plata a la cuenta contable incorrecta.

@@ -174,6 +174,11 @@ async function acusarRecibo(args: {
     <ul style="font-size:14px;color:#111">
       <li>Importe: <strong>${fmt$(Number(r.importe) || 0)}</strong></li>
       <li>Cliente: ${r.cliente ? `<strong>${r.cliente}</strong>` : '<span style="color:#b45309">no lo reconocí — lo elegís al confirmar</span>'}</li>
+      ${!r.cliente && (r.pagador || r.cuentaDestino)
+        ? `<li style="color:#92400e">El aviso dice que paga <strong>${r.pagador || '(no lo dice)'}</strong>${
+            r.cuentaDestino ? `, y que se acredita en <strong>${r.cuentaDestino}</strong>` : ''
+          }. Si ese nombre está mal leído (p. ej. dice Xavia, que somos nosotros), avisá: es un problema de la app, no del aviso.</li>`
+        : ''}
       <li>Facturas: ${r.comprobantes?.length ? `<code>${r.comprobantes.join(', ')}</code>` : '<span style="color:#9ca3af">ninguna mencionada</span>'}</li>
     </ul>
     ${args.auto?.registrado
