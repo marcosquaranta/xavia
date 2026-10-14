@@ -190,7 +190,18 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   // Solo los clientes con precio cargado en alguna ensalada. Tener precio es lo que
   // significa "a este cliente se le vende esto": sin precio la venta se cargaría en
   // cantidad y saldría en $0 en la factura.
-  const filasEnsalada = filas.filter(f=>ENSALADAS.some(a=>pr(f.id_control,f.sucursal,a.key)>0));
+  //
+  // Se mira con `precioFinal` y no con el precio exacto de la sucursal, igual que la grilla
+  // de paquetes. Con la comparación exacta, un cliente con la lista cargada a nivel cliente
+  // (sin sucursal) o en otra sucursal aparecía en paquetes y NO acá: el precio estaba puesto
+  // y la sección seguía sin mostrarlo, sin ninguna forma de darse cuenta por qué.
+  const tienePrecioEnsalada = (f: Fila) => {
+    const cli = clientes.find((c) => String(c.id_control) === String(f.id_control));
+    return ENSALADAS.some((a) => precioFinal(precios, String(f.id_control), f.sucursal, a.key, cli) > 0);
+  };
+  // El mismo escape que en paquetes: esconder a alguien que SÍ compra porque falta cargarle
+  // el precio deja una venta sin forma de cargarse, y eso es peor que la fila de más.
+  const filasEnsalada = mostrarSinPrecio ? filas.filter(f=>f.unidad!=='kg') : filas.filter(tienePrecioEnsalada);
   const totsEnsalada: Record<string,number> = Object.fromEntries(
     ENSALADAS.map(a=>[a.key, filasEnsalada.reduce((acc,f)=>acc+(Number(q(f.id_control,f.sucursal,a.key))||0),0)]),
   );
@@ -1063,6 +1074,11 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
               <span style={{fontSize:'11px',color:'#0d9488'}}>
                 Solo los clientes con precio cargado · descuentan plantas, no paquetes
               </span>
+              {/* Dónde se habilita un cliente nuevo. Sin esto hay que saberlo de memoria:
+                  la sección simplemente no lo muestra y no dice qué falta. */}
+              <a href="/admin/clientes-venta" style={{fontSize:'11px',color:'#0f766e',marginLeft:'auto',textDecoration:'underline'}}>
+                ¿Falta un cliente? Cargale el precio de la ensalada →
+              </a>
             </div>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
               <thead>
