@@ -66,7 +66,13 @@ export async function POST(req: NextRequest) {
       // Si son varios y no se dijo cuánto corresponde a cada uno, el precio NO se toca: se
       // podría repartir el total en partes iguales, pero eso inventa un precio unitario que
       // después valoriza el stock. Mejor quedarse sin dato que con uno falso.
-      const montoBase = items.length === 1 ? (Number(gasto?.monto) || 0) : (item.monto || 0);
+      // Si la compra se cargó en cuotas, `monto` es la cuota y el precio real de la compra
+      // está en `monto_compra_total` (ver lib/gastoCuotas.ts). Valorizar con la cuota daría
+      // un precio unitario N veces más chico y arrastraría ese error a todo el stock.
+      const montoDelGasto = Number(gasto?.monto_compra_total) > 0
+        ? Number(gasto?.monto_compra_total)
+        : (Number(gasto?.monto) || 0);
+      const montoBase = items.length === 1 ? montoDelGasto : (item.monto || 0);
       const precioUnitario = cant > 0 && montoBase > 0 ? montoBase / cant : 0;
       const existente = stocksVivos.find((s) =>
         s.id_articulo === id_articulo && String(s.anio) === String(anio) && String(s.mes) === String(mes)

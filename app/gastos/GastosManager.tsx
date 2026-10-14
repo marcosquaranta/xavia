@@ -5,6 +5,7 @@ import { CATEGORIAS_GASTO, MEDIOS_PAGO, admiteMontoNegativo, type Gasto, type Ca
 import NumberInput from '@/components/NumberInput';
 
 import { estaPagado } from '@/lib/proveedores';
+import { planDeCuotas, motivoSinCuotas, MAX_CUOTAS } from '@/lib/gastoCuotas';
 import { avisoMontoSospechoso } from '@/lib/montoSospechoso';
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const MEDIOS = MEDIOS_PAGO;
@@ -18,6 +19,11 @@ const fmtMoneda = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 const UMBRAL_DETALLE = 200000;
 const fmtDiaMes = (f: string) => { const [, m, d] = f.split('-'); return d && m ? `${d}/${m}` : f; };
 const fmtFecha = (s: string) => { const [y, m, d] = String(s || '').split(/[T ]/)[0].split('-'); return d && m ? `${d}/${m}` : s; };
+// Con el año: un plan de cuotas cruza diciembre y "14/03" no dice si es este marzo o el que
+// viene — que es justo lo que se quiere ver al cargar doce cuotas.
+const fmtFechaAnio = (s: string) => { const [y, m, d] = String(s || '').split(/[T ]/)[0].split('-'); return d && m ? `${d}/${m}/${String(y).slice(2)}` : s; };
+const MES_CORTO = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+const fmtMesAnio = (s: string) => { const [y, m] = String(s || '').split('-'); return m ? `${MES_CORTO[Number(m) - 1]}-${String(y).slice(2)}` : s; };
 
 interface Props {
   gastos: Gasto[]; articulos: Articulo[]; usuario: string;
@@ -55,6 +61,11 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
   const [pendiente, setPendiente] = useState(false);
   const [proveedor, setProveedor] = useState('');
   const [vencimiento, setVencimiento] = useState('');
+  // Compra en cuotas: `monto` sigue siendo el precio de LA COMPRA y las cuotas se calculan
+  // sobre eso. Pedir "el monto de la cuota" sería la otra opción, pero obliga a hacer la
+  // división a mano en la cabeza y es donde se cuelan los errores — y en el ticket el número
+  // que figura es el total.
+  const [cuotas, setCuotas] = useState(1);
   const aceptaNegativo = admiteMontoNegativo(categoria);
   const [monto, setMonto] = useState(0);
   const [medioPago, setMedioPago] = useState<string>(MEDIOS[0]);
@@ -62,6 +73,7 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
   const [cantidad, setCantidad] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [okMsg, setOkMsg] = useState<string | null>(null);
 
   const unidadArticulo = useMemo(
     () => String(articulos.find((a) => a.id_articulo === idArticulo)?.unidad_medida || '').trim(),
@@ -69,6 +81,14 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
   );
   const categoriasArticulo = useMemo(() => Array.from(new Set(articulos.map((a) => a.categoria))).sort(), [articulos]);
   const precioUnitarioCalc = monto > 0 && Number(cantidad) > 0 ? monto / Number(cantidad) : null;
+  // El plan se calcula con la MISMA función que usa el servidor al guardar. Lo que se ve en
+  // pantalla antes de confirmar es, cuota por cuota y fecha por fecha, exactamente lo que va
+  // a quedar cargado.
+  const sinCuotas = motivoSinCuotas(categoria);
+  const planCuotas = useMemo(
+    () => cuotas > 1 && monto !== 0 && !sinCuotas ? planDeCuotas({ fecha, descripcion: descripcion.trim() || 'Compra', montoTotal: monto, cuotas }) : [],
+    [cuotas, monto, fecha, descripcion, sinCuotas],
+  );
 
   // Edición inline
   const [editId, setEditId] = useState<string | null>(null);
@@ -165,6 +185,11 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
     if (esMovimiento && !medioDestino) { setError('Elegí a qué cuenta entra la plata'); return; }
     if (esAdelanto && !empleadoAdelanto) { setError('Elegí a qué empleado se le adelantó'); return; }
     if (pendiente && !proveedor.trim()) { setError('Poné a qué proveedor se le debe'); return; }
+    if (cuotas > 1) {
+      if (sinCuotas) { setError(sinCuotas); return; }
+      if (pendiente) { setError('Una compra en cuotas no se marca además como pendiente: cada cuota ya es su propio gasto en su mes.'); return; }
+      if (!planCuotas.length) { setError('No se pudo armar el plan de cuotas: revisá la fecha y el monto.'); return; }
+    }
     if (categoria === 'insumos' && !idArticulo) { setError('Elegí qué artículo se compró: un insumo sin artículo no entra al stock.'); return; }
     if (categoria === 'insumos' && !(Number(cantidad) > 0)) { setError('Poné la cantidad comprada, en la unidad del artículo.'); return; }
     // Un monto muy fuera de escala casi siempre son ceros de más. Se pregunta, no se bloquea:
@@ -181,10 +206,19 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
           ...(esAdelanto ? { empleado: empleadoAdelanto } : {}),
           ...(pendiente ? { pendiente: true, proveedor: proveedor.trim(), vencimiento } : {}),
           ...(categoria === 'insumos' ? { id_articulo: idArticulo, cantidad } : {}),
+          ...(cuotas > 1 ? { cuotas } : {}),
         }),
       });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || 'Error al guardar');
+      // Una compra en cuotas escribe varias filas de una vez, y varias con fecha futura: si
+      // no se dice, parece que se cargó un gasto solo y que el resto se perdió.
+      if (j.cuotas > 1) {
+        setOkMsg(`Cargadas ${j.cuotas} cuotas de ${descripcion.trim()}, de ${fmtFechaAnio(j.desde)} a ${fmtFechaAnio(j.hasta)}, con ${medioPago}. Las de meses que vienen ya están contadas en el resultado y en el saldo de esa cuenta.`);
+      } else {
+        setOkMsg(null);
+      }
+      setCuotas(1);
       setDescripcion('');
       setEmpleadoAdelanto('');
       setPendiente(false); setProveedor(''); setVencimiento(''); setMonto(0); setFecha(hoyISO()); setCategoria('gastos_generales'); setMedioPago(MEDIOS[0]); setMedioDestino('');
@@ -221,11 +255,25 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
     }
   }
 
+  // Borrar una cuota pregunta primero si se va la compra entera. Sin esto, una compra de 12
+  // cuotas cargada por error hay que borrarla de a una, y basta olvidarse de la última para
+  // dejar un gasto suelto en un mes futuro que después nadie entiende de dónde salió.
   async function borrar(id: string) {
-    if (!confirm('¿Eliminar este gasto?')) return;
+    const g = gastos.find((x) => String(x.id_gasto) === String(id));
+    const total = Number(g?.cuota_total) || 0;
+    let grupo = false;
+    if (total > 1) {
+      const nro = Number(g?.cuota_nro) || 0;
+      grupo = confirm(
+        `Esta es la cuota ${nro} de ${total} de "${g?.descripcion || ''}".\n\n` +
+        `OK = borrar la COMPRA COMPLETA (las ${total} cuotas).\n` +
+        `Cancelar = volver sin borrar nada.`,
+      );
+      if (!grupo) return;
+    } else if (!confirm('¿Eliminar este gasto?')) return;
     setBorrando(id);
     try {
-      await fetch('/api/gastos/borrar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id_gasto: id }) });
+      await fetch('/api/gastos/borrar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id_gasto: id, ...(grupo ? { grupo: true } : {}) }) });
       router.refresh();
     } catch {} finally { setBorrando(null); }
   }
@@ -318,6 +366,12 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
       <form onSubmit={agregar} className="card" style={{ marginBottom: '14px' }}>
         <p className="card-title">Nuevo gasto</p>
         {error && <div className="alert-box error" style={{ marginBottom: '10px' }}>{error}</div>}
+        {okMsg && (
+          <div style={{ marginBottom: '10px', fontSize: '12px', color: '#065f46', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '6px', padding: '9px 11px', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+            <span>✓</span><span>{okMsg}</span>
+            <button onClick={() => setOkMsg(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#059669', cursor: 'pointer', fontSize: '13px' }}>×</button>
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '12px' }}>
           <div>
             <label>Fecha</label>
@@ -370,9 +424,77 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
           )}
         </div>
 
-        {/* Compra a crédito. No se ofrece para movimientos entre cuentas ni adelantos: esos,
-            por definición, son plata que ya se movió. */}
+        {/* ── Compra en cuotas ──────────────────────────────────────────────────────────
+            Una compra en cuotas son N gastos, uno por mes, cada uno con su fecha y con este
+            mismo medio de pago. Se escriben las N filas al confirmar, así la compra entera
+            queda a la vista y cada mes —incluidos los que todavía no llegaron— ya tiene su
+            cuota contada en el resultado y en el saldo de la cuenta.
+
+            El plan se muestra ANTES de confirmar, con la misma función que usa el servidor
+            para guardarlo: lo que se ve es lo que queda. */}
         {!esMovimiento && !esAdelanto && (
+          <div style={{ marginBottom: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '10px', flexWrap: 'wrap' }}>
+              <div>
+                <label>¿En cuántas cuotas?</label>
+                {/* Al pasar a cuotas se apaga "todavía no lo pagué": son dos formas de decir
+                    lo mismo encima de la misma compra, y dejarlo prendido mandaría el total
+                    como deuda Y repartido en cuotas. */}
+                <select value={cuotas} onChange={(e) => { const n = Number(e.target.value); setCuotas(n); if (n > 1) { setPendiente(false); setVencimiento(''); } }} disabled={guardando}
+                  style={{ fontWeight: cuotas > 1 ? 700 : 400, borderColor: cuotas > 1 ? '#2563eb' : undefined, color: cuotas > 1 ? '#1e40af' : undefined }}>
+                  <option value={1}>Un solo pago</option>
+                  {[2, 3, 4, 6, 9, 10, 12, 18, 24].filter((n) => n <= MAX_CUOTAS).map((n) => (
+                    <option key={n} value={n}>{n} cuotas</option>
+                  ))}
+                </select>
+              </div>
+              {cuotas > 1 && (
+                <p style={{ margin: '0 0 7px', fontSize: '11px', color: '#6b7280', maxWidth: '420px', lineHeight: 1.45 }}>
+                  El monto de arriba es el <strong>precio total de la compra</strong>, no el de la cuota.
+                  Se reparte solo, y cada cuota sale con <strong>{medioPago}</strong>.
+                </p>
+              )}
+            </div>
+
+            {cuotas > 1 && sinCuotas && (
+              <p style={{ margin: '8px 0 0', fontSize: '11.5px', color: '#991b1b', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '8px 10px' }}>
+                {sinCuotas}
+              </p>
+            )}
+
+            {planCuotas.length > 1 && (
+              <div style={{ marginTop: '8px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '10px 12px' }}>
+                <p style={{ margin: '0 0 7px', fontSize: '12px', fontWeight: 700, color: '#1e40af' }}>
+                  Así va a quedar cargado · {planCuotas.length} cuotas con {medioPago}
+                </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px 14px', fontSize: '11.5px', color: '#1e3a8a' }}>
+                  {planCuotas.map((c) => (
+                    <span key={c.nro} style={{ whiteSpace: 'nowrap' }}>
+                      <strong>{fmtMesAnio(c.fecha)}</strong> {fmtMoneda(c.monto)}
+                    </span>
+                  ))}
+                </div>
+                {/* La suma, siempre a la vista. Es el único control que importa acá: si la
+                    suma de las cuotas no da el precio de la compra, hay un error. */}
+                <p style={{ margin: '7px 0 0', paddingTop: '6px', borderTop: '1px solid #bfdbfe', fontSize: '11.5px', color: '#1e3a8a' }}>
+                  Suman <strong>{fmtMoneda(planCuotas.reduce((a, c) => a + c.monto, 0))}</strong>
+                  {' '}· primera el {fmtFechaAnio(planCuotas[0].fecha)}, última el {fmtFechaAnio(planCuotas[planCuotas.length - 1].fecha)}
+                </p>
+                {categoria === 'insumos' && (
+                  <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#1e40af' }}>
+                    La mercadería entra al stock <strong>una sola vez</strong>, con la primera cuota y con el
+                    precio total de la compra — las otras cuotas son solo el pago.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Compra a crédito. No se ofrece para movimientos entre cuentas ni adelantos: esos,
+            por definición, son plata que ya se movió. Ni junto con cuotas: el total quedaría
+            contado dos veces, una como deuda y otra repartido en las cuotas. */}
+        {!esMovimiento && !esAdelanto && cuotas === 1 && (
           <div style={{ marginBottom: '12px' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#374151', cursor: 'pointer', fontWeight: 600 }}>
               <input type="checkbox" checked={pendiente} onChange={(e) => setPendiente(e.target.checked)} disabled={guardando} />
@@ -586,7 +708,18 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
                     return (
                       <tr key={g.id_gasto}>
                         <td style={{ whiteSpace: 'nowrap', color: '#6b7280' }}>{fmtFecha(g.fecha)}</td>
-                        <td>{g.descripcion || <span style={{ color: '#d1d5db' }}>sin detalle</span>}</td>
+                        <td>
+                          {g.descripcion || <span style={{ color: '#d1d5db' }}>sin detalle</span>}
+                          {/* La descripción ya dice "(cuota 3/6)", pero el chip hace que se
+                              lea de un barrido que esta fila es parte de una compra más
+                              grande y que su monto no es el precio de nada. */}
+                          {Number(g.cuota_total) > 1 && (
+                            <span title={`Cuota ${g.cuota_nro} de ${g.cuota_total} de una compra en cuotas`}
+                              style={{ marginLeft: '5px', fontSize: '10px', fontWeight: 700, color: '#1e40af', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '4px', padding: '1px 5px', whiteSpace: 'nowrap' }}>
+                              {g.cuota_nro}/{g.cuota_total}
+                            </span>
+                          )}
+                        </td>
                         <td style={{ color: '#6b7280' }}>{LABEL_CAT[g.categoria] || g.categoria}</td>
                         <td style={{ color: '#6b7280' }}>
                           {g.medio_pago}{g.medio_pago_destino ? ` → ${g.medio_pago_destino}` : ''}

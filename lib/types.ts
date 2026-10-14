@@ -184,6 +184,17 @@ export interface Gasto {
   aplicado_stock: 'SI' | 'NO' | '';  // 'SI' = ya confirmado (o descartado) como compra de Stocks, no debe volver a sugerirse
   id_articulo: string;   // artículo vinculado directo (si se cargó como insumo detallado) — vacío si no aplica
   cantidad: number | string;  // cantidad física comprada — junto con monto define el precio unitario (monto/cantidad)
+  // ── Compra en cuotas (ver lib/gastoCuotas.ts) ─────────────────────────────────────────
+  // Una compra en cuotas son N filas, una por mes. Las tres columnas dicen de qué compra es
+  // cada fila y qué lugar ocupa, para poder verlas, corregirlas o borrarlas como un conjunto
+  // en vez de como N gastos sueltos que casualmente se parecen.
+  cuota_grupo: string;            // el id_gasto de la primera cuota — identifica la compra
+  cuota_nro: number | string;     // 1..cuota_total
+  cuota_total: number | string;   // cuántas cuotas tiene la compra
+  // El precio de la COMPRA, no el de la cuota. Solo va en la primera cuota, y solo cuando la
+  // compra entra al stock: `monto` ahí es una fracción, y usarlo para valorizar el artículo
+  // daría un precio unitario N veces más chico que el real.
+  monto_compra_total: number | string;
 }
 
 export interface ClienteVenta {
