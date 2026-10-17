@@ -3,6 +3,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { sugerirCombinaciones, toleranciaDe } from '@/lib/conciliacionCobro';
 import { cuentasElegibles, cantidadPreferidas, cuentasDeRetencion } from '@/lib/cuentasCobro';
 import { retencionDesdeImporte, cuentaParaRetencion } from '@/lib/retenciones';
+import CobroEnPartes, { chequearPartes, type ParteUI } from '@/components/CobroEnPartes';
 
 interface ClienteOpt {
   id_control: string;
@@ -57,6 +58,10 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
   // llenaba de saldos de monedas que nadie va a cobrar nunca.
   const [retencion, setRetencion] = useState('');
   const [cuentaRet, setCuentaRet] = useState('');
+  // Cobro que entra en varias fechas: un cheque a 30 días, o media entrega ahora y la otra
+  // mitad después. `fecha` sigue siendo la del cobro cuando entra de una sola vez.
+  const [enPartes, setEnPartes] = useState(false);
+  const [partes, setPartes] = useState<ParteUI[]>([]);
   const [verTodasCuentasRet, setVerTodasCuentasRet] = useState(false);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; s: string } | null>(null);
@@ -162,7 +167,12 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
     const retTxt = Number(retencion) > 0
       ? `\nRetención: $${Number(retencion).toLocaleString('es-AR')} — cancela $${(Math.round(Number(importe)) + Math.round(Number(retencion))).toLocaleString('es-AR')} de facturas.`
       : '';
-    if (!confirm(`Se va a registrar en Xubio un cobro de $${Number(importe).toLocaleString('es-AR')} de ${nombre}, en ${cuentaNom}, con fecha ${fmtDia(fecha)}.${retTxt}\n\nEsto impacta en la contabilidad. ¿Confirmás?`)) return;
+    const chk = enPartes ? chequearPartes(Number(importe), partes) : null;
+    if (chk?.error) { setMsg({ t: 'err', s: chk.error }); return; }
+    const cuandoTxt = chk
+      ? `que entra en ${chk.lista.length} veces: ${chk.lista.map((x) => `${fmtDia(x.fecha)} $${x.importe.toLocaleString('es-AR')}`).join(' · ')}`
+      : `con fecha ${fmtDia(fecha)}`;
+    if (!confirm(`Se va a registrar en Xubio un cobro de $${Number(importe).toLocaleString('es-AR')} de ${nombre}, en ${cuentaNom}, ${cuandoTxt}.${retTxt}\n\nEsto impacta en la contabilidad. ¿Confirmás?`)) return;
 
     setLoading(true); setMsg(null);
     try {
@@ -171,12 +181,13 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
         body: JSON.stringify({
           id_control: cliente, fecha, importe: Number(importe), cuentaId: Number(cuentaId),
           observacion, comprobantes: elegidas,
+          ...(enPartes ? { partes: chequearPartes(Number(importe), partes).lista } : {}),
           retencion: Number(retencion) || 0,
         }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'Error al registrar');
-      setMsg({ t: 'ok', s: `✓ Registrado en Xubio${j.numeroRecibo ? ` — recibo ${j.numeroRecibo}` : ''}. Recargando…` });
+      setMsg({ t: 'ok', s: `✓ Registrado en Xubio${j.partes > 1 ? ` en ${j.partes} partes` : ''}${j.numeroRecibo ? ` — recibo ${j.numeroRecibo}` : ''}. Recargando…` });
       setFilas((p) => [{
         id_cobro: j.id_cobro, cliente: nombre, fecha, importe: Number(importe),
         numero_recibo: j.numeroRecibo || '', transaccionid: String(j.transaccionid || ''),
@@ -250,7 +261,8 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
             </div>
             <div>
               <label style={labelStyle}>Fecha del cobro *</label>
-              <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} disabled={loading} style={inputStyle} />
+              <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} disabled={loading || enPartes} style={inputStyle} />
+              {enPartes && <span style={{ fontSize: '10px', color: '#64748b' }}>La define cada parte</span>}
             </div>
             <div>
               <label style={labelStyle}>Importe *</label>
@@ -314,6 +326,24 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
                 placeholder="ej: transferencia del 12/09" />
             </div>
           </div>
+
+          {/* Cobro que entra en varias fechas (cheques, pago en partes). Va plegado: es la
+              excepción, y una fila de fechas siempre abierta haría dudar de si hay que
+              completarla en un cobro normal. */}
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: '9px 0 0', fontSize: '11.5px', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
+            <input type="checkbox" checked={enPartes} disabled={loading}
+              onChange={(e) => {
+                setEnPartes(e.target.checked);
+                setPartes(e.target.checked ? [{ fecha, importe: '' }, { fecha: '', importe: '' }] : []);
+              }} />
+            La plata entra en varias fechas (cheques, pago en partes)
+          </label>
+          {enPartes && (
+            <div style={{ marginTop: '7px' }}>
+              <CobroEnPartes total={Number(importe) || 0} partes={partes} onChange={setPartes} disabled={loading}
+                nota={Number(retencion) > 0 ? 'La retención va entera en la primera.' : ''} />
+            </div>
+          )}
 
           {/* Facturas del cliente: de la más reciente a la más vieja. Tildarlas completa el
               importe y además deja asentado en el recibo de Xubio qué cubre el cobro —

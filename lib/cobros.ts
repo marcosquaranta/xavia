@@ -284,3 +284,73 @@ function nombreDeCuenta(cuentaId: number, cuentas: { id: number; nombre: string 
   const k = norm(x.nombre);
   return MEDIOS_PAGO.find((m) => norm(m).includes(k) || k.includes(norm(m))) || '';
 }
+
+// ══ Un cobro que entra en varias fechas ════════════════════════════════════════════════
+//
+// Un cheque a 30 días, o media entrega ahora y la otra mitad el mes que viene: la factura se
+// da por cobrada hoy, pero la plata entra en dos momentos. Cargarlo como un solo cobro con
+// una sola fecha obliga a elegir cuál de las dos mentir, y las dos rompen algo distinto: con
+// la fecha de hoy la cuenta muestra plata que todavía no está, y con la de la última parte la
+// factura figura impaga hasta entonces y se le sigue reclamando al cliente.
+//
+// Así que se registran N cobros, uno por fecha, cada uno con su importe. Cada parte entra a la
+// cuenta el día que de verdad entra, y las facturas quedan imputadas desde la primera.
+//
+// Las facturas van en TODAS las partes a propósito: la imputación marca qué cobro explica cada
+// factura (la primera gana, ver imputacionesManuales) y además saca esa plata del pool de
+// dinero sin explicar. Si las partes siguientes no las llevaran, su plata aparecería como un
+// cobro suelto sin imputar, que es justo el problema que esto viene a evitar.
+//
+// La retención entra entera en la PRIMERA parte: es un hecho del momento en que se emite el
+// pago, no algo que se vaya devengando con cada cheque.
+export interface ParteCobro { fecha: string; importe: number }
+
+export interface ResultadoCobroPartes {
+  ok: boolean;
+  partes: ResultadoCobro[];
+  error?: string;
+  status?: number;
+}
+
+export async function registrarCobroEnPartes(
+  p: Omit<PedidoCobro, 'fecha' | 'importe'>, partes: ParteCobro[],
+): Promise<ResultadoCobroPartes> {
+  const limpias = (partes || [])
+    .map((x) => ({ fecha: String(x?.fecha || '').trim(), importe: Math.round((Number(x?.importe) || 0) * 100) / 100 }))
+    .filter((x) => x.fecha || x.importe);
+
+  if (limpias.length < 2) return { ok: false, partes: [], error: 'Un cobro en partes necesita al menos dos fechas.', status: 400 };
+  for (const x of limpias) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(x.fecha)) return { ok: false, partes: [], error: `La fecha "${x.fecha}" no es válida.`, status: 400 };
+    if (!(x.importe > 0)) return { ok: false, partes: [], error: 'Cada parte tiene que tener un importe mayor a 0.', status: 400 };
+  }
+
+  // Se registran de la más vieja a la más nueva: así el recibo con la imputación de las
+  // facturas es el primero, que es el que alguien busca cuando quiere saber desde cuándo esa
+  // factura está dada por cobrada.
+  limpias.sort((a, b) => a.fecha.localeCompare(b.fecha));
+
+  const hechas: ResultadoCobro[] = [];
+  for (let i = 0; i < limpias.length; i++) {
+    const parte = limpias[i];
+    const etiqueta = `Parte ${i + 1} de ${limpias.length}`;
+    const r = await registrarCobro({
+      ...p,
+      fecha: parte.fecha,
+      importe: parte.importe,
+      observacion: [p.observacion, etiqueta].filter(Boolean).join(' — '),
+      retencion: i === 0 ? (Number(p.retencion) || 0) : 0,
+    });
+    hechas.push(r);
+    // Si una parte falla, se corta y se devuelve lo que SÍ se registró. Seguir con las que
+    // quedan dejaría el cobro partido a la mitad sin que nadie sepa qué entró y qué no; y
+    // deshacer las anteriores automáticamente sería borrar de Xubio sin que nadie lo pida.
+    if (!r.ok) {
+      return {
+        ok: false, partes: hechas, status: r.status || 500,
+        error: `${etiqueta}: ${r.error}. ${i > 0 ? `Las ${i} parte(s) anteriores SÍ quedaron registradas en Xubio — revisalas antes de reintentar, o esta plata se va a contar dos veces.` : 'No se registró ninguna parte.'}`,
+      };
+    }
+  }
+  return { ok: true, partes: hechas };
+}

@@ -7,7 +7,7 @@ import {
   proponerCliente, aliasDesdeDescripcion, nuevoIdItem, normalizarNombre,
   type ItemBandeja, type AliasCobranza,
 } from '@/lib/bandejaCobranzas';
-import { registrarCobro } from '@/lib/cobros';
+import { registrarCobro, registrarCobroEnPartes, type ParteCobro } from '@/lib/cobros';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 import type { ClienteVenta } from '@/lib/types';
 import * as XLSX from 'xlsx';
@@ -138,10 +138,15 @@ export async function PATCH(req: NextRequest) {
     const comprobantes: string[] = Array.isArray(body.comprobantes) ? body.comprobantes.map(String) : [];
     if (!idControl) return NextResponse.json({ error: 'Elegí de qué cliente es este cobro.' }, { status: 400 });
 
-    const r = await registrarCobro({
+    const importeFinal = Number(body.importe) > 0 ? Number(body.importe) : Number(item.importe);
+    // La fecha del cobro se puede corregir al confirmar. La del aviso es cuándo AVISARON,
+    // que no siempre es cuándo entra la plata: un cheque a 30 días se avisa hoy y entra el
+    // mes que viene, y con la fecha del aviso la cuenta muestra plata que no está.
+    const fechaCobro = /^\d{4}-\d{2}-\d{2}$/.test(String(body.fecha || ''))
+      ? String(body.fecha)
+      : String(item.fecha);
+    const comun = {
       idControl,
-      fecha: String(item.fecha),
-      importe: Number(body.importe) > 0 ? Number(body.importe) : Number(item.importe),
       cuentaId,
       observacion: `Importado del resumen bancario — ${String(item.descripcion).slice(0, 120)}`,
       comprobantes,
@@ -149,8 +154,25 @@ export async function PATCH(req: NextRequest) {
       // Lo que el cliente retuvo. El importe del movimiento bancario es lo que ENTRÓ: la
       // factura se cancela por la suma de los dos.
       retencion: Number(body.retencion) || 0,
-    });
-    if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status || 500 });
+    };
+
+    // Cobro que entra en varias fechas (cheques, pago en dos veces). La suma se valida acá
+    // y no en el formulario: si las partes no dan el total, la factura queda cancelada por
+    // un monto que nadie transfirió.
+    const partes: ParteCobro[] = Array.isArray(body.partes) ? body.partes : [];
+    let r;
+    if (partes.length > 1) {
+      const suma = Math.round(partes.reduce((a, x) => a + (Number(x?.importe) || 0), 0) * 100) / 100;
+      if (Math.abs(suma - Math.round(importeFinal * 100) / 100) > 0.01) {
+        return NextResponse.json({ error: `Las partes suman $${suma.toLocaleString('es-AR')} y el cobro es de $${importeFinal.toLocaleString('es-AR')}. Tienen que dar lo mismo.` }, { status: 400 });
+      }
+      const rp = await registrarCobroEnPartes(comun, partes);
+      if (!rp.ok) return NextResponse.json({ error: rp.error }, { status: rp.status || 500 });
+      r = rp.partes[0];
+    } else {
+      r = await registrarCobro({ ...comun, fecha: fechaCobro, importe: importeFinal });
+      if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status || 500 });
+    }
 
     const clientes = await readSheet<ClienteVenta>('Clientes');
     const cli = clientes.find(c => String(c.id_control) === idControl);
@@ -160,7 +182,8 @@ export async function PATCH(req: NextRequest) {
       cliente: cli?.nombre_display || cli?.nombre_xubio || '',
       comprobantes: comprobantes.join(', '),
       id_cobro: r.idCobro || '',
-      importe: Number(body.importe) > 0 ? Number(body.importe) : Number(item.importe),
+      importe: importeFinal,
+      fecha: fechaCobro,
       usuario: user.email,
     });
 

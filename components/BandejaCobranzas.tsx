@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { sugerirCombinaciones, toleranciaDe } from '@/lib/conciliacionCobro';
 import { cuentasElegibles, cuentaSugerida, cantidadPreferidas, cuentasDeRetencion } from '@/lib/cuentasCobro';
 import { retencionDesdeImporte, cuentaParaRetencion } from '@/lib/retenciones';
+import CobroEnPartes, { chequearPartes, type ParteUI } from '@/components/CobroEnPartes';
 import { parsearImporte } from '@/lib/parseResumen';
 import { claveComprobante } from '@/lib/comprobantes';
 
@@ -102,6 +103,12 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
   // sugerencias buscan combinaciones por un número equivocado y no hay ninguna que cierre.
   // Antes la única salida era descartar el movimiento y cargarlo a mano en otra pantalla.
   const [importeEditado, setImporteEditado] = useState(String(Math.round(item.importe)));
+  // La fecha del COBRO, que no es la del aviso: avisar un cheque a 30 días es hoy, pero la
+  // plata entra el mes que viene. Con la fecha del aviso la cuenta muestra plata que no está.
+  const [fechaCobro, setFechaCobro] = useState(String(item.fecha || '').split(/[T ]/)[0]);
+  // Y cuando entra en varias veces, una fila por fecha. Vacío = entra todo junto.
+  const [enPartes, setEnPartes] = useState(false);
+  const [partes, setPartes] = useState<ParteUI[]>([]);
   const importeNum = Math.round(Number(importeEditado)) || 0;
   const importeCambiado = importeNum !== Math.round(item.importe);
   // La lista completa para tildar de a una. Las sugerencias resuelven el caso normal, pero
@@ -212,7 +219,12 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
       const avisoRet = retNum > 0
         ? `\n\nEn Xubio se cancela por ${fmt$(importeNum + retNum)} (el total de la factura) y acá se carga un gasto de ${fmt$(retNum)} por la retención, así la cuenta queda con los ${fmt$(importeNum)} que entraron de verdad.`
         : '';
-      if (!window.confirm(`Se va a registrar en Xubio un cobro de ${fmt$(importeNum)} de ${nombre}, con fecha ${fmtDia(item.fecha)}.${avisoImporte}${avisoRet}\n\nEsto impacta en la contabilidad. ¿Confirmás?`)) return;
+      const chk = enPartes ? chequearPartes(importeNum, partes) : null;
+      if (chk?.error) { setErr(chk.error); return; }
+      const detalleFechas = chk
+        ? `\n\nEntra en ${chk.lista.length} veces: ${chk.lista.map((x) => `${fmtDia(x.fecha)} ${fmt$(x.importe)}`).join(' · ')}.`
+        : `\n\nCon fecha ${fmtDia(fechaCobro)}.`;
+      if (!window.confirm(`Se va a registrar en Xubio un cobro de ${fmt$(importeNum)} de ${nombre}.${detalleFechas}${avisoImporte}${avisoRet}\n\nEsto impacta en la contabilidad. ¿Confirmás?`)) return;
     } else {
       if (!window.confirm('Se va a descartar este movimiento: no se registra ningún cobro y no vuelve a aparecer en la bandeja. ¿Confirmás?')) return;
     }
@@ -224,6 +236,8 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
           id_item: item.id_item, accion,
           id_control: idControl, cuentaId: Number(cuentaId), comprobantes: elegidas,
           importe: importeNum,
+          fecha: fechaCobro,
+          ...(enPartes ? { partes: chequearPartes(importeNum, partes).lista } : {}),
           retencion: Number(retencion) || 0,
         }),
       });
@@ -345,6 +359,18 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
                   </span>
                 )}
               </div>
+              {/* Cuándo entra la plata. Por defecto la del aviso, porque es lo normal, pero
+                  editable: un cheque o un pago diferido se avisan hoy y entran después. */}
+              <div>
+                <label style={{ display: 'block', fontSize: '10px', color: '#6b7280', fontWeight: 600 }}>FECHA DEL COBRO</label>
+                <input type="date" value={fechaCobro} onChange={(e) => setFechaCobro(e.target.value)} disabled={trabajando || enPartes}
+                  style={{ ...inputStyle, width: '140px', ...(fechaCobro !== String(item.fecha || '').split('T')[0] ? { borderColor: '#b45309', fontWeight: 700 } : {}) }} />
+                {fechaCobro !== String(item.fecha || '').split('T')[0] && !enPartes && (
+                  <span style={{ display: 'block', fontSize: '9.5px', color: '#b45309', fontWeight: 700 }}>
+                    el aviso decía {fmtDia(item.fecha)}
+                  </span>
+                )}
+              </div>
               <div>
                 <label style={{ display: 'block', fontSize: '10px', color: '#6b7280', fontWeight: 600 }}>RETENCIÓN</label>
                 <input type="number" min={0} value={retencion} onChange={(e) => setRetencion(e.target.value)} disabled={trabajando}
@@ -378,6 +404,26 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
                   </span>
                 </>
               )}
+            </div>
+          )}
+
+          {/* Cobro que entra en varias veces (cheques, pago en dos partes). Va plegado:
+              es la excepción, y una fila de fechas abierta siempre haría dudar de si hay
+              que completarla en un cobro normal. */}
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: '0 0 8px', fontSize: '11.5px', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
+            <input type="checkbox" checked={enPartes} disabled={trabajando}
+              onChange={(e) => {
+                setEnPartes(e.target.checked);
+                // Arranca con la fecha que ya estaba elegida: es la primera parte, y así no
+                // hay que volver a escribirla.
+                setPartes(e.target.checked ? [{ fecha: fechaCobro, importe: '' }, { fecha: '', importe: '' }] : []);
+              }} />
+            La plata entra en varias fechas (cheques, pago en partes)
+          </label>
+          {enPartes && (
+            <div style={{ marginBottom: '8px' }}>
+              <CobroEnPartes total={importeNum} partes={partes} onChange={setPartes} disabled={trabajando}
+                nota={Number(retencion) > 0 ? 'La retención va entera en la primera.' : ''} />
             </div>
           )}
 
