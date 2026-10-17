@@ -11,8 +11,12 @@ export const dynamic = 'force-dynamic';
 // datos se leen frescos de la planilla en cada carga (force-dynamic, sin caché), así
 // que nunca queda desactualizada aunque se la deje abierta y se recargue más tarde.
 export default async function ReporteSemanalPreviewPage() {
+// Plata = solo admin. Un usuario básico ve lo operativo (cultivos, cámara, cajones,
+// protocolo); ventas, cobranzas, facturación, gastos y resultado no. Esta pantalla no estaba
+// en el menú de un usuario básico, pero eso es esconderla, no cerrarla: la URL alcanzaba.
   const user = await getCurrentUser();
   if (!user) redirect('/login');
+  if (user.rol !== 'admin') redirect('/panel');
 
   let html = '';
   let texto = '';

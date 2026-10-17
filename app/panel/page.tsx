@@ -493,8 +493,15 @@ export default async function PanelPage() {
               paso de más. Van juntas porque las tres son "cargar algo", no mirar algo. */}
           <div style={{ display:'flex', gap:'7px', flexWrap:'wrap' }}>
             <Link href="/cultivos/nuevo" className="btn" style={{ whiteSpace:'nowrap' }}>+ Nuevo lote</Link>
-            <Link href="/gastos" className="btn" style={{ whiteSpace:'nowrap', background:'#92400e' }}>+ Nuevo gasto</Link>
-            <Link href="/cobranzas" className="btn" style={{ whiteSpace:'nowrap', background:'#1d4ed8' }}>+ Nueva cobranza</Link>
+            {/* Gasto y cobranza son plata: solo admin. Un usuario básico entra al Panel igual
+                que todos, y un botón que lo manda a una pantalla que lo rebota no es un
+                atajo, es una puerta cerrada con cartel. */}
+            {user.rol === 'admin' && (
+              <>
+                <Link href="/gastos" className="btn" style={{ whiteSpace:'nowrap', background:'#92400e' }}>+ Nuevo gasto</Link>
+                <Link href="/cobranzas" className="btn" style={{ whiteSpace:'nowrap', background:'#1d4ed8' }}>+ Nueva cobranza</Link>
+              </>
+            )}
           </div>
         </div>
 

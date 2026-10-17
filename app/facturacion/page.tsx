@@ -45,8 +45,12 @@ export interface FacturaPendiente {
 }
 
 export default async function FacturacionPage() {
+// Plata = solo admin. Un usuario básico ve lo operativo (cultivos, cámara, cajones,
+// protocolo); ventas, cobranzas, facturación, gastos y resultado no. Esta pantalla no estaba
+// en el menú de un usuario básico, pero eso es esconderla, no cerrarla: la URL alcanzaba.
   const user = await getCurrentUser();
   if (!user) redirect('/login');
+  if (user.rol !== 'admin') redirect('/panel');
 
   let clientes: ClienteVenta[] = [], precios: PrecioVenta[] = [], ventas: VentaDia[] = [];
   let emitidos: any[] = [];

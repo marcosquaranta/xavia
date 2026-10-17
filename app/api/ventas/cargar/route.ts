@@ -18,6 +18,9 @@ const QTY_KEYS = PROD_KEYS;
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
+    // Plata = solo admin, igual que la pantalla. Cerrar la pantalla y dejar la API abierta
+    // no cierra nada: la pantalla es una cortina, la API es la puerta.
+  if (user.rol !== 'admin') return NextResponse.json({ error: 'Solo un administrador puede ver o cambiar esto.' }, { status: 403 });
   try {
     const { fecha } = await req.json();
     if (!fecha) return NextResponse.json({ error: 'fecha requerida' }, { status: 400 });
