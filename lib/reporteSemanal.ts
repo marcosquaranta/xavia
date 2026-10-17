@@ -965,46 +965,74 @@ export function construirHtml(d: ReporteSemanalData): string {
   const esRuculaFila = (cultivo: string) => cultivo.toLowerCase().startsWith('rúc') || cultivo.toLowerCase().startsWith('ruc');
   const enPaq = (plantas: number) => `${fmtN(Math.round(plantas / POSPAQ))} paq`;
 
-  // Cada fase se muestra como "descartadas (% de las que pasaron por esa fase)" — el
-  // número solo no dice si es grave; el % sobre la base sí. Rojo a partir del 10%.
-  const celdaFaseHtml = (desc: number, base: number) => {
-    if (base <= 0) return '<span style="color:#c8c8c8">—</span>';
-    const pct = Math.round((desc / base) * 1000) / 10;
-    const color = pct >= 10 ? '#dc2626' : '#9ca3af';
-    const peso = pct >= 10 ? '700' : '400';
-    return `${fmtN(desc)} <span style="color:${color};font-weight:${peso}">(${pct}%)</span> <span style="color:#c8c8c8;font-size:11px">de ${fmtN(base)}</span>`;
+  // ── Descarte: una fila por lugar donde SE PIERDE algo ────────────────────────────────
+  //
+  // Antes era una grilla de cuatro fases × cuatro cultivos, con tres sub-filas cada uno
+  // (esta semana, la anterior, el mes). La mayoría de las celdas eran "—": el cuadro era
+  // enorme y había que recorrerlo entero para encontrar los dos o tres lugares donde
+  // realmente se tira producto. Y tres ventanas de tiempo que se pisan entre sí —el mes
+  // incluye las dos semanas— no agregaban nada que el acumulado y la comparación semanal no
+  // dijeran ya.
+  //
+  // Ahora: una fila por cada par cultivo+fase que tuvo descarte, ordenadas por cuánto se
+  // perdió, y tres números que contestan las dos preguntas que importan —cuánto se pierde
+  // ahí, y está subiendo o bajando—. Las fases sin descarte no ocupan una fila: que no
+  // aparezcan ES el dato.
+  const FASES_DESCARTE = [
+    { k: 'plantinF1', b: 'basePlantinF1', label: 'Plantín→F1' },
+    { k: 'f1F2', b: 'baseF1F2', label: 'F1→F2' },
+    { k: 'f2Cosecha', b: 'baseF2Cosecha', label: 'F2→Cosecha' },
+    { k: 'camaraPlantas', b: 'baseCamara', label: 'Cámara' },
+  ] as const;
+  const pctDe = (x: DescarteFaseReporte | undefined, k: string, b: string): number | null => {
+    if (!x) return null;
+    const base = Number((x as any)[b]) || 0;
+    if (base <= 0) return null;
+    return Math.round((Number((x as any)[k]) || 0) / base * 1000) / 10;
   };
-  // Cada cultivo lleva, debajo de su fila de 4 semanas, los mismos porcentajes para esta
-  // semana, la anterior y el mes. El acumulado de 4 semanas solo dice el nivel; estas tres
-  // dicen si está subiendo, bajando o si lo de esta semana fue un pico aislado — que es lo
-  // único que define si hay que ir a mirar algo hoy.
-  const filaVentana = (etiqueta: string, lista: DescarteFaseReporte[], cultivo: string) => {
-    const x = lista.find((y) => y.cultivo === cultivo);
-    if (!x) return '';
-    const pct = (desc: number, base: number) => base > 0 ? `${Math.round((desc / base) * 1000) / 10}%` : '—';
-    return `<tr style="font-size:11.5px;color:#9ca3af">
-      <td style="padding:2px 10px 2px 22px;border-bottom:1px solid #f7f7f7">${etiqueta}</td>
-      <td style="padding:2px 10px;border-bottom:1px solid #f7f7f7;text-align:right">${pct(x.plantinF1, x.basePlantinF1)}</td>
-      <td style="padding:2px 10px;border-bottom:1px solid #f7f7f7;text-align:right">${pct(x.f1F2, x.baseF1F2)}</td>
-      <td style="padding:2px 10px;border-bottom:1px solid #f7f7f7;text-align:right">${pct(x.f2Cosecha, x.baseF2Cosecha)}</td>
-      <td style="padding:2px 10px;border-bottom:1px solid #f7f7f7;text-align:right">${pct(x.camaraPlantas, x.baseCamara)}</td>
-      <td style="padding:2px 10px;border-bottom:1px solid #f7f7f7;text-align:right">${fmtN(x.total)}</td>
-    </tr>`;
-  };
-  const descarteFaseFilas = d.descartePorFase.map((f) => `<tr>
-      <td style="padding:6px 10px;font-weight:600">${f.cultivo}</td>
-      <td style="padding:6px 10px;text-align:right">${celdaFaseHtml(f.plantinF1, f.basePlantinF1)}</td>
-      <td style="padding:6px 10px;text-align:right">${celdaFaseHtml(f.f1F2, f.baseF1F2)}</td>
-      <td style="padding:6px 10px;text-align:right">${celdaFaseHtml(f.f2Cosecha, f.baseF2Cosecha)}</td>
-      <td style="padding:6px 10px;text-align:right">
-        ${celdaFaseHtml(f.camaraPlantas, f.baseCamara)}
-        ${f.camara > 0 && f.camaraPlantas !== f.camara ? `<br><span style="color:#c8c8c8;font-size:11px">${fmtN(f.camara)} paq tirados</span>` : ''}
-      </td>
-      <td style="padding:6px 10px;text-align:right;font-weight:800">${fmtN(f.total)}${esRuculaFila(f.cultivo) ? ` <span style="font-weight:400;color:#9ca3af">(${enPaq(f.total)})</span>` : ''}</td>
-    </tr>
-    ${filaVentana('esta semana', d.descarteSemana, f.cultivo)}
-    ${filaVentana('semana anterior', d.descarteSemanaAnterior, f.cultivo)}
-    ${filaVentana('mes en curso', d.descarteMes, f.cultivo)}`).join('');
+  const pctTxt = (v: number | null) => v === null ? '<span style="color:#c8c8c8">—</span>' : `${v}%`;
+
+  const lineasDescarte = d.descartePorFase.flatMap((f) =>
+    FASES_DESCARTE.map((fase) => {
+      const plantas = Number((f as any)[fase.k]) || 0;
+      const sem = d.descarteSemana.find((y) => y.cultivo === f.cultivo);
+      const ant = d.descarteSemanaAnterior.find((y) => y.cultivo === f.cultivo);
+      return {
+        cultivo: f.cultivo, fase: fase.label, plantas,
+        pct4: pctDe(f, fase.k, fase.b),
+        pctSem: pctDe(sem, fase.k, fase.b),
+        pctAnt: pctDe(ant, fase.k, fase.b),
+        paqTirados: fase.k === 'camaraPlantas' ? (Number(f.camara) || 0) : 0,
+        esRucula: esRuculaFila(f.cultivo),
+      };
+    }),
+  ).filter((x) => x.plantas > 0).sort((a, b) => b.plantas - a.plantas);
+
+  const totalDescarte = d.descartePorFase.reduce((a, f) => a + (Number(f.total) || 0), 0);
+
+  const descarteFaseFilas = lineasDescarte.length === 0
+    ? `<tr><td colspan="4" style="padding:10px;color:#9ca3af">Sin descarte cargado en las últimas 4 semanas.</td></tr>`
+    : lineasDescarte.map((x) => {
+        // Rojo sobre el nivel (10% es mucho en cualquier fase) y flecha sobre la tendencia:
+        // son dos cosas distintas y un 12% que viene bajando no se mira igual que un 4% que
+        // se duplicó.
+        const alto = (x.pct4 ?? 0) >= 10;
+        const sube = x.pctSem !== null && x.pctAnt !== null && x.pctSem > x.pctAnt + 0.5;
+        const baja = x.pctSem !== null && x.pctAnt !== null && x.pctSem < x.pctAnt - 0.5;
+        return `<tr>
+          <td style="padding:7px 10px;border-bottom:1px solid #f0f0f0">
+            <strong>${x.cultivo}</strong> <span style="color:#9ca3af">·</span> ${x.fase}
+          </td>
+          <td style="padding:7px 10px;border-bottom:1px solid #f0f0f0;text-align:right;font-weight:800;color:${alto ? '#dc2626' : '#111'}">
+            ${x.pct4 === null ? '—' : `${x.pct4}%`}
+            <br><span style="font-weight:400;font-size:11px;color:#9ca3af">${fmtN(x.plantas)} pl${x.esRucula ? ` · ${enPaq(x.plantas)}` : ''}${x.paqTirados > 0 ? ` · ${fmtN(x.paqTirados)} paq tirados` : ''}</span>
+          </td>
+          <td style="padding:7px 10px;border-bottom:1px solid #f0f0f0;text-align:right;color:${sube ? '#dc2626' : baja ? '#059669' : '#6b7280'};font-weight:${sube || baja ? '700' : '400'}">
+            ${sube ? '↑ ' : baja ? '↓ ' : ''}${pctTxt(x.pctSem)}
+          </td>
+          <td style="padding:7px 10px;border-bottom:1px solid #f0f0f0;text-align:right;color:#9ca3af">${pctTxt(x.pctAnt)}</td>
+        </tr>`;
+      }).join('');
 
   // ── Indicadores del mes ──
   const indicadoresHtml = d.indicadoresMes.length === 0 ? '' : `
@@ -1252,15 +1280,22 @@ export function construirHtml(d: ReporteSemanalData): string {
     </table>
     <p style="margin:0 0 20px;font-size:11px;color:#9ca3af">− (rojo) = falta, contado por debajo de lo esperado · + (verde) = sobra, contado por encima de lo esperado.</p>
 
-    <h3 style="margin:0 0 8px;font-size:14px">Descarte por cultivo y por fase <span style="font-weight:400;color:#9ca3af">(últimas 4 semanas — plantas descartadas y % de las que pasaron por esa fase)</span></h3>
+    <h3 style="margin:0 0 2px;font-size:14px">Dónde se está perdiendo producto</h3>
+    <p style="margin:0 0 8px;font-size:11.5px;color:#9ca3af">Solo las etapas con descarte. El % es sobre las plantas que pasaron por esa etapa.</p>
     <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:6px">
-      <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Plantín→F1</th><th style="padding:6px 10px;text-align:right">F1→F2</th><th style="padding:6px 10px;text-align:right">F2→Cosecha</th><th style="padding:6px 10px;text-align:right">Cámara</th><th style="padding:6px 10px;text-align:right">Total</th></tr></thead>
+      <thead><tr style="background:#f5f5f5">
+        <th style="padding:6px 10px;text-align:left">Etapa</th>
+        <th style="padding:6px 10px;text-align:right">Últimas 4 sem.</th>
+        <th style="padding:6px 10px;text-align:right">Esta semana</th>
+        <th style="padding:6px 10px;text-align:right">Anterior</th>
+      </tr></thead>
       <tbody>${descarteFaseFilas}</tbody>
     </table>
     <p style="margin:0 0 20px;font-size:11px;color:#9ca3af">
-      <strong>Cámara</strong> es producto ya empaquetado que se tiró, cargado desde Stocks. Se carga en paquetes y se muestra
-      convertido a plantas (en rúcula, 3 por paquete) para poder sumarlo con las otras etapas; su base es lo que salió vivo de la cosecha.
-      No incluye el faltante de los ajustes de stock: eso es producto que no se sabe dónde está, no producto que se decidió tirar, y va en la sección de stock en cámara.
+      Total de 4 semanas: <strong style="color:#374151">${fmtN(totalDescarte)} plantas</strong>.
+      <strong>Cámara</strong> es producto ya empaquetado que se tiró (cargado desde Stocks), pasado a plantas para poder
+      sumarlo con el resto. No incluye el faltante de los ajustes de stock — eso no se tiró, no se sabe dónde está, y va en
+      la sección de stock en cámara.
     </p>
 
     ${indicadoresHtml}
@@ -1404,10 +1439,39 @@ export function construirTexto(d: ReporteSemanalData): string {
   }
   L.push('');
 
-  L.push(`🗑️ *Descarte por cultivo y por fase* (plantas, últimas 4 semanas — dónde se pierde):`);
-  for (const f of d.descartePorFase) {
-    const pctTxt = (desc: number, base: number) => base > 0 ? `${fmtN(desc)} (${Math.round((desc / base) * 1000) / 10}% de ${fmtN(base)})` : '—';
-    L.push(`  ${f.cultivo}: Plantín→F1 ${pctTxt(f.plantinF1, f.basePlantinF1)} · F1→F2 ${pctTxt(f.f1F2, f.baseF1F2)} · F2→Cosecha ${pctTxt(f.f2Cosecha, f.baseF2Cosecha)} · Cámara ${pctTxt(f.camaraPlantas, f.baseCamara)}${f.camara > 0 ? ` [${fmtN(f.camara)} paq]` : ''} · Total ${fmtN(f.total)}${f.cultivo.toLowerCase().startsWith('rúc') ? ` (${fmtN(Math.round(f.total / POSPAQ))} paq)` : ''}`);
+  // Mismo criterio que el mail: solo las etapas donde se pierde algo, ordenadas por
+  // cuánto, y la comparación contra la semana pasada. Una lista de ceros en WhatsApp es
+  // todavía más ilegible que en el mail.
+  L.push(`🗑️ *Dónde se está perdiendo producto* (% sobre lo que pasó por esa etapa):`);
+  const FASES_TXT = [
+    { k: 'plantinF1', b: 'basePlantinF1', label: 'Plantín→F1' },
+    { k: 'f1F2', b: 'baseF1F2', label: 'F1→F2' },
+    { k: 'f2Cosecha', b: 'baseF2Cosecha', label: 'F2→Cosecha' },
+    { k: 'camaraPlantas', b: 'baseCamara', label: 'Cámara' },
+  ] as const;
+  const pctF = (x: DescarteFaseReporte | undefined, k: string, b: string): number | null => {
+    if (!x) return null;
+    const base = Number((x as any)[b]) || 0;
+    return base > 0 ? Math.round((Number((x as any)[k]) || 0) / base * 1000) / 10 : null;
+  };
+  const lineasTxt = d.descartePorFase.flatMap((f) =>
+    FASES_TXT.map((fase) => ({
+      cultivo: f.cultivo, fase: fase.label,
+      plantas: Number((f as any)[fase.k]) || 0,
+      pct4: pctF(f, fase.k, fase.b),
+      pctSem: pctF(d.descarteSemana.find((y) => y.cultivo === f.cultivo), fase.k, fase.b),
+      pctAnt: pctF(d.descarteSemanaAnterior.find((y) => y.cultivo === f.cultivo), fase.k, fase.b),
+    })),
+  ).filter((x) => x.plantas > 0).sort((a, b) => b.plantas - a.plantas);
+  if (lineasTxt.length === 0) {
+    L.push(`  Sin descarte cargado en las últimas 4 semanas.`);
+  } else {
+    for (const x of lineasTxt) {
+      const flecha = x.pctSem !== null && x.pctAnt !== null
+        ? (x.pctSem > x.pctAnt + 0.5 ? ' ↑' : x.pctSem < x.pctAnt - 0.5 ? ' ↓' : '')
+        : '';
+      L.push(`  ${x.cultivo} · ${x.fase}: ${x.pct4 === null ? '—' : `${x.pct4}%`} en 4 sem (${fmtN(x.plantas)} pl) · esta semana ${x.pctSem === null ? '—' : `${x.pctSem}%`}${flecha} (antes ${x.pctAnt === null ? '—' : `${x.pctAnt}%`})`);
+    }
   }
   L.push('');
 
