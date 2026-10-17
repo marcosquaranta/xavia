@@ -176,12 +176,39 @@ export function plantasPerdidasPorSubocupacion(
 // abajo, con el mismo criterio de clasificación de cultivo.
 // ══════════════════════════════════════════════════════════════════════════════════════
 
+// ── Qué se puede medir y qué no ──────────────────────────────────────────────────────
+//
+// Cosechar por PAQUETE no deja contar plantas muertas: se cuentan los paquetes que se
+// armaron, no las plantas que no llegaron. Por eso un lote de rúcula cosechado por paquete
+// guarda `descarte_reportado` en cero por construcción (ver app/api/lotes/cosecha/route.ts),
+// y ese cero no significa "no se perdió nada", significa "nadie lo contó".
+//
+// Tratarlo como un cero real daba rúcula 100% todos los meses, y como la rúcula es la mayor
+// parte del volumen —y además se convierte a plantas multiplicando por 3— el promedio global
+// quedaba pegado arriba del 90% pasara lo que pasara con la lechuga. El indicador decía
+// "objetivo cumplido" el mismo mes en que la crespa perdía el 37% de las plantas.
+//
+// Así que lo no medido se cuenta aparte y no entra en ningún porcentaje. Que una parte del
+// volumen no se pueda medir es un dato en sí mismo, y se muestra.
+export interface EficienciaCultivo {
+  viva: number;
+  descarte: number;
+  pct: number | null;
+  // Plantas que salieron de lotes donde el descarte no se pudo contar. No entran en viva ni
+  // en descarte: no se sabe de qué lado iban.
+  vivaSinMedir: number;
+}
 export interface EficienciaMesCultivo {
   mes: string; label: string;
-  rucula: { viva: number; descarte: number; pct: number | null };
-  lechuga_crespa: { viva: number; descarte: number; pct: number | null };
-  lechuga_roble: { viva: number; descarte: number; pct: number | null };
-  albahaca: { viva: number; descarte: number; pct: number | null };
+  rucula: EficienciaCultivo;
+  lechuga_crespa: EficienciaCultivo;
+  lechuga_roble: EficienciaCultivo;
+  albahaca: EficienciaCultivo;
+  // El global del mes, SOLO sobre lo que se midió. Null si no se midió nada.
+  pctGlobal: number | null;
+  // Qué parte del volumen del mes quedó sin medir, 0-100. Es lo que dice cuánto vale el
+  // número de arriba: un 95% sobre el 10% del volumen no es un 95%.
+  pctSinMedir: number;
 }
 
 export function eficienciaSiembraCosechaPorMes(lotes: Lote[], nMeses = 6, hastaRef: Date = new Date()): EficienciaMesCultivo[] {
@@ -192,7 +219,11 @@ export function eficienciaSiembraCosechaPorMes(lotes: Lote[], nMeses = 6, hastaR
     const mes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     meses.push({
       mes, label: `${MESES_CORTO[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`,
-      rucula: { viva: 0, descarte: 0, pct: null }, lechuga_crespa: { viva: 0, descarte: 0, pct: null }, lechuga_roble: { viva: 0, descarte: 0, pct: null }, albahaca: { viva: 0, descarte: 0, pct: null },
+      rucula: { viva: 0, descarte: 0, pct: null, vivaSinMedir: 0 },
+      lechuga_crespa: { viva: 0, descarte: 0, pct: null, vivaSinMedir: 0 },
+      lechuga_roble: { viva: 0, descarte: 0, pct: null, vivaSinMedir: 0 },
+      albahaca: { viva: 0, descarte: 0, pct: null, vivaSinMedir: 0 },
+      pctGlobal: null, pctSinMedir: 0,
     });
   }
   const idxPorMes = new Map(meses.map((m, i) => [m.mes, i]));
@@ -212,14 +243,29 @@ export function eficienciaSiembraCosechaPorMes(lotes: Lote[], nMeses = 6, hastaR
       ? (Number(l.unidades_cosechadas) || 0) * (Number(l.plantas_por_unidad_real) || 3)
       : (Number(l.unidades_cosechadas) || 0);
     const descarte = Number(l.descarte_reportado) || 0;
-    meses[idx][cultivo].viva += viva;
-    meses[idx][cultivo].descarte += descarte;
+    // Un lote de rúcula cosechado por paquete (o bandeja, o cajón) no midió descarte: su
+    // cero es ausencia de dato. El mismo lote cosechado por planta sí lo mide, así que la
+    // distinción es por lote y no por cultivo.
+    const destino = String(l.destino_cosecha || '').trim();
+    const midioDescarte = !(esRucula && destino !== '' && destino !== 'planta');
+    if (midioDescarte) {
+      meses[idx][cultivo].viva += viva;
+      meses[idx][cultivo].descarte += descarte;
+    } else {
+      meses[idx][cultivo].vivaSinMedir += viva;
+    }
   }
   for (const m of meses) {
+    let vivaTot = 0, descarteTot = 0, sinMedir = 0;
     (['rucula', 'lechuga_crespa', 'lechuga_roble', 'albahaca'] as const).forEach((c) => {
       const base = m[c].viva + m[c].descarte;
       m[c].pct = base > 0 ? Math.round((m[c].viva / base) * 1000) / 10 : null;
+      vivaTot += m[c].viva; descarteTot += m[c].descarte; sinMedir += m[c].vivaSinMedir;
     });
+    const baseMedida = vivaTot + descarteTot;
+    m.pctGlobal = baseMedida > 0 ? Math.round((vivaTot / baseMedida) * 1000) / 10 : null;
+    const todo = baseMedida + sinMedir;
+    m.pctSinMedir = todo > 0 ? Math.round((sinMedir / todo) * 1000) / 10 : 0;
   }
   return meses;
 }

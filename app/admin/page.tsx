@@ -16,6 +16,7 @@ export default async function AdminPage() {
     { href: '/admin/personal', titulo: 'Control de personal', desc: 'Horas, tardanzas y sueldo por quincena (CrossChex)' },
     { href: '/admin/articulos', titulo: 'Artículos de stock', desc: 'Categorías, unidades y fórmula de uso teórico' },
     { href: '/admin/datos-pago', titulo: 'Datos de pago', desc: 'Los datos bancarios que van al pie de cada recordatorio de cobranza' },
+    { href: '/admin/avisos', titulo: 'Avisos por mail', desc: 'A quién le llega cada aviso automático de la app' },
   ];
   return (
     <>

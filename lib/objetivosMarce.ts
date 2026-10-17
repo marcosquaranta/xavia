@@ -68,8 +68,17 @@ export function cumplimientoObjetivo(
   const cumple = brecha >= 0;
   const u = kpi.unidad;
   const signo = brecha > 0 ? '+' : '';
-  const texto = cumple
-    ? `✓ Objetivo cumplido — ${pct}% del objetivo (${signo}${brecha}${u} sobre ${objetivo}${u})`
-    : `${pct}% del objetivo — faltan ${Math.abs(brecha)}${u} para llegar a ${objetivo}${u}`;
+  // Cuando el KPI YA es un porcentaje, "109.9% del objetivo" y "+8.4%" son dos formas de
+  // mentir sobre lo mismo: la brecha entre 93.4% y 85% son 8.4 PUNTOS, no un 8.4%, y el
+  // "109.9% del objetivo" convierte un mes flojo en un logro. Para esos KPI se dice el
+  // valor, el objetivo y la distancia en puntos, que es lo único que significa algo.
+  const esPorcentaje = u === '%';
+  const texto = esPorcentaje
+    ? (cumple
+        ? `✓ Objetivo cumplido — ${valor}% vs. ${objetivo}% de objetivo (${Math.abs(brecha)} ${Math.abs(brecha) === 1 ? 'punto' : 'puntos'} ${kpi.mejor === 'alto' ? 'arriba' : 'abajo'})`
+        : `${valor}% vs. ${objetivo}% de objetivo — ${Math.abs(brecha)} ${Math.abs(brecha) === 1 ? 'punto' : 'puntos'} ${kpi.mejor === 'alto' ? 'abajo' : 'arriba'}`)
+    : (cumple
+        ? `✓ Objetivo cumplido — ${pct}% del objetivo (${signo}${brecha}${u} sobre ${objetivo}${u})`
+        : `${pct}% del objetivo — faltan ${Math.abs(brecha)}${u} para llegar a ${objetivo}${u}`);
   return { valor, objetivo, pct, brecha, cumple, texto };
 }

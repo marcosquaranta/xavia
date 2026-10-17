@@ -3,15 +3,13 @@ import { isAdmin } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import type { VentaDia, ClienteVenta, ConfigItem } from '@/lib/types';
 import { clientesSinPedir, DIAS_AVISO, DIAS_DESCARTE } from '@/lib/clientesSinPedir';
+import { destinatariosDe } from '@/lib/avisosConfig';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// A quién le llega. Es una lista de la planilla (Configuracion → `email_clientes_sin_pedir`,
-// separados por coma) y no una constante en el código: el día que cambie quién sigue a los
-// clientes no debería hacer falta un deploy. Sin la clave cargada cae a administración, que
-// es mejor que no mandar nada y que nadie se entere de que el aviso existe.
-const DESTINO_POR_DEFECTO = ['administracion@xavia.com.ar'];
+// A quién le llega sale de Admin → Avisos por mail (ver lib/avisosConfig.ts): el día que
+// cambie quién sigue a los clientes no debería hacer falta un deploy.
 const CLAVE_CONFIG = 'email_clientes_sin_pedir';
 const URL_VENTAS = 'https://xavia-self.vercel.app/ventas';
 
@@ -47,10 +45,7 @@ export async function GET(req: NextRequest) {
     if (!lista.length) return NextResponse.json({ ok: true, enviado: false, motivo: 'ninguno en la ventana', hoy });
     if (!process.env.RESEND_API_KEY) return NextResponse.json({ ok: false, error: 'RESEND_API_KEY no configurada' }, { status: 500 });
 
-    const crudo = String(config.find((c) => String(c.clave).trim() === CLAVE_CONFIG)?.valor || '').trim();
-    const destinatarios = crudo
-      ? crudo.split(/[,;]/).map((x) => x.trim()).filter((x) => x.includes('@'))
-      : DESTINO_POR_DEFECTO;
+    const destinatarios = destinatariosDe(CLAVE_CONFIG, config);
     if (!destinatarios.length) return NextResponse.json({ ok: false, error: `${CLAVE_CONFIG} no tiene ningún mail válido` }, { status: 500 });
 
     const filas = lista.map((c) => {

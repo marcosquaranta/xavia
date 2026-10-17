@@ -101,13 +101,10 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
 
   // ── KPI 2: Eficiencia Siembra → Cosecha — promedio mensual, por cultivo (últimos 6 meses) ──
   const eficienciaMensual = eficienciaSiembraCosechaPorMes(lotes, 6);
-  function eficienciaGlobalDeMes(m: EficienciaMesCultivo): number | null {
-    const vivaTot = m.rucula.viva + m.lechuga_crespa.viva + m.lechuga_roble.viva;
-    const descarteTot = m.rucula.descarte + m.lechuga_crespa.descarte + m.lechuga_roble.descarte;
-    const base = vivaTot + descarteTot;
-    return base > 0 ? Math.round((vivaTot / base) * 1000) / 10 : null;
-  }
-  const eficienciaGlobalMensual = eficienciaMensual.map(eficienciaGlobalDeMes);
+  // El global sale del propio KPI y no se vuelve a calcular acá: solo promedia lo que se
+  // MIDIÓ (ver lib/kpisOperativos.ts). Sumar la rúcula cosechada por paquete, cuyo descarte
+  // es cero por construcción, dejaba el número arriba del 90% pasara lo que pasara.
+  const eficienciaGlobalMensual = eficienciaMensual.map((m) => m.pctGlobal);
   const eficienciaUltimoMes = (() => {
     for (let i = eficienciaMensual.length - 1; i >= 0; i--) {
       const pctGlobal = eficienciaGlobalMensual[i];
@@ -674,9 +671,28 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
                 <span style={{ fontSize:'11px', color:'#9ca3af' }}>{eficienciaUltimoMes?.mes.label ?? 'sin datos aún'}</span>
               </div>
               {eficienciaUltimoMes && (
+                <>
                 <p style={{ margin:'0 0 6px', fontSize:'10.5px', color:'#6b7280' }}>
-                  Rúcula {eficienciaUltimoMes.mes.rucula.pct ?? '—'}% · Crespa {eficienciaUltimoMes.mes.lechuga_crespa.pct ?? '—'}% · Roble {eficienciaUltimoMes.mes.lechuga_roble.pct ?? '—'}%
+                  {(['rucula','lechuga_crespa','lechuga_roble'] as const).map((c, i) => {
+                    const nombre = c === 'rucula' ? 'Rúcula' : c === 'lechuga_crespa' ? 'Crespa' : 'Roble';
+                    const d = eficienciaUltimoMes.mes[c];
+                    return (
+                      <span key={c}>
+                        {i > 0 ? ' · ' : ''}{nombre}{' '}
+                        {d.pct !== null
+                          ? <strong style={{ color: d.pct < 85 ? '#dc2626' : '#111827' }}>{d.pct}%</strong>
+                          : <span style={{ color: '#9ca3af' }}>no se mide</span>}
+                      </span>
+                    );
+                  })}
                 </p>
+                {eficienciaUltimoMes.mes.pctSinMedir > 0 && (
+                  <p style={{ margin:'0 0 6px', fontSize:'10px', color:'#b45309' }}>
+                    El {eficienciaUltimoMes.mes.pctSinMedir}% del volumen no se mide: cosechar por paquete no deja contar las
+                    plantas que no llegaron. Este número es solo sobre el resto.
+                  </p>
+                )}
+                </>
               )}
               {evoEficienciaCultivo.series.some((s) => s.puntos.length > 0) ? (
                 <>
