@@ -488,9 +488,14 @@ export default async function PanelPage() {
             <h1 className="page-title">Panel de control</h1>
             <p className="page-subtitle">{hoyStr.charAt(0).toUpperCase()+hoyStr.slice(1)} · Bienvenido, {user.nombre}</p>
           </div>
-          {/* Antes al pie de la página — a pedido explícito, arriba de todo para no tener
-              que bajar todo el Panel cada vez que hay que cargar un lote nuevo. */}
-          <Link href="/cultivos/nuevo" className="btn" style={{ whiteSpace:'nowrap' }}>+ Nuevo lote</Link>
+          {/* Arriba de todo, a pedido explícito: son las tres cargas que se hacen todos los
+              días, y bajar el Panel entero (o buscar la sección en el menú) cada vez era el
+              paso de más. Van juntas porque las tres son "cargar algo", no mirar algo. */}
+          <div style={{ display:'flex', gap:'7px', flexWrap:'wrap' }}>
+            <Link href="/cultivos/nuevo" className="btn" style={{ whiteSpace:'nowrap' }}>+ Nuevo lote</Link>
+            <Link href="/gastos" className="btn" style={{ whiteSpace:'nowrap', background:'#92400e' }}>+ Nuevo gasto</Link>
+            <Link href="/cobranzas" className="btn" style={{ whiteSpace:'nowrap', background:'#1d4ed8' }}>+ Nueva cobranza</Link>
+          </div>
         </div>
 
         <BuscadorLote baseUrl="/cultivos" />

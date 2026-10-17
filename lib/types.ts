@@ -378,6 +378,15 @@ export interface StockCamara {
   // Siembra → Cosecha" de los KPIs operativos de Marcelo — ese queda explícitamente
   // acotado a producción (siembra→cosecha), sin cámara ni ventas.
   descarte_paq: number | string;
+  // ── De cuándo es lo que se contó ──────────────────────────────────────────────────────
+  //
+  // Un recuento dice CUÁNTO hay, no desde cuándo está. Sin este dato, la pila arranca de
+  // nuevo el día del conteo y todo lo que había pasa a tener cero días: la alerta de
+  // antigüedad se reinicia sola cada vez que alguien cuenta, justo cuando más hace falta.
+  //
+  // `fecha` sigue siendo el corte (desde cuándo cuentan las cosechas y ventas posteriores);
+  // `fecha_origen` es solo la EDAD de lo contado. Vacío = lo contado es de ese mismo día.
+  fecha_origen: string;
 }
 
 // Configuración por empleado para Control de personal (horas/CrossChex) — workno es el

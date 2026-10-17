@@ -246,6 +246,12 @@ export function calcularCamara(
   if (!fechaBase) return { cultivo, stockActual: 0, diasPromedio: 0, diasMasViejo: 0, cantidadMasVieja: 0, base, cajones: { stockActual: 0, diasPromedio: 0, diasMasViejo: 0, cantidadMasVieja: 0 } };
 
   const cantidadBase = Number(base.cantidad_paq) || 0;
+  // La EDAD de lo contado, que no es lo mismo que la fecha del conteo. Si quien contó dijo de
+  // cuándo es lo más viejo, la pila arranca con esa fecha; si no, con la del conteo (que es
+  // lo que se venía haciendo, y lo que hacía que contar reiniciara la alerta de antigüedad).
+  // El CORTE —desde cuándo suman las cosechas y restan las ventas— sigue siendo `fechaBase`:
+  // mezclar las dos cosas volvería a contar cosechas que ya estaban adentro del recuento.
+  const fechaEdadBase = parseDate((base as any).fecha_origen) || fechaBase;
 
   // Cosechas desde fechaBase (exclusive: solo posteriores a la base), con la regla del
   // mediodía aplicada respecto a "ahora" — antes esto no tenía límite superior alguno,
@@ -314,7 +320,7 @@ export function calcularCamara(
   // FIFO para días promedio
   // Cola: base primero, luego cosechas ordenadas por fecha ASC
   const cola: { fecha: Date; cantidad: number }[] = [
-    { fecha: fechaBase, cantidad: cantidadBase },
+    { fecha: fechaEdadBase, cantidad: cantidadBase },
     ...cosechas.sort((a, b) => a.fecha.getTime() - b.fecha.getTime()),
   ];
 
@@ -379,11 +385,12 @@ function pilaDeCajones(
   hoy: Date,
 ): ResultadoCamara['cajones'] {
   const cantidadBase = Number((base as any).cantidad_cajones) || 0;
+  const fechaEdadBase = parseDate((base as any).fecha_origen) || fechaBase;
   const vendidos = cajonesVendidosEntre(cultivo, ventas, fechaBase, hoy);
   const stockActual = Math.round(Math.max(0, cantidadBase + totalCosechado - vendidos));
 
   const cola: { fecha: Date; cantidad: number }[] = [
-    { fecha: fechaBase, cantidad: cantidadBase },
+    { fecha: fechaEdadBase, cantidad: cantidadBase },
     ...cosechas.filter((c) => c.cajones > 0).map((c) => ({ fecha: c.fecha, cantidad: c.cajones }))
       .sort((a, b) => a.fecha.getTime() - b.fecha.getTime()),
   ];

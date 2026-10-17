@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
 
   try {
-    const { cultivo, fecha, tipo, cantidad_paq, cantidad_cajones, notas, descarte_paq } = await req.json();
+    const { cultivo, fecha, tipo, cantidad_paq, cantidad_cajones, notas, descarte_paq, fecha_origen } = await req.json();
     if (!cultivo || !fecha || !tipo || cantidad_paq === undefined) {
       return NextResponse.json({ error: 'datos_incompletos' }, { status: 400 });
     }
@@ -29,6 +29,8 @@ export async function POST(req: NextRequest) {
     // El recuento de cajones del mismo conteo. Los cajones son una pila aparte en la cámara
     // (ver lib/camara.ts): se cuentan y se descuentan por separado de los paquetes.
     await asegurarColumna('StockCamara', 'cantidad_cajones');
+    // De cuándo es lo contado. Sin esto, contar reiniciaba la antigüedad de todo el stock.
+    await asegurarColumna('StockCamara', 'fecha_origen');
 
     // Append por NOMBRE de columna (inmune al orden de columnas de la planilla).
     // El appendRow posicional anterior podía meter cultivo/fecha en columnas
@@ -40,6 +42,7 @@ export async function POST(req: NextRequest) {
       tipo,
       cantidad_paq: Number(cantidad_paq),
       cantidad_cajones: Number(cantidad_cajones) > 0 ? Number(cantidad_cajones) : '',
+      fecha_origen: /^\d{4}-\d{2}-\d{2}$/.test(String(fecha_origen || '')) ? String(fecha_origen) : '',
       notas: notas || '',
       usuario: user.email,
       fecha_carga: new Date().toISOString().split('T')[0],

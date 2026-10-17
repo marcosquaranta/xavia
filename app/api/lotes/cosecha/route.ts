@@ -40,7 +40,11 @@ export async function POST(req: NextRequest) {
     if (modoFinal === 'planta' && !(Number(peso_muestra_gr) > 0)) {
       return NextResponse.json({ error: 'El pesaje testigo (peso del paquete en gramos) es obligatorio' }, { status: 400 });
     }
-    if (modoFinal === 'paquete' && !(Number(peso_muestra_paquete_gr) > 0)) {
+    // También en modo cajón, y por un motivo más fuerte que en paquete: lo que entra a la
+    // cámara por un cajón se calcula dividiendo los kilos del cajón por el peso del paquete
+    // (ver lib/cosechaCajones.ts). Sin pesaje, esa división usa el peso de referencia y la
+    // cantidad que entra al stock es una estimación disfrazada de dato.
+    if ((modoFinal === 'paquete' || modoFinal === 'cajon') && !(Number(peso_muestra_paquete_gr) > 0)) {
       return NextResponse.json({ error: 'El pesaje testigo (peso del paquete en gramos) es obligatorio' }, { status: 400 });
     }
 
@@ -173,7 +177,7 @@ export async function POST(req: NextRequest) {
         peso_muestra_kg: pesoMuestra,
         peso_total_estimado_kg: pesoKg > 0 ? pesoKg.toFixed(3) : '',
         cajones_armados: Number(cajones_armados) > 0 ? Number(cajones_armados) : '',
-        peso_muestra_paquete_gr: modoFinal === 'paquete' ? (Number(peso_muestra_paquete_gr) || '') : '',
+        peso_muestra_paquete_gr: modoFinal === 'planta' ? '' : (Number(peso_muestra_paquete_gr) || ''),
         destino_cosecha: destino,
         estado: 'cosechado',
         lote_origen: id_lote,
@@ -215,7 +219,7 @@ export async function POST(req: NextRequest) {
       peso_muestra_kg: pesoMuestra,
       peso_total_estimado_kg: pesoKg > 0 ? pesoKg.toFixed(3) : '',
       cajones_armados: modoFinal === 'cajon' ? (Number(cajones_armados) || 0) : '',
-      peso_muestra_paquete_gr: modoFinal === 'paquete' ? (Number(peso_muestra_paquete_gr) || '') : '',
+      peso_muestra_paquete_gr: modoFinal === 'planta' ? '' : (Number(peso_muestra_paquete_gr) || ''),
       destino_cosecha: destino,
       estado: 'cosechado',
       fecha_ult_movimiento: fecha,

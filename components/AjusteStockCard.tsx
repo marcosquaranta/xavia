@@ -20,11 +20,20 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, a
   compact?: boolean;
 }) {
   const [abierto, setAbierto] = useState<CultivoCamara | null>(null);
+  // Los dos recuentos vienen PRECARGADOS con lo que calcula la app, no vacíos.
+  //
+  // Un conteo escribe una base nueva y las dos pilas se reconstruyen desde ahí, así que un
+  // campo en blanco no significa "no lo conté": significa cero. Antes, contar solo los
+  // cajones era imposible —el botón quedaba apagado porque faltaban los paquetes— y dejar
+  // los cajones en blanco los habría puesto en cero sin que nadie lo pidiera.
   const [cantidad, setCantidad] = useState('');
   // El recuento de cajones del mismo conteo. Arranca con el stock calculado, no vacío: un
   // recuento escribe una base nueva y la pila de cajones se reconstruye desde ahí, así que
   // dejarlo en blanco pondría los cajones en cero sin que nadie lo haya querido.
   const [cantidadCaj, setCantidadCaj] = useState('');
+  // De cuándo es lo más viejo de lo que se contó. Sin este dato la pila arranca hoy y la
+  // alerta de antigüedad se reinicia sola con cada conteo, que es cuando más hace falta.
+  const [fechaOrigen, setFechaOrigen] = useState('');
   const [notas, setNotas] = useState('');
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; s: string } | null>(null);
@@ -39,16 +48,19 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, a
   const diff = abierto && cantidad !== '' ? Math.round(Number(cantidad) - stockAbierto) : null;
 
   function abrir(key: CultivoCamara) {
-    const caj = cultivos.find(c => c.key === key)!.data.cajones;
-    setAbierto(key); setCantidad(''); setCantidadCaj(caj && caj.stockActual > 0 ? String(caj.stockActual) : '');
+    const d = cultivos.find(c => c.key === key)!.data;
+    setAbierto(key);
+    setCantidad(String(d.actual));
+    setCantidadCaj(d.cajones ? String(d.cajones.stockActual) : '0');
+    setFechaOrigen('');
     setNotas(''); setMsg(null);
   }
   function cerrar() {
-    setAbierto(null); setCantidad(''); setCantidadCaj(''); setNotas('');
+    setAbierto(null); setCantidad(''); setCantidadCaj(''); setFechaOrigen(''); setNotas('');
   }
 
   async function registrar() {
-    if (!abierto || cantidad === '') return;
+    if (!abierto || (cantidad === '' && cantidadCaj === '')) return;
     setLoading(true); setMsg(null);
     try {
       const r = await fetch('/api/stocks/camara/base', {
@@ -56,7 +68,8 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, a
         body: JSON.stringify({
           cultivo: abierto, fecha: new Date().toISOString().slice(0, 10),
           tipo: 'ajuste', cantidad_paq: Number(cantidad),
-          cantidad_cajones: cantidadCaj === '' ? 0 : Number(cantidadCaj), notas,
+          cantidad_cajones: cantidadCaj === '' ? 0 : Number(cantidadCaj),
+          fecha_origen: fechaOrigen, notas,
         }),
       });
       const j = await r.json().catch(() => ({}));
@@ -64,7 +77,8 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, a
       // La diferencia de un recuento es un FALTANTE, no un descarte: es producto que no se
       // sabe dónde está. El descarte se carga aparte, desde Stocks, y dice por qué se tiró.
       const dTxt = diff === null || diff === 0 ? 'sin faltante vs. lo esperado' : `${diff > 0 ? '+' : ''}${diff} paq de faltante`;
-      setMsg({ t: 'ok', s: `Ajuste registrado (${dTxt}). Recargando…` });
+      const cajTxt = cantidadCaj !== '' ? ` · ${Number(cantidadCaj)} cajones` : '';
+      setMsg({ t: 'ok', s: `Ajuste registrado (${dTxt}${cajTxt}). Recargando…` });
       setTimeout(() => window.location.reload(), 1600);
     } catch (e: any) {
       setMsg({ t: 'err', s: e.message || 'Error al guardar' });
@@ -141,20 +155,35 @@ export default function AjusteStockCard({ rucula, lechugaCrespa, lechugaRoble, a
 
             {abierto === c.key ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <input type="number" placeholder="Cantidad real (paq)" value={cantidad} onChange={e => setCantidad(e.target.value)} disabled={loading}
+                <p style={{ margin: 0, fontSize: '10.5px', color: '#6b7280', lineHeight: 1.4 }}>
+                  Vienen con lo que calcula la app. Pisá el que contaste y dejá el otro como está.
+                </p>
+                <label style={{ fontSize: '10.5px', color: '#6b7280' }}>Paquetes contados</label>
+                <input type="number" placeholder="Paquetes contados" value={cantidad} onChange={e => setCantidad(e.target.value)} disabled={loading}
                   style={{ fontSize: '12px', padding: '4px 6px', border: '1px solid #d1d5db', borderRadius: '5px' }} />
                 {diff !== null && (
                   <span style={{ fontSize: '11px', fontWeight: 600, color: diff === 0 ? '#6b7280' : diff > 0 ? '#059669' : '#dc2626' }}>
                     {diff === 0 ? 'Sin faltante' : `${diff > 0 ? '+' : ''}${diff} paq de faltante`}
                   </span>
                 )}
+                <label style={{ fontSize: '10.5px', color: '#6b7280' }}>Cajones contados</label>
                 <input type="number" placeholder="Cajones contados" value={cantidadCaj} onChange={e => setCantidadCaj(e.target.value)} disabled={loading}
                   style={{ fontSize: '12px', padding: '4px 6px', border: '1px solid #d1d5db', borderRadius: '5px' }} />
+                {/* La edad de lo contado. Un recuento dice cuánto hay, no desde cuándo está:
+                    sin esto la pila arranca hoy, todo pasa a tener cero días y la alerta de
+                    antigüedad se reinicia justo cuando alguien la revisa. */}
+                <label style={{ fontSize: '10.5px', color: '#6b7280' }}>¿De cuándo es lo más viejo que contaste?</label>
+                <input type="date" value={fechaOrigen} max={new Date().toISOString().slice(0, 10)}
+                  onChange={e => setFechaOrigen(e.target.value)} disabled={loading}
+                  style={{ fontSize: '12px', padding: '4px 6px', border: '1px solid #d1d5db', borderRadius: '5px' }} />
+                <span style={{ fontSize: '10px', color: '#9ca3af', marginTop: '-3px' }}>
+                  Opcional, pero si lo dejás vacío la app toma todo como cosechado hoy y la alerta de días en cámara se reinicia.
+                </span>
                 <input type="text" placeholder="Notas (opcional)" value={notas} onChange={e => setNotas(e.target.value)} disabled={loading}
                   style={{ fontSize: '12px', padding: '4px 6px', border: '1px solid #d1d5db', borderRadius: '5px' }} />
                 <div style={{ display: 'flex', gap: '6px' }}>
-                  <button onClick={registrar} disabled={loading || cantidad === ''}
-                    style={{ fontSize: '11px', padding: '4px 10px', background: '#166534', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', opacity: loading || cantidad === '' ? 0.6 : 1 }}>
+                  <button onClick={registrar} disabled={loading || (cantidad === '' && cantidadCaj === '')}
+                    style={{ fontSize: '11px', padding: '4px 10px', background: '#166534', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', opacity: loading || (cantidad === '' && cantidadCaj === '') ? 0.6 : 1 }}>
                     {loading ? 'Guardando…' : 'Confirmar'}
                   </button>
                   <button onClick={cerrar} disabled={loading}

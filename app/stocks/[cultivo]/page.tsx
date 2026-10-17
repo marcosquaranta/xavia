@@ -7,6 +7,7 @@ import Header from '@/components/Header';
 import CargarDescarteCamara from '@/components/CargarDescarteCamara';
 
 import { plantasDeVenta } from '@/lib/articulos';
+import { calcularCamara, DIAS_CAMARA_ALERTA, type CultivoCamara } from '@/lib/camara';
 export const dynamic = 'force-dynamic';
 
 function parseD(s: any): Date | null {
@@ -128,6 +129,12 @@ export default async function StockDetallePage({ params, searchParams }: { param
   const nextMes = `${month === 11 ? year + 1 : year}-${String(month === 11 ? 1 : month + 2).padStart(2, '0')}`;
   const hoyDia = inMonth(hoy) ? hoy.getDate() : -1;
 
+  // La pila de cajones, con las mismas reglas que la de paquetes (ver lib/camara.ts). Esta
+  // pantalla lleva el día a día en paquetes; los cajones son otro bulto y no entran en esa
+  // grilla, pero son stock en la misma cámara y no verlos acá obligaba a ir a otra pantalla
+  // para saber cuántos hay.
+  const camara = calcularCamara(cultivo as CultivoCamara, registros, lotes, ventas);
+
   return (
     <>
       <Header user={user} current="stocks" />
@@ -143,6 +150,22 @@ export default async function StockDetallePage({ params, searchParams }: { param
             <span style={{ fontSize: '13px', fontWeight: 600, textTransform: 'capitalize', minWidth: '120px', textAlign: 'center' }}>{nombreMes}</span>
             <Link href={`/stocks/${cultivo}?mes=${nextMes}`} className="btn secondary" style={{ fontSize: '12px', padding: '4px 10px' }}>→</Link>
           </div>
+        </div>
+        {/* Los cajones, arriba y en bultos: es la unidad en la que se cuentan en la cámara. */}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap', background: camara.cajones.diasMasViejo >= DIAS_CAMARA_ALERTA ? '#fef2f2' : '#f9fafb', border: `1px solid ${camara.cajones.diasMasViejo >= DIAS_CAMARA_ALERTA ? '#fecaca' : '#e5e7eb'}`, borderRadius: '8px', padding: '8px 12px', margin: '0 0 10px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151' }}>📦 Cajones en cámara</span>
+          <strong style={{ fontSize: '18px', color: '#111827' }}>{camara.cajones.stockActual}</strong>
+          {camara.cajones.cantidadMasVieja > 0 && (
+            <span style={{ fontSize: '11.5px', color: camara.cajones.diasMasViejo >= DIAS_CAMARA_ALERTA ? '#dc2626' : '#6b7280', fontWeight: camara.cajones.diasMasViejo >= DIAS_CAMARA_ALERTA ? 700 : 400 }}>
+              {camara.cajones.diasMasViejo >= DIAS_CAMARA_ALERTA ? '⚠ ' : ''}
+              el más viejo es de hace {camara.cajones.diasMasViejo} {camara.cajones.diasMasViejo === 1 ? 'día' : 'días'}
+              {camara.cajones.cantidadMasVieja > 0 ? ` (${camara.cajones.cantidadMasVieja} cj)` : ''}
+              {camara.cajones.diasMasViejo >= DIAS_CAMARA_ALERTA ? ' — sacarlos primero' : ''}
+            </span>
+          )}
+          <span style={{ fontSize: '10.5px', color: '#9ca3af', marginLeft: 'auto' }}>
+            Se cuentan aparte de los paquetes: entra lo cosechado en cajón, sale lo vendido por kilo.
+          </span>
         </div>
         <p className="page-subtitle">Stock teórico día a día. Las ventas se imputan por su <strong>fecha de venta</strong>. Los días con control de stock (resaltados) muestran lo <strong>contado físicamente</strong>; el sobrante/faltante sale de comparar ese conteo contra lo esperado.</p>
 
