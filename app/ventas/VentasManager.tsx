@@ -213,7 +213,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   };
   // El mismo escape que en paquetes: esconder a alguien que SÍ compra porque falta cargarle
   // el precio deja una venta sin forma de cargarse, y eso es peor que la fila de más.
-  const filasEnsalada = mostrarSinPrecio ? filas.filter(f=>f.unidad!=='kg') : filas.filter(tienePrecioEnsalada);
+  // Sin filtrar por `unidad`: un cliente de cajón puede comprar ensaladas o albahaca, y
+  // excluirlo por cómo se le vende la rúcula lo dejaba sin dónde cargarlas.
+  const filasEnsalada = mostrarSinPrecio ? filas : filas.filter(tienePrecioEnsalada);
   const totsEnsalada: Record<string,number> = Object.fromEntries(
     APARTE.map(a=>[a.key, filasEnsalada.reduce((acc,f)=>acc+(Number(q(f.id_control,f.sucursal,a.key))||0),0)]),
   );
@@ -375,8 +377,13 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       setShowPreExport(false);
       Object.values(tmrs.current).forEach(t=>clearTimeout(t));
       // Flush de todas las cantidades cargadas (igual que en exportar)
+      // Un cliente que compra por cajón Y por unidad está en las dos listas, y cada una
+      // arma su propia línea para el mismo cliente, el mismo día y la misma sucursal: dos
+      // filas para una sola venta. La de cajones ya incluye las cantidades por unidad, así
+      // que es la que vale — de las normales se saca a los que también están allá.
+      const clavesKg = new Set(filasKg.map(f=>`${f.id_control}__${f.sucursal}`));
       const todasLineas = [
-        ...filasNormales.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
+        ...filasNormales.filter(f=>!clavesKg.has(`${f.id_control}__${f.sucursal}`)).map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
         ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:kgDeCajones('rucula_kg',Number(dr?.rucula_kg?.value)||0),lechuga_kg_crespa:kgDeCajones('lechuga_kg_crespa',Number(dr?.lechuga_kg_crespa?.value)||0),lechuga_kg_roble:kgDeCajones('lechuga_kg_roble',Number(dr?.lechuga_kg_roble?.value)||0)};}),
       ].filter((l:LineaCarga)=>[...KEYS_UNIDAD,...KEYS_KG].some(k=>Number(l[k])>0));
       const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:todasLineas})});
@@ -403,8 +410,11 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       setShowPreExport(false);
       // Cancelar timers pendientes y guardar TODO en UN solo request antes de exportar
       Object.values(tmrs.current).forEach(t=>clearTimeout(t));
+      // Mismo cuidado que al cargar: el cliente que está en las dos listas se manda una
+      // sola vez, desde la de cajones, que ya lleva también las cantidades por unidad.
+      const clavesKgExp = new Set(filasKg.map(f=>`${f.id_control}__${f.sucursal}`));
       const todasLineas = [
-        ...filasNormales.map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
+        ...filasNormales.filter(f=>!clavesKgExp.has(`${f.id_control}__${f.sucursal}`)).map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
         ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:kgDeCajones('rucula_kg',Number(dr?.rucula_kg?.value)||0),lechuga_kg_crespa:kgDeCajones('lechuga_kg_crespa',Number(dr?.lechuga_kg_crespa?.value)||0),lechuga_kg_roble:kgDeCajones('lechuga_kg_roble',Number(dr?.lechuga_kg_roble?.value)||0)};}),
       // Solo enviar líneas con al menos una cantidad > 0
       ].filter((l:LineaCarga)=>[...KEYS_UNIDAD,...KEYS_KG].some(k=>Number(l[k])>0));
@@ -439,13 +449,37 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
     return ALL.some((a) => precioFinal(precios, String(f.id_control), f.sucursal, a.key, cli) > 0)
       || APARTE.some((a) => precioFinal(precios, String(f.id_control), f.sucursal, a.key, cli) > 0);
   }
+  // Lo mismo para los de cajón: tener precio en algún artículo por kilo.
+  function tienePrecioKg(f: Fila): boolean {
+    const cli = clientes.find((c) => String(c.id_control) === String(f.id_control));
+    return KGK_ALL.some((k) => precioFinal(precios, String(f.id_control), f.sucursal, k, cli) > 0);
+  }
 
-  const porPaquete = filas.filter(f=>f.unidad!=='kg');
+  // ── Un cliente puede estar en las dos secciones ─────────────────────────────────────
+  //
+  // `unidad` del cliente decidía TODO: con 'kg' aparecía solo en la tabla de cajones y con
+  // cualquier otra cosa solo en la grilla de paquetes. Pero hay clientes que llevan rúcula
+  // y lechuga por cajón Y además ensaladas, albahaca o berro por unidad, y para esos había
+  // que elegir cuál de las dos ventas se podía cargar: la otra no tenía dónde entrar.
+  //
+  // Ahora `unidad` es solo el default de cómo se le vende, y lo que decide en qué sección
+  // aparece es lo mismo que decide todo lo demás acá: tener precio cargado. Es la misma
+  // regla que ya usaban la grilla de paquetes y la sección de otros productos, aplicada
+  // también a la de cajones — tres secciones preguntando lo mismo en vez de dos reglas
+  // distintas.
+  //
+  // El default sigue valiendo para el que todavía no tiene ningún precio: sin esto, un
+  // cliente nuevo no aparecería en ninguna parte hasta que alguien le cargue la lista.
+  const porPaquete = filas.filter((f) => tienePrecioPaquete(f) || (f.unidad !== 'kg' && !tienePrecioKg(f)));
   const sinPrecioPaquete = porPaquete.filter((f) => !tienePrecioPaquete(f));
   // Se pueden mostrar igual. Esconder a alguien que SÍ compra porque falta cargarle el precio
   // dejaría una venta sin forma de cargarse, y eso es peor que la fila de más.
   const filasNormales = mostrarSinPrecio ? porPaquete : porPaquete.filter(tienePrecioPaquete);
-  const filasKg = filas.filter(f=>f.unidad==='kg');
+  // Mismo criterio del otro lado: entra el que tiene precio por kilo, y además el que está
+  // marcado como cliente de cajón aunque todavía no se lo hayan cargado.
+  const filasKg = mostrarSinPrecio
+    ? filas.filter((f) => tienePrecioKg(f) || f.unidad === 'kg')
+    : filas.filter((f) => tienePrecioKg(f) || (f.unidad === 'kg' && !tienePrecioPaquete(f)));
   const tots:Record<PK,number>=vacio(0);
   for(const f of filasNormales)for(const p of ALL)tots[p.key]+=Number(q(f.id_control,f.sucursal,p.key))||0;
   const totsKg={rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0};
