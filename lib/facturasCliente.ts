@@ -198,7 +198,15 @@ export function facturasPorCliente(
   // SIN imputar, y ese número no sale en el resultado: sin él, "esta factura está abierta"
   // es un veredicto que no se puede discutir. Va como parámetro de salida y no en el retorno
   // para no cambiarle la forma a los seis lugares que ya llaman a esta función.
-  diagnostico?: { cobradoSinImputar?: Map<string, number> },
+  diagnostico?: {
+    cobradoSinImputar?: Map<string, number>;
+    // Dónde se cortó el reparto de cada cliente, si se cortó. Es el dato que explica el
+    // caso más confuso de toda la pantalla: cuando la factura más vieja no entra entera en
+    // lo que el cliente cobró sin imputar, el reparto se detiene ahí y TODAS las que siguen
+    // quedan figurando impagas. El cliente aparece debiendo un año entero y el número no
+    // tiene ninguna explicación visible. `repartir` ya lo sabe; faltaba sacarlo afuera.
+    cortes?: Map<string, { numero: string; fecha: string; importe: number; restaba: number }>;
+  },
 ): Record<string, FacturaCliente[]> {
   // Las facturas que la app ya imputó. No es lo mismo que "pagas" —Xubio no expone eso—
   // pero alcanza para no ofrecer dos veces la misma.
@@ -283,7 +291,12 @@ export function facturasPorCliente(
 
   // De la más reciente a la más vieja, que es como se las busca al cobrar.
   for (const id of Object.keys(out)) {
-    if (cobranzas) out[id] = cubrirConCobrosDeXubio(out[id], cobradoPorCliente.get(id) || 0);
+    if (cobranzas) {
+      const sinImputar = cobradoPorCliente.get(id) || 0;
+      const d = repartir(out[id], sinImputar);
+      out[id] = out[id].map((f) => ({ ...f, cubierta: d.cubiertas.has(f.numero) }));
+      if (d.corte && diagnostico?.cortes) diagnostico.cortes.set(String(id), d.corte);
+    }
     out[id].sort((a, b) => b.fecha.localeCompare(a.fecha));
   }
   if (diagnostico) diagnostico.cobradoSinImputar = cobradoPorCliente;

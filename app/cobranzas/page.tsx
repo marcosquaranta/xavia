@@ -221,9 +221,16 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   // recordatorios: un cliente al que hace tres semanas no se le reclama y debe dos
   // millones tiene que poder verse sin abrir nada.
   const deudaPorCliente: Record<string, { monto: number; cantidad: number; masVieja: string }> = {};
+  let cortesPorCliente: Record<string, { numero: string; fecha: string; importe: number; restaba: number }> = {};
   try {
     const [comps, cobs] = await pedidoXubio;
-    const todas = facturasPorCliente(comps, cobros, clientes, saldadasSet, cobs, imputadas, ajustes);
+    // Dónde se cortó el reparto de cada cliente. Es la explicación del caso más
+    // desconcertante de esta pantalla —un cliente que aparece debiendo el año entero porque
+    // su cobro no alcanzó a cubrir entera la factura más vieja— y hasta ahora el cálculo lo
+    // sabía y no lo decía.
+    const cortesReparto = new Map<string, { numero: string; fecha: string; importe: number; restaba: number }>();
+    const todas = facturasPorCliente(comps, cobros, clientes, saldadasSet, cobs, imputadas, ajustes, { cortes: cortesReparto });
+    cortesPorCliente = Object.fromEntries(cortesReparto);
     for (const [id, fs] of Object.entries(todas)) {
       // Impaga = ni imputada desde la app, ni cubierta por los cobros de Xubio, ni dada por
       // saldada a mano. Es el mismo criterio con el que se decide qué reclamar, así que el
@@ -611,6 +618,7 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
               conRecordatorio={[...conRecordatorio]}
               revisiones={revisionesUI}
               diasRevisionVieja={DIAS_REVISION_VIEJA}
+              cortes={cortesPorCliente}
             />
           </div>
         </div>

@@ -111,7 +111,11 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
   // plata entra el mes que viene. Con la fecha del aviso la cuenta muestra plata que no está.
   const [fechaCobro, setFechaCobro] = useState(String(item.fecha || '').split(/[T ]/)[0]);
   // Y cuando entra en varias veces, una fila por fecha. Vacío = entra todo junto.
-  const [verMail, setVerMail] = useState(false);
+  // Si el aviso trae un adjunto, el bloque arranca ABIERTO. Un adjunto en un aviso de pago
+  // es casi siempre el comprobante, o sea el único lugar donde está el dato: esconderlo
+  // detrás de un click es pedir un paso de más justo en el caso en que hace falta. Cuando
+  // el mail es solo texto queda plegado, porque ahí la descripción de arriba suele alcanzar.
+  const [verMail, setVerMail] = useState(() => !!String(item.adjuntos || '').trim());
   // Corregir el importe de una factura sin salir de acá. El caso es siempre el mismo: el
   // aviso dice $X, la factura figura por $Y y la diferencia es un error de carga. Había que
   // irse a la pantalla de comprobantes y volver, perdiendo todo lo ya tildado.

@@ -14,6 +14,13 @@ import type { FacturaCliente } from '@/lib/facturasCliente';
 
 export interface ClienteImpagas { id_control: string; nombre: string }
 
+// Dónde se cortó el reparto de los cobros de Xubio, por cliente. Es la explicación del caso
+// más desconcertante de esta pantalla: si la factura más vieja no entra entera en lo que el
+// cliente cobró sin imputar, el reparto se detiene ahí y TODAS las que siguen quedan
+// figurando impagas — el cliente aparece debiendo un año entero. El dato existía en el
+// cálculo y no se mostraba, así que el número no tenía ninguna explicación visible.
+export interface CorteReparto { numero: string; fecha: string; importe: number; restaba: number }
+
 // La última vez que se controló la cuenta de cada cliente, con la foto de lo que había.
 export interface RevisionUI {
   id_control: string;
@@ -34,7 +41,7 @@ const diasDesde = (f: string) => {
 };
 
 export default function ResumenImpagas({
-  clientes, facturasPorCliente, conRecordatorio = [], revisiones = {}, diasRevisionVieja = 30,
+  clientes, facturasPorCliente, conRecordatorio = [], revisiones = {}, diasRevisionVieja = 30, cortes = {},
 }: {
   clientes: ClienteImpagas[];
   facturasPorCliente: Record<string, FacturaCliente[]>;
@@ -43,9 +50,78 @@ export default function ResumenImpagas({
   conRecordatorio?: string[];
   revisiones?: Record<string, RevisionUI>;
   diasRevisionVieja?: number;
+  // Dónde se cortó el reparto de cada cliente (ver CorteReparto).
+  cortes?: Record<string, CorteReparto>;
 }) {
   const router = useRouter();
   const [abierto, setAbierto] = useState<string | null>(null);
+  // La cuenta corriente del cliente, accionable. Hasta ahora el detalle se podía mirar y
+  // nada más: para dar una factura por cobrada había que irse a otra pantalla, buscarla de
+  // nuevo y volver, y por eso en la práctica quedaban figurando impagas para siempre.
+  const [elegidas, setElegidas] = useState<string[]>([]);
+  const [motivo, setMotivo] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  const [editando, setEditando] = useState<string | null>(null);
+  const [nuevoImporte, setNuevoImporte] = useState('');
+  const [motivoAjuste, setMotivoAjuste] = useState('');
+
+  const alternar = (n: string) => setElegidas((p) => p.includes(n) ? p.filter((x) => x !== n) : [...p, n]);
+
+  // Dar por cobradas las elegidas. No genera ningún movimiento en Xubio: es exactamente la
+  // misma marca que la pantalla de facturas saldadas, así que no hay dos formas distintas
+  // de que una factura quede fuera de los reclamos.
+  async function marcarCobradas(idControl: string, nombre: string, impagas: FacturaCliente[]) {
+    if (!elegidas.length) return;
+    if (!motivo.trim()) { setMsg('Escribí por qué se dan por cobradas.'); return; }
+    const total = impagas.filter((f) => elegidas.includes(f.numero)).reduce((a, f) => a + (Number(f.importe) || 0), 0);
+    if (!window.confirm(`Dar por cobradas ${elegidas.length} factura(s) de ${nombre} por ${fmt(total)}.\n\nNo se registra ningún movimiento en Xubio: salen de los reclamos y de las opciones al imputar.\n\n¿Confirmás?`)) return;
+    setGuardando(true); setMsg(null);
+    try {
+      const r = await fetch('/api/cobranzas/saldadas', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          motivo: motivo.trim(),
+          facturas: impagas.filter((f) => elegidas.includes(f.numero)).map((f) => ({
+            numero: f.numero, id_control: idControl, cliente: nombre, fecha: f.fecha, importe: f.importe,
+          })),
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'No se pudo guardar');
+      setMsg(`✓ ${j.mensaje || 'Listo.'}`);
+      setElegidas([]); setMotivo('');
+      router.refresh();
+    } catch (e: any) {
+      setMsg(e.message || 'No se pudo guardar');
+    }
+    setGuardando(false);
+  }
+
+  // Corregir el importe, con el mismo ajuste que usa la bandeja: una sola forma de que una
+  // factura valga algo distinto de lo que dice Xubio.
+  async function ajustar(idControl: string, nombre: string, f: FacturaCliente) {
+    const nuevo = Math.round(Number(nuevoImporte));
+    if (!isFinite(nuevo) || nuevo < 0) { setMsg('El importe tiene que ser un número.'); return; }
+    if (!motivoAjuste.trim()) { setMsg('Poné por qué se ajusta.'); return; }
+    setGuardando(true); setMsg(null);
+    try {
+      const r = await fetch('/api/cobranzas/ajuste-factura', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          numero: f.numero, id_control: idControl, cliente: nombre,
+          importeXubio: f.importeFactura ?? f.importe, importeApp: nuevo, motivo: motivoAjuste.trim(),
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'No se pudo ajustar');
+      setMsg(`✓ ${f.numero} queda en ${fmt(nuevo)}.`);
+      setEditando(null); setNuevoImporte(''); setMotivoAjuste('');
+      router.refresh();
+    } catch (e: any) {
+      setMsg(e.message || 'No se pudo ajustar');
+    }
+    setGuardando(false);
+  }
   const [marcando, setMarcando] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -202,10 +278,30 @@ export default function ResumenImpagas({
                 )}
               </p>
             )}
+            {/* El corte del reparto. Sin esto, un cliente con un cobro grande en Xubio que
+                no alcanza para cubrir entera la factura más vieja aparece debiendo TODO el
+                año, y no hay nada en pantalla que lo explique. */}
+            {cortes[f.id_control] && (() => {
+              const c = cortes[f.id_control];
+              return (
+                <p style={{ margin: '0 0 8px', fontSize: '11.5px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '7px', padding: '8px 10px', lineHeight: 1.5 }}>
+                  <strong>Ojo con este número.</strong> El reparto de los cobros que este cliente tiene en Xubio se cortó
+                  en <span style={{ fontFamily: 'ui-monospace, monospace' }}>{c.numero}</span> ({fmtFecha(c.fecha)}, {fmt(c.importe)}):
+                  quedaban {fmt(c.restaba)} sin asignar, que no alcanzan para cubrirla entera. Desde ahí para adelante
+                  todas figuran impagas, aunque el cliente pueda haberlas pagado. Si es así, imputá ese cobro a las
+                  facturas que correspondan, o dalas por cobradas acá abajo.
+                </p>
+              );
+            })()}
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
               <tbody>
                 {f.impagas.map((x) => (
                   <tr key={x.numero} style={{ borderTop: '1px solid #f9fafb' }}>
+                    <td style={{ padding: '3px 6px', width: '22px' }}>
+                      <input type="checkbox" checked={elegidas.includes(x.numero)}
+                        onChange={() => alternar(x.numero)} disabled={guardando}
+                        title="Elegir para dar por cobrada" />
+                    </td>
                     <td style={{ padding: '3px 6px', fontFamily: 'ui-monospace, monospace', fontSize: '11px' }}>{x.numero}</td>
                     <td style={{ padding: '3px 6px', color: '#6b7280' }}>{fmtFecha(x.fecha)}</td>
                     <td style={{ padding: '3px 6px', color: '#9ca3af' }}>{diasDesde(x.fecha)} días</td>
@@ -221,10 +317,76 @@ export default function ResumenImpagas({
                         </span>
                       )}
                     </td>
+                    <td style={{ padding: '3px 6px', textAlign: 'right', width: '24px' }}>
+                      <button type="button" title="Corregir el importe de esta factura"
+                        onClick={() => {
+                          setEditando(editando === x.numero ? null : x.numero);
+                          setNuevoImporte(String(Math.round(x.importe)));
+                          setMotivoAjuste(''); setMsg(null);
+                        }}
+                        disabled={guardando}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '12px', padding: 0 }}>✎</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+
+            {/* Editar el importe, acá mismo. Mismo ajuste que usa la bandeja. */}
+            {editando && f.impagas.some((x) => x.numero === editando) && (() => {
+              const x = f.impagas.find((y) => y.numero === editando)!;
+              return (
+                <div style={{ marginTop: '8px', padding: '9px 10px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '7px' }}>
+                  <p style={{ margin: '0 0 7px', fontSize: '11.5px', fontWeight: 700, color: '#92400e' }}>
+                    Corregir <span style={{ fontFamily: 'ui-monospace, monospace' }}>{x.numero}</span> — hoy figura {fmt(x.importe)}
+                  </p>
+                  <div style={{ display: 'flex', gap: '7px', flexWrap: 'wrap' }}>
+                    <input type="number" value={nuevoImporte} onChange={(e) => setNuevoImporte(e.target.value)} disabled={guardando}
+                      placeholder="Importe real" style={{ fontSize: '12px', padding: '5px 7px', border: '1px solid #d1d5db', borderRadius: '6px', width: '130px' }} />
+                    <input type="text" value={motivoAjuste} onChange={(e) => setMotivoAjuste(e.target.value)} disabled={guardando}
+                      placeholder="¿Por qué? (ej: 40 rúculas de menos)" style={{ fontSize: '12px', padding: '5px 7px', border: '1px solid #d1d5db', borderRadius: '6px', flex: '1 1 200px' }} />
+                    <button type="button" onClick={() => ajustar(f.id_control, f.nombre, x)} disabled={guardando}
+                      style={{ fontSize: '11.5px', fontWeight: 700, padding: '5px 12px', background: '#166534', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Guardar</button>
+                    <button type="button" onClick={() => setEditando(null)} disabled={guardando}
+                      style={{ fontSize: '11.5px', padding: '5px 10px', background: 'white', border: '1px solid #e5e7eb', borderRadius: '6px', cursor: 'pointer' }}>Cancelar</button>
+                  </div>
+                  <p style={{ margin: '6px 0 0', fontSize: '10.5px', color: '#b45309' }}>
+                    No cambia la factura en Xubio: queda del lado de la app, con el motivo y tu usuario.
+                  </p>
+                </div>
+              );
+            })()}
+
+            {/* Dar por cobradas. Es lo que faltaba para que esto sea la cuenta corriente y
+                no una lista para mirar: la mitad de lo que figura impago está cobrado y
+                nadie lo marca porque había que irse a otra pantalla. */}
+            {elegidas.length > 0 && (
+              <div style={{ marginTop: '9px', padding: '10px 11px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px' }}>
+                <p style={{ margin: '0 0 7px', fontSize: '12px', fontWeight: 700, color: '#166534' }}>
+                  {elegidas.length} factura(s) elegida(s) ·{' '}
+                  {fmt(f.impagas.filter((x) => elegidas.includes(x.numero)).reduce((a, x) => a + (Number(x.importe) || 0), 0))}
+                </p>
+                <div style={{ display: 'flex', gap: '7px', flexWrap: 'wrap' }}>
+                  <input type="text" value={motivo} onChange={(e) => setMotivo(e.target.value)} disabled={guardando}
+                    placeholder="¿Por qué se dan por cobradas? (ej: pagó en efectivo, no se cargó)"
+                    style={{ fontSize: '12px', padding: '5px 7px', border: '1px solid #d1d5db', borderRadius: '6px', flex: '1 1 260px' }} />
+                  <button type="button" onClick={() => marcarCobradas(f.id_control, f.nombre, f.impagas)} disabled={guardando || !motivo.trim()}
+                    style={{ fontSize: '12px', fontWeight: 700, padding: '6px 14px', background: motivo.trim() ? '#166534' : '#d1d5db', color: 'white', border: 'none', borderRadius: '6px', cursor: motivo.trim() ? 'pointer' : 'not-allowed' }}>
+                    {guardando ? 'Guardando…' : 'Dar por cobradas'}
+                  </button>
+                  <button type="button" onClick={() => { setElegidas([]); setMotivo(''); }} disabled={guardando}
+                    style={{ fontSize: '12px', padding: '6px 11px', background: 'white', border: '1px solid #e5e7eb', borderRadius: '6px', cursor: 'pointer' }}>
+                    Deseleccionar
+                  </button>
+                </div>
+                {/* Qué hace y qué no, antes de apretar: no es lo mismo que registrar un
+                    cobro, y confundirlos deja plata sin entrar a ninguna cuenta. */}
+                <p style={{ margin: '7px 0 0', fontSize: '10.5px', color: '#15803d', lineHeight: 1.45 }}>
+                  No registra ningún cobro en Xubio ni suma plata a ninguna cuenta: solo deja de reclamarlas.
+                  Si la plata entró de verdad, lo que corresponde es registrar el cobro desde la bandeja.
+                </p>
+              </div>
+            )}
           </div>
         );
       })()}

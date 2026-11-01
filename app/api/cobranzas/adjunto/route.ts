@@ -60,7 +60,11 @@ export async function GET(req: NextRequest) {
         'Content-Type': tipo,
         // inline: la idea es mirarlo en la misma pantalla, no bajarlo para abrirlo aparte.
         'Content-Disposition': `inline; filename="${String(adj.filename || 'adjunto').replace(/"/g, '')}"`,
-        'Cache-Control': 'private, max-age=300',
+        // Un adjunto de un mail ya recibido no cambia nunca, así que se cachea fuerte:
+        // el primer vistazo paga el viaje a Resend y los siguientes son instantáneos.
+        // `private` porque es información de un cobro y no puede quedar en un caché
+        // compartido.
+        'Cache-Control': 'private, max-age=86400, immutable',
       },
     });
   } catch (err: any) {
