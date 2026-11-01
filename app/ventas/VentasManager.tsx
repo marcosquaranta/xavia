@@ -4,20 +4,30 @@ import Link from 'next/link';
 import type { ClienteVenta, PrecioVenta, VentaDia, PedidoFijo } from '@/lib/types';
 import { ventasCargadasSemana, precioFinal } from '@/lib/estadisticasVentas';
 import { nombreClienteVisible } from '@/lib/clientes';
-import { ARTICULOS_UNIDAD, KEYS_UNIDAD, KEYS_KG, KG_POR_CAJON, kgDeCajones, cajonesDeKg } from '@/lib/articulos';
+import { ARTICULOS_UNIDAD, KEYS_UNIDAD, KEYS_KG, KG_POR_CAJON, kgDeCajones, cajonesDeKg, type Articulo } from '@/lib/articulos';
 import { DIAS_CAMARA_ALERTA } from '@/lib/camara';
 
 // Los artículos salen del catálogo (lib/articulos.ts), no de una lista escrita acá: esa
 // lista estaba repetida en veinticinco archivos y agregar un producto significaba
 // encontrarlos todos. Se cargan solo los ACTIVOS —la bandeja de rúcula ya no se hace— pero
 // las ventas viejas que la tienen se siguen leyendo y valorizando igual.
-const PP = ARTICULOS_UNIDAD.filter(a => a.principal);
-const PE = ARTICULOS_UNIDAD.filter(a => !a.principal && !a.seccionAparte);
-const ALL = [...PP, ...PE];
-// Las ensaladas van en su propia tabla, abajo, y solo con los clientes que las compran.
-// Como columnas de la grilla principal aparecían para los veinte clientes que no las
-// compran, y esa grilla ya tiene una fila por sucursal: se volvía ilegible.
-const ENSALADAS = ARTICULOS_UNIDAD.filter(a => a.seccionAparte);
+// Los artículos dados de alta desde Admin → Artículos de venta llegan por props y se
+// mezclan acá con los del código: una sola lista, armada en un solo lugar. Si se leyeran
+// del módulo, un producto nuevo no aparecería hasta el próximo deploy, que es justo lo que
+// esta pantalla dejó de necesitar.
+function listasDe(extras: Articulo[]) {
+  const unidad = [...ARTICULOS_UNIDAD, ...extras.filter(a => a.activo && a.unidad === 'unidad')];
+  const PP = unidad.filter(a => a.principal);
+  const PE = unidad.filter(a => !a.principal && !a.seccionAparte);
+  return {
+    unidad,
+    PP, PE, ALL: [...PP, ...PE],
+    // Los de sección aparte van en su propia tabla, abajo, y solo con los clientes que los
+    // compran. Como columnas de la grilla principal aparecían para los veinte clientes que
+    // no los compran, y esa grilla ya tiene una fila por sucursal: se volvía ilegible.
+    APARTE: unidad.filter(a => a.seccionAparte),
+  };
+}
 
 interface LineaCarga {
   id_control:string; nombre_cliente:string;
@@ -25,11 +35,11 @@ interface LineaCarga {
   [key:string]:string|number;
 }
 // Resumen de texto (cantidades por cliente y por producto) para el mensaje de "Cargar ventas".
-function resumenCarga(lineas: LineaCarga[]): string {
-  // ARTICULOS_UNIDAD y no ALL: el mensaje de confirmación tiene que nombrar TODO lo que se
+function resumenCarga(lineas: LineaCarga[], articulosUnidad: Articulo[]): string {
+  // La lista completa y no ALL: el mensaje de confirmación tiene que nombrar TODO lo que se
   // cargó, incluidas las ensaladas, que se cargan en su propia sección. Si sale de la misma
   // lista que arma la grilla, lo que no está en la grilla se confirma en silencio.
-  const claveProd = [...ARTICULOS_UNIDAD.map(p=>({key:p.key as keyof LineaCarga & string, label:p.label, u:'u'})), {key:'rucula_kg' as const,label:'Rúcula',u:'kg'}, {key:'lechuga_kg_crespa' as const,label:'Lechuga Crespa',u:'kg'}, {key:'lechuga_kg_roble' as const,label:'Lechuga Roble',u:'kg'}];
+  const claveProd = [...articulosUnidad.map(p=>({key:p.key as keyof LineaCarga & string, label:p.label, u:'u'})), {key:'rucula_kg' as const,label:'Rúcula',u:'kg'}, {key:'lechuga_kg_crespa' as const,label:'Lechuga Crespa',u:'kg'}, {key:'lechuga_kg_roble' as const,label:'Lechuga Roble',u:'kg'}];
 
   // El desglose por CULTIVO dentro de cada cliente, que es contra lo que se controla lo que
   // se subió al camión. El total por cliente solo no alcanza: "La Esperanza 60 u" no dice
@@ -135,7 +145,9 @@ function sumarDiasStr(f: string, n: number): string {
 }
 const soloDia = (v: any) => String(v || '').split(/[T ]/)[0];
 
-export default function VentasManager({clientes,precios,frecuencias,stats,pedidosFijos,initialFecha}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;pedidosFijos:PedidoFijo[];initialFecha?:string}) {
+export default function VentasManager({clientes,precios,frecuencias,stats,pedidosFijos,initialFecha,articulosExtra=[]}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;pedidosFijos:PedidoFijo[];initialFecha?:string;articulosExtra?:Articulo[]}) {
+  // El catálogo de esta pantalla = los del código + los dados de alta desde Admin.
+  const {unidad:ARTS_UNIDAD, PP, PE, ALL, APARTE} = listasDe(articulosExtra);
   const hoy = hoyArg();
   const [fecha,setFecha]=useState(initialFecha || hoy);
   const [fc,setFc]=useState<Record<string,string>>({});
@@ -197,13 +209,13 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   // y la sección seguía sin mostrarlo, sin ninguna forma de darse cuenta por qué.
   const tienePrecioEnsalada = (f: Fila) => {
     const cli = clientes.find((c) => String(c.id_control) === String(f.id_control));
-    return ENSALADAS.some((a) => precioFinal(precios, String(f.id_control), f.sucursal, a.key, cli) > 0);
+    return APARTE.some((a) => precioFinal(precios, String(f.id_control), f.sucursal, a.key, cli) > 0);
   };
   // El mismo escape que en paquetes: esconder a alguien que SÍ compra porque falta cargarle
   // el precio deja una venta sin forma de cargarse, y eso es peor que la fila de más.
   const filasEnsalada = mostrarSinPrecio ? filas.filter(f=>f.unidad!=='kg') : filas.filter(tienePrecioEnsalada);
   const totsEnsalada: Record<string,number> = Object.fromEntries(
-    ENSALADAS.map(a=>[a.key, filasEnsalada.reduce((acc,f)=>acc+(Number(q(f.id_control,f.sucursal,a.key))||0),0)]),
+    APARTE.map(a=>[a.key, filasEnsalada.reduce((acc,f)=>acc+(Number(q(f.id_control,f.sucursal,a.key))||0),0)]),
   );
 
   function pr(id:string,suc:string,k:PK){const r=precios.find(p=>String(p.id_control)===String(id)&&p.sucursal_obs===suc);return r?Number((r as any)[k]||0):0;}
@@ -377,7 +389,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       // momento de reintentar ahí. Mostrar el mensaje real acá evita ese callejón sin salida.
       const detalleErrores = (j.errores||[]).map((e:any)=>`• ${e.cliente}: ${e.error}`).join('\n');
       const txt = nEmit>0
-        ? `✓ Facturas cargadas OK\n${resumenCarga(todasLineas)}${nErr>0?`\n\n⚠ ${nErr} con error:\n${detalleErrores}`:''}`
+        ? `✓ Facturas cargadas OK\n${resumenCarga(todasLineas, ARTS_UNIDAD)}${nErr>0?`\n\n⚠ ${nErr} con error:\n${detalleErrores}`:''}`
         : nErr>0 ? `No se pudo emitir ninguna (${nErr} con error):\n${detalleErrores}` : `${j.clientes} cliente(s) cargados.`;
       setMsg({t: nErr>0 && nEmit===0 ? 'err' : 'ok', s: txt});
       setCtds({});setEsts({});setCtdsKg({});ctdsKgLive.current={};setFc({});
@@ -425,7 +437,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   function tienePrecioPaquete(f: Fila): boolean {
     const cli = clientes.find((c) => String(c.id_control) === String(f.id_control));
     return ALL.some((a) => precioFinal(precios, String(f.id_control), f.sucursal, a.key, cli) > 0)
-      || ENSALADAS.some((a) => precioFinal(precios, String(f.id_control), f.sucursal, a.key, cli) > 0);
+      || APARTE.some((a) => precioFinal(precios, String(f.id_control), f.sucursal, a.key, cli) > 0);
   }
 
   const porPaquete = filas.filter(f=>f.unidad!=='kg');
@@ -1066,13 +1078,13 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
             Aparte de la grilla de paquetes a pedido de Marcos: mezcladas ahí se hacía
             confuso. Usa los mismos handlers que la grilla principal, así que guarda igual
             —al salir del campo, con el mismo indicador de color— sin código duplicado. */}
-        {ENSALADAS.length>0&&(
+        {APARTE.length>0&&(
           filasEnsalada.length>0?(
           <div style={{marginTop:'16px',border:'1px solid #99f6e4',borderRadius:'8px',overflow:'hidden'}}>
             <div style={{background:'#f0fdfa',padding:'8px 14px',borderBottom:'1px solid #99f6e4',display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap'}}>
-              <span style={{fontSize:'13px',fontWeight:700,color:'#0f766e'}}>🥗 Ensaladas</span>
+              <span style={{fontSize:'13px',fontWeight:700,color:'#0f766e'}}>🥗 Otros productos</span>
               <span style={{fontSize:'11px',color:'#0d9488'}}>
-                Solo los clientes con precio cargado · descuentan plantas, no paquetes
+                Solo los clientes con precio cargado · se cargan aparte de la grilla
               </span>
               {/* Dónde se habilita un cliente nuevo. Sin esto hay que saberlo de memoria:
                   la sección simplemente no lo muestra y no dice qué falta. */}
@@ -1084,7 +1096,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
               <thead>
                 <tr style={{background:'#ccfbf1',borderBottom:'1px solid #99f6e4'}}>
                   <th style={{textAlign:'left',padding:'8px 12px',minWidth:'150px'}}>Cliente</th>
-                  {ENSALADAS.map(a=>(
+                  {APARTE.map(a=>(
                     <th key={a.key} style={{textAlign:'center',padding:'8px 10px',color:a.color,fontWeight:700,minWidth:'120px'}}>{a.labelLargo}</th>
                   ))}
                   <th style={{textAlign:'center',padding:'8px 6px',color:'#9ca3af',minWidth:'92px',fontSize:'10px'}}>Fecha fact.</th>
@@ -1098,7 +1110,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
                       {f.nombre_display||f.nombre_cliente}
                       {f.sucursal&&<span style={{color:'#9ca3af',fontWeight:400}}> · {f.sucursal}</span>}
                     </td>
-                    {ENSALADAS.map(a=>{
+                    {APARTE.map(a=>{
                       // Un cliente puede comprar una ensalada y no la otra: la que no tiene
                       // precio no se deja cargar, para no facturarle algo en $0.
                       const precio=pr(f.id_control,f.sucursal,a.key);
@@ -1122,7 +1134,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
                 ))}
                 <tr style={{background:'#f0fdfa',borderTop:'2px solid #5eead4'}}>
                   <td style={{padding:'8px 12px',fontSize:'12px',fontWeight:700,color:'#0f766e'}}>Total</td>
-                  {ENSALADAS.map(a=>(
+                  {APARTE.map(a=>(
                     <td key={a.key} style={{textAlign:'center',padding:'8px',fontSize:'15px',fontWeight:800,color:totsEnsalada[a.key]>0?'#0f766e':'#d1d5db'}}>
                       {totsEnsalada[a.key]>0?totsEnsalada[a.key].toLocaleString('es-AR'):'—'}
                     </td>
@@ -1148,7 +1160,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
           </div>
           ):(
             <p style={{marginTop:'14px',fontSize:'11.5px',color:'#92400e',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'8px',padding:'8px 12px'}}>
-              🥗 <strong>Ensaladas:</strong> todavía no hay ningún cliente con precio cargado, así que no hay a quién
+              🥗 <strong>Otros productos:</strong> todavía no hay ningún cliente con precio cargado, así que no hay a quién
               cargárselas. Se cargan en Admin → Clientes de venta y esta sección aparece sola.
             </p>
           )

@@ -131,6 +131,9 @@ export interface DatosEERR {
   // valorizan por kilo — así que ninguna pantalla hace una lectura extra de Lotes solo
   // para esto, pero la que ya los tiene los pasa y el número cierra con los gráficos.
   lotes?: Lote[];
+  // Los artículos de venta dados de alta desde Admin. Sin esto su facturación no entra en
+  // el total de ventas del mes: se emite la factura y el resultado no la ve.
+  articulosExtra?: { key: string; unidad: string }[];
 }
 
 export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
@@ -139,11 +142,16 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
   const hasta = `${anio}-${mm}-${String(new Date(anio, mes, 0).getDate()).padStart(2, '0')}`;
 
   // ── Ventas ──
-  const vr = ventasEnRango(d.ventas, d.precios, d.clientes, desde, hasta, d.lotes || []);
+  const vr = ventasEnRango(d.ventas, d.precios, d.clientes, desde, hasta, d.lotes || [], d.articulosExtra || []);
   const porCultivo: LineaVenta[] = [
     { label: 'Rúcula', unidades: vr.rucula.unidades, monto: vr.rucula.monto },
     { label: 'Lechuga', unidades: vr.lechuga.unidades, monto: vr.lechuga.monto },
     { label: 'Albahaca', unidades: vr.albahaca.unidades, monto: vr.albahaca.monto },
+    // Lo que no es ninguno de los tres cultivos (microgreens y demás altas propias). La
+    // línea aparece solo si hubo venta: una fila en cero todos los meses es ruido.
+    ...(vr.otros.monto > 0 || vr.otros.unidades > 0
+      ? [{ label: 'Otros', unidades: vr.otros.unidades, monto: vr.otros.monto }]
+      : []),
   ];
   const totalVentas = porCultivo.reduce((a, c) => a + c.monto, 0);
 

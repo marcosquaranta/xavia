@@ -12,11 +12,19 @@ import { claveComprobante } from '@/lib/comprobantes';
 import { valorDeFactura, guardarAjuste } from '@/lib/ajusteFactura';
 import { HOJA_COMPROBANTES, type ComprobanteCache } from '@/lib/xubioCache';
 import type { PrecioVenta, ClienteVenta } from '@/lib/types';
+import { leerArticulosExtra } from '@/lib/articulosVenta';
 export async function POST(req: NextRequest) {
   // Las columnas de los artículos nuevos tienen que existir antes de escribir por nombre.
   await asegurarColumnasArticulos();
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
+  // Las claves de artículo incluyen las dadas de alta desde Admin. Si salieran solo del
+  // código, una venta de un producto nuevo se guardaría con esa columna en blanco: la
+  // pantalla la muestra cargada y la planilla queda en cero.
+  const clavesUnidad = [
+    ...KEYS_UNIDAD,
+    ...(await leerArticulosExtra()).filter((a) => a.activo && a.unidad === 'unidad').map((a) => a.key),
+  ];
     // Plata = solo admin, igual que la pantalla. Cerrar la pantalla y dejar la API abierta
     // no cierra nada: la pantalla es una cortina, la API es la puerta.
   if (user.rol !== 'admin') return NextResponse.json({ error: 'Solo un administrador puede ver o cambiar esto.' }, { status: 403 });
@@ -52,7 +60,7 @@ export async function POST(req: NextRequest) {
           updates: {
             // Por clave de artículo: agregar un producto no obliga a tocar este objeto, que
             // es justamente el lugar donde olvidarse hace que la venta se guarde sin él.
-            ...Object.fromEntries(KEYS_UNIDAD.map((k) => [k, (l as any)[k] || 0])),
+            ...Object.fromEntries(clavesUnidad.map((k) => [k, (l as any)[k] || 0])),
             // La bandeja de rúcula ya no se carga, pero si la fila vieja la tiene no se pisa
             // con 0: sería borrar una venta real al re-guardar cualquier otro campo.
             bandeja_rucula: (l as any).bandeja_rucula !== undefined
@@ -74,7 +82,7 @@ export async function POST(req: NextRequest) {
         await appendRowObj('Ventas', {
           id_venta: `V-${String(nextId++).padStart(5, '0')}`, fecha,
           id_control: l.id_control, nombre_cliente: l.nombre_cliente, sucursal: l.sucursal,
-          ...Object.fromEntries(KEYS_UNIDAD.map((k) => [k, (l as any)[k] || 0])),
+          ...Object.fromEntries(clavesUnidad.map((k) => [k, (l as any)[k] || 0])),
           bandeja_rucula: (l as any).bandeja_rucula || 0,
           rucula_kg: l.rucula_kg || 0, lechuga_kg: l.lechuga_kg || 0,
           lechuga_kg_crespa: l.lechuga_kg_crespa || 0, lechuga_kg_roble: l.lechuga_kg_roble || 0,

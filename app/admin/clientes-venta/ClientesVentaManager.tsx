@@ -17,12 +17,19 @@ interface Props {
   clientes: ClienteVenta[];
   precios: PrecioVenta[];
   cambios: Record<string, CambioPrecioUI>;
+  // Los dados de alta desde Admin → Artículos de venta, ya separados por unidad.
+  extrasUnidad?: { key: string; label: string }[];
+  extrasKg?: { key: string; label: string }[];
 }
 
 // Solo los artículos que se venden hoy. Los dados de baja no se editan —no tiene sentido
 // ponerle precio nuevo a algo que no se hace más— pero su precio viejo sigue en la planilla
 // y se sigue usando para valorizar las ventas de cuando sí se vendía.
 const PROD_LABELS = ARTICULOS_UNIDAD.map((a) => ({ key: a.key, label: a.labelLargo }));
+// Los artículos dados de alta desde Admin → Artículos de venta se suman a estas listas. Sin
+// esto no se les puede poner precio, y sin precio un artículo no aparece nunca en la
+// pantalla de carga: quedaría creado y invisible.
+export interface EtiquetaArticulo { key: string; label: string }
 // lechuga_kg (precio único, legacy) ya no se edita acá — reemplazado por precio propio
 // por variedad. El valor viejo se preserva en la planilla pero no se toca desde este form.
 const KG_LABELS = [
@@ -34,12 +41,13 @@ const KG_LABELS = [
 const fmtDia = (f: string) => { const [y, m, d] = String(f || '').split('-'); return d ? `${d}/${m}/${y.slice(2)}` : f; };
 const fmtPesos = (n: number) => '$' + Math.round(Math.abs(n)).toLocaleString('es-AR');
 
-function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, esKg, onSaved, cambios }: {
+function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, esKg, onSaved, cambios, extrasUnidad = [], extrasKg = [] }: {
   idControl: string; nombreCliente: string; sucursalObs: string;
   precioActual: PrecioVenta | undefined; esKg: boolean; onSaved: () => void;
   cambios: Record<string, CambioPrecioUI>;
+  extrasUnidad?: EtiquetaArticulo[]; extrasKg?: EtiquetaArticulo[];
 }) {
-  const campos = esKg ? KG_LABELS : PROD_LABELS;
+  const campos = esKg ? [...KG_LABELS, ...extrasKg] : [...PROD_LABELS, ...extrasUnidad];
   const [vals, setVals] = useState<Record<string,string>>(() =>
     Object.fromEntries(campos.map(p => [p.key, precioActual ? String((precioActual as any)[p.key] || '') : '']))
   );
@@ -103,7 +111,7 @@ function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, 
   );
 }
 
-function ClienteRow({ c, precios, cambios, onSaved }: { c: ClienteVenta; precios: PrecioVenta[]; cambios: Record<string, CambioPrecioUI>; onSaved: () => void }) {
+function ClienteRow({ c, precios, cambios, onSaved, extrasUnidad = [], extrasKg = [] }: { c: ClienteVenta; precios: PrecioVenta[]; cambios: Record<string, CambioPrecioUI>; onSaved: () => void; extrasUnidad?: EtiquetaArticulo[]; extrasKg?: EtiquetaArticulo[] }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string|null>(null);
@@ -289,12 +297,12 @@ function ClienteRow({ c, precios, cambios, onSaved }: { c: ClienteVenta; precios
                     <PreciosSucursal key={suc}
                       idControl={String(c.id_control)} nombreCliente={c.nombre_xubio} sucursalObs={suc}
                       precioActual={precios.find(p => String(p.id_control) === String(c.id_control) && p.sucursal_obs === suc)}
-                      esKg={c.unidad === 'kg'} onSaved={onSaved} cambios={cambios} />
+                      esKg={c.unidad === 'kg'} onSaved={onSaved} cambios={cambios} extrasUnidad={extrasUnidad} extrasKg={extrasKg} />
                   ))
                 : <PreciosSucursal
                     idControl={String(c.id_control)} nombreCliente={c.nombre_xubio} sucursalObs={c.nombre_xubio}
                     precioActual={precios.find(p => String(p.id_control) === String(c.id_control))}
-                    esKg={c.unidad === 'kg'} onSaved={onSaved} cambios={cambios} />
+                    esKg={c.unidad === 'kg'} onSaved={onSaved} cambios={cambios} extrasUnidad={extrasUnidad} extrasKg={extrasKg} />
               }
             </div>
           </td>
@@ -304,7 +312,7 @@ function ClienteRow({ c, precios, cambios, onSaved }: { c: ClienteVenta; precios
   );
 }
 
-export default function ClientesVentaManager({ clientes, precios, cambios }: Props) {
+export default function ClientesVentaManager({ clientes, precios, cambios, extrasUnidad = [], extrasKg = [] }: Props) {
   const router = useRouter();
   const [mostrarForm, setMostrarForm] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -388,11 +396,11 @@ export default function ClientesVentaManager({ clientes, precios, cambios }: Pro
             </tr>
           </thead>
           <tbody>
-            {activos.map(c => <ClienteRow key={c.id_control} c={c} precios={precios} cambios={cambios} onSaved={() => router.refresh()} />)}
+            {activos.map(c => <ClienteRow key={c.id_control} c={c} precios={precios} cambios={cambios} onSaved={() => router.refresh()} extrasUnidad={extrasUnidad} extrasKg={extrasKg} />)}
             {inactivos.length > 0 && (
               <>
                 <tr><td colSpan={8} style={{ padding: '8px 6px 4px', fontSize: '11px', color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase' }}>Inactivos</td></tr>
-                {inactivos.map(c => <ClienteRow key={c.id_control} c={c} precios={precios} cambios={cambios} onSaved={() => router.refresh()} />)}
+                {inactivos.map(c => <ClienteRow key={c.id_control} c={c} precios={precios} cambios={cambios} onSaved={() => router.refresh()} extrasUnidad={extrasUnidad} extrasKg={extrasKg} />)}
               </>
             )}
           </tbody>

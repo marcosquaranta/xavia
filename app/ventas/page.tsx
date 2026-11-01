@@ -9,6 +9,8 @@ import VentasManager from './VentasManager';
 import XubioResumen from './XubioResumen';
 import VentasEvolucionCharts from './VentasEvolucionCharts';
 import { ultimaSubaPorClienteRecord } from '@/lib/preciosHistoricoServer';
+import { leerArticulosExtra } from '@/lib/articulosVenta';
+import type { Articulo } from '@/lib/articulos';
 export const dynamic = 'force-dynamic';
 
 function safeD(s: any): Date | null {
@@ -59,6 +61,9 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
   let historicas: VentaHistorica[] = [];
   let pedidosFijos: PedidoFijo[] = [];
   let lotes: Lote[] = [];
+  // Los artículos dados de alta desde Admin → Artículos de venta. Van a la pantalla de carga
+  // junto con los del código.
+  let articulosExtra: Articulo[] = [];
   let err: string | null = null;
   try {
     [clientes, precios, ventas, historicas, pedidosFijos, lotes] = await Promise.all([
@@ -69,6 +74,7 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
       // a unidades-equivalente en el gráfico de clientes.
       readSheet<Lote>('Lotes').catch(() => []),
     ]);
+    articulosExtra = await leerArticulosExtra();
   } catch (e: any) { err = e?.message || 'Error'; }
   if (err) return (<><Header user={user} current="ventas" /><div className="container"><div className="alert-box error">{err}</div></div></>);
   const frecuencias: Record<string,number> = {};
@@ -78,7 +84,7 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
   const evolClienteSemanal = evolucionVentaPorClienteSemanal(ventas, clientes, 6, 5, lotes);
   const evolClienteMensual = evolucionVentaPorCliente(ventas, clientes, 6, 5, lotes);
   const evolPrecio = evolucionPrecioPromedio(ventas, precios, clientes, 12, lotes);
-  const resumenMes = resumenMesActual(ventas, precios, clientes, undefined, undefined, lotes);
+  const resumenMes = resumenMesActual(ventas, precios, clientes, undefined, undefined, lotes, articulosExtra.map((a) => a.key));
   const clientesPrecioVolumen = clientesPrecioVsVolumen(ventas, precios, clientes, lotes);
   const ultimaSuba = await ultimaSubaPorClienteRecord();
 
@@ -104,7 +110,7 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
         </div>
         <VentasEvolucionCharts articulo={evolArticulo} clienteSemanal={evolClienteSemanal} clienteMensual={evolClienteMensual} precio={evolPrecio} resumenMes={resumenMes} clientesPrecioVolumen={clientesPrecioVolumen} ultimaSuba={ultimaSuba} />
         <div className="card">
-          <VentasManager clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} pedidosFijos={pedidosFijos.filter(p=>p.activo==='SI')} initialFecha={searchParams.fecha} />
+          <VentasManager articulosExtra={articulosExtra} clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} pedidosFijos={pedidosFijos.filter(p=>p.activo==='SI')} initialFecha={searchParams.fecha} />
           <XubioResumen />
         </div>
       </div>

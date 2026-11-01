@@ -5,6 +5,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { HOJA_PRECIOS_HIST, HEADERS_PRECIOS_HIST, detectarCambios, type CambioPrecio } from '@/lib/preciosHistorico';
 import type { PrecioVenta } from '@/lib/types';
 import { PROD_KEYS } from '@/lib/articulos';
+import { leerArticulosExtra } from '@/lib/articulosVenta';
 
 import { asegurarColumnasArticulos } from '@/lib/articulosSheets';
 // Upsert de precio por id_control + sucursal_obs
@@ -17,6 +18,7 @@ export async function POST(req: NextRequest) {
     const { id_control, nombre_cliente, sucursal_obs } = body;
     if (!id_control || !sucursal_obs) return NextResponse.json({ error: 'datos_incompletos' }, { status: 400 });
 
+    const clavesTodas = [...PROD_KEYS, ...(await leerArticulosExtra()).map((a) => a.key)];
     const precios = await readSheet<PrecioVenta>('Precios');
     const existe = precios.find(p => String(p.id_control) === String(id_control) && p.sucursal_obs === sucursal_obs);
     // Cada campo: si viene en el request se usa, si no se preserva el valor existente
@@ -30,7 +32,13 @@ export async function POST(req: NextRequest) {
       id_control: String(id_control), nombre_cliente: nombre_cliente || (existe as any)?.nombre_cliente || '', sucursal_obs,
       // Un precio por cada artículo del catálogo, incluidos los dados de baja: si se
       // borrara el precio de la bandeja de rúcula, las ventas viejas pasarían a valer $0.
-      ...Object.fromEntries(PROD_KEYS.map((k) => [k, campo(body[k], k as keyof PrecioVenta)])),
+      // TODAS las claves, las del código y las dadas de alta desde Admin.
+      //
+      // Esto no es cosmético: setRowByHeader escribe la fila ENTERA, y toda columna que no
+      // esté en este objeto queda en blanco. Con la lista del código sola, cada vez que
+      // alguien guardaba el precio de un cliente se borraba el precio de los artículos
+      // nuevos — sin error, sin aviso, y recién se nota cuando la factura sale en cero.
+      ...Object.fromEntries(clavesTodas.map((k) => [k, campo(body[k], k as keyof PrecioVenta)])),
     };
 
     if (existe) {

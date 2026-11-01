@@ -17,6 +17,7 @@ import { productividadDeMes, plantasCosechadasEnRango } from './productividad';
 import { kmEnRango, VEHICULO_PARTNER } from './kilometraje';
 
 import { comprobantesParaMirar } from './xubioLectura';
+import { leerArticulosExtra } from './articulosVenta';
 const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
 function lunesDe(d: Date): Date {
@@ -546,8 +547,10 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const desdeSemana = fmtISO(new Date(hoy.getTime() - 6 * 86400000));
   const hastaAnt = fmtISO(new Date(hoy.getTime() - 7 * 86400000));
   const desdeAnt = fmtISO(new Date(hoy.getTime() - 13 * 86400000));
-  const ventasSemana = ventasEnRango(ventas, precios, clientes, desdeSemana, hastaHoy, lotes);
-  const ventasSemanaAnterior = ventasEnRango(ventas, precios, clientes, desdeAnt, hastaAnt, lotes);
+  // Los artículos de alta propia: su plata es facturación del mes como cualquier otra.
+  const extrasVenta = (await leerArticulosExtra()).map((a) => ({ key: a.key, unidad: a.unidad as string }));
+  const ventasSemana = ventasEnRango(ventas, precios, clientes, desdeSemana, hastaHoy, lotes, extrasVenta);
+  const ventasSemanaAnterior = ventasEnRango(ventas, precios, clientes, desdeAnt, hastaAnt, lotes, extrasVenta);
 
   // ── Descarte: esta semana, la anterior y el mes ──
   //
@@ -577,9 +580,9 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const kmSemanaAnterior = kmEnRango(registrosKm, VEHICULO_PARTNER, desdeAnt, hastaAnt);
 
   // ── Ventas del mes en curso: acumulado a hoy, proyección a fin de mes y total real del mes pasado ──
-  const ventasMesActual = resumenMesActual(ventas, precios, clientes, hoy, undefined, lotes);
+  const ventasMesActual = resumenMesActual(ventas, precios, clientes, hoy, undefined, lotes, extrasVenta.map((a) => a.key));
   const diasEnMesPasado = new Date(mesPasadoRef.getFullYear(), mesPasadoRef.getMonth() + 1, 0).getDate();
-  const resumenMesPasado = resumenMesActual(ventas, precios, clientes, mesPasadoRef, diasEnMesPasado, lotes);
+  const resumenMesPasado = resumenMesActual(ventas, precios, clientes, mesPasadoRef, diasEnMesPasado, lotes, extrasVenta.map((a) => a.key));
   const ventasMesAnteriorTotal = resumenMesPasado.unidadesMes;
   const ventasMesAnteriorMonto = resumenMesPasado.montoMes;
 

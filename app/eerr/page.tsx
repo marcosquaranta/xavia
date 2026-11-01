@@ -24,6 +24,7 @@ import { origenYAplicacion, deudaProveedoresAlCierre, causasDeLaDiferencia } fro
 import { pagadosEnRango } from '@/lib/proveedores';
 import { calcularValorizacionMes as valorizacionDelMes } from '@/lib/valorizacionStock';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
+import { leerArticulosExtra } from '@/lib/articulosVenta';
 export const dynamic = 'force-dynamic';
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -91,7 +92,10 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   let mesPrev = mes - 1, anioPrev = anio;
   if (mesPrev === 0) { mesPrev = 12; anioPrev--; }
 
-  const datos = { articulos, stocks, gastos, ventas, precios, clientes };
+  // Los artículos de venta dados de alta desde Admin: sin esto su facturación no entra en
+  // el total de ventas del mes.
+  const articulosExtra = (await leerArticulosExtra()).map((a) => ({ key: a.key, unidad: a.unidad }));
+  const datos = { articulos, stocks, gastos, ventas, precios, clientes, articulosExtra };
   // Dos pasadas: la primera para conocer la masa salarial —que es la base de las
   // previsiones— y la segunda ya con las previsiones adentro del resultado. Sin la primera
   // habría que elegir entre no previsionar o previsionar sobre un número que todavía no se

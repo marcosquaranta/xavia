@@ -604,7 +604,7 @@ export interface ResumenMesActual {
   paqPorCajon: PaquetesPorCajon;
 }
 export function resumenMesActual(
-  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], fechaRef: Date = new Date(), diaCorte?: number, lotes: Lote[] = []
+  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], fechaRef: Date = new Date(), diaCorte?: number, lotes: Lote[] = [], clavesExtra: string[] = []
 ): ResumenMesActual {
   const mk = mesKey(fechaRef.toISOString().slice(0, 10));
   const corte = diaCorte ?? fechaRef.getDate();
@@ -614,6 +614,10 @@ export function resumenMesActual(
     return !dia || dia <= corte;
   });
   const clienteMap = new Map(clientes.map((c) => [c.id_control, c]));
+  // Los artículos dados de alta desde Admin cuentan como venta igual que los del código: si
+  // salieran solo de PROD_KEYS, su plata no entraría en el total del mes y el indicador
+  // diría menos de lo que se facturó, sin que nada falle.
+  const clavesConExtra = [...PROD_KEYS, ...clavesExtra.filter((k) => !PROD_KEYS.includes(k))];
 
   const PRICE_KEYS = [...KEYS_RUCULA, ...KEYS_LECHUGA, 'albahaca'] as const;
   // rucula_kg/lechuga_kg (ventas por cajón) quedan afuera del precio promedio (otra unidad
@@ -628,7 +632,7 @@ export function resumenMesActual(
   let monto = 0; // facturado total del mes, TODAS las presentaciones (incluye kg y bandeja)
   for (const v of delMes) {
     const cliente = clienteMap.get(v.id_control);
-    for (const key of PROD_KEYS) {
+    for (const key of clavesConExtra) {
       const qty = Number((v as any)[key]) || 0;
       if (qty <= 0) continue;
       // El monto se valoriza siempre, con el precio de ESA presentación para ESE cliente:
@@ -707,8 +711,11 @@ export interface VentasRangoCultivo {
 }
 // Albahaca va aparte: no es lechuga (antes directamente no se contaba en este rango, así
 // que su venta no aparecía en ningún total que saliera de acá).
-export interface VentasRango { rucula: VentasRangoCultivo; lechuga: VentasRangoCultivo; albahaca: VentasRangoCultivo }
-export function ventasEnRango(ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], desde: string, hasta: string, lotes: Lote[] = []): VentasRango {
+// `otros` junta los artículos dados de alta desde Admin que no son ninguno de los tres
+// cultivos — los microgreens en bandeja, por ejemplo. Sin este balde su venta no entraba en
+// ningún total: se facturaba y no aparecía en el resultado del mes.
+export interface VentasRango { rucula: VentasRangoCultivo; lechuga: VentasRangoCultivo; albahaca: VentasRangoCultivo; otros: VentasRangoCultivo }
+export function ventasEnRango(ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], desde: string, hasta: string, lotes: Lote[] = [], extras: { key: string; unidad: string }[] = []): VentasRango {
   const clienteMap = new Map(clientes.map((c) => [c.id_control, c]));
   // Mismo gramaje que todo lo demás: peso real de lo cosechado en la ventana (ver
   // gramajeDeRango), nominal solo si no hay cosechas pesadas.
@@ -717,6 +724,7 @@ export function ventasEnRango(ventas: VentaDia[], precios: PrecioVenta[], client
     rucula: { unidades: 0, monto: 0, unidadesKg: 0, cajones: 0, unidadesBandeja: 0 },
     lechuga: { unidades: 0, monto: 0, unidadesKg: 0, cajones: 0, unidadesBandeja: 0 },
     albahaca: { unidades: 0, monto: 0, unidadesKg: 0, cajones: 0, unidadesBandeja: 0 },
+    otros: { unidades: 0, monto: 0, unidadesKg: 0, cajones: 0, unidadesBandeja: 0 },
   };
   for (const v of ventas) {
     const f = String(v.fecha || '').split(/[T ]/)[0];
@@ -762,10 +770,22 @@ export function ventasEnRango(ventas: VentaDia[], precios: PrecioVenta[], client
       acc.albahaca.unidades += qtyAlb;
       acc.albahaca.monto += qtyAlb * precioFinal(precios, v.id_control, v.sucursal, 'albahaca', cliente);
     }
+
+    // Los artículos de alta propia. No son plantas de ningún cultivo, así que sus unidades
+    // no se mezclan con las de rúcula o lechuga —serían peras sumadas con manzanas— pero su
+    // PLATA sí tiene que estar: es facturación del mes como cualquier otra.
+    for (const ex of extras) {
+      const qty = Number((v as any)[ex.key]) || 0;
+      if (qty <= 0) continue;
+      acc.otros.unidades += qty;
+      if (ex.unidad === 'kg') acc.otros.unidadesKg += qty;
+      acc.otros.monto += qty * precioFinal(precios, v.id_control, v.sucursal, ex.key, cliente);
+    }
   }
   acc.rucula.monto = Math.round(acc.rucula.monto);
   acc.lechuga.monto = Math.round(acc.lechuga.monto);
   acc.albahaca.monto = Math.round(acc.albahaca.monto);
+  acc.otros.monto = Math.round(acc.otros.monto);
   acc.rucula.cajones = Math.round(acc.rucula.cajones);
   acc.lechuga.cajones = Math.round(acc.lechuga.cajones);
   return acc;

@@ -5,6 +5,7 @@ import type { ClienteVenta, PrecioVenta, VentaDia, ConfigItem, Lote } from '@/li
 import { nombreClienteVisible } from '@/lib/clientes';
 import * as XLSX from 'xlsx';
 import { ARTICULOS, PROD_KEYS } from '@/lib/articulos';
+import { leerArticulosExtra } from '@/lib/articulosVenta';
 // Email via Resend API (sin dependencias extra)
 
 const COLS = ['NUMERODECONTROL','CLIENTE','TIPO','NUMERO','FECHA','VENCIMIENTODELCOBRO',
@@ -59,6 +60,12 @@ function abreviarCliente(nombre: string): string {
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
+  // Los artículos dados de alta desde Admin también se facturan. Si el mapa de nombres de
+  // Xubio saliera solo del código, la venta se exportaría sin ese ítem y el cliente pagaría
+  // de menos sin que nada falle — que es el modo de romperse más caro que tiene esto.
+  const extrasVenta = await leerArticulosExtra();
+  const prodsUnidad = [...PRODS, ...extrasVenta.filter((a) => a.unidad === 'unidad').map((a) => ({ key: a.key, xubio: a.xubio }))];
+  const prodsKg = [...PRODS_KG, ...extrasVenta.filter((a) => a.unidad === 'kg').map((a) => ({ key: a.key, xubio: a.xubio }))];
     // Plata = solo admin, igual que la pantalla. Cerrar la pantalla y dejar la API abierta
     // no cierra nada: la pantalla es una cortina, la API es la puerta.
   if (user.rol !== 'admin') return NextResponse.json({ error: 'Solo un administrador puede ver o cambiar esto.' }, { status: 403 });
@@ -181,7 +188,7 @@ export async function POST(req: NextRequest) {
       const obsCliente = cliente.nombre_xubio || cliente.nombre_display;
       // Filas de productos (paquetes)
       for (const linea of lineas) {
-        for (const prod of PRODS) {
+        for (const prod of prodsUnidad) {
           const qty = Number((linea as any)[prod.key]) || 0;
           if (qty <= 0) continue;
           const precio = getPrecio(precios, idControl, linea.sucursal, prod.key, cliente.sucursales);
@@ -195,7 +202,7 @@ export async function POST(req: NextRequest) {
           ]);
         }
         // Filas de productos KG (clientes que facturan por cajón, ej. Select Food)
-        for (const prod of PRODS_KG) {
+        for (const prod of prodsKg) {
           const qty = Number((linea as any)[prod.key]) || 0;
           if (qty <= 0) continue;
           const precio = getPrecio(precios, idControl, linea.sucursal, prod.key, cliente.sucursales);

@@ -14,6 +14,7 @@ export default async function AdminPage() {
     { href: '/admin/clientes-venta', titulo: 'Clientes', desc: 'Facturación, precios y Xubio' },
     { href: '/admin/pedidos-fijos', titulo: 'Pedidos fijos', desc: 'Pedidos recurrentes por día de la semana' },
     { href: '/admin/personal', titulo: 'Control de personal', desc: 'Horas, tardanzas y sueldo por quincena (CrossChex)' },
+    { href: '/admin/articulos-venta', titulo: 'Artículos de venta', desc: 'Dar de alta lo que se vende y su nombre en Xubio' },
     { href: '/admin/articulos', titulo: 'Artículos de stock', desc: 'Categorías, unidades y fórmula de uso teórico' },
     { href: '/admin/datos-pago', titulo: 'Datos de pago', desc: 'Los datos bancarios que van al pie de cada recordatorio de cobranza' },
     { href: '/admin/avisos', titulo: 'Avisos por mail', desc: 'A quién le llega cada aviso automático de la app' },

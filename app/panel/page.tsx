@@ -36,6 +36,7 @@ import { GraficoVentaPorArticulo } from '@/app/ventas/VentasEvolucionCharts';
 import TareasProtocolo from '@/components/TareasProtocolo';
 import { leerConfigProtocolo, tareasDelDia as tareasProtocoloDelDia, tareasVencidas as tareasProtocoloVencidas, alertasProtocolo } from '@/lib/protocoloTareas';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
+import { leerArticulosExtra } from '@/lib/articulosVenta';
 
 export const dynamic = 'force-dynamic';
 // Ya no le pide nada a CrossChex acá adentro (ver TardanzasHoyBanner.tsx) — se deja el
@@ -194,13 +195,14 @@ export default async function PanelPage() {
   const evolArticuloPanel = evolucionVentaPorArticulo(ventasPanel, 12, historicasPanel, undefined, lotes);
   const ahora = new Date();
   const mesPasadoRef = mesAnteriorClamp(ahora);
-  const resumenMesPanel = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, ahora, undefined, lotes);
+  const clavesExtraVenta = (await leerArticulosExtra()).map((a) => a.key);
+  const resumenMesPanel = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, ahora, undefined, lotes, clavesExtraVenta);
   // Mes pasado completo, para comparar contra la proyección (que estima un mes entero).
   // OJO: sin el diaCorte explícito acá, resumenMesActual usa mesPasadoRef.getDate() como
   // corte (el mismo día que hoy) en vez del mes completo — quedaba idéntico al
   // "comparable" de abajo e inflaba la variación de la proyección.
   const diasEnMesPasado = new Date(mesPasadoRef.getFullYear(), mesPasadoRef.getMonth() + 1, 0).getDate();
-  const resumenMesPasadoCompleto = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, mesPasadoRef, diasEnMesPasado, lotes);
+  const resumenMesPasadoCompleto = resumenMesActual(ventasPanel, preciosPanel, clientesPanel, mesPasadoRef, diasEnMesPasado, lotes, clavesExtraVenta);
   // Referencia para "venta al día": el RITMO de todo el mes pasado (total real / días del mes),
   // prorrateado a los días que ya pasaron este mes — NO el total real de "mes pasado, mismos
   // primeros N días", que quedaba a merced de en qué día cayó algún pedido grande de un
