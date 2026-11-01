@@ -108,6 +108,9 @@ Devolvé SOLO un objeto JSON, sin texto alrededor y sin bloque de código, con e
 Reglas:
 - Si no encontrás un importe claro, poné null y explicá por qué en el comentario. NO inventes un número.
 - No confundas un CUIT, un número de operación ni un número de factura con un importe.
+- Tampoco una FECHA. Un aviso del 26/10/2026 no es un pago de $2.026: si el único número que
+  encontrás para el importe coincide con el año, el día o el mes del aviso, es la fecha, no el
+  monto. En ese caso poné null y decilo en el comentario.
 - "alta" solo si el aviso dice explícitamente cuánto se pagó. Si tuviste que deducirlo, es "media" o "baja".
 
 VARIOS PAGOS EN UN MISMO AVISO:

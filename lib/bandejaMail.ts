@@ -125,7 +125,24 @@ export async function crearItemDesdeAviso(args: {
     return { ok: true, motivo: 'confirmacion', idItem, codigo };
   }
 
-  const leido = parsearAvisoPago(`${asunto}\n${texto}`);
+  // ── Un importe que en realidad es una fecha ──────────────────────────────────────────
+//
+// Pasó con un aviso del 26/10/2026: el importe leído fue $2.026. No es un error de suma, es
+// el AÑO tomado como monto, y de ahí para abajo todo lo que sigue trabaja sobre un número
+// inventado — la conciliación busca facturas por $2.026 y propone cualquier cosa.
+//
+// La regla es angosta a propósito: solo se desconfía de un importe que coincide con un año
+// que aparece en el propio aviso. Un umbral tipo "menos de $10.000 es sospechoso" sería más
+// amplio y descartaría cobros chicos que son reales.
+function pareceUnaFecha(importe: number, textoCompleto: string): boolean {
+  const n = Math.round(importe);
+  if (!(n >= 1900 && n <= 2100)) return false;
+  // Que ese mismo número figure en el aviso como año. Si no está, puede ser un cobro real
+  // de $2.026 y no hay por qué dudar.
+  return new RegExp(`(^|[^\\d])${n}([^\\d]|$)`).test(textoCompleto);
+}
+
+const leido = parsearAvisoPago(`${asunto}\n${texto}`);
 
   // Los clientes se leen antes que nada: hacen falta para el matcheo por texto y, si hay
   // que llamar a la IA, para que pueda elegir de la lista.
@@ -216,6 +233,15 @@ export async function crearItemDesdeAviso(args: {
     }
   }
 
+  // Si el importe leído es un año del propio aviso, se descarta y el aviso entra como "no
+  // se pudo leer el importe", que es la verdad: es mejor que entre vacío y se complete a
+  // mano que con un número que después arrastra una imputación equivocada.
+  let importeEraFecha = false;
+  if (Number(importe) > 0 && pareceUnaFecha(Number(importe), `${asunto} ${texto}`)) {
+    importeEraFecha = true;
+    importe = 0;
+  }
+
   const sinImporte = !(Number(importe) > 0);
   if (sinImporte) importe = 0;
 
@@ -240,7 +266,7 @@ export async function crearItemDesdeAviso(args: {
   // ponerla acá la deja elegida sola, y además queda a la vista en "Dice el aviso" para
   // poder desconfiar.
   const descripcion = [
-    sinImporte ? 'NO SE PUDO LEER EL IMPORTE — completálo a mano' : '',
+    sinImporte ? (importeEraFecha ? 'NO SE PUDO LEER EL IMPORTE — lo que se leyó era el año del aviso, no un monto. Completálo a mano' : 'NO SE PUDO LEER EL IMPORTE — completálo a mano') : '',
     estadoPago === 'pendiente' ? 'PAGO PENDIENTE — el aviso dice que todavía no se acreditó' : '',
     args.remitente ? `De ${args.remitente}` : '',
     asunto || 'Aviso de pago',

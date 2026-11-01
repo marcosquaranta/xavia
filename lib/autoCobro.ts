@@ -174,6 +174,7 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
     .filter((i) => String(i.estado || '').trim() === 'pendiente' && String(i.origen) === 'mail')
     .filter((i) => !opciones.soloItem || String(i.id_item) === String(opciones.soloItem));
   const out: ResultadoAuto = { activo, candidatos: [], rechazados: [], registrados: [], errores: [] };
+  const pendientesDeNota: { idItem: string; motivo: string }[] = [];
   if (!pendientes.length) return out;
 
   // Las facturas del último año, por clave, con su cliente y su importe.
@@ -206,16 +207,32 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
     const cliente = String(it.cliente || '') || String(it.id_control || '');
     const importe = Math.round(num(it.importe));
     const retencion = retencionDe(it);
-    const rechazar = (motivo: string) => out.rechazados.push({ idItem: String(it.id_item), cliente, importe, motivo });
+    const rechazar = (motivo: string) => {
+      out.rechazados.push({ idItem: String(it.id_item), cliente, importe, motivo });
+      // El motivo va a la fila y no solo al mail de acuse: cuando alguien abre la bandeja y
+      // ve un aviso que "debería haberse registrado solo", la pregunta es por qué no, y la
+      // respuesta tiene que estar ahí y no en un mail de hace tres días.
+      pendientesDeNota.push({ idItem: String(it.id_item), motivo });
+    };
 
     const remitente = norm((it as any).remitente);
     if (remitente && excluidos.some((x) => remitente.includes(x))) {
       rechazar('el remitente está excluido del registro automático'); continue;
     }
+    // ── Por qué la confianza de la IA ya no frena esto ────────────────────────────────
+    //
+    // Pedía `confianza alta` ADEMÁS de que las cuentas cerraran, y eso dejaba sin registrar
+    // avisos donde las facturas nombradas sumaban exactamente el importe: el caso más claro
+    // que existe. La confianza mide qué tan segura está la IA de haber leído bien; la
+    // identidad aritmética de más abajo no mide confianza, la COMPRUEBA. Si las facturas
+    // existen, son de este cliente, están abiertas y suman exacto, da igual con cuánta
+    // seguridad lo leyó: el resultado es verificable por sí mismo.
+    //
+    // Lo que sí sigue frenando es que la plata no haya entrado todavía. Eso no es una duda
+    // de lectura, es un hecho del mundo: el aviso dice que el pago está programado.
     const conf = confianzaDe(it);
-    if (conf !== 'alta') {
-      rechazar(conf ? `la IA leyó el aviso con confianza ${conf}` : 'no consta que la IA haya podido leer el aviso con seguridad');
-      continue;
+    if (conf === 'pendiente_de_acreditar') {
+      rechazar('el aviso dice que el pago todavía no se acreditó'); continue;
     }
     if (!String(it.id_control || '').trim()) { rechazar('no se reconoció a qué cliente corresponde'); continue; }
     if (importe <= 0) { rechazar('no se pudo leer el importe'); continue; }
@@ -305,5 +322,13 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
       out.errores.push({ idItem: c.idItem, cliente: c.cliente, error: e?.message || 'error' });
     }
   }
+  // Las notas de los rechazos, al final y sin romper nada si alguna falla: no poder anotar
+  // el motivo no puede impedir que se informe lo que sí se registró.
+  for (const n of pendientesDeNota) {
+    try {
+      await updateRow(HOJA_BANDEJA, 'id_item', n.idItem, { nota: `no se registró solo: ${n.motivo}` });
+    } catch { /* se informa igual en el resultado */ }
+  }
+
   return out;
 }
