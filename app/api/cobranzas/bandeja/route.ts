@@ -119,8 +119,15 @@ export async function PATCH(req: NextRequest) {
     const items = await readSheet<ItemBandeja>(HOJA_BANDEJA).catch(() => [] as ItemBandeja[]);
     const item = items.find(i => String(i.id_item) === idItem);
     if (!item) return NextResponse.json({ error: 'No se encontró ese movimiento en la bandeja.' }, { status: 404 });
+    // Ya resuelto. Pasa cuando la pantalla quedó abierta desde antes, o cuando el registro
+    // automático lo tomó mientras tanto. Devolver un error y dejarlo en la lista es lo peor
+    // de los dos mundos: no se puede confirmar y tampoco se va. Se marca `yaResuelto` para
+    // que la pantalla lo saque sola y siga.
     if (String(item.estado) !== 'pendiente') {
-      return NextResponse.json({ error: `Ese movimiento ya está ${item.estado}.` }, { status: 400 });
+      return NextResponse.json({
+        yaResuelto: true, estado: String(item.estado),
+        error: `Ese movimiento ya está ${item.estado} — se saca de la bandeja.`,
+      }, { status: 409 });
     }
 
     if (accion === 'descartar') {

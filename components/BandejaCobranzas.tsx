@@ -253,6 +253,13 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
         }),
       });
       const j = await r.json();
+      // Ya lo había tomado otro (la pantalla estaba abierta desde antes, o lo registró el
+      // automático). No es un error que haya que resolver: simplemente ya no está.
+      if (r.status === 409 && j?.yaResuelto) {
+        onListo(`Ese movimiento ya estaba ${j.estado}. Lo saco de la bandeja.`);
+        router.refresh();
+        return;
+      }
       if (!r.ok) throw new Error(j.error || 'Error');
       onListo(accion === 'confirmar'
         ? `✓ Cobro registrado${j.numeroRecibo ? ` — recibo ${j.numeroRecibo}` : ''}${j.aliasAprendido ? `. Aprendí que "${j.aliasAprendido}" es ese cliente.` : ''}`
@@ -276,6 +283,11 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
         body: JSON.stringify({ id_item: item.id_item, accion: 'descartar' }),
       });
       const j = await r.json();
+      if (r.status === 409 && j?.yaResuelto) {
+        onListo(`Ese movimiento ya estaba ${j.estado}. Lo saco de la bandeja.`);
+        router.refresh();
+        return;
+      }
       if (!r.ok) throw new Error(j.error || 'Error');
       onListo('✓ Movimiento descartado.');
       router.refresh();
@@ -578,7 +590,12 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
                   <span style={{ fontFamily: 'monospace', fontSize: '10.5px', color: '#1d4ed8' }}>{sg.numeros.join(' + ')}</span>
                   <span style={{ marginLeft: 'auto', fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: '8px',
                     background: sg.exacta ? '#dcfce7' : '#fef3c7', color: sg.exacta ? '#166534' : '#92400e' }}>
-                    {sg.exacta ? 'exacto' : `${sg.diferencia > 0 ? '+' : '−'}${fmt$(Math.abs(sg.diferencia))}`}
+                    {/* La diferencia es (lo que suman las facturas − lo que entró). En
+                        positivo significa que las facturas valen MÁS: están pagando de
+                        menos. Un "+$85.637" sin eso se lee como lo contrario. */}
+                    {sg.exacta ? 'exacto'
+                      : sg.diferencia > 0 ? `faltan ${fmt$(sg.diferencia)}`
+                      : `sobran ${fmt$(Math.abs(sg.diferencia))}`}
                   </span>
                 </button>
                 );
@@ -683,11 +700,17 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
             return (
               <p style={{ margin: '0 0 8px', fontSize: '11.5px', color: ok ? '#166534' : '#b45309', fontWeight: 600 }}>
                 Cancela: {elegidas.join(', ')}
-                {suma > 0 && (
-                  <span style={{ fontWeight: 400 }}>
-                    {' '}— suma {fmt$(suma)}{dif === 0 ? ' (exacto)' : ` (${dif > 0 ? '+' : '−'}${fmt$(Math.abs(dif))})`}
+                {suma > 0 && <span style={{ fontWeight: 400 }}>{' '}— suma {fmt$(suma)}</span>}
+                {/* En palabras y no como "+$85.637": el signo solo obliga a reconstruir
+                    cada vez de qué lado está la diferencia, y se lee al revés. */}
+                {suma > 0 && dif !== 0 && (
+                  <span style={{ display: 'block', fontWeight: 700, marginTop: '2px' }}>
+                    {dif > 0
+                      ? `Te están pagando ${fmt$(dif)} de menos: esa factura queda con saldo.`
+                      : `Entraron ${fmt$(Math.abs(dif))} de más de lo que suman esas facturas: falta alguna, o parte va a cuenta.`}
                   </span>
                 )}
+                {suma > 0 && dif === 0 && <span style={{ fontWeight: 400 }}> (exacto)</span>}
               </p>
             );
           })()}
