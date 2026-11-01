@@ -112,6 +112,12 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
   const [fechaCobro, setFechaCobro] = useState(String(item.fecha || '').split(/[T ]/)[0]);
   // Y cuando entra en varias veces, una fila por fecha. Vacío = entra todo junto.
   const [verMail, setVerMail] = useState(false);
+  // Corregir el importe de una factura sin salir de acá. El caso es siempre el mismo: el
+  // aviso dice $X, la factura figura por $Y y la diferencia es un error de carga. Había que
+  // irse a la pantalla de comprobantes y volver, perdiendo todo lo ya tildado.
+  const [editando, setEditando] = useState<string | null>(null);
+  const [nuevoImporte, setNuevoImporte] = useState('');
+  const [motivoAjuste, setMotivoAjuste] = useState('');
   const [enPartes, setEnPartes] = useState(false);
   const [partes, setPartes] = useState<ParteUI[]>([]);
   const importeNum = Math.round(Number(importeEditado)) || 0;
@@ -276,6 +282,34 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
     } catch (e: any) {
       setErr(e.message); setTrabajando(false);
     }
+  }
+
+  // Guarda el ajuste y refresca las facturas, para que la suma de abajo y las sugerencias
+  // se recalculen con el valor nuevo: ajustar y seguir viendo el número viejo sería peor
+  // que no poder ajustar.
+  async function guardarAjusteFactura(f: FacturaCliente) {
+    const nuevo = Math.round(Number(nuevoImporte));
+    if (!isFinite(nuevo) || nuevo < 0) { setErr('El importe tiene que ser un número.'); return; }
+    if (!motivoAjuste.trim()) { setErr('Poné por qué se ajusta.'); return; }
+    setTrabajando(true); setErr(null);
+    try {
+      const r = await fetch('/api/cobranzas/ajuste-factura', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          numero: f.numero, id_control: idControl,
+          cliente: clientes.find((c) => c.id_control === idControl)?.nombre || '',
+          importeXubio: f.importe, importeApp: nuevo, motivo: motivoAjuste.trim(),
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'No se pudo ajustar');
+      setEditando(null); setNuevoImporte(''); setMotivoAjuste('');
+      await traerFacturas(idControl);
+      router.refresh();
+    } catch (e: any) {
+      setErr(e.message || 'No se pudo ajustar');
+    }
+    setTrabajando(false);
   }
 
   const reconocido = !!item.id_control;
@@ -577,9 +611,58 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
                         <span style={{ color: '#9ca3af' }}>{fmtDia(f.fecha)}</span>
                         <span style={{ marginLeft: 'auto', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmt$(f.importe)}</span>
                         {cerrada && <span style={{ fontSize: '9.5px', color: '#166534' }}>ya cobrada</span>}
+                        {/* Corregir el importe sin salir de la bandeja. No toca Xubio: es el
+                            mismo ajuste de la pantalla de comprobantes. */}
+                        <button type="button" title="Corregir el importe de esta factura"
+                          onClick={(e) => {
+                            e.preventDefault(); e.stopPropagation();
+                            setEditando(editando === f.numero ? null : f.numero);
+                            setNuevoImporte(String(Math.round(f.importe)));
+                            setMotivoAjuste('');
+                          }}
+                          disabled={trabajando}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '11px', padding: '0 2px' }}>✎</button>
                       </label>
                     );
                   })}
+                  {editando && (() => {
+                    const f = facturas.find((x) => x.numero === editando);
+                    if (!f) return null;
+                    const dif = Math.round(Number(nuevoImporte) || 0) - Math.round(f.importe);
+                    return (
+                      <div style={{ marginTop: '7px', padding: '9px 10px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '7px' }}>
+                        <p style={{ margin: '0 0 7px', fontSize: '11.5px', fontWeight: 700, color: '#92400e' }}>
+                          Corregir <span style={{ fontFamily: 'monospace' }}>{f.numero}</span> — en Xubio figura {fmt$(f.importe)}
+                        </p>
+                        <div style={{ display: 'flex', gap: '7px', flexWrap: 'wrap', alignItems: 'center' }}>
+                          <input type="number" value={nuevoImporte} onChange={(e) => setNuevoImporte(e.target.value)} disabled={trabajando}
+                            placeholder="Importe real" style={{ ...inputStyle, width: '130px' }} />
+                          <input type="text" value={motivoAjuste} onChange={(e) => setMotivoAjuste(e.target.value)} disabled={trabajando}
+                            placeholder="¿Por qué? (ej: 40 rúculas de menos)" style={{ ...inputStyle, flex: '1 1 220px', minWidth: '180px' }} />
+                          <button type="button" onClick={() => guardarAjusteFactura(f)} disabled={trabajando}
+                            style={{ fontSize: '11.5px', fontWeight: 700, padding: '5px 12px', background: '#166534', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
+                            Guardar
+                          </button>
+                          <button type="button" onClick={() => { setEditando(null); setErr(null); }} disabled={trabajando}
+                            style={{ fontSize: '11.5px', padding: '5px 10px', background: 'white', border: '1px solid #e5e7eb', borderRadius: '6px', cursor: 'pointer' }}>
+                            Cancelar
+                          </button>
+                        </div>
+                        {dif !== 0 && (
+                          <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#92400e' }}>
+                            {dif > 0 ? 'Sube' : 'Baja'} {fmt$(Math.abs(dif))} respecto de lo emitido.
+                          </p>
+                        )}
+                        {/* Que quede claro qué NO hace: la factura en Xubio sigue como está.
+                            Creer que esto la corrige allá sería peor que no tenerlo. */}
+                        <p style={{ margin: '6px 0 0', fontSize: '10.5px', color: '#b45309', lineHeight: 1.45 }}>
+                          Esto <strong>no cambia la factura en Xubio</strong>: queda registrado del lado de la app, con el motivo
+                          y tu usuario, y es lo que se usa para la deuda del cliente. Si hay que corregirla de verdad, va una
+                          nota de crédito desde Comprobantes.
+                        </p>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
