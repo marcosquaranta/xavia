@@ -163,6 +163,9 @@ const leido = parsearAvisoPago(`${asunto}\n${texto}`);
   let pagador = '';
   let cuentaDestino = '';
   let fechaIA = '';
+  // Lo que decía el cuerpo del mail cuando no coincide con el comprobante adjunto. Se
+  // guarda para poder decirlo: un importe corregido en silencio es un número sin dueño.
+  let importeDelTexto = 0;
   // Los pagos que el aviso trae ADEMÁS del primero. Una captura de una app de pagos muestra
   // varios, uno abajo del otro: son cobros distintos, con fechas distintas, y cada uno se
   // imputa por separado. Metidos en una sola fila habría que separarlos a mano, y sumarlos
@@ -173,6 +176,15 @@ const leido = parsearAvisoPago(`${asunto}\n${texto}`);
 
   // Matcheo por texto primero: alias aprendidos y nombres. Es gratis y determinístico.
   let cand = proponerCliente(`${args.remitente || ''} ${asunto} ${texto}`, clientes, aliases);
+
+  // Si lo que el regex sacó del texto es un año del propio aviso, no es un importe. Se
+  // descarta ACÁ, antes de decidir si hace falta la IA: así el aviso entra en el camino de
+  // "falta el importe" y la IA —que está mirando el comprobante adjunto— puede darlo.
+  let importeEraFecha = false;
+  if (Number(importe) > 0 && pareceUnaFecha(Number(importe), `${asunto} ${texto}`)) {
+    importeEraFecha = true;
+    importe = 0;
+  }
 
   // Se llama a la IA cuando falta el importe O cuando no se reconoció al cliente. Lo
   // segundo importa tanto como lo primero: el nombre del aviso casi nunca es el que usamos
@@ -202,7 +214,22 @@ const leido = parsearAvisoPago(`${asunto}\n${texto}`);
 
     if (ia) {
       comentarioIA = [ia.comentario, ia.razonDelCliente].filter(Boolean).join(' · ');
-      if (faltaImporte && Number(ia.importe) > 0) {
+      // ── Cuándo gana el número de la IA ────────────────────────────────────────────
+      //
+      // Antes ganaba SIEMPRE el regex sobre el texto: si en el cuerpo del mail había
+      // cualquier número que pareciera plata, el importe que la IA sacó del comprobante
+      // adjunto se descartaba sin mirarlo. Y el cuerpo de un aviso reenviado casi nunca
+      // tiene el monto: tiene la cadena de reenvíos, fechas, números de operación. El monto
+      // está en la IMAGEN. Por eso parecía que la IA leía mal los adjuntos: los leía, y
+      // después el código tiraba la respuesta.
+      //
+      // Con un adjunto, el adjunto manda: es el comprobante. Si los dos números no
+      // coinciden, se usa el de la IA y se deja dicho el otro, para poder desconfiar.
+      const hayAdjunto = (args.pdfs?.length || 0) > 0;
+      const iaTieneImporte = Number(ia.importe) > 0;
+      const difieren = iaTieneImporte && Number(importe) > 0 && Math.abs(Number(ia.importe) - Number(importe)) > 1;
+      if (iaTieneImporte && (faltaImporte || (hayAdjunto && difieren))) {
+        if (difieren) importeDelTexto = Number(importe);
         importe = ia.importe;
         if (ia.retencion) retencion = ia.retencion;
         if (ia.fecha) fechaIA = ia.fecha;
@@ -234,15 +261,6 @@ const leido = parsearAvisoPago(`${asunto}\n${texto}`);
         }
       }
     }
-  }
-
-  // Si el importe leído es un año del propio aviso, se descarta y el aviso entra como "no
-  // se pudo leer el importe", que es la verdad: es mejor que entre vacío y se complete a
-  // mano que con un número que después arrastra una imputación equivocada.
-  let importeEraFecha = false;
-  if (Number(importe) > 0 && pareceUnaFecha(Number(importe), `${asunto} ${texto}`)) {
-    importeEraFecha = true;
-    importe = 0;
   }
 
   const sinImporte = !(Number(importe) > 0);
@@ -277,6 +295,7 @@ const leido = parsearAvisoPago(`${asunto}\n${texto}`);
     retencion ? `retención ${retencion}` : '',
     cuentaDestino ? marcarCuentaDeclarada(cuentaDestino) : '',
     leidoCon === 'ia' ? `leído con IA (confianza ${confianza})` : '',
+    importeDelTexto > 0 ? `OJO: el cuerpo del mail decía ${importeDelTexto} y el comprobante adjunto dice ${Math.round(Number(importe))} — se usó el del comprobante` : '',
     texto.replace(/\s+/g, ' ').slice(0, 140),
   ].filter(Boolean).join(' · ');
 
