@@ -123,6 +123,9 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
       // las recalculaba por importe, que es adivinar algo que el aviso ya dijo.
       comprobantes: String(i.comprobantes || ''),
       origen: String(i.origen || 'banco'),
+      // El aviso como llegó, para poder leerlo cuando la IA no sacó lo que hacía falta.
+      texto_mail: String((i as any).texto_mail || ''),
+      adjuntos: String((i as any).adjuntos || ''),
     }))
     .sort((a, b) => b.fecha.localeCompare(a.fecha) || b.importe - a.importe);
 

@@ -341,6 +341,7 @@ export async function POST(req: NextRequest) {
       origen: 'mail',
       usuario: 'correo reenviado',
       pdfs,
+      emailId: String(data?.email_id || ''),
     });
 
     // ── Registrarlo en el momento, si no hace falta mirarlo ──────────────────────────

@@ -97,6 +97,8 @@ export async function crearItemDesdeAviso(args: {
   importeForzado?: number;
   fechaForzada?: string;
   pdfs?: AdjuntoIA[];
+  // El id del mail en Resend, para poder volver a pedir los adjuntos al mirarlos.
+  emailId?: string;
 }): Promise<ResultadoItemAviso> {
   const texto = String(args.texto || '');
   const asunto = String(args.asunto || '');
@@ -105,6 +107,7 @@ export async function crearItemDesdeAviso(args: {
   // Las columnas nuevas no existen en una hoja creada antes, y appendRowObj escribe por
   // nombre: sin esto, los datos del aviso se perderían en silencio.
   await asegurarColumnas(HOJA_BANDEJA, ['retencion', 'cuenta_destino', 'confianza', 'remitente']);
+  await asegurarColumnas(HOJA_BANDEJA, ['texto_mail', 'email_id', 'adjuntos']);
   const previos = await readSheet<ItemBandeja>(HOJA_BANDEJA).catch(() => [] as ItemBandeja[]);
   const hoy = fechaArgentinaHoy();
 
@@ -305,6 +308,12 @@ const leido = parsearAvisoPago(`${asunto}\n${texto}`);
     // perfecta: lo que falta no es certeza sobre el dato, es que la plata entre.
     confianza: estadoPago === 'pendiente' ? 'pendiente_de_acreditar' : (confianza || ''),
     remitente: String(args.remitente || ''),
+    // El cuerpo entero. Se recorta a 20.000 caracteres porque una celda de Sheets tiene un
+    // límite duro de 50.000 y un mail con toda la cadena de reenvíos lo pasa: mejor guardar
+    // los primeros 20.000 que perder la fila entera por un error de escritura.
+    texto_mail: String(texto || '').slice(0, 20000),
+    email_id: String(args.emailId || ''),
+    adjuntos: (args.pdfs || []).map((a) => a.nombre).join(', '),
   });
 
   // ── Los demás pagos del mismo aviso ──────────────────────────────────────────────

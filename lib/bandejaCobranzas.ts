@@ -21,6 +21,16 @@ export const HEADERS_BANDEJA = [
   // Mientras una persona confirmaba cada fila alcanzaba con que estuviera escrito ahí; para
   // que la app pueda decidir sola tiene que poder leerlo sin interpretar una frase.
   'retencion', 'cuenta_destino', 'confianza', 'remitente',
+  // ── El aviso crudo ────────────────────────────────────────────────────────────────
+  //
+  // `descripcion` guarda 140 caracteres del cuerpo, que alcanzan para reconocer el aviso de
+  // un vistazo y no para entenderlo. Cuando la IA no pudo sacar el importe o las facturas,
+  // la única forma de resolverlo era abrir la casilla de correo y buscar el mail a mano.
+  //
+  // Ahora el texto completo queda acá, y los adjuntos se vuelven a pedir por `email_id` en
+  // el momento de mirarlos (ver /api/cobranzas/adjunto): una imagen no entra en una celda
+  // de planilla, y guardarla en base64 sería llenar la hoja de basura ilegible.
+  'texto_mail', 'email_id', 'adjuntos',
 ];
 
 // Aliases aprendidos: cómo aparece un cliente en el resumen del banco. El banco muestra la
@@ -53,6 +63,12 @@ export interface ItemBandeja {
   cuenta_destino: string;
   confianza: 'alta' | 'media' | 'baja' | string;
   remitente: string;
+  // El cuerpo completo del mail, para poder leerlo sin ir a la casilla.
+  texto_mail: string;
+  // El id del mail en Resend: con eso se vuelven a pedir los adjuntos cuando alguien los
+  // quiere ver. Vacío en lo que no vino por mail.
+  email_id: string;
+  adjuntos: string;  // nombres separados por coma
 }
 
 export interface AliasCobranza {

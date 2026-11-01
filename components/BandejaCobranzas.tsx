@@ -18,6 +18,10 @@ interface ItemUI {
   nota: string;
   origen: string;  // banco | mail | manual | setup
   comprobantes?: string; // las facturas que el propio aviso dice pagar (las lee la IA)
+  // El aviso como llegó: el cuerpo completo del mail y los nombres de los adjuntos. Sirve
+  // para resolver a mano lo que la IA no pudo leer, sin ir a abrir la casilla de correo.
+  texto_mail?: string;
+  adjuntos?: string;
 }
 interface ClienteOpt {
   id_control: string;
@@ -107,6 +111,7 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
   // plata entra el mes que viene. Con la fecha del aviso la cuenta muestra plata que no está.
   const [fechaCobro, setFechaCobro] = useState(String(item.fecha || '').split(/[T ]/)[0]);
   // Y cuando entra en varias veces, una fila por fecha. Vacío = entra todo junto.
+  const [verMail, setVerMail] = useState(false);
   const [enPartes, setEnPartes] = useState(false);
   const [partes, setPartes] = useState<ParteUI[]>([]);
   const importeNum = Math.round(Number(importeEditado)) || 0;
@@ -253,6 +258,26 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
     }
   }
 
+  // Descarte rápido desde el encabezado. Pregunta una sola vez y con los datos a la vista:
+  // es reversible solo volviendo a cargar el aviso a mano, así que vale el confirm, pero no
+  // vale obligar a abrir la fila entera.
+  async function descartarRapido() {
+    if (!window.confirm(`Descartar ${fmt$(item.importe)} del ${fmtDia(item.fecha)}${item.cliente ? ` — ${item.cliente}` : ''}.\n\nNo se registra ningún cobro y no vuelve a aparecer en la bandeja.\n\n¿Confirmás?`)) return;
+    setTrabajando(true); setErr(null);
+    try {
+      const r = await fetch('/api/cobranzas/bandeja', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_item: item.id_item, accion: 'descartar' }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Error');
+      onListo('✓ Movimiento descartado.');
+      router.refresh();
+    } catch (e: any) {
+      setErr(e.message); setTrabajando(false);
+    }
+  }
+
   const reconocido = !!item.id_control;
   const ORIGEN: Record<string, { txt: string; bg: string; fg: string }> = {
     banco: { txt: 'banco', bg: '#eef2ff', fg: '#3730a3' },
@@ -295,6 +320,20 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
         <span style={{ fontSize: '11px', color: '#9ca3af', flex: 1, minWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {item.descripcion}
         </span>
+        {/* Descartar sin abrir la fila. La mayoría de lo que entra de más —un resumen de
+            banco que no es un cobro, un aviso repetido— se reconoce de un vistazo, y para
+            sacarlo había que abrir la fila, bajar hasta el final y leer un confirm. */}
+        <button
+          onClick={(e) => { e.stopPropagation(); descartarRapido(); }}
+          disabled={trabajando}
+          title="No es un cobro — descartar"
+          style={{
+            background: 'none', border: 'none', cursor: trabajando ? 'default' : 'pointer',
+            color: '#d1d5db', fontSize: '17px', lineHeight: 1, padding: '0 4px',
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#dc2626'; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#d1d5db'; }}
+        >×</button>
         <span style={{ fontSize: '11px', color: '#9ca3af' }}>{abierto ? '▲' : '▼'}</span>
       </div>
 
@@ -424,6 +463,43 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
             <div style={{ marginBottom: '8px' }}>
               <CobroEnPartes total={importeNum} partes={partes} onChange={setPartes} disabled={trabajando}
                 nota={Number(retencion) > 0 ? 'La retención va entera en la primera.' : ''} />
+            </div>
+          )}
+
+          {/* El aviso crudo. La descripción de arriba son 140 caracteres: alcanzan para
+              reconocer el mail, no para entenderlo. Cuando la IA no sacó el importe o las
+              facturas, esto es lo que evita tener que ir a abrir la casilla de correo. */}
+          {(!!(item as any).texto_mail || !!(item as any).adjuntos) && (
+            <div style={{ marginBottom: '8px' }}>
+              <button type="button" onClick={() => setVerMail((v) => !v)}
+                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: '11.5px', color: '#2563eb', fontWeight: 600, textDecoration: 'underline' }}>
+                {verMail ? '▾ Ocultar el mail' : '▸ Ver el mail como llegó'}
+                {!!(item as any).adjuntos && <span style={{ color: '#9ca3af', fontWeight: 400 }}> · {String((item as any).adjuntos).split(',').filter(Boolean).length} adjunto(s)</span>}
+              </button>
+              {verMail && (
+                <div style={{ marginTop: '6px', background: '#fafaf9', border: '1px solid #f1f0eb', borderRadius: '7px', padding: '9px 11px' }}>
+                  {!!(item as any).texto_mail && (
+                    <pre style={{ margin: 0, maxHeight: '280px', overflow: 'auto', fontSize: '11.5px', lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', color: '#374151' }}>
+                      {String((item as any).texto_mail)}
+                    </pre>
+                  )}
+                  {String((item as any).adjuntos || '').split(',').map((x) => x.trim()).filter(Boolean).map((nombre, i) => (
+                    <div key={i} style={{ marginTop: '9px', paddingTop: '9px', borderTop: '1px solid #f1f0eb' }}>
+                      <p style={{ margin: '0 0 5px', fontSize: '11px', color: '#6b7280' }}>
+                        📎 {nombre}{' '}
+                        <a href={`/api/cobranzas/adjunto?item=${encodeURIComponent(item.id_item)}&n=${i}`} target="_blank" rel="noreferrer"
+                          style={{ color: '#2563eb' }}>abrir aparte</a>
+                      </p>
+                      {/* El adjunto se vuelve a pedir al mail en el momento de mirarlo. Si ya
+                          no está, se ve el mensaje del alt y no una imagen rota: saber que
+                          se perdió es distinto de pensar que no había nada. */}
+                      <img src={`/api/cobranzas/adjunto?item=${encodeURIComponent(item.id_item)}&n=${i}`}
+                        alt={`No se pudo traer "${nombre}" — puede que el mail ya no lo tenga disponible. Probá "abrir aparte".`}
+                        style={{ maxWidth: '100%', maxHeight: '420px', borderRadius: '6px', border: '1px solid #e5e7eb', display: 'block' }} />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
