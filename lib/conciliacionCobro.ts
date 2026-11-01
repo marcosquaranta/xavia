@@ -17,6 +17,9 @@ export interface FacturaCandidata {
   cubierta?: boolean;
   // Dada por saldada a mano, sin movimiento en Xubio (ver facturasSaldadas.ts).
   saldadaManual?: boolean;
+  // Imputada a un cobro desde la app (ver cobranzasEdit.ts). Faltaba acá, y era una de las
+  // dos razones por las que se proponían facturas que la misma pantalla mostraba cobradas.
+  imputadaManual?: boolean;
 }
 
 // Qué cuenta como paga lo decide LA APP: un cobro imputado acá (`yaCobrada`) o una factura
@@ -33,8 +36,14 @@ export interface FacturaCandidata {
 //
 // Antes esto estaba escrito dos veces y con condiciones DISTINTAS — la búsqueda por importe
 // excluía las cubiertas y la fila de "las más viejas" no—, así que esa fila proponía
-// facturas ya cobradas. Ahora es un solo lugar.
-export const estaImpaga = (f: FacturaCandidata) => !f.yaCobrada && !f.saldadaManual;
+// facturas ya cobradas.
+//
+// Volvió a pasar, y peor: esta función miraba dos de las cuatro marcas y la pantalla miraba
+// las cuatro, así que una factura podía aparecer rotulada "YA COBRADA" en la lista y al
+// mismo tiempo venir propuesta y tildada arriba. Las cuatro marcas van acá, y las demás
+// pantallas preguntan por esta función.
+export const estaImpaga = (f: FacturaCandidata) =>
+  !f.yaCobrada && !f.saldadaManual && !f.cubierta && !f.imputadaManual;
 
 export interface Combinacion {
   numeros: string[];
@@ -42,8 +51,8 @@ export interface Combinacion {
   diferencia: number;   // total − objetivo (negativo = falta plata para llegar)
   exacta: boolean;
   consecutivas: boolean; // comprobantes seguidos del cliente (ver corridas más abajo)
-  // La fila de referencia: arrancar por la factura más vieja e ir sumando. Se muestra
-  // siempre, aunque no entre en la tolerancia (ver combinacionMasViejas).
+  // La fila de referencia: arrancar por la factura más vieja e ir sumando. Se muestra solo
+  // si entra en la tolerancia, como cualquier otra (ver combinacionMasViejas).
   masViejas?: boolean;
   // Las facturas que el PROPIO AVISO dice estar pagando. No sale de adivinar por importe:
   // lo dice el comprobante del cliente, así que va primera y va siempre, cierre o no cierre
@@ -139,6 +148,11 @@ export function combinacionMasViejas(
     if (acum > obj) break;
   }
   if (!mejor) return null;
+  // Si ni la mejor corrida de las más viejas entra en la tolerancia, no es una respuesta a
+  // "qué está pagando esto": es una fila que se ve igual que las buenas, viene primera y
+  // tildada, y propone cancelar una factura de $250.835 con un aviso de $2.026. Mejor no
+  // sugerir nada y que se elija a mano de la lista, que está ahí abajo.
+  if (Math.abs(mejor.dif) > toleranciaDe(obj)) return null;
 
   const elegidas = candidatas.slice(0, mejor.hasta + 1);
   return {
