@@ -377,6 +377,28 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
     .sort((a, b) => String(b.fecha_envio || '').localeCompare(String(a.fecha_envio || '')));
   const prendidos = filas.filter((f) => f.activo).length;
 
+  // ── El color dice qué hace cada cosa ────────────────────────────────────────────────
+  //
+  // Todo era una pila de tarjetas blancas idénticas, y las tres cosas que se hacen acá no
+  // son la misma: imputar lo que entró es el trabajo del día, cargar a mano toca la
+  // contabilidad, y los informes solo se miran. Con todo del mismo color hay que leer cada
+  // título para saber dónde estás parado.
+  //
+  // Verde = lo que hay que hacer hoy. Azul = mueve plata en Xubio. Ámbar = cambia la app
+  // pero NO toca Xubio. Gris = solo se mira.
+  const tituloZona: React.CSSProperties = {
+    margin: '22px 0 8px', fontSize: '12px', fontWeight: 800, textTransform: 'uppercase',
+    letterSpacing: '0.7px', color: '#9ca3af',
+  };
+  const tarjeta = (color: string): React.CSSProperties => ({
+    background: 'white', border: '1px solid #e5e7eb', borderLeft: `4px solid ${color}`,
+    borderRadius: '10px', padding: '13px 15px', marginBottom: '12px',
+  });
+  const encabezado = (color: string): React.CSSProperties => ({
+    margin: 0, fontSize: '14px', fontWeight: 800, color, cursor: 'pointer', listStyle: 'revert',
+  });
+  const bajada: React.CSSProperties = { margin: '3px 0 0', fontSize: '12px', color: '#6b7280', lineHeight: 1.5 };
+
   return (
     <>
       <Header user={user} current="cobranzas" />
@@ -389,16 +411,11 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
 
         <ActualizarXubio actualizado={actualizadoXubio} />
 
-        {/* ══ BANDEJA ══ */}
-        <div className="card" style={{ marginBottom: '14px' }}>
-          <p className="card-title">Bandeja — cobros por imputar</p>
-          <p className="card-sub">
-            Subís el resumen del banco y acá quedan los movimientos de entrada, uno por uno, con el cliente
-            propuesto y qué facturas podrían ser. Nada se registra en Xubio hasta que lo confirmás.
-            Cuando elegís el cliente a mano, la app se guarda cómo aparece ese pagador en el resumen y la
-            próxima vez lo reconoce sola. Las facturas vienen precargadas solo para los clientes con el
-            recordatorio prendido; para el resto se piden al abrir la fila y tarda unos segundos.
-          </p>
+        {/* ══ 1. LO QUE HAY QUE HACER ══ */}
+        <p style={tituloZona}>Lo que hay que imputar</p>
+        <div style={tarjeta('#166534')}>
+          <p style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#166534' }}>Bandeja — cobros por imputar</p>
+          <p style={bajada}>Nada se registra en Xubio hasta que lo confirmás.</p>
           <div style={{ marginTop: '10px' }}>
             <BandejaCobranzas
               items={itemsBandeja}
@@ -417,24 +434,22 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
           </div>
         </div>
 
-        {/* ══ CARGA MANUAL (los dos caminos juntos) ══ */}
-        <details className="card" style={{ marginBottom: '14px' }}>
-          <summary style={{ cursor: 'pointer', fontSize: '14px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
-            Cargar un cobro a mano
-          </summary>
-          <p className="card-sub">
-            Para lo que no entró por la bandeja. Dos caminos según qué haya que hacer.
-          </p>
+        {/* ══ 2. CARGAR A MANO ══
+            Los dos caminos, visibles a la vez. Antes estaban uno adentro del otro adentro
+            de un tercero: tres clicks para llegar a cualquiera de los dos, y ninguno se veía
+            hasta abrir el primero. Son dos cosas distintas y la diferencia importa —uno
+            mueve plata en Xubio y el otro no— así que van en paralelo y con colores
+            distintos, no en una lista anidada. */}
+        <p style={tituloZona}>Cargar a mano · lo que no entró por la bandeja</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: '12px', marginBottom: '12px' }}>
 
-          <details style={{ marginTop: '10px', borderTop: '1px solid #f3f4f6', paddingTop: '10px' }}>
-            <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
-              Registrar el cobro en Xubio
-            </summary>
-
-          <p className="card-sub">
-            Lo que cargues acá se crea en Xubio como cobranza del cliente. Entra a su cuenta corriente
-            como cobro a cuenta: la API de Xubio no permite imputarlo a una factura puntual, eso sigue
-            siendo a mano si hace falta. Un cobro mal cargado se puede anular desde acá.
+        <details style={tarjeta('#1d4ed8')}>
+          <summary style={encabezado('#1d4ed8')}>Registrar un cobro en Xubio</summary>
+          <p style={{ ...bajada, color: '#1e40af', fontWeight: 600 }}>Mueve la contabilidad: crea la cobranza en Xubio.</p>
+          <p style={bajada}>
+            Entra a la cuenta corriente del cliente como cobro a cuenta: la API de Xubio no permite
+            imputarlo a una factura puntual, eso sigue siendo a mano si hace falta. Un cobro mal cargado
+            se puede anular desde acá.
           </p>
           <div style={{ marginTop: '10px' }}>
             <RegistrarCobro
@@ -457,18 +472,15 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
                 }))}
             />
           </div>
-                  </details>
+        </details>
 
-          <details style={{ marginTop: '10px', borderTop: '1px solid #f3f4f6', paddingTop: '10px' }}>
-            <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
-              Marcar facturas como saldadas (sin tocar Xubio)
-            </summary>
-
-          <p className="card-sub">
+        <details style={tarjeta('#b45309')}>
+          <summary style={encabezado('#b45309')}>Marcar facturas como saldadas</summary>
+          <p style={{ ...bajada, color: '#92400e', fontWeight: 600 }}>No toca Xubio: la contabilidad queda como está.</p>
+          <p style={bajada}>
             Para las que se cobraron por fuera de la app —un cheque, una compensación, un cobro cargado
-            a mano en Xubio— o las que ya no se van a cobrar. Se dan por saldadas y dejan de aparecer al
-            imputar y en los reclamos. <strong>No se registra ningún movimiento en Xubio</strong>, así que
-            la contabilidad queda como está. Se puede deshacer.
+            a mano en Xubio— o las que ya no se van a cobrar. Dejan de aparecer al imputar y en los
+            reclamos. Se puede deshacer.
           </p>
           <div style={{ marginTop: '10px' }}>
             {/* Solo los clientes con recordatorio prendido. La lista completa son todos los
@@ -496,28 +508,31 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
                 }))}
             />
           </div>
-                  </details>
         </details>
 
-        {/* ══ RECLAMO PUNTUAL ══ */}
-        <details className="card" style={{ marginBottom: '14px' }}>
-          <summary style={{ cursor: 'pointer', fontSize: '14px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
-            Reclamar facturas a un cliente
-          </summary>
-          <p className="card-sub">
-            Para mandar un reclamo puntual sin tocar la configuración del recordatorio automático.
-            Elegís el cliente, marcás desde qué fecha (o tildás las facturas una por una) y se manda.
+        </div>
+
+        {/* ══ 3. RECLAMOS ══ */}
+        <p style={tituloZona}>Reclamos a clientes</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+
+        <details style={tarjeta('#6d28d9')}>
+          <summary style={encabezado('#6d28d9')}>Reclamar facturas a un cliente</summary>
+          <p style={bajada}>
+            Un reclamo puntual, sin tocar la configuración del recordatorio automático. Elegís el cliente,
+            marcás desde qué fecha (o tildás las facturas una por una) y se manda.
           </p>
           <div style={{ marginTop: '10px' }}>
             <ReclamoManual clientes={filas.map((f) => ({ id_control: f.id_control, nombre: f.nombre }))} />
           </div>
         </details>
 
-        <details className="card" style={{ marginBottom: '14px' }}>
-          <summary style={{ cursor: 'pointer', fontSize: '14px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
+        <details style={tarjeta('#6d28d9')}>
+          <summary style={encabezado('#6d28d9')}>
             Clientes con recordatorio
+            <span style={{ fontWeight: 400, color: prendidos > 0 ? '#059669' : '#b45309', fontSize: '12.5px' }}> · {prendidos} prendido{prendidos === 1 ? '' : 's'}</span>
           </summary>
-          <p className="card-sub">
+          <p style={bajada}>
             {prendidos === 0 ? 'Ninguno prendido todavía' : `${prendidos} prendido${prendidos > 1 ? 's' : ''}`}
             {' · '}
             {/* El mail también está en la ficha del cliente, que es donde se lo busca cuando
@@ -531,6 +546,11 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
             <ClientesRecordatorio clientes={filas} />
           </div>
         </details>
+
+        </div>
+
+        {/* ══ 4. SOLO PARA MIRAR ══ */}
+        <p style={tituloZona}>Informes</p>
 
         {/* ══ COBRANZAS DEL MES ══ */}
         {ver !== 'movimientos' ? (
