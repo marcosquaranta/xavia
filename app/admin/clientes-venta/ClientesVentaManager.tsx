@@ -47,7 +47,22 @@ function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, 
   cambios: Record<string, CambioPrecioUI>;
   extrasUnidad?: EtiquetaArticulo[]; extrasKg?: EtiquetaArticulo[];
 }) {
-  const campos = esKg ? [...KG_LABELS, ...extrasKg] : [...PROD_LABELS, ...extrasUnidad];
+  // ── Los dos grupos, siempre ──────────────────────────────────────────────────────────
+  //
+  // Antes el cliente marcado como "kg" veía SOLO las casillas por cajón y el resto solo las
+  // de unidad. Pero hay clientes que llevan rúcula por cajón y además ensaladas, albahaca,
+  // berro o microgreens por unidad, y a esos no había forma de cargarles el precio de la
+  // otra mitad. Sin precio, el artículo no aparece nunca en la pantalla de carga: la venta
+  // quedaba sin poder cargarse y no había nada que indicara por qué.
+  //
+  // Ahora están los dos grupos y `esKg` solo decide cuál va primero. Las casillas que no
+  // se usan quedan vacías, que es exactamente lo que significan.
+  const camposUnidad = [...PROD_LABELS, ...extrasUnidad];
+  const camposKg = [...KG_LABELS, ...extrasKg];
+  const grupos = esKg
+    ? [{ titulo: 'Por cajón', campos: camposKg }, { titulo: 'Por unidad', campos: camposUnidad }]
+    : [{ titulo: 'Por unidad', campos: camposUnidad }, { titulo: 'Por cajón', campos: camposKg }];
+  const campos = [...camposUnidad, ...camposKg];
   const [vals, setVals] = useState<Record<string,string>>(() =>
     Object.fromEntries(campos.map(p => [p.key, precioActual ? String((precioActual as any)[p.key] || '') : '']))
   );
@@ -73,10 +88,15 @@ function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, 
   return (
     <div style={{ background: esKg ? '#fffbeb' : '#f9fafb', border: `1px solid ${esKg ? '#fde68a' : '#f3f4f6'}`, borderRadius: '6px', padding: '10px 12px', marginBottom: '8px' }}>
       <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: esKg ? '#92400e' : '#374151' }}>
-        {sucursalObs}{esKg && <span style={{ marginLeft: '6px', fontWeight: 400, fontSize: '10px' }}>· precios por KG (cajón)</span>}
+        {sucursalObs}{esKg && <span style={{ marginLeft: '6px', fontWeight: 400, fontSize: '10px' }}>· compra por cajón</span>}
       </p>
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(campos.length, 5)}, 1fr)`, gap: '6px', marginBottom: '8px' }}>
-        {campos.map(p => {
+      {grupos.filter((g) => g.campos.length > 0).map((g) => (
+      <div key={g.titulo} style={{ marginBottom: '10px' }}>
+      <p style={{ margin: '0 0 4px', fontSize: '10px', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+        {g.titulo}
+      </p>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(g.campos.length, 5)}, 1fr)`, gap: '6px' }}>
+        {g.campos.map(p => {
           const ult = cambios[`${idControl}||${sucursalObs}||${p.key}`];
           const subio = ult ? ult.diferencia > 0 : false;
           return (
@@ -100,6 +120,8 @@ function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, 
           );
         })}
       </div>
+      </div>
+      ))}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <button className="btn" style={{ fontSize: '11px', padding: '4px 10px' }} onClick={guardar} disabled={saving}>
           {saving ? 'Guardando…' : 'Guardar precios'}
