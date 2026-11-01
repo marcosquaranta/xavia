@@ -41,7 +41,7 @@ const diasDesde = (f: string) => {
 };
 
 export default function ResumenImpagas({
-  clientes, facturasPorCliente, conRecordatorio = [], revisiones = {}, diasRevisionVieja = 30, cortes = {},
+  clientes, facturasPorCliente, conRecordatorio = [], revisiones = {}, diasRevisionVieja = 30, cortes = {}, saldadasPorCliente = {},
 }: {
   clientes: ClienteImpagas[];
   facturasPorCliente: Record<string, FacturaCliente[]>;
@@ -52,6 +52,8 @@ export default function ResumenImpagas({
   diasRevisionVieja?: number;
   // Dónde se cortó el reparto de cada cliente (ver CorteReparto).
   cortes?: Record<string, CorteReparto>;
+  // Cuántas facturas de cada cliente ya están dadas por saldadas a mano.
+  saldadasPorCliente?: Record<string, { cantidad: number; monto: number }>;
 }) {
   const router = useRouter();
   const [abierto, setAbierto] = useState<string | null>(null);
@@ -293,6 +295,15 @@ export default function ResumenImpagas({
                 </p>
               );
             })()}
+            {/* Las que ya se dieron por saldadas. Contesta de una la pregunta "¿no las
+                había marcado ya?": si dice 0, la marca nunca se guardó. */}
+            <p style={{ margin: '0 0 8px', fontSize: '11.5px', color: '#6b7280' }}>
+              {saldadasPorCliente[f.id_control]?.cantidad
+                ? <>Este cliente ya tiene <strong>{saldadasPorCliente[f.id_control].cantidad}</strong> factura(s) dadas por saldadas
+                    a mano ({fmt(saldadasPorCliente[f.id_control].monto)}), que no se cuentan en esta lista.</>
+                : <>Este cliente <strong>no tiene ninguna factura dada por saldada a mano</strong>. Si creías que sí, la marca no se
+                    guardó: tildalas abajo y dalas por cobradas.</>}
+            </p>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
               <tbody>
                 {f.impagas.map((x) => (

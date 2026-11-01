@@ -375,6 +375,26 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   const historial = [...enviados]
     .filter((r) => String(r.fecha_envio || '').slice(0, 10) >= desdeHistorial)
     .sort((a, b) => String(b.fecha_envio || '').localeCompare(String(a.fecha_envio || '')));
+  // Cuántas facturas de cada cliente están dadas por saldadas a mano. Es la respuesta a
+  // "ya las marqué y me siguen apareciendo": si acá dice 0, la marca nunca se guardó; si
+  // dice 88, las que quedan en la lista son otras. Sin este número las dos situaciones se
+  // ven igual —una lista larga— y no hay forma de saber cuál es.
+  //
+  // Se cuenta por id_control y también por nombre: `marcarSaldadas` acepta el id como
+  // opcional, así que las marcadas desde pantallas que no lo mandaban quedaron sin él.
+  const saldadasPorCliente: Record<string, { cantidad: number; monto: number }> = {};
+  {
+    const porNombre = new Map(clientes.map((c) => [nombreClienteVisible(c).trim().toLowerCase(), String(c.id_control)]));
+    for (const f of saldadas) {
+      if (String(f.estado) === 'revertida') continue;
+      const id = String(f.id_control || '').trim() || porNombre.get(String(f.cliente || '').trim().toLowerCase()) || '';
+      if (!id) continue;
+      const acc = saldadasPorCliente[id] ||= { cantidad: 0, monto: 0 };
+      acc.cantidad += 1;
+      acc.monto += Number(f.importe) || 0;
+    }
+  }
+
   const prendidos = filas.filter((f) => f.activo).length;
 
   // ── El color dice qué hace cada cosa ────────────────────────────────────────────────
@@ -441,7 +461,10 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
             mueve plata en Xubio y el otro no— así que van en paralelo y con colores
             distintos, no en una lista anidada. */}
         <p style={tituloZona}>Cargar a mano · lo que no entró por la bandeja</p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+        {/* Uno abajo del otro y no en dos columnas: adentro hay tablas anchas —la de
+            clientes con recordatorio tiene siete columnas— y en media pantalla quedan
+            ilegibles. El ancho acá vale más que la compacidad. */}
+        <div style={{ marginBottom: '12px' }}>
 
         <details style={tarjeta('#1d4ed8')}>
           <summary style={encabezado('#1d4ed8')}>Registrar un cobro en Xubio</summary>
@@ -514,7 +537,10 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
 
         {/* ══ 3. RECLAMOS ══ */}
         <p style={tituloZona}>Reclamos a clientes</p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+        {/* Uno abajo del otro y no en dos columnas: adentro hay tablas anchas —la de
+            clientes con recordatorio tiene siete columnas— y en media pantalla quedan
+            ilegibles. El ancho acá vale más que la compacidad. */}
+        <div style={{ marginBottom: '12px' }}>
 
         <details style={tarjeta('#6d28d9')}>
           <summary style={encabezado('#6d28d9')}>Reclamar facturas a un cliente</summary>
@@ -639,6 +665,7 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
               revisiones={revisionesUI}
               diasRevisionVieja={DIAS_REVISION_VIEJA}
               cortes={cortesPorCliente}
+              saldadasPorCliente={saldadasPorCliente}
             />
           </div>
         </div>
