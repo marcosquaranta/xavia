@@ -25,6 +25,7 @@ import { pagadosEnRango } from '@/lib/proveedores';
 import { calcularValorizacionMes as valorizacionDelMes } from '@/lib/valorizacionStock';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 import { leerArticulosExtra } from '@/lib/articulosVenta';
+import { leerSaldadas, type FacturaSaldada } from '@/lib/facturasSaldadas';
 export const dynamic = 'force-dynamic';
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -51,6 +52,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   let previsiones: Awaited<ReturnType<typeof leerPrevisiones>> = [];
   let cobranzas: Cobranza[] = [], saldosGuardados: SaldoCuenta[] = [];
   let cobranzasXubio: CobranzaCache[] = [];
+  let saldadas: FacturaSaldada[] = [];
   // Los cobros registrados desde la app: de ahí sale cuánto retuvieron los clientes.
   let cobrosApp: CobroRegistrado[] = [];
   let err: string | null = null;
@@ -64,6 +66,8 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
       readSheet<CobranzaCache>(HOJA_COBRANZAS_CACHE).catch(() => [] as CobranzaCache[]),
       readSheet<CobroRegistrado>(HOJA_COBROS).catch(() => [] as CobroRegistrado[]),
     ]);
+    // Las facturas dadas por saldadas a mano: no mueven el puente, pero se muestran.
+    saldadas = await leerSaldadas();
   } catch (e: any) { err = e?.message || 'Error cargando datos'; }
 
   if (err) return (
@@ -130,6 +134,18 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   // incluida— así que esto ya cuenta la factura como cobrada entera, que es lo correcto: el
   // cliente no quedó debiendo nada. Lo retenido vuelve a salir como gasto (ver lib/cobros.ts),
   // y eso es lo que explica por qué a la cuenta entró menos.
+  // Lo que se dio por saldado a mano DENTRO del mes, por fecha de marcado: el día que
+  // alguien decide dejar de reclamar una factura es el día que esa plata se pierde, no el
+  // día en que se emitió. Casi siempre son facturas viejas, y por eso el monto no tiene
+  // relación con lo facturado del mes.
+  const saldadasDelMes = saldadas
+    .filter((f) => {
+      if (String(f.estado) === 'revertida') return false;
+      const d = String(f.fecha_marcado || '').split(/[T ]/)[0];
+      return d >= desdeMes && d <= hastaMes;
+    })
+    .reduce((a, f) => a + (Number(f.importe) || 0), 0);
+
   const cobradoMesTotal =
     cobranzasMes.reduce((a, c) => a + (Number(c.monto) || 0), 0)
     + cobranzasXubio
@@ -197,6 +213,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
     resultado: act.resultado,
     facturadoMes: act.ventas.total,
     cobradoMes: cobradoMesTotal,
+    saldadasMes: saldadasDelMes,
     deudaProveedoresInicio: deudaProveedoresAlCierre(gastos, finMesPrev),
     deudaProveedoresFin: deudaProveedoresAlCierre(gastos, hastaMes),
     previsionesMes: (previsionesDelMes?.despidos || 0) + (previsionesDelMes?.sac || 0),

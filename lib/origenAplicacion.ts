@@ -80,6 +80,9 @@ export interface EntradasFondos {
   // la historia.
   facturadoMes: number;
   cobradoMes: number;
+  // Lo que se dio por saldado a mano en el mes. NO entra en la cuenta del puente —ver el
+  // comentario en origenYAplicacion— pero se muestra: es plata que se dejó de perseguir.
+  saldadasMes?: number;
   deudaProveedoresInicio: number;
   deudaProveedoresFin: number;
   // Lo previsionado del mes (despidos y SAC). Es costo del mes y no salió de la caja, así
@@ -112,6 +115,22 @@ export interface EntradasFondos {
 export function origenYAplicacion(e: EntradasFondos): OrigenAplicacion {
   const lineas: LineaFondos[] = [];
 
+  // ── Por qué esto NO resta las facturas dadas por saldadas a mano ──────────────────
+  //
+  // Dar una factura por saldada baja lo que el cliente debe sin que entre plata, así que
+  // parece que falta restarla acá. No falta, y es importante entender por qué antes de
+  // "arreglarlo": el resultado TAMPOCO la resta como pérdida. Los dos olvidos se cancelan
+  // exactamente y el puente cierra.
+  //
+  //   real:  Δcaja = (resultado − incobrable) − (facturado − cobrado − incobrable) + …
+  //   acá:   Δcaja =  resultado              − (facturado − cobrado)               + …
+  //
+  // Son la misma cuenta. El riesgo está en tocar un solo lado: si algún día los incobrables
+  // pasan a restar del resultado (que es lo correcto contablemente), hay que restarlos
+  // también de esta línea el mismo día, o el puente se rompe por ese monto.
+  //
+  // Lo que sí falta es VERLOS: se da por perdida plata real y no aparece en ningún lado.
+  // Por eso van abajo como línea informativa, con monto 0 en el puente.
   const deltaDeudores = Math.round(e.facturadoMes - e.cobradoMes);
   if (deltaDeudores !== 0) {
     lineas.push({
@@ -147,6 +166,18 @@ export function origenYAplicacion(e: EntradasFondos): OrigenAplicacion {
       // El costo restó del resultado pero la plata no salió de ninguna cuenta de la empresa.
       monto: Math.round(e.gastosPagadosPorSocios),
       detalle: 'Cargados con medio de pago «Aporte socios»: no salieron de la caja',
+    });
+  }
+
+  // Las facturas que se dieron por saldadas este mes. Va con monto 0 porque no mueve el
+  // puente (ver arriba), pero tiene que estar a la vista: es plata que se dejó de perseguir
+  // y hoy no figura en ningún número del cierre. Un mes con medio millón acá no se puede
+  // leer igual que uno con cero.
+  if (Math.round(e.saldadasMes || 0) !== 0) {
+    lineas.push({
+      label: 'Facturas dadas por saldadas a mano',
+      monto: 0,
+      detalle: `${fmt(e.saldadasMes || 0)} que se dejaron de reclamar este mes. No mueven la caja ni el resultado: el cliente deja de deberlas y no entró plata. Si no se van a cobrar nunca, son una pérdida que todavía no está en el resultado.`,
     });
   }
 
