@@ -11,6 +11,12 @@ import VentasEvolucionCharts from './VentasEvolucionCharts';
 import { ultimaSubaPorClienteRecord } from '@/lib/preciosHistoricoServer';
 import { leerArticulosExtra } from '@/lib/articulosVenta';
 import type { Articulo } from '@/lib/articulos';
+import AlertasVentas from './AlertasVentas';
+import { saldoPorCliente, alertasCajones, type AlertaCajon } from '@/lib/cajones';
+import { clientesSinPedir, DIAS_AVISO, DIAS_DESCARTE, type ClienteSinPedir } from '@/lib/clientesSinPedir';
+import { ventasSinFacturar, type PendienteSinFacturar } from '@/lib/alertasVentas';
+import { fechaArgentinaHoy } from '@/lib/ocupacion';
+import type { CajonMovimiento } from '@/lib/types';
 export const dynamic = 'force-dynamic';
 
 function safeD(s: any): Date | null {
@@ -64,6 +70,10 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
   // Los artículos dados de alta desde Admin → Artículos de venta. Van a la pantalla de carga
   // junto con los del código.
   let articulosExtra: Articulo[] = [];
+  // Los movimientos de cajones, solo para la alerta. Es la única hoja que esta página no
+  // leía ya: las otras dos alertas salen de las ventas y los clientes que de todas formas
+  // hacen falta para la carga.
+  let movimientosCajones: CajonMovimiento[] = [];
   let err: string | null = null;
   try {
     [clientes, precios, ventas, historicas, pedidosFijos, lotes] = await Promise.all([
@@ -75,6 +85,7 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
       readSheet<Lote>('Lotes').catch(() => []),
     ]);
     articulosExtra = await leerArticulosExtra();
+    movimientosCajones = await readSheet<CajonMovimiento>('CajonesMovimientos').catch(() => []);
   } catch (e: any) { err = e?.message || 'Error'; }
   if (err) return (<><Header user={user} current="ventas" /><div className="container"><div className="alert-box error">{err}</div></div></>);
   const frecuencias: Record<string,number> = {};
@@ -87,6 +98,28 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
   const resumenMes = resumenMesActual(ventas, precios, clientes, undefined, undefined, lotes, articulosExtra.map((a) => a.key));
   const clientesPrecioVolumen = clientesPrecioVsVolumen(ventas, precios, clientes, lotes);
   const ultimaSuba = await ultimaSubaPorClienteRecord();
+
+  // ── Las alertas ────────────────────────────────────────────────────────────────────
+  //
+  // Las tres se calculan con la MISMA función que usa su pantalla de origen, importada: la
+  // de cajones es la del Panel y la de /cajones, la de clientes que dejaron de pedir es la
+  // del mail de los lunes. Si acá se recalcularan con un criterio propio, la alerta y la
+  // pantalla a la que manda dirían cosas distintas sobre lo mismo.
+  const hoyISO = fechaArgentinaHoy();
+  let alertaCajonesVentas: AlertaCajon[] = [];
+  let alertaSinFacturar: PendienteSinFacturar[] = [];
+  let alertaSinPedir: ClienteSinPedir[] = [];
+  try {
+    alertaCajonesVentas = alertasCajones(saldoPorCliente(movimientosCajones, clientes), 7);
+    alertaSinFacturar = ventasSinFacturar(ventas, clientes, hoyISO, articulosExtra.map((a) => a.key));
+    // Entre DIAS_AVISO y DIAS_DESCARTE: pasado ese tope ya no es \"dejó de pedir esta
+    // semana\", es un cliente que no compra más, y mezclarlos hace que la lista no se mire.
+    alertaSinPedir = clientesSinPedir(ventas, clientes, hoyISO)
+      .filter((c) => c.dias > DIAS_AVISO && c.dias <= DIAS_DESCARTE);
+  } catch {
+    // Una alerta que no se puede calcular no puede tirar abajo la pantalla de carga: cargar
+    // la venta del día es para lo que se entra acá.
+  }
 
   return (
     <>
@@ -106,8 +139,15 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
             <Link href="/cobranzas" className="btn secondary" style={{ fontSize: '13px', marginTop: '2px' }}>
               💰 Cobranzas →
             </Link>
+            {/* El historial es donde se ve qué se facturó y qué quedó colgado, y se entraba
+                solo desde Facturación. Acá arriba porque es la pantalla a la que manda la
+                alerta de ventas sin facturar. */}
+            <Link href="/ventas/historial" className="btn secondary" style={{ fontSize: '13px', marginTop: '2px' }}>
+              🧾 Historial de facturación →
+            </Link>
           </div>
         </div>
+        <AlertasVentas cajones={alertaCajonesVentas} sinFacturar={alertaSinFacturar} sinPedir={alertaSinPedir} />
         <VentasEvolucionCharts articulo={evolArticulo} clienteSemanal={evolClienteSemanal} clienteMensual={evolClienteMensual} precio={evolPrecio} resumenMes={resumenMes} clientesPrecioVolumen={clientesPrecioVolumen} ultimaSuba={ultimaSuba} />
         <div className="card">
           <VentasManager articulosExtra={articulosExtra} clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} pedidosFijos={pedidosFijos.filter(p=>p.activo==='SI')} initialFecha={searchParams.fecha} />

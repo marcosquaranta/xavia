@@ -8,10 +8,19 @@ interface EntradaExpCliente {
   id_exportacion: string; fecha: string; fecha_exportacion: string; cliente: string; id_control: string;
   sucursales?: string[];
   rucula: number; lechuga: number; rucula_kg: number; lechuga_kg: number;
+  // Todo lo que no son las cuatro columnas fijas: albahaca, ensaladas, microgreens y lo que
+  // se dé de alta desde la app. Viene como {clave: cantidad} y solo con lo que tiene algo.
+  otros?: Record<string, number>;
 }
 interface EntradaPend {
   fecha: string; filas: number; rucula: number; lechuga: number; rucula_kg: number; lechuga_kg: number;
+  id_control: string; cliente: string; sucursales?: string[];
+  otros?: Record<string, number>;
+  // Lo que SÍ se facturó a ese cliente ese mismo día. Casi siempre explica el pendiente:
+  // el cliente se facturó en otra tanda y lo que quedó suelto es una fila repetida.
+  facturadoMismoDia?: { id_exportacion: string; fecha_exportacion: string }[];
 }
+interface ArticuloCol { key: string; label: string }
 
 const fmt = (n: number) => Math.round(n).toLocaleString('es-AR');
 const fmtKg = (n: number) => n > 0 ? `${n.toFixed(1)} kg` : '—';
@@ -24,9 +33,25 @@ const CAMPOS = [
 
 // Editor inline de una venta puntual ya facturada — corrige el registro interno de Xavia
 // (no anula la factura real ya emitida en Xubio) sin salir de esta página.
-function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, onFilaEliminada, onCerrar }: {
-  idExportacion: string; idControl: string; fecha: string; onGuardado: () => void; onFilaEliminada: () => void; onCerrar: () => void;
+function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra = [], onGuardado, onFilaEliminada, onCerrar }: {
+  idExportacion: string; idControl: string; fecha: string;
+  // Los articulos dados de alta desde la app. Llegan del servidor porque no estan en el
+  // codigo del navegador, y tienen que entrar al editor como cualquier otro: ver el
+  // comentario de `campos` abajo.
+  camposExtra?: { key: string; label: string }[];
+  onGuardado: () => void; onFilaEliminada: () => void; onCerrar: () => void;
 }) {
+  // ── Todos los articulos, no una lista escrita a mano ────────────────────────────
+  //
+  // Guardar escribia SOLO las claves que este archivo nombraba una por una, y el servidor
+  // completa con 0 lo que no viene. Resultado: corregir la rucula de una factura que tambien
+  // llevaba ensaladas o microgreens las borraba, sin aviso y sin que apareciera en ningun
+  // lado hasta mirar la planilla.
+  //
+  // Por eso ahora es una sola lista y todo lo que la usa la recorre: el formulario, el
+  // guardado y la nota de credito. Agregar un articulo no deberia obligar a acordarse de
+  // tres lugares.
+  const campos = [...CAMPOS, ...camposExtra.filter((e) => !CAMPOS.some((c) => c.key === e.key))];
   const [loading, setLoading] = useState(true);
   const [filas, setFilas] = useState<VentaDia[]>([]);
   // Ojo: puede haber varias filas con la misma (fecha, cliente, sucursal) — filas
@@ -57,7 +82,7 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
       const v0: Record<string, Record<string, string>> = {};
       for (const f of propias) {
         v0[f.id_venta] = {};
-        for (const c of CAMPOS) v0[f.id_venta][c.key] = String(Number((f as any)[c.key]) || '');
+        for (const c of campos) v0[f.id_venta][c.key] = String(Number((f as any)[c.key]) || '');
       }
       setValores(v0);
     }).catch(() => setError('No se pudo cargar el detalle.')).finally(() => setLoading(false));
@@ -75,9 +100,9 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
         const g = (k: string) => Number(v[k]) || 0;
         return {
           id_venta: f.id_venta, id_control: idControl, nombre_cliente: f.nombre_cliente, sucursal: f.sucursal,
-          rucula: g('rucula'), lechuga_crespa: g('lechuga_crespa'), hoja_roble: g('hoja_roble'),
-          bandeja_rucula: g('bandeja_rucula'), albahaca: g('albahaca'),
-          rucula_kg: g('rucula_kg'), lechuga_kg_crespa: g('lechuga_kg_crespa'), lechuga_kg_roble: g('lechuga_kg_roble'),
+          // Por clave y no una por una: lo que falte en este objeto el servidor lo guarda
+          // como 0, asi que una clave olvidada aca borra esa venta en silencio.
+          ...Object.fromEntries(campos.map((c) => [c.key, g(c.key)])),
         };
       });
       const r = await fetch('/api/ventas/guardar', {
@@ -116,7 +141,7 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
   const numeroFactura = numerosFactura.length === 1 ? numerosFactura[0] : '';
 
   async function emitirNC() {
-    const lineas = filas.flatMap((f) => CAMPOS
+    const lineas = filas.flatMap((f) => campos
       .map((c) => ({ id_venta: f.id_venta, key: c.key, cantidad: Number(aAcreditar[`${f.id_venta}__${c.key}`]) || 0 }))
       .filter((l) => l.cantidad > 0));
     if (!lineas.length) { setError('Poné qué cantidad acreditar en al menos un producto.'); return; }
@@ -202,14 +227,14 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, onGuardado, o
         <table style={{ fontSize: '12px', width: '100%' }}>
           <thead><tr>
             <th style={{ textAlign: 'left', padding: '4px 6px' }}>Sucursal</th>
-            {CAMPOS.map(c => <th key={c.key} style={{ textAlign: 'center', padding: '4px 6px' }}>{c.label}</th>)}
+            {campos.map(c => <th key={c.key} style={{ textAlign: 'center', padding: '4px 6px' }}>{c.label}</th>)}
             <th style={{ padding: '4px 6px' }}></th>
           </tr></thead>
           <tbody>
             {filas.map(f => (
               <tr key={f.id_venta}>
                 <td style={{ padding: '4px 6px', fontWeight: 600, whiteSpace: 'nowrap' }}>{f.sucursal}</td>
-                {CAMPOS.map(c => {
+                {campos.map(c => {
                   const facturado = Number(valores[f.id_venta]?.[c.key]) || 0;
                   if (modo !== 'nc') return (
                     <td key={c.key} style={{ padding: '3px 4px' }}>
@@ -318,6 +343,9 @@ export default function HistorialManager() {
   const [loading, setLoading] = useState(true);
   const [exportaciones, setExportaciones] = useState<EntradaExpCliente[]>([]);
   const [pendientes, setPendientes] = useState<EntradaPend[]>([]);
+  // Las columnas de los demás artículos las manda el servidor con su etiqueta: los
+  // artículos dados de alta desde la app no están en el código del navegador.
+  const [articulos, setArticulos] = useState<ArticuloCol[]>([]);
   const [filtro, setFiltro] = useState('');
   const [filtroCliente, setFiltroCliente] = useState('');
   const [filtroSucursal, setFiltroSucursal] = useState('');
@@ -332,6 +360,7 @@ export default function HistorialManager() {
     fetch('/api/ventas/historial').then(r => r.json()).then(j => {
       setExportaciones(j.exportaciones || []);
       setPendientes(j.pendientes || []);
+      setArticulos(j.articulos || []);
     }).catch(() => {}).finally(() => setLoading(false));
   }
   useEffect(() => { cargar(); }, []);
@@ -341,10 +370,13 @@ export default function HistorialManager() {
     if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Error'); }
   }
 
-  async function eliminarPendiente(fecha: string) {
-    if (!confirm(`¿Eliminar todas las ventas no facturadas del ${fecha}? Esto no se puede deshacer.`)) return;
-    setEliminando(fecha); setMsg(null);
-    try { await limpiar({ fecha, limpiarTodo: false }); cargar(); }
+  // Solo las de ESE cliente en esa fecha. Antes borraba todo lo pendiente del día: con la
+  // tabla agrupada solo por fecha daba igual, pero ahora cada fila es un cliente y borrar de
+  // más sería tirar la venta de otro.
+  async function eliminarPendiente(fecha: string, idControl: string, cliente: string) {
+    if (!confirm(`¿Eliminar las ventas no facturadas de ${cliente} del ${fecha}? Esto no se puede deshacer.`)) return;
+    setEliminando(`${fecha}__${idControl}`); setMsg(null);
+    try { await limpiar({ fecha, id_control: idControl, soloPendientesDelDia: true }); cargar(); }
     catch (e: any) { setMsg(e.message); }
     setEliminando(null);
   }
@@ -376,6 +408,20 @@ export default function HistorialManager() {
     setLimpiando(false);
   }
 
+  // Una columna por artículo que aparezca EN LO QUE SE ESTÁ VIENDO, no una por artículo del
+  // catálogo. Con veinte artículos entre microgreens y ensaladas, dibujarlos todos deja una
+  // tabla de veinticinco columnas con dieciocho vacías y la hace ilegible justo para los
+  // clientes que solo compran rúcula.
+  function colsCon(filas: { otros?: Record<string, number> }[]): ArticuloCol[] {
+    const conAlgo = new Set<string>();
+    for (const f of filas) for (const [k, n] of Object.entries(f.otros || {})) if (Number(n) > 0) conAlgo.add(k);
+    return articulos.filter((a) => conAlgo.has(a.key));
+  }
+  const celdaOtro = (f: { otros?: Record<string, number> }, k: string) => {
+    const n = Number(f.otros?.[k]) || 0;
+    return n > 0 ? fmt(n) : '—';
+  };
+
   const q = filtro.trim().toLowerCase();
   // Las opciones salen de lo que hay cargado, no de una lista fija: un cliente dado de baja
   // sigue teniendo facturas viejas que hay que poder buscar.
@@ -391,6 +437,10 @@ export default function HistorialManager() {
       || (e.sucursales || []).some(su => su.toLowerCase().includes(q));
   });
   const hayFiltro = !!(q || filtroCliente || filtroSucursal);
+  // Cada tabla dibuja solo los artículos que aparecen en SUS filas: lo facturado y lo
+  // pendiente casi nunca tienen los mismos, y compartir columnas dejaba la mitad vacías.
+  const colsExp = colsCon(expFiltradas);
+  const colsPend = colsCon(pendientes);
 
   if (loading) return <p style={{ color: '#9ca3af', fontSize: '13px' }}>Cargando…</p>;
 
@@ -415,29 +465,60 @@ export default function HistorialManager() {
             <table style={{ fontSize: '13px', width: '100%' }}>
               <thead><tr style={{ background: '#fefce8', borderBottom: '1px solid #fde68a' }}>
                 <th style={{ textAlign: 'left', padding: '6px 10px' }}>Fecha</th>
+                <th style={{ textAlign: 'left', padding: '6px 10px' }}>Cliente</th>
                 <th style={{ textAlign: 'right', padding: '6px 10px' }}>Rúcula</th>
                 <th style={{ textAlign: 'right', padding: '6px 10px' }}>Lechuga</th>
                 <th style={{ textAlign: 'right', padding: '6px 10px' }}>Rúcula kg</th>
                 <th style={{ textAlign: 'right', padding: '6px 10px' }}>Lechuga kg</th>
+                {colsPend.map(a => <th key={a.key} style={{ textAlign: 'right', padding: '6px 10px' }}>{a.label}</th>)}
+                <th style={{ textAlign: 'left', padding: '6px 10px' }}>¿Se facturó ese día?</th>
                 <th style={{ padding: '6px 10px' }}></th>
               </tr></thead>
               <tbody>
-                {pendientes.map(h => (
-                  <tr key={h.fecha} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                {pendientes.map(h => {
+                  const kp = `${h.fecha}__${h.id_control}`;
+                  return (
+                  <tr key={kp} style={{ borderBottom: '1px solid #f3f4f6' }}>
                     <td style={{ padding: '7px 10px', fontWeight: 600, whiteSpace: 'nowrap' }}>{h.fecha}</td>
+                    <td style={{ padding: '7px 10px', color: '#374151' }}>
+                      {h.cliente}
+                      {(h.sucursales || []).length > 0 && (
+                        <span style={{ display: 'block', fontSize: '10.5px', color: '#9ca3af' }}>{(h.sucursales || []).join(' · ')}</span>
+                      )}
+                    </td>
                     <td style={{ textAlign: 'right', padding: '7px 10px', color: '#166534' }}>{h.rucula > 0 ? fmt(h.rucula) : '—'}</td>
                     <td style={{ textAlign: 'right', padding: '7px 10px', color: '#4d7c0f' }}>{h.lechuga > 0 ? fmt(h.lechuga) : '—'}</td>
                     <td style={{ textAlign: 'right', padding: '7px 10px', color: '#92400e' }}>{fmtKg(h.rucula_kg)}</td>
                     <td style={{ textAlign: 'right', padding: '7px 10px', color: '#b45309' }}>{fmtKg(h.lechuga_kg)}</td>
+                    {colsPend.map(a => (
+                      <td key={a.key} style={{ textAlign: 'right', padding: '7px 10px', color: '#0f766e' }}>{celdaOtro(h, a.key)}</td>
+                    ))}
+                    {/* La respuesta a \"¿esto quedó sin facturar o ya se facturó en otra
+                        carga?\". Si ese día salieron facturas a ESE cliente, lo más probable
+                        es que esta fila sea una carga repetida y haya que borrarla, no
+                        facturarla de nuevo. */}
+                    <td style={{ padding: '7px 10px', fontSize: '11.5px' }}>
+                      {(h.facturadoMismoDia || []).length === 0 ? (
+                        <span style={{ color: '#b45309', fontWeight: 600 }}>No — falta facturar</span>
+                      ) : (
+                        <span style={{ color: '#1e40af' }}>
+                          Sí: {(h.facturadoMismoDia || []).map(x => x.id_exportacion).join(', ')}
+                          <span style={{ display: 'block', color: '#9ca3af', fontSize: '10.5px' }}>
+                            puede ser una carga repetida
+                          </span>
+                        </span>
+                      )}
+                    </td>
                     <td style={{ padding: '7px 10px', textAlign: 'right', display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
                       <Link href={`/ventas?fecha=${h.fecha}`} className="btn secondary small">Ir a cargar →</Link>
-                      <button onClick={() => eliminarPendiente(h.fecha)} disabled={eliminando === h.fecha}
+                      <button onClick={() => eliminarPendiente(h.fecha, h.id_control, h.cliente)} disabled={eliminando === kp}
                         style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: '6px', padding: '5px 10px', fontSize: '11px', cursor: 'pointer', color: '#dc2626' }}>
-                        {eliminando === h.fecha ? 'Eliminando…' : '🗑 Eliminar'}
+                        {eliminando === kp ? 'Eliminando…' : '🗑 Eliminar'}
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -488,6 +569,7 @@ export default function HistorialManager() {
                 <th style={{ textAlign: 'right', padding: '6px 10px' }}>Lechuga</th>
                 <th style={{ textAlign: 'right', padding: '6px 10px' }}>Rúcula kg</th>
                 <th style={{ textAlign: 'right', padding: '6px 10px' }}>Lechuga kg</th>
+                {colsExp.map(a => <th key={a.key} style={{ textAlign: 'right', padding: '6px 10px' }}>{a.label}</th>)}
                 <th style={{ padding: '6px 10px' }}></th>
               </tr></thead>
               <tbody>
@@ -511,6 +593,9 @@ export default function HistorialManager() {
                       <td style={{ textAlign: 'right', padding: '7px 10px', color: '#4d7c0f' }}>{h.lechuga > 0 ? fmt(h.lechuga) : '—'}</td>
                       <td style={{ textAlign: 'right', padding: '7px 10px', color: '#92400e' }}>{fmtKg(h.rucula_kg)}</td>
                       <td style={{ textAlign: 'right', padding: '7px 10px', color: '#b45309' }}>{fmtKg(h.lechuga_kg)}</td>
+                      {colsExp.map(a => (
+                        <td key={a.key} style={{ textAlign: 'right', padding: '7px 10px', color: '#0f766e' }}>{celdaOtro(h, a.key)}</td>
+                      ))}
                       <td style={{ padding: '7px 10px', textAlign: 'right', display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
                         <button onClick={() => setEditando(abierto ? null : key)} className="btn secondary small">
                           {abierto ? '▲ Cerrar' : '✏️ Editar'}
@@ -523,8 +608,8 @@ export default function HistorialManager() {
                     </tr>
                     {abierto && (
                       <tr style={{ borderBottom: '1px solid #f3f4f6', background: '#eff6ff' }}>
-                        <td colSpan={8} style={{ padding: '0 10px 12px' }}>
-                          <EditorFacturadoDetalle idExportacion={h.id_exportacion} idControl={h.id_control} fecha={h.fecha}
+                        <td colSpan={8 + colsExp.length} style={{ padding: '0 10px 12px' }}>
+                          <EditorFacturadoDetalle idExportacion={h.id_exportacion} idControl={h.id_control} fecha={h.fecha} camposExtra={articulos}
                             onGuardado={() => { setEditando(null); cargar(); }} onFilaEliminada={cargar} onCerrar={() => setEditando(null)} />
                         </td>
                       </tr>

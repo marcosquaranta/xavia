@@ -21,7 +21,7 @@ const NOMBRE_CULTIVO_CAMARA: Record<string, string> = {
 import { saldoPorCliente, alertasCajones } from '@/lib/cajones';
 import { descartePorFaseMes } from '@/lib/descarte';
 import { germinacionYSupervivenciaMes } from '@/lib/germinacion';
-import { faltaCargarEstaSemana, esDiaDeAvisoKm, ultimaLectura, kmEnRango, VEHICULO_PARTNER } from '@/lib/kilometraje';
+import { hayQueAvisarKm, ultimaLectura, kmEnRango, VEHICULO_PARTNER, diasSinCargarKm, DIAS_ATRASO_INSISTENTE } from '@/lib/kilometraje';
 import { productividadDeMes, plantasCosechadasEnRango } from '@/lib/productividad';
 import Header from '@/components/Header';
 import GraficoCiclosSemanas from '@/components/GraficoCiclosSemanas';
@@ -478,7 +478,10 @@ export default async function PanelPage() {
   // (se sigue mostrando) todos los días de la semana hasta que se cargue una lectura.
   // Pendiente de cargar, y además día de avisar (jueves o viernes): son dos cosas
   // distintas. La carga está siempre disponible; el banner grande solo esos dos días.
-  const faltaKm = faltaCargarEstaSemana(registrosKm, VEHICULO_PARTNER, hoy) && esDiaDeAvisoKm(hoy);
+  // El día que toca, o cualquier día si ya pasaron más de dos semanas sin cargar (ver
+  // lib/kilometraje.ts). La regla vive allá para que no haya una versión por pantalla.
+  const faltaKm = hayQueAvisarKm(registrosKm, VEHICULO_PARTNER, hoy);
+  const diasSinKm = diasSinCargarKm(registrosKm, VEHICULO_PARTNER, hoy);
   const ultimaLecturaKm = ultimaLectura(registrosKm, VEHICULO_PARTNER);
 
   return (
@@ -540,6 +543,8 @@ export default async function PanelPage() {
           ultimaFecha={ultimaLecturaKm ? ultimaLecturaKm.fecha : null}
           ultimoIdKm={ultimaLecturaKm ? String(ultimaLecturaKm.id_km) : null}
           faltaCargar={faltaKm}
+          diasSinCargar={diasSinKm}
+          umbralAtraso={DIAS_ATRASO_INSISTENTE}
         />
 
         {/* ══ TAREAS DE HOY ══ */}

@@ -49,6 +49,36 @@ export function faltaCargarEstaSemana(registros: KilometrajeVehiculo[], vehiculo
   return !registros.some((r) => r.vehiculo === vehiculo && String(r.fecha || '').slice(0, 10) >= refStr);
 }
 
+// ── Cuándo sale el aviso ─────────────────────────────────────────────────────────────
+//
+// Dos reglas en una sola función, porque si la condición se arma en la página termina
+// habiendo una versión por pantalla y el aviso aparece en una y no en otra.
+//
+// Regla normal: solo el día que toca cargar (jueves, con el viernes de segunda chance). Un
+// aviso que aparece todos los días se vuelve parte del fondo y deja de leerse.
+//
+// Excepción: si ya pasaron más de dos semanas sin cargar nada, deja de ser un recordatorio
+// y pasa a ser un problema — los km por cosecha del reporte quedan sin dato en todo ese
+// período. Ahí el aviso sale cualquier día, hasta que se cargue.
+export const DIAS_ATRASO_INSISTENTE = 14;
+
+export function diasSinCargarKm(registros: KilometrajeVehiculo[], vehiculo: string, hoy: Date = new Date()): number | null {
+  const ult = ultimaLectura(registros, vehiculo);
+  if (!ult) return null;   // nunca se cargó: es el caso más atrasado que hay
+  const f = String(ult.fecha || '').slice(0, 10);
+  if (!f) return null;
+  const t = new Date(f + 'T12:00:00').getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.round((hoy.getTime() - t) / 86400000);
+}
+
+export function hayQueAvisarKm(registros: KilometrajeVehiculo[], vehiculo: string, hoy: Date = new Date()): boolean {
+  if (!faltaCargarEstaSemana(registros, vehiculo, hoy)) return false;
+  if (esDiaDeAvisoKm(hoy)) return true;
+  const d = diasSinCargarKm(registros, vehiculo, hoy);
+  return d === null || d > DIAS_ATRASO_INSISTENTE;
+}
+
 // Última lectura conocida (para mostrar de referencia en el formulario y validar que la
 // nueva no sea menor — el odómetro no puede retroceder).
 export function ultimaLectura(registros: KilometrajeVehiculo[], vehiculo: string): KilometrajeVehiculo | null {

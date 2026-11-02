@@ -22,6 +22,12 @@ export const AVISOS: AvisoConfigurable[] = [
     descripcion: 'Lunes y jueves. Los clientes que hace más de 6 días que no cargan un pedido (y menos de 20), ordenados por cuánto compraban.',
     porDefecto: ['juanpablosoroeta@gmail.com'],
   },
+  {
+    clave: 'email_ventas_sin_facturar',
+    titulo: 'Ventas cargadas sin facturar',
+    descripcion: 'Todos los días a la mañana, solo si hay algo. Ventas cargadas hace más de 2 días que nunca se mandaron a Xubio, separando las que faltan facturar de las que parecen carga repetida.',
+    porDefecto: ['marcos.quaranta@gmail.com'],
+  },
 ];
 
 // Los mails de un aviso: lo que esté cargado en la planilla, y si no, el default.

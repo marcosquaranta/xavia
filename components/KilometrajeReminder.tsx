@@ -1,9 +1,14 @@
 'use client';
 import { useState } from 'react';
 
-export default function KilometrajeReminder({ ultimoKm, ultimaFecha, ultimoIdKm, faltaCargar }: {
+export default function KilometrajeReminder({ ultimoKm, ultimaFecha, ultimoIdKm, faltaCargar, diasSinCargar = null, umbralAtraso = 14 }: {
   ultimoKm: number | null; ultimaFecha: string | null; ultimoIdKm: string | null; faltaCargar: boolean;
+  // Cuántos días hace de la última carga, para poder decirlo cuando el atraso ya es grande.
+  // El aviso normal sale el día que toca; este caso sale cualquier día y conviene que
+  // explique por qué está apareciendo un martes (ver lib/kilometraje.ts).
+  diasSinCargar?: number | null; umbralAtraso?: number;
 }) {
+  const atrasado = diasSinCargar === null || diasSinCargar > umbralAtraso;
   const [abierto, setAbierto] = useState(false);
   const [km, setKm] = useState('');
   const [notas, setNotas] = useState('');
@@ -117,7 +122,13 @@ export default function KilometrajeReminder({ ultimoKm, ultimaFecha, ultimoIdKm,
       <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '28px', lineHeight: 1 }}>🚗</span>
         <div style={{ flex: 1, minWidth: '260px' }}>
-          <p style={{ margin: '0 0 4px', fontSize: '15px', fontWeight: 800, color: '#1e3a8a' }}>Falta cargar el kilometraje del Partner esta semana</p>
+          <p style={{ margin: '0 0 4px', fontSize: '15px', fontWeight: 800, color: atrasado ? '#9a3412' : '#1e3a8a' }}>
+            {atrasado
+              ? (diasSinCargar === null
+                  ? 'Nunca se cargó el kilometraje del Partner'
+                  : `Hace ${diasSinCargar} días que no se carga el kilometraje del Partner`)
+              : 'Falta cargar el kilometraje del Partner esta semana'}
+          </p>
           <p style={{ margin: 0, fontSize: '12.5px', color: '#1e40af' }}>
             Se pide los jueves, un día antes del reporte semanal, así los km de la semana entran en ese reporte. Lo podés cargar cualquier día.
             {ultimoKm !== null && <> Última carga: <strong>{ultimoKm.toLocaleString('es-AR')} km</strong>{ultimaFecha ? ` (${ultimaFecha})` : ''}.</>}

@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
     // no cierra nada: la pantalla es una cortina, la API es la puerta.
   if (user.rol !== 'admin') return NextResponse.json({ error: 'Solo un administrador puede ver o cambiar esto.' }, { status: 403 });
   try {
-    const { fecha, limpiarTodo, soloPendientes, id_exportacion, id_control, id_venta } = await req.json();
+    const { fecha, limpiarTodo, soloPendientes, id_exportacion, id_control, id_venta, soloPendientesDelDia } = await req.json();
     const ventas = await readSheet<VentaDia>('Ventas');
     const noExportado = (v: VentaDia) => !v.exportado || v.exportado === '';
 
@@ -26,6 +26,11 @@ export async function POST(req: NextRequest) {
       // Una línea puntual ya facturada (por cliente, dentro de esa tanda) — para corregir
       // el registro interno cuando una venta se facturó mal, sin tocar el resto de la tanda.
       aLimpiar = ventas.filter(v => v.exportado === id_exportacion && (!id_control || String(v.id_control) === String(id_control)));
+    } else if (soloPendientesDelDia && fecha && id_control) {
+      // Lo NO facturado de un cliente en un día puntual. Existe porque la lista de
+      // pendientes ahora es una fila por (fecha, cliente): borrar todo el día desde una de
+      // esas filas tiraría también la venta pendiente de los demás clientes de esa fecha.
+      aLimpiar = ventas.filter(v => v.fecha === fecha && String(v.id_control) === String(id_control) && noExportado(v));
     } else if (soloPendientes) {
       // Todo lo NO facturado, de cualquier fecha.
       aLimpiar = ventas.filter(noExportado);
