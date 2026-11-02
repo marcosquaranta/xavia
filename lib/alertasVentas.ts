@@ -39,10 +39,11 @@ export interface PendienteSinFacturar {
 }
 
 const soloDia = (f: any) => String(f || '').split(/[T ]/)[0];
-const tieneCantidad = (v: any) => PROD_KEYS.some((k) => (Number(v?.[k]) || 0) > 0)
-  // También los artículos de la hoja: sus claves no están en PROD_KEYS, y una venta de solo
-  // microgreens tiene que contar como venta cargada igual que cualquier otra.
-  || Object.entries(v || {}).some(([k, n]) => /^(bandeja_|microgreen|ens_)/.test(k) && (Number(n) || 0) > 0);
+// Los artículos de la hoja NO se adivinan por el nombre de la columna: llegan en
+// `clavesExtra`, leídas del catálogo. Un regex tipo /^microgreen/ sería una segunda forma de
+// decidir qué es un artículo, y el día que alguien dé de alta uno con otro nombre esta
+// alerta lo ignoraría sin que nada falle.
+const tieneCantidad = (v: any) => PROD_KEYS.some((k) => (Number(v?.[k]) || 0) > 0);
 
 // ── Ventas cargadas que nunca se facturaron ─────────────────────────────────────────
 //
