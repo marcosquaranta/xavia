@@ -1,7 +1,8 @@
 'use client';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { sugerirCombinaciones, toleranciaDe } from '@/lib/conciliacionCobro';
-import { cuentasElegibles, cantidadPreferidas, cuentasDeRetencion } from '@/lib/cuentasCobro';
+import { cuentasElegibles, cuentaSugerida, cantidadPreferidas, cuentasDeRetencion } from '@/lib/cuentasCobro';
+import AjustarFactura from '@/components/AjustarFactura';
 import { retencionDesdeImporte, cuentaParaRetencion } from '@/lib/retenciones';
 import CobroEnPartes, { chequearPartes, type ParteUI } from '@/components/CobroEnPartes';
 
@@ -34,10 +35,15 @@ interface FacturaCliente { numero: string; fecha: string; importe: number; yaCob
 // Diagnóstico + carga de cobros. El diagnóstico va primero a propósito: hasta no verlo en
 // verde no se sabe si las credenciales y las cuentas están bien, y el primer cobro no es
 // el momento de descubrirlo.
-export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = [], errorCuentas = null }: {
+export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = [], errorCuentas = null, ultimaCuentaPorCliente = {} }: {
   clientes: ClienteOpt[]; cobros: CobroFila[];
   cuentasIniciales?: { id: number; nombre: string }[];
   errorCuentas?: string | null;
+  // Dónde entró la plata de cada cliente la última vez, sacado de las cobranzas que ya
+  // están en Xubio. La bandeja ya lo usaba; acá había que elegir la cuenta a mano en cada
+  // cobro, que es una decisión ya tomada y es justo el campo donde equivocarse manda la
+  // plata a la cuenta que no es.
+  ultimaCuentaPorCliente?: Record<string, string>;
 }) {
   const [diag, setDiag] = useState<any>(null);
   const [diagLoading, setDiagLoading] = useState(false);
@@ -49,6 +55,9 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
   const [avisoCuentas, setAvisoCuentas] = useState<string | null>(null);
 
   const [cliente, setCliente] = useState('');
+  // Si la tocaste a mano, no se pisa. Elegir otro cliente después de haber corregido la
+  // cuenta volvería a ponerle la de costumbre y te haría corregirla de nuevo.
+  const [cuentaTocada, setCuentaTocada] = useState(false);
   const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
   const [importe, setImporte] = useState('');
   const [cuentaId, setCuentaId] = useState('');
@@ -76,9 +85,27 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
   const [facturasError, setFacturasError] = useState<string | null>(null);
   const [elegidas, setElegidas] = useState<string[]>([]);
   const [importeTocado, setImporteTocado] = useState(false);
+  // Qué factura se está corrigiendo, si alguna.
+  const [ajustando, setAjustando] = useState<string | null>(null);
+
+  // La cuenta a la que ese cliente pagó la última vez, resuelta contra las cuentas reales
+  // de Xubio. Mismo criterio que la bandeja: el nombre guardado no es un id, así que hay
+  // que mapearlo.
+  function cuentaDeCostumbre(id: string): string {
+    const nombre = id ? (ultimaCuentaPorCliente[id] || '') : '';
+    if (!nombre) return '';
+    const c = cuentaSugerida(cuentas, nombre);
+    return c ? String(c.id) : '';
+  }
 
   async function cambiarCliente(idControl: string) {
     setCliente(idControl);
+    // Se preselecciona la de siempre, pero queda editable y el cartelito de abajo dice de
+    // dónde salió: una cuenta que aparece sola y sin explicación se confirma sin mirarla.
+    if (!cuentaTocada) {
+      const costumbre = cuentaDeCostumbre(idControl);
+      if (costumbre) setCuentaId(costumbre);
+    }
     setFacturas([]); setElegidas([]); setFacturasError(null);
     setImporte(''); setImporteTocado(false);
     // Cada cliente retiene un porcentaje distinto (o ninguno): dejar el número del cliente
@@ -270,7 +297,7 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
             </div>
             <div>
               <label style={labelStyle}>¿Dónde entró? *</label>
-              <select value={cuentaId} onChange={(e) => setCuentaId(e.target.value)} disabled={loading} style={inputStyle}>
+              <select value={cuentaId} onChange={(e) => { setCuentaId(e.target.value); setCuentaTocada(true); }} disabled={loading} style={inputStyle}>
                 <option value="">— Elegir cuenta —</option>
                 {(() => {
                   // Las de cobro arriba, el resto detrás de un separador: el plan de cuentas
@@ -284,6 +311,14 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
                   ));
                 })()}
               </select>
+              {/* De dónde salió la cuenta que aparece elegida. Una preselección sin
+                  explicación se confirma sin mirarla, y acá confirmar la cuenta equivocada
+                  manda la plata a otro lado en Xubio. */}
+              {cliente && !cuentaTocada && cuentaDeCostumbre(cliente) === cuentaId && cuentaId && (
+                <span style={{ fontSize: '10px', color: '#059669', display: 'block', marginTop: '2px' }}>
+                  Es donde este cliente pagó la última vez
+                </span>
+              )}
             </div>
             <div>
               <label style={labelStyle}>Retención sufrida (opcional)</label>
@@ -419,6 +454,17 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
                           <span style={{ color: '#6b7280', minWidth: '78px' }}>{fmtDia(f.fecha)}</span>
                           <span style={{ color: '#9ca3af', fontSize: '10.5px', minWidth: '52px' }}>{diasDesde(f.fecha)}d</span>
                           <span style={{ marginLeft: 'auto', fontWeight: 600 }}>{fmt$(f.importe)}</span>
+                          {/* Corregir el importe sin salir de acá. Es el caso de la factura
+                              mal cargada que el cliente pagó bien: mientras el importe esté
+                              mal, lo tildado nunca va a coincidir con lo que entró. */}
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            title="Corregir el importe de esta factura"
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setAjustando(ajustando === f.numero ? null : f.numero); }}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setAjustando(ajustando === f.numero ? null : f.numero); } }}
+                            style={{ color: '#9ca3af', fontSize: '11px', cursor: 'pointer', padding: '0 2px' }}
+                          >✎</span>
                           {f.yaCobrada && (
                             <span title="Ya entró en un cobro registrado desde la app" style={{ fontSize: '9.5px', background: '#f3f4f6', color: '#6b7280', padding: '1px 6px', borderRadius: '8px', fontWeight: 700 }}>
                               ya cobrada
@@ -428,6 +474,21 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
                       );
                     })}
                   </div>
+                  {ajustando && (() => {
+                    const f = facturas.find((x) => x.numero === ajustando);
+                    if (!f) return null;
+                    return (
+                      <AjustarFactura
+                        numero={f.numero}
+                        importeActual={f.importe}
+                        idControl={cliente}
+                        cliente={clientes.find((c) => c.id_control === cliente)?.nombre || ''}
+                        deshabilitado={loading}
+                        onCancelar={() => setAjustando(null)}
+                        onListo={async () => { setAjustando(null); await cambiarCliente(cliente); }}
+                      />
+                    );
+                  })()}
                   {elegidas.length > 0 && difImporte !== 0 && (
                     <p style={{ margin: '5px 0 0', fontSize: '11px', color: '#b45309' }}>
                       ⚠ El importe no coincide con lo tildado ({fmt$(totalElegido)}): {difImporte > 0 ? `hay ${fmt$(difImporte)} de más` : `faltan ${fmt$(-difImporte)}`}.

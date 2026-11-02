@@ -538,6 +538,10 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
             <RegistrarCobro
               cuentasIniciales={cuentasXubio}
               errorCuentas={errorCuentas}
+              // La cuenta a la que paga cada cliente, igual que en la bandeja. Es el mismo
+              // dato y la misma fuente: si acá se dedujera de otro lado, la cuenta que
+              // propone la carga a mano y la que propone la bandeja podrían diferir.
+              ultimaCuentaPorCliente={ultimaCuentaPorCliente}
               clientes={filas.map((f) => ({
                 id_control: f.id_control,
                 nombre: f.nombre,

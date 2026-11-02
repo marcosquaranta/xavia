@@ -7,6 +7,7 @@ import { retencionDesdeImporte, cuentaParaRetencion } from '@/lib/retenciones';
 import CobroEnPartes, { chequearPartes, type ParteUI } from '@/components/CobroEnPartes';
 import { parsearImporte } from '@/lib/parseResumen';
 import { claveComprobante } from '@/lib/comprobantes';
+import AjustarFactura from '@/components/AjustarFactura';
 
 interface ItemUI {
   id_item: string;
@@ -123,8 +124,14 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
   // aviso dice $X, la factura figura por $Y y la diferencia es un error de carga. Había que
   // irse a la pantalla de comprobantes y volver, perdiendo todo lo ya tildado.
   const [editando, setEditando] = useState<string | null>(null);
-  const [nuevoImporte, setNuevoImporte] = useState('');
-  const [motivoAjuste, setMotivoAjuste] = useState('');
+
+  // Abrir el editor de una factura. Una sola función porque ahora se entra desde dos
+  // lados —el número de la sugerencia y el lápiz de la lista a mano— y dos copias del
+  // mismo gesto terminan abriendo el editor con el importe de otra factura.
+  function abrirAjuste(numero: string) {
+    setEditando(editando === numero ? null : numero);
+    setErr(null);
+  }
   const [enPartes, setEnPartes] = useState(false);
   const [partes, setPartes] = useState<ParteUI[]>([]);
   const importeNum = Math.round(Number(importeEditado)) || 0;
@@ -306,30 +313,6 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
   // Guarda el ajuste y refresca las facturas, para que la suma de abajo y las sugerencias
   // se recalculen con el valor nuevo: ajustar y seguir viendo el número viejo sería peor
   // que no poder ajustar.
-  async function guardarAjusteFactura(f: FacturaCliente) {
-    const nuevo = Math.round(Number(nuevoImporte));
-    if (!isFinite(nuevo) || nuevo < 0) { setErr('El importe tiene que ser un número.'); return; }
-    if (!motivoAjuste.trim()) { setErr('Poné por qué se ajusta.'); return; }
-    setTrabajando(true); setErr(null);
-    try {
-      const r = await fetch('/api/cobranzas/ajuste-factura', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          numero: f.numero, id_control: idControl,
-          cliente: clientes.find((c) => c.id_control === idControl)?.nombre || '',
-          importeXubio: f.importe, importeApp: nuevo, motivo: motivoAjuste.trim(),
-        }),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || 'No se pudo ajustar');
-      setEditando(null); setNuevoImporte(''); setMotivoAjuste('');
-      await traerFacturas(idControl);
-      router.refresh();
-    } catch (e: any) {
-      setErr(e.message || 'No se pudo ajustar');
-    }
-    setTrabajando(false);
-  }
 
   const reconocido = !!item.id_control;
   const ORIGEN: Record<string, { txt: string; bg: string; fg: string }> = {
@@ -594,7 +577,31 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
                     </span>
                   )}
                   {sg.consecutivas && <span style={{ fontSize: '9.5px', fontWeight: 700, padding: '1px 5px', borderRadius: '8px', background: '#ede9fe', color: '#5b21b6' }}>seguidas</span>}
-                  <span style={{ fontFamily: 'monospace', fontSize: '10.5px', color: '#1d4ed8' }}>{sg.numeros.join(' + ')}</span>
+                  {/* ── Cada número abre el editor de ESA factura ───────────────────────
+                      El caso que trababa todo: el cliente pagó bien y la factura quedó mal
+                      cargada, así que ninguna combinación cierra y la sugerencia dice
+                      “faltan $12.400” para siempre. Corregir el importe era salir de la
+                      bandeja, perder lo tildado y volver.
+                      Van como <span> y no como <button> porque esto ya está adentro del
+                      botón de la sugerencia, y un botón dentro de otro no es HTML válido. */}
+                  <span style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center' }}>
+                    {sg.numeros.map((n) => (
+                      <span
+                        key={n}
+                        role="button"
+                        tabIndex={0}
+                        title="Corregir el importe de esta factura"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); abrirAjuste(n); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); abrirAjuste(n); } }}
+                        style={{
+                          fontFamily: 'monospace', fontSize: '10.5px', color: '#1d4ed8', cursor: 'pointer',
+                          borderBottom: '1px dashed #93c5fd', padding: '0 1px',
+                        }}
+                      >
+                        {n} ✎
+                      </span>
+                    ))}
+                  </span>
                   <span style={{ marginLeft: 'auto', fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: '8px',
                     background: sg.exacta ? '#dcfce7' : '#fef3c7', color: sg.exacta ? '#166534' : '#92400e' }}>
                     {/* La diferencia es (lo que suman las facturas − lo que entró). En
@@ -638,59 +645,42 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
                         {/* Corregir el importe sin salir de la bandeja. No toca Xubio: es el
                             mismo ajuste de la pantalla de comprobantes. */}
                         <button type="button" title="Corregir el importe de esta factura"
-                          onClick={(e) => {
-                            e.preventDefault(); e.stopPropagation();
-                            setEditando(editando === f.numero ? null : f.numero);
-                            setNuevoImporte(String(Math.round(f.importe)));
-                            setMotivoAjuste('');
-                          }}
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); abrirAjuste(f.numero); }}
                           disabled={trabajando}
                           style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '11px', padding: '0 2px' }}>✎</button>
                       </label>
                     );
                   })}
-                  {editando && (() => {
-                    const f = facturas.find((x) => x.numero === editando);
-                    if (!f) return null;
-                    const dif = Math.round(Number(nuevoImporte) || 0) - Math.round(f.importe);
-                    return (
-                      <div style={{ marginTop: '7px', padding: '9px 10px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '7px' }}>
-                        <p style={{ margin: '0 0 7px', fontSize: '11.5px', fontWeight: 700, color: '#92400e' }}>
-                          Corregir <span style={{ fontFamily: 'monospace' }}>{f.numero}</span> — en Xubio figura {fmt$(f.importe)}
-                        </p>
-                        <div style={{ display: 'flex', gap: '7px', flexWrap: 'wrap', alignItems: 'center' }}>
-                          <input type="number" value={nuevoImporte} onChange={(e) => setNuevoImporte(e.target.value)} disabled={trabajando}
-                            placeholder="Importe real" style={{ ...inputStyle, width: '130px' }} />
-                          <input type="text" value={motivoAjuste} onChange={(e) => setMotivoAjuste(e.target.value)} disabled={trabajando}
-                            placeholder="¿Por qué? (ej: 40 rúculas de menos)" style={{ ...inputStyle, flex: '1 1 220px', minWidth: '180px' }} />
-                          <button type="button" onClick={() => guardarAjusteFactura(f)} disabled={trabajando}
-                            style={{ fontSize: '11.5px', fontWeight: 700, padding: '5px 12px', background: '#166534', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
-                            Guardar
-                          </button>
-                          <button type="button" onClick={() => { setEditando(null); setErr(null); }} disabled={trabajando}
-                            style={{ fontSize: '11.5px', padding: '5px 10px', background: 'white', border: '1px solid #e5e7eb', borderRadius: '6px', cursor: 'pointer' }}>
-                            Cancelar
-                          </button>
-                        </div>
-                        {dif !== 0 && (
-                          <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#92400e' }}>
-                            {dif > 0 ? 'Sube' : 'Baja'} {fmt$(Math.abs(dif))} respecto de lo emitido.
-                          </p>
-                        )}
-                        {/* Que quede claro qué NO hace: la factura en Xubio sigue como está.
-                            Creer que esto la corrige allá sería peor que no tenerlo. */}
-                        <p style={{ margin: '6px 0 0', fontSize: '10.5px', color: '#b45309', lineHeight: 1.45 }}>
-                          Esto <strong>no cambia la factura en Xubio</strong>: queda registrado del lado de la app, con el motivo
-                          y tu usuario, y es lo que se usa para la deuda del cliente. Si hay que corregirla de verdad, va una
-                          nota de crédito desde Comprobantes.
-                        </p>
-                      </div>
-                    );
-                  })()}
                 </div>
               )}
             </div>
           )}
+
+          {/* El editor vive afuera de la lista plegada: ahora se abre también desde los
+              números de la sugerencia, y adentro del bloque solo aparecía con la lista
+              desplegada —se apretaba el lápiz y no pasaba nada visible. */}
+          {editando && (() => {
+            const f = facturas.find((x) => x.numero === editando);
+            if (!f) return null;
+            return (
+              <AjustarFactura
+                numero={f.numero}
+                importeActual={f.importe}
+                idControl={idControl}
+                cliente={clientes.find((c) => c.id_control === idControl)?.nombre || ''}
+                deshabilitado={trabajando}
+                onCancelar={() => { setEditando(null); setErr(null); }}
+                onListo={async () => {
+                  setEditando(null);
+                  // Volver a traer las facturas: el importe cambió y de él dependen las
+                  // combinaciones que se sugieren. Dejarlas como estaban mostraría
+                  // “faltan $12.400” justo después de haber corregido esos $12.400.
+                  await traerFacturas(idControl);
+                  router.refresh();
+                }}
+              />
+            );
+          })()}
 
           {idControl && !cargandoFacturas && !facturas.length && (
             <p style={{ margin: '0 0 8px', fontSize: '11px', color: '#b45309' }}>
