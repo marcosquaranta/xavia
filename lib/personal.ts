@@ -300,9 +300,23 @@ export function calcularResumenQuincena(
       });
     }
     const horasReales = Math.round(dias.reduce((a, d) => a + d.horas, 0) * 100) / 100;
+    // ── El número manual es POR QUINCENA, aunque ahora se liquide por mes ──────────────
+    //
+    // `horas_teoricas_quincena` se cargó cuando se pagaba cada quince días: los 46 de
+    // default, y los valores que hay guardados, son medio mes. Usarlos tal cual para un
+    // período mensual paga la mitad del sueldo, y es un error que no se nota —el número sale
+    // plausible, solo que chico—.
+    //
+    // Se escala por dos cuando el período es el mes entero, en vez de reinterpretar el campo:
+    // reinterpretarlo cambiaría en silencio lo que significan los valores ya cargados, y
+    // volver a mirar un mes viejo liquidado por quincena daría otro número del que se pagó.
+    //
+    // Al empleado con "horas por día" configuradas no le afecta: a ese se le calculan solas
+    // del calendario real del período, que ya sale bien para un mes.
+    const horasManualPeriodo = (Number(emp?.horas_teoricas_quincena) || 46) * (quincena === 0 ? 2 : 1);
     const horasTeoricas = esAuto
       ? horasTeoricasAuto(anio, mes, diasDesde, diasHasta, horasLVEmp, horasSabEmp)
-      : (Number(emp?.horas_teoricas_quincena) || 46);
+      : horasManualPeriodo;
     const sueldoHora = Number(emp?.sueldo_hora) || 0;
     const tardanzas = dias.filter((d) => d.esTardanza).length;
     const presentismoConfigurado = Number(emp?.presentismo) || 0;

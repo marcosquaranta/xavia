@@ -3,23 +3,34 @@ import { Fragment, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Empleado } from '@/lib/types';
 import { horasTeoricasAuto, rangoQuincena, type ResumenEmpleado, type PeriodoPago } from '@/lib/personal';
+import AdelantosEmpleado from '@/components/AdelantosEmpleado';
+import type { AdelantoDetalle } from '@/lib/adelantos';
 
-interface Props { resumen: ResumenEmpleado[]; empleados: Empleado[]; anio: number; mes: number; quincena: PeriodoPago; }
+interface Props {
+  resumen: ResumenEmpleado[]; empleados: Empleado[]; anio: number; mes: number; quincena: PeriodoPago;
+  // El detalle de los adelantos por empleado, para poder verlos y corregirlos acá mismo.
+  // Son los gastos reales: lo que se edita se edita sobre el gasto (ver AdelantosEmpleado).
+  adelantosDetalle?: Record<string, AdelantoDetalle[]>;
+  medios?: string[];
+  // Último día del período: es la fecha con la que se propone un adelanto nuevo, porque
+  // cargarlo fuera del período no lo descuenta de este sueldo.
+  hastaISO?: string;
+}
 
 const fmtN = (n: number) => n.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 // Horas de más/de menos van siempre en enteras (ya vienen redondeadas desde calcularResumenQuincena) — a diferencia de fmtN, sin decimales.
 const fmtH = (n: number) => Math.round(n).toLocaleString('es-AR');
 
-export default function PersonalManager({ resumen, empleados, anio, mes, quincena }: Props) {
+export default function PersonalManager({ resumen, empleados, anio, mes, quincena, adelantosDetalle = {}, medios = [], hastaISO = '' }: Props) {
   const router = useRouter();
-  const [abierto, setAbierto] = useState<{ workno: string; modo: 'dias' | 'tardanzas' } | null>(null);
+  const [abierto, setAbierto] = useState<{ workno: string; modo: 'dias' | 'tardanzas' | 'adelantos' } | null>(null);
   const [editando, setEditando] = useState<string | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [guardando, setGuardando] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  function toggle(workno: string, modo: 'dias' | 'tardanzas') {
+  function toggle(workno: string, modo: 'dias' | 'tardanzas' | 'adelantos') {
     setAbierto((v) => (v && v.workno === workno && v.modo === modo ? null : { workno, modo }));
   }
 
@@ -52,7 +63,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
 
 `
       + (tieneFichajes
-        ? `OJO: tiene ${r.dias.length} día(s) fichados en esta quincena. Los fichajes no se borran, así que si sigue marcando en el reloj va a volver a aparecer acá como "sin configurar".
+        ? `OJO: tiene ${r.dias.length} día(s) fichados en este período. Los fichajes no se borran, así que si sigue marcando en el reloj va a volver a aparecer acá como "sin configurar".
 
 `
         : '')
@@ -101,7 +112,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
           pagar_extras: form.pagar_extras || '',
         }),
       });
-      if (!resAjuste.ok) { const j = await resAjuste.json().catch(() => ({})); throw new Error(j.error || 'Error guardando ajustes de la quincena'); }
+      if (!resAjuste.ok) { const j = await resAjuste.json().catch(() => ({})); throw new Error(j.error || 'Error guardando los ajustes del período'); }
       setEditando(null);
       router.refresh();
     } catch (e: any) {
@@ -144,7 +155,10 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
               const { diasDesde, diasHasta } = rangoQuincena(anio, mes, quincena);
               const horasTeoricasPreview = editandoEsta && (Number(form.horas_lv) || 0) > 0
                 ? horasTeoricasAuto(anio, mes, diasDesde, diasHasta, Number(form.horas_lv) || 0, Number(form.horas_sabado) || 0)
-                : Number(form.horas_teoricas_quincena) || 0;
+                // Por dos cuando el período es el mes entero, igual que el servidor: el número
+                // guardado es por quincena (ver lib/personal.ts). Si la vista previa no lo
+                // escalara, mostraría la mitad de lo que se va a pagar.
+                : (Number(form.horas_teoricas_quincena) || 0) * (quincena === 0 ? 2 : 1);
               // El teórico de la vista previa: mismas cuentas que el servidor, para que lo que
               // se ve mientras se edita coincida con lo que va a quedar guardado.
               const teoricoPreview = editandoEsta
@@ -198,6 +212,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                       <span style={{ fontWeight: 600 }}>{fmtN(r.horasReales)}</span>
                       <span style={{ color: '#9ca3af' }}> / {editandoEsta && !((Number(form.horas_lv) || 0) > 0) ? (
                         <input type="number" min={0} value={form.horas_teoricas_quincena} onChange={(e) => setForm((f) => ({ ...f, horas_teoricas_quincena: e.target.value }))}
+                          title="Horas teóricas POR QUINCENA. Se guarda así desde que se pagaba cada quince días, y para un período mensual se usa el doble — por eso el número de al lado puede no coincidir con lo que escribís acá."
                           style={{ width: '58px', textAlign: 'right', fontSize: '12px' }} />
                       ) : fmtN(editandoEsta ? horasTeoricasPreview : r.horasTeoricas)} hs</span>
                       {r.diferenciaHoras !== 0 && (
@@ -206,7 +221,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                         </span>
                       )}
                       {r.diasSinDatos > 0 && (
-                        <span title="Días de la quincena que todavía no tienen fichajes cargados — se toma la teoría, no cuentan como falta" style={{ display: 'block', fontSize: '10px', color: '#2563eb' }}>
+                        <span title="Días del período que todavía no tienen fichajes cargados — se toma la teoría, no cuentan como falta" style={{ display: 'block', fontSize: '10px', color: '#2563eb' }}>
                           {r.diasSinDatos} día(s) sin datos aún
                         </span>
                       )}
@@ -270,11 +285,18 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                       )}
                     </td>
 
-                    {/* Adelantos ya entregados en el período: salen de Gastos. */}
+                    {/* Adelantos ya entregados en el período: salen de Gastos. Se puede
+                        abrir para ver de qué se compone el número, corregir uno o cargar
+                        otro sin salir de acá — antes era ir a Gastos, buscar la fila entre
+                        cientos y volver. */}
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      {r.adelantos > 0
-                        ? <span style={{ fontWeight: 600, color: '#dc2626' }}>− {fmt$(r.adelantos)}</span>
-                        : <span style={{ color: '#9ca3af' }}>—</span>}
+                      <button type="button" onClick={() => toggle(r.workno, 'adelantos')}
+                        title="Ver, corregir o cargar adelantos de este empleado"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: '13px',
+                          fontWeight: r.adelantos > 0 ? 600 : 400, color: r.adelantos > 0 ? '#dc2626' : '#9ca3af',
+                          textDecoration: 'underline', textDecorationStyle: 'dotted' }}>
+                        {r.adelantos > 0 ? `− ${fmt$(r.adelantos)}` : '+ adelanto'}
+                      </button>
                     </td>
 
                     <td style={{ textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap' }}>
@@ -341,11 +363,24 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                           <input type="number" min={0} step={0.5} value={form.horas_sabado} onChange={(e) => setForm((f) => ({ ...f, horas_sabado: e.target.value }))} style={{ width: '55px', fontSize: '12px' }} />
                           <span style={{ marginLeft: '10px', color: '#9ca3af' }}>
                             {(Number(form.horas_lv) || 0) > 0
-                              ? `→ Hs. teóricas esta quincena: ${fmtN(horasTeoricasPreview)} hs (se calcula sola)`
+                              ? `→ Hs. teóricas del período: ${fmtN(horasTeoricasPreview)} hs (se calcula sola)`
                               : 'Dejalo en 0 para seguir usando el número manual de "Hs. teóricas"'}
                           </span>
                         </div>
-                        <p style={{ margin: '6px 0 0', color: '#9ca3af' }}>Presentismo, Extras y Hs. extras de esta fila son para ESTA quincena únicamente.</p>
+                        <p style={{ margin: '6px 0 0', color: '#9ca3af' }}>Presentismo, Extras y Hs. extras de esta fila son para ESTE período únicamente.</p>
+                      </td>
+                    </tr>
+                  )}
+                  {abierto?.workno === r.workno && abierto.modo === 'adelantos' && (
+                    <tr>
+                      <td colSpan={20} style={{ padding: '4px 8px 10px' }}>
+                        <AdelantosEmpleado
+                          workno={r.workno}
+                          nombre={r.nombre}
+                          adelantos={adelantosDetalle[r.workno] || []}
+                          medios={medios}
+                          hasta={hastaISO}
+                        />
                       </td>
                     </tr>
                   )}
@@ -407,7 +442,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
         </table>
       </div>
       <p style={{ margin: '10px 0 0', fontSize: '11px', color: '#9ca3af' }}>
-        Entrada = primer fichaje del día · Salida = último fichaje del día. Tolerancia de 15 min para tardanzas (quedan siempre en minutos, sin redondear); un ingreso pasadas las 11 no cuenta (día raro/franco). "Hs. de más"/"Hs. de menos" comparan contra lo esperado ese día según horario configurado (o turno de 8hs si no hay horario cargado) — de más solo cuenta si supera 1 hora, y ambas se redondean a horas enteras. Los domingos no son día programado: cualquier hora trabajada un domingo cuenta directo como "de más" (marcada "domingo"). "A pagar" = horas teóricas × sueldo/hora + presentismo (si corresponde) + extras $ − adelantos. Las horas de más NO se pagan salvo que se tilde "pagar las hs. de más" en ese mes: se calculan y se muestran, pero liquidarlas es una decisión. Los adelantos salen de Gastos, con categoría "Adelanto de sueldo" y el empleado elegido. Presentismo se pierde por falta o por 2 o más tardanzas en el período. "Hs. teóricas (auto)" se calcula sola del calendario si el empleado tiene "horas por día" configuradas; si no, es el número manual de siempre.
+        Entrada = primer fichaje del día · Salida = último fichaje del día. Tolerancia de 15 min para tardanzas (quedan siempre en minutos, sin redondear); un ingreso pasadas las 11 no cuenta (día raro/franco). "Hs. de más"/"Hs. de menos" comparan contra lo esperado ese día según horario configurado (o turno de 8hs si no hay horario cargado) — de más solo cuenta si supera 1 hora, y ambas se redondean a horas enteras. Los domingos no son día programado: cualquier hora trabajada un domingo cuenta directo como "de más" (marcada "domingo"). "A pagar" = horas teóricas × sueldo/hora + presentismo (si corresponde) + extras $ − adelantos. Las horas de más NO se pagan salvo que se tilde "pagar las hs. de más" en ese mes: se calculan y se muestran, pero liquidarlas es una decisión. Los adelantos salen de Gastos, con categoría "Adelanto de sueldo" y el empleado elegido. Presentismo se pierde por falta o por 2 o más tardanzas en el período. "Hs. teóricas (auto)" se calcula sola del calendario si el empleado tiene "horas por día" configuradas; si no, es el número manual de siempre, que está cargado POR QUINCENA y para un período mensual se usa el doble. Los adelantos se pueden ver y corregir apretando el número de la columna "Adelantos": se cargan como gasto, con la fecha en que salió la plata.
       </p>
     </div>
   );

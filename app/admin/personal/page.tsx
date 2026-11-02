@@ -5,7 +5,8 @@ import { readSheet } from '@/lib/sheets';
 import { leerFichajesCache, diasEnCache } from '@/lib/fichajesCache';
 import { calcularResumenQuincena, rangoQuincena, hoyArg, type AjusteQuincena, type ResumenEmpleado, type PeriodoPago } from '@/lib/personal';
 import type { Empleado, PersonalQuincena, Gasto } from '@/lib/types';
-import { adelantosPorEmpleado, adelantosSinAsignar } from '@/lib/adelantos';
+import { adelantosPorEmpleado, adelantosSinAsignar, adelantosDetallePorEmpleado, type AdelantoDetalle } from '@/lib/adelantos';
+import { MEDIOS_PAGO } from '@/lib/types';
 import Header from '@/components/Header';
 import PersonalManager from './PersonalManager';
 import SincronizarFichajes from './SincronizarFichajes';
@@ -33,6 +34,11 @@ export default async function PersonalPage({ searchParams }: { searchParams: { a
   let empleados: Empleado[] = [];
   let resumen: ResumenEmpleado[] = [];
   let adelantosHuerfanos: Gasto[] = [];
+  // El detalle de los adelantos, para poder verlos y corregirlos desde la propia pantalla de
+  // sueldos. Sale de los MISMOS gastos que el total que se descuenta: si se leyera de otro
+  // lado, la lista y el número descontado podrían no coincidir.
+  let adelantosDetalle: Record<string, AdelantoDetalle[]> = {};
+  let hastaISO = '';
   let err: string | null = null;
   const diasSinSincronizar: string[] = [];
   try {
@@ -57,6 +63,8 @@ export default async function PersonalPage({ searchParams }: { searchParams: { a
     // Los adelantos del período, para descontarlos de lo que queda por pagar.
     const adelantos = adelantosPorEmpleado(gastos, desdeDia, hastaDia);
     adelantosHuerfanos = adelantosSinAsignar(gastos, desdeDia, hastaDia);
+    adelantosDetalle = adelantosDetallePorEmpleado(gastos, desdeDia, hastaDia);
+    hastaISO = hastaDia;
     resumen = calcularResumenQuincena(registros, empleados, anio, mes, quincena, ajustes, adelantos);
     // Días de la quincena (hasta hoy) que todavía no tienen ningún fichaje guardado — para
     // avisar en pantalla en vez de mostrar una quincena en cero como si nadie hubiera venido.
@@ -123,7 +131,7 @@ export default async function PersonalPage({ searchParams }: { searchParams: { a
           </div>
         )}
 
-        {!err && <PersonalManager resumen={resumen} empleados={empleados} anio={anio} mes={mes} quincena={quincena} />}
+        {!err && <PersonalManager resumen={resumen} empleados={empleados} anio={anio} mes={mes} quincena={quincena} adelantosDetalle={adelantosDetalle} medios={[...MEDIOS_PAGO]} hastaISO={hastaISO} />}
       </div>
     </>
   );
