@@ -66,10 +66,62 @@ export interface DeudaProveedor {
     descripcion: string;
     monto: number;
     diasParaVencer: number | null; // negativo = vencido
+    // Lo que dice la celda cuando no se pudo leer como fecha. Va a la pantalla para poder
+    // arreglarlo: decir “sin vencimiento” cuando en la planilla hay algo escrito manda a
+    // buscar el problema al lugar equivocado.
+    vencimientoCrudo?: string;
+    // Las dos fechas de la compra, para poder editarla desde donde se la ve.
+    categoria?: string;
+    medioPago?: string;
+    cantidad?: number;
   }[];
 }
 
-const soloFecha = (v: any) => String(v || '').split(/[T ]/)[0];
+// ── Normalizar una fecha que viene de la planilla ───────────────────────────────────
+//
+// `vencimiento` se escribe a mano y Sheets lo devuelve como se le canta: ISO, d/m/aaaa,
+// d-m-aa, o un número de serie si la celda quedó con formato de fecha. Todo lo que no sea
+// ISO rompe `new Date(x + 'T12:00:00')` y da Invalid Date.
+//
+// Eso es lo que producía el “en null d” de la pantalla: había vencimiento cargado, no se
+// podía parsear, los días daban null y se imprimía igual. Peor que feo: una compra con
+// vencimiento ilegible NO cuenta como vencida, así que no aparecía en el total de vencido
+// ni se ordenaba primero — se pagaba tarde sin que nada avisara.
+const SERIE_BASE = Date.UTC(1899, 11, 30); // Sheets cuenta días desde el 30/12/1899
+export function fechaISO(v: any): string {
+  const crudo = String(v ?? '').trim();
+  if (!crudo) return '';
+
+  // Ya viene ISO (con o sin hora).
+  const iso = crudo.split(/[T ]/)[0];
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+
+  // d/m/aaaa, d-m-aa, d.m.aaaa
+  const m = crudo.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if (m) {
+    const d = Number(m[1]), mes = Number(m[2]);
+    let anio = Number(m[3]);
+    if (anio < 100) anio += 2000;
+    if (d >= 1 && d <= 31 && mes >= 1 && mes <= 12) {
+      return `${anio}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+  }
+
+  // Número de serie de Sheets. El piso de 1000 es para no convertir un “30” —alguien que
+  // escribió el PLAZO en vez de la fecha— en el 29/01/1900: eso no es un vencimiento, es un
+  // dato mal cargado, y hay que devolverlo vacío para que la pantalla lo pueda reclamar.
+  if (/^\d+(\.\d+)?$/.test(crudo)) {
+    const n = Number(crudo);
+    if (n >= 1000 && n < 100000) {
+      return new Date(SERIE_BASE + Math.floor(n) * 86400000).toISOString().slice(0, 10);
+    }
+    return '';
+  }
+
+  return '';
+}
+
+const soloFecha = (v: any) => fechaISO(v);
 
 function diasEntre(desde: string, hasta: string): number | null {
   if (!desde || !hasta) return null;
@@ -80,15 +132,27 @@ function diasEntre(desde: string, hasta: string): number | null {
 }
 
 // Lo que se debe hoy, agrupado por proveedor y de lo más vencido a lo que falta más.
+// “FLHORAGRO” y “flhoragro” son el mismo proveedor. Agrupando por el texto tal cual, la
+// pantalla mostraba las dos tarjetas por separado y ningún total por proveedor era el que
+// de verdad se le debe — que es justamente el número para el que existe esta pantalla.
+// También se normalizan los espacios de más y los acentos, por el mismo motivo.
+const claveProveedor = (s: string) => s
+  .toLowerCase()
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/\s+/g, ' ')
+  .trim();
+
 export function deudaProveedores(gastos: Gasto[], hoy: string): DeudaProveedor[] {
   const porProveedor = new Map<string, DeudaProveedor>();
   for (const g of gastos || []) {
     if (estaPagado(g)) continue;
     const proveedor = String((g as any)?.proveedor || '').trim() || 'Sin proveedor';
+    const clave = claveProveedor(proveedor);
+    const crudoVenc = String((g as any)?.vencimiento ?? '').trim();
     const vencimiento = soloFecha((g as any)?.vencimiento);
     const monto = Number(g?.monto) || 0;
     const dias = vencimiento ? diasEntre(hoy, vencimiento) : null;
-    const d = porProveedor.get(proveedor) || { proveedor, total: 0, vencido: 0, items: [] };
+    const d = porProveedor.get(clave) || { proveedor, total: 0, vencido: 0, items: [] };
     d.total += monto;
     if (dias !== null && dias < 0) d.vencido += monto;
     d.items.push({
@@ -98,8 +162,14 @@ export function deudaProveedores(gastos: Gasto[], hoy: string): DeudaProveedor[]
       descripcion: String(g.descripcion || ''),
       monto,
       diasParaVencer: dias,
+      // Solo si hay algo escrito que no se pudo leer. Si la celda está vacía es “sin
+      // vencimiento” y punto, que es otra cosa.
+      ...(crudoVenc && !vencimiento ? { vencimientoCrudo: crudoVenc } : {}),
+      categoria: String((g as any)?.categoria || ''),
+      medioPago: String((g as any)?.medio_pago || ''),
+      cantidad: Number((g as any)?.cantidad) || 0,
     });
-    porProveedor.set(proveedor, d);
+    porProveedor.set(clave, d);
   }
   for (const d of porProveedor.values()) {
     // Lo que vence antes, primero: es el orden en el que hay que pagar.
