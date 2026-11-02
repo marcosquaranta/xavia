@@ -25,6 +25,9 @@ const fmtH = (n: number) => Math.round(n).toLocaleString('es-AR');
 export default function PersonalManager({ resumen, empleados, anio, mes, quincena, adelantosDetalle = {}, medios = [], hastaISO = '' }: Props) {
   const router = useRouter();
   const [abierto, setAbierto] = useState<{ workno: string; modo: 'dias' | 'tardanzas' | 'adelantos' } | null>(null);
+  // La confirmación de lo último que se guardó, arriba de la lista. Va acá y no adentro
+  // del panel porque el panel se cierra: el mensaje tiene que sobrevivirlo.
+  const [aviso, setAviso] = useState<string | null>(null);
   const [editando, setEditando] = useState<string | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [guardando, setGuardando] = useState<string | null>(null);
@@ -164,6 +167,16 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
   return (
     <div className="card">
       {error && <div className="alert-box error" style={{ marginBottom: '12px' }}>{error}</div>}
+      {/* La confirmación de lo último que se guardó, con la lista ya a la vista. Se cierra
+          con la ✕: no se va sola, porque el número que cambió está en la fila de al lado y
+          hay que poder mirarlo con el aviso todavía puesto. */}
+      {aviso && (
+        <div style={{ marginBottom: '12px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#166534' }}>{aviso}</span>
+          <button type="button" onClick={() => setAviso(null)}
+            style={{ background: 'none', border: 'none', color: '#166534', fontSize: '13px', cursor: 'pointer', padding: '0 2px' }}>✕</button>
+        </div>
+      )}
       <div style={{ overflowX: 'auto' }}>
         <table style={{ fontSize: '13px', width: '100%' }}>
           <thead>
@@ -470,7 +483,16 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                           medios={medios}
                           hasta={hastaISO}
                           adelantoManual={r.adelantoManual || 0}
-                          onAdelantoManual={(monto) => guardarAjusteRapido(r, { adelanto_manual: monto })}
+                          onAdelantoManual={(monto) => {
+                            // Se cierra y se confirma arriba, igual que los adelantos con
+                            // gasto: desde acá el gesto es el mismo aunque lo guarde otra API.
+                            guardarAjusteRapido(r, { adelanto_manual: monto });
+                            setAbierto(null);
+                            setAviso(monto > 0
+                              ? `✓ ${r.nombre}: descuento a mano de ${fmt$(monto)} (no se registra como gasto).`
+                              : `✓ ${r.nombre}: se sacó el descuento a mano.`);
+                          }}
+                          onListo={(m) => { setAbierto(null); setAviso(m); }}
                         />
                       </td>
                     </tr>

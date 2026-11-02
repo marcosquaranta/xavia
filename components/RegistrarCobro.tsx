@@ -1,6 +1,6 @@
 'use client';
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { sugerirCombinaciones, toleranciaDe } from '@/lib/conciliacionCobro';
+import { sugerirCombinaciones, toleranciaDe, estaImpaga } from '@/lib/conciliacionCobro';
 import { cuentasElegibles, cuentaSugerida, cantidadPreferidas, cuentasDeRetencion } from '@/lib/cuentasCobro';
 import AjustarFactura from '@/components/AjustarFactura';
 import { retencionDesdeImporte, cuentaParaRetencion } from '@/lib/retenciones';
@@ -29,7 +29,25 @@ const fmtDia = (f: string) => { const [y, m, d] = String(f || '').split('-'); re
 const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 const diasDesde = (f: string) => Math.round((Date.now() - new Date(f + 'T12:00:00').getTime()) / 86400000);
 
-interface FacturaCliente { numero: string; fecha: string; importe: number; yaCobrada: boolean }
+// ── Las CUATRO marcas, no una ───────────────────────────────────────────────────────
+//
+// Este tipo declaraba solo `yaCobrada`, y el endpoint devuelve cuatro: también `cubierta`
+// (los cobros que el cliente tiene en Xubio alcanzan a taparla), `saldadaManual` (se dio por
+// saldada a mano) e `imputadaManual`.
+//
+// Como el tipo no las nombraba, la lista de acá arriba mostraba como ABIERTA una factura
+// que el panel de abajo —que sí mira las cuatro— contaba como cobrada. La misma pantalla
+// decía dos cosas distintas del mismo cliente.
+//
+// Los datos siempre llegaron: lo que faltaba era mirarlos. Ahora se usa `estaImpaga`, la
+// misma función con la que se decide qué reclamar y qué ofrecer al imputar.
+interface FacturaCliente {
+  numero: string; fecha: string; importe: number;
+  yaCobrada: boolean;
+  cubierta?: boolean;
+  saldadaManual?: boolean;
+  imputadaManual?: boolean;
+}
 
 
 // Diagnóstico + carga de cobros. El diagnóstico va primero a propósito: hasta no verlo en
@@ -81,6 +99,7 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
 
   // Facturas del cliente elegido, para tildar cuáles cubre el cobro.
   const [facturas, setFacturas] = useState<FacturaCliente[]>([]);
+  const [diasVentana, setDiasVentana] = useState(365);
   const [facturasLoading, setFacturasLoading] = useState(false);
   const [facturasError, setFacturasError] = useState<string | null>(null);
   const [elegidas, setElegidas] = useState<string[]>([]);
@@ -118,7 +137,10 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'No se pudieron traer las facturas');
       setFacturas(j.facturas || []);
-      if (!(j.facturas || []).length) setFacturasError('Este cliente no tiene facturas en los últimos 120 días.');
+      setDiasVentana(Number(j.dias) || 365);
+      // La ventana la decide la API (365 días). La pantalla decía 120 y era mentira: hacía
+      // creer que faltaban facturas por estar fuera de rango cuando el rango era otro.
+      if (!(j.facturas || []).length) setFacturasError(`Este cliente no tiene facturas en los últimos ${Number(j.dias) || 365} días.`);
     } catch (e: any) {
       setFacturasError(e.message || 'No se pudieron traer las facturas');
     }
@@ -391,7 +413,7 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
                 <>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap', marginBottom: '5px' }}>
                     <span style={{ fontSize: '11px', fontWeight: 700, color: '#374151' }}>Facturas del cliente</span>
-                    <span style={{ fontSize: '10.5px', color: '#9ca3af' }}>últimos 120 días · tildá las que cubre este cobro</span>
+                    <span style={{ fontSize: '10.5px', color: '#9ca3af' }}>últimos {diasVentana} días · tildá las que cubre este cobro</span>
                     {elegidas.length > 0 && (
                       <span style={{ marginLeft: 'auto', fontSize: '11.5px', fontWeight: 700, color: '#166534' }}>
                         {elegidas.length} tildada{elegidas.length > 1 ? 's' : ''} · {fmt$(totalElegido)}
@@ -442,14 +464,19 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
                   <div style={{ maxHeight: '210px', overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '6px' }}>
                     {facturas.map((f) => {
                       const tildada = elegidas.includes(f.numero);
+                      // Cerrada por cualquiera de las cuatro vías. Una factura cerrada no se
+                      // puede tildar: imputarle un cobro a algo que ya está cobrado lo cuenta
+                      // dos veces y deja otra factura abierta tapada.
+                      const cerrada = !estaImpaga(f as any);
                       return (
                         <label key={f.numero}
                           style={{
                             display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 9px',
                             borderBottom: '1px solid #f3f4f6', cursor: 'pointer', fontSize: '12px',
-                            background: tildada ? '#f0fdf4' : f.yaCobrada ? '#fafafa' : 'white',
+                            background: tildada ? '#f0fdf4' : cerrada ? '#fafafa' : 'white',
+                            opacity: cerrada ? 0.6 : 1,
                           }}>
-                          <input type="checkbox" checked={tildada} disabled={loading} onChange={() => toggleFactura(f.numero)} />
+                          <input type="checkbox" checked={tildada} disabled={loading || cerrada} onChange={() => toggleFactura(f.numero)} />
                           <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#1d4ed8', minWidth: '132px' }}>{f.numero}</span>
                           <span style={{ color: '#6b7280', minWidth: '78px' }}>{fmtDia(f.fecha)}</span>
                           <span style={{ color: '#9ca3af', fontSize: '10.5px', minWidth: '52px' }}>{diasDesde(f.fecha)}d</span>
@@ -465,9 +492,20 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
                             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setAjustando(ajustando === f.numero ? null : f.numero); } }}
                             style={{ color: '#9ca3af', fontSize: '11px', cursor: 'pointer', padding: '0 2px' }}
                           >✎</span>
-                          {f.yaCobrada && (
-                            <span title="Ya entró en un cobro registrado desde la app" style={{ fontSize: '9.5px', background: '#f3f4f6', color: '#6b7280', padding: '1px 6px', borderRadius: '8px', fontWeight: 700 }}>
-                              ya cobrada
+                          {/* Por qué está cerrada, no solo que lo está. “Cubierta” no es lo
+                              mismo que “cobrada”: la primera la dedujo la app repartiendo los
+                              cobros de Xubio, y es la que conviene poder discutir. */}
+                          {cerrada && (
+                            <span
+                              title={f.yaCobrada ? 'Ya entró en un cobro registrado desde la app'
+                                : f.imputadaManual ? 'Se imputó a mano a un cobro de Xubio'
+                                : f.saldadaManual ? 'Se dio por saldada a mano, sin registrar cobro en Xubio'
+                                : 'Los cobros que el cliente tiene en Xubio alcanzan a cubrirla (lo dedujo la app)'}
+                              style={{ fontSize: '9.5px', background: '#f3f4f6', color: '#6b7280', padding: '1px 6px', borderRadius: '8px', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                              {f.yaCobrada ? 'ya cobrada'
+                                : f.imputadaManual ? 'imputada'
+                                : f.saldadaManual ? 'saldada a mano'
+                                : 'cubierta'}
                             </span>
                           )}
                         </label>

@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { estaImpaga } from '@/lib/conciliacionCobro';
 
 interface ClienteOpt { id_control: string; nombre: string }
 interface Factura {
@@ -22,7 +23,12 @@ interface Factura {
 // Una factura está abierta si NINGUNO de los cuatro caminos la da por saldada. Es el mismo
 // criterio que usa el resumen de impagas y el que decide a quién se le reclama por mail: si
 // acá fuera otro, esta pantalla reclamaría cosas que las otras dan por cobradas.
-const estaAbierta = (f: Factura) => !f.yaCobrada && !f.saldadaManual && !f.imputadaManual && !f.cubierta;
+// La misma función con la que se decide qué reclamar, qué ofrecer al imputar y qué contar
+// como deuda. Acá había una copia idéntica escrita a mano: andaba, pero una copia más es
+// otra que se puede quedar atrás. Ya pasó con la lista de "Registrar un cobro", que miraba
+// una sola de las cuatro marcas y mostraba como abierta una factura que el resto de la
+// pantalla daba por cobrada.
+const estaAbierta = (f: Factura) => estaImpaga(f as any);
 
 const MARCA: { test: (f: Factura) => boolean; texto: string; titulo: string }[] = [
   { test: (f) => !!f.yaCobrada, texto: 'cobrada', titulo: 'Entró en un cobro registrado desde la app' },

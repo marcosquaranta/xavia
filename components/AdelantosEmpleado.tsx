@@ -23,7 +23,7 @@ const inp: React.CSSProperties = {
 };
 
 export default function AdelantosEmpleado({
-  workno, nombre, adelantos, medios, hasta, adelantoManual = 0, onAdelantoManual,
+  workno, nombre, adelantos, medios, hasta, adelantoManual = 0, onAdelantoManual, onListo,
 }: {
   workno: string;
   nombre: string;
@@ -36,6 +36,13 @@ export default function AdelantosEmpleado({
   // de `adelantoManual` en lib/personal.ts.
   adelantoManual?: number;
   onAdelantoManual?: (monto: number) => void;
+  // ── Qué pasa después de guardar ────────────────────────────────────────────────
+  //
+  // El panel se cierra y la confirmación se muestra arriba de la lista, no acá adentro.
+  // Dejarlo abierto con un “✓ guardado” dentro obligaba a cerrarlo a mano para volver a
+  // ver las horas y el sueldo, que es justamente el número que cambió y lo que se vino a
+  // mirar. Y un panel que queda abierto después de cargar invita a cargar dos veces.
+  onListo?: (mensaje: string) => void;
 }) {
   const router = useRouter();
   const [nuevoMonto, setNuevoMonto] = useState('');
@@ -69,9 +76,12 @@ export default function AdelantosEmpleado({
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j?.error === 'falta_empleado' ? 'Faltó decir de qué empleado es.' : (j?.error || 'No se pudo cargar.'));
-      setMsg({ ok: true, texto: '✓ Adelanto cargado. También queda como gasto del mes.' });
       setNuevoMonto('');
       router.refresh();
+      // El refresh es por detrás; cerrar no espera a que termine. Lo guardado ya está
+      // guardado y la lista se va a actualizar sola.
+      if (onListo) onListo(`✓ Adelanto de ${fmt$(monto)} cargado a ${nombre}. También queda como gasto del mes.`);
+      else setMsg({ ok: true, texto: '✓ Adelanto cargado. También queda como gasto del mes.' });
     } catch (e: any) {
       setMsg({ ok: false, texto: e?.message || 'No se pudo cargar.' });
     } finally { setTrabajando(false); }
@@ -94,9 +104,10 @@ export default function AdelantosEmpleado({
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j?.error || 'No se pudo guardar.');
-      setMsg({ ok: true, texto: '✓ Adelanto corregido.' });
       setEditando(null);
       router.refresh();
+      if (onListo) onListo(`✓ Adelanto de ${nombre} corregido a ${fmt$(monto)}.`);
+      else setMsg({ ok: true, texto: '✓ Adelanto corregido.' });
     } catch (e: any) {
       setMsg({ ok: false, texto: e?.message || 'No se pudo guardar.' });
     } finally { setTrabajando(false); }
@@ -112,8 +123,9 @@ export default function AdelantosEmpleado({
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j?.error || 'No se pudo borrar.');
-      setMsg({ ok: true, texto: '✓ Adelanto borrado.' });
       router.refresh();
+      if (onListo) onListo(`✓ Se borró el adelanto de ${fmt$(a.monto)} de ${nombre}.`);
+      else setMsg({ ok: true, texto: '✓ Adelanto borrado.' });
     } catch (e: any) {
       setMsg({ ok: false, texto: e?.message || 'No se pudo borrar.' });
     } finally { setTrabajando(false); }
@@ -201,7 +213,7 @@ export default function AdelantosEmpleado({
             <input type="number" value={manual} onChange={(e) => setManual(e.target.value)} disabled={trabajando}
               placeholder="0" style={{ ...inp, width: '110px' }} />
             <button type="button" disabled={trabajando}
-              onClick={() => onAdelantoManual(Math.round(Number(manual) || 0))}
+              onClick={() => { setTrabajando(true); onAdelantoManual(Math.round(Number(manual) || 0)); }}
               style={{ fontSize: '11px', padding: '4px 11px', background: '#b45309', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 600 }}>
               Guardar descuento
             </button>
