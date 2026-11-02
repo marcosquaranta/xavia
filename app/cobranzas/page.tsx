@@ -406,16 +406,36 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   //
   // Verde = lo que hay que hacer hoy. Azul = mueve plata en Xubio. Ámbar = cambia la app
   // pero NO toca Xubio. Gris = solo se mira.
-  const tituloZona: React.CSSProperties = {
-    margin: '22px 0 8px', fontSize: '12px', fontWeight: 800, textTransform: 'uppercase',
-    letterSpacing: '0.7px', color: '#9ca3af',
-  };
-  const tarjeta = (color: string): React.CSSProperties => ({
-    background: 'white', border: '1px solid #e5e7eb', borderLeft: `4px solid ${color}`,
-    borderRadius: '10px', padding: '13px 15px', marginBottom: '12px',
+  // ── El tamaño dice cuántas veces por semana se usa cada cosa ────────────────────
+  //
+  // El color ya decía qué hace cada cosa, pero todos los títulos pesaban igual: la bandeja
+  // —que se abre todos los días— se veía igual que la lista de clientes con recordatorio,
+  // que se toca cuando entra un cliente nuevo. Una pantalla donde todo grita no prioriza
+  // nada, y lo que se usa todos los días queda a la misma distancia que lo que se toca una
+  // vez por mes.
+  //
+  // Tres niveles, por frecuencia de uso real:
+  //   1 · Todos los días → bandeja e impagas. Título grande, borde grueso, color fuerte.
+  //   2 · Cuando hace falta → cargar a mano, saldar, reclamar. Plegados, con su color.
+  //   3 · De vez en cuando → informes y configuración. Gris, chico, sin barra de color.
+  //
+  // Por eso "Facturas impagas por cliente" subió al nivel 1 y salió de Informes: dejó de
+  // ser una tabla para mirar cuando se le agregaron los tildes para dar por cobradas y el
+  // ✎ para corregir importes. Es la cuenta corriente, se trabaja ahí.
+  const tituloZona = (peso: 1 | 2 | 3): React.CSSProperties => ({
+    margin: peso === 1 ? '8px 0 10px' : '26px 0 8px',
+    fontSize: peso === 1 ? '13px' : peso === 3 ? '11px' : '12px',
+    fontWeight: peso === 1 ? 800 : 700,
+    textTransform: 'uppercase', letterSpacing: '0.7px',
+    color: peso === 1 ? '#374151' : '#9ca3af',
   });
-  const encabezado = (color: string): React.CSSProperties => ({
-    margin: 0, fontSize: '14px', fontWeight: 800, color, cursor: 'pointer', listStyle: 'revert',
+  const tarjeta = (color: string, grosor = 4): React.CSSProperties => ({
+    background: 'white', border: '1px solid #e5e7eb', borderLeft: `${grosor}px solid ${color}`,
+    borderRadius: '10px', padding: grosor >= 5 ? '15px 17px' : '13px 15px', marginBottom: '12px',
+  });
+  const encabezado = (color: string, tam = 14): React.CSSProperties => ({
+    margin: 0, fontSize: `${tam}px`, fontWeight: tam >= 14 ? 800 : 700, color,
+    cursor: 'pointer', listStyle: 'revert',
   });
   const bajada: React.CSSProperties = { margin: '3px 0 0', fontSize: '12px', color: '#6b7280', lineHeight: 1.5 };
 
@@ -432,9 +452,9 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
         <ActualizarXubio actualizado={actualizadoXubio} />
 
         {/* ══ 1. LO QUE HAY QUE HACER ══ */}
-        <p style={tituloZona}>Lo que hay que imputar</p>
-        <div style={tarjeta('#166534')}>
-          <p style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#166534' }}>Bandeja — cobros por imputar</p>
+        <p style={tituloZona(1)}>Todos los días</p>
+        <div style={tarjeta('#166534', 5)}>
+          <p style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: '#166534' }}>Bandeja — cobros por imputar</p>
           <p style={bajada}>Nada se registra en Xubio hasta que lo confirmás.</p>
           <div style={{ marginTop: '10px' }}>
             <BandejaCobranzas
@@ -454,13 +474,50 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
           </div>
         </div>
 
+        {/* ══ QUIÉN DEBE QUÉ ══ */}
+        {ver !== 'impagas' ? (
+          <div style={{ ...tarjeta('#4338ca', 5), display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+            <div>
+              <p style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#3730a3' }}>Facturas impagas por cliente</p>
+              <p style={bajada}>Quién debe qué, desde cuándo y hace cuánto que no se revisa.</p>
+            </div>
+            <Link href="/cobranzas?ver=impagas" className="btn secondary" style={{ fontSize: '13px', whiteSpace: 'nowrap' }}>Ver →</Link>
+          </div>
+        ) : (
+        <div style={tarjeta('#4338ca', 5)}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+            <p style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#3730a3' }}>Facturas impagas por cliente</p>
+            <Link href="/cobranzas" style={{ fontSize: '12px', color: '#2563eb' }}>Ocultar</Link>
+          </div>
+          <p className="card-sub">
+            Todo lo facturado en los últimos {DIAS_PAGINA} días que no figura cobrado: ni imputado desde la app,
+            ni dado por saldado a mano, ni imputado a un cobro, ni cubierto por los cobros que el cliente tiene en
+            Xubio. Están <strong>todos los clientes</strong>: los que no tienen el recordatorio prendido quedan
+            marcados, porque esa deuda existe igual pero no se reclama sola.
+          </p>
+          <div style={{ marginTop: '10px' }}>
+            <ResumenImpagas
+              clientes={clientes
+                .map((c) => ({ id_control: String(c.id_control), nombre: nombreClienteVisible(c) }))
+                .sort((a, b) => a.nombre.localeCompare(b.nombre))}
+              facturasPorCliente={impagasCliente}
+              conRecordatorio={[...conRecordatorio]}
+              revisiones={revisionesUI}
+              diasRevisionVieja={DIAS_REVISION_VIEJA}
+              cortes={cortesPorCliente}
+              saldadasPorCliente={saldadasPorCliente}
+            />
+          </div>
+        </div>
+        )}
+
         {/* ══ 2. CARGAR A MANO ══
             Los dos caminos, visibles a la vez. Antes estaban uno adentro del otro adentro
             de un tercero: tres clicks para llegar a cualquiera de los dos, y ninguno se veía
             hasta abrir el primero. Son dos cosas distintas y la diferencia importa —uno
             mueve plata en Xubio y el otro no— así que van en paralelo y con colores
             distintos, no en una lista anidada. */}
-        <p style={tituloZona}>Cargar a mano · lo que no entró por la bandeja</p>
+        <p style={tituloZona(2)}>Cuando hace falta</p>
         {/* Uno abajo del otro y no en dos columnas: adentro hay tablas anchas —la de
             clientes con recordatorio tiene siete columnas— y en media pantalla quedan
             ilegibles. El ancho acá vale más que la compacidad. */}
@@ -533,15 +590,6 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
           </div>
         </details>
 
-        </div>
-
-        {/* ══ 3. RECLAMOS ══ */}
-        <p style={tituloZona}>Reclamos a clientes</p>
-        {/* Uno abajo del otro y no en dos columnas: adentro hay tablas anchas —la de
-            clientes con recordatorio tiene siete columnas— y en media pantalla quedan
-            ilegibles. El ancho acá vale más que la compacidad. */}
-        <div style={{ marginBottom: '12px' }}>
-
         <details style={tarjeta('#6d28d9')}>
           <summary style={encabezado('#6d28d9')}>Reclamar facturas a un cliente</summary>
           <p style={bajada}>
@@ -553,36 +601,16 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
           </div>
         </details>
 
-        <details style={tarjeta('#6d28d9')}>
-          <summary style={encabezado('#6d28d9')}>
-            Clientes con recordatorio
-            <span style={{ fontWeight: 400, color: prendidos > 0 ? '#059669' : '#b45309', fontSize: '12.5px' }}> · {prendidos} prendido{prendidos === 1 ? '' : 's'}</span>
-          </summary>
-          <p style={bajada}>
-            {prendidos === 0 ? 'Ninguno prendido todavía' : `${prendidos} prendido${prendidos > 1 ? 's' : ''}`}
-            {' · '}
-            {/* El mail también está en la ficha del cliente, que es donde se lo busca cuando
-                hay que actualizar un contacto. Es la misma columna: se edite donde se edite,
-                es el mismo dato. */}
-            <Link href="/admin/clientes-venta" style={{ color: '#2563eb' }}>
-              también se edita en la ficha de cada cliente →
-            </Link>
-          </p>
-          <div style={{ marginTop: '10px' }}>
-            <ClientesRecordatorio clientes={filas} />
-          </div>
-        </details>
-
         </div>
 
         {/* ══ 4. SOLO PARA MIRAR ══ */}
-        <p style={tituloZona}>Informes</p>
+        <p style={tituloZona(3)}>De vez en cuando · informes y ajustes</p>
 
         {/* ══ COBRANZAS DEL MES ══ */}
         {ver !== 'movimientos' ? (
           <div className="card" style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
             <div>
-              <p className="card-title" style={{ margin: 0 }}>Cobranzas del mes</p>
+              <p style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: '#6b7280' }}>Cobranzas del mes</p>
               <p className="card-sub" style={{ margin: '2px 0 0' }}>Lo que entró, por medio de cobro y por cliente.</p>
             </div>
             <Link href="/cobranzas?ver=movimientos" className="btn secondary" style={{ fontSize: '13px', whiteSpace: 'nowrap' }}>Ver →</Link>
@@ -590,7 +618,7 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
         ) : (
         <div className="card" style={{ marginBottom: '14px' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-            <p className="card-title" style={{ margin: 0 }}>Cobranzas del mes</p>
+            <p style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: '#6b7280' }}>Cobranzas del mes</p>
             <Link href="/cobranzas" style={{ fontSize: '12px', color: '#2563eb' }}>Ocultar</Link>
           </div>
           <p className="card-sub">
@@ -634,47 +662,31 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
         </div>
         )}
 
-        {/* ══ QUIÉN DEBE QUÉ ══ */}
-        {ver !== 'impagas' ? (
-          <div className="card" style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-            <div>
-              <p className="card-title" style={{ margin: 0 }}>Facturas impagas por cliente</p>
-              <p className="card-sub" style={{ margin: '2px 0 0' }}>Quién debe qué, desde cuándo y hace cuánto que no se revisa.</p>
-            </div>
-            <Link href="/cobranzas?ver=impagas" className="btn secondary" style={{ fontSize: '13px', whiteSpace: 'nowrap' }}>Ver →</Link>
-          </div>
-        ) : (
-        <div className="card" style={{ marginBottom: '14px' }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-            <p className="card-title" style={{ margin: 0 }}>Facturas impagas por cliente</p>
-            <Link href="/cobranzas" style={{ fontSize: '12px', color: '#2563eb' }}>Ocultar</Link>
-          </div>
-          <p className="card-sub">
-            Todo lo facturado en los últimos {DIAS_PAGINA} días que no figura cobrado: ni imputado desde la app,
-            ni dado por saldado a mano, ni imputado a un cobro, ni cubierto por los cobros que el cliente tiene en
-            Xubio. Están <strong>todos los clientes</strong>: los que no tienen el recordatorio prendido quedan
-            marcados, porque esa deuda existe igual pero no se reclama sola.
+
+        <details className="card">
+          <summary style={encabezado('#6b7280', 13)}>
+            Clientes con recordatorio
+            <span style={{ fontWeight: 400, color: prendidos > 0 ? '#059669' : '#b45309', fontSize: '12.5px' }}> · {prendidos} prendido{prendidos === 1 ? '' : 's'}</span>
+          </summary>
+          <p style={bajada}>
+            {prendidos === 0 ? 'Ninguno prendido todavía' : `${prendidos} prendido${prendidos > 1 ? 's' : ''}`}
+            {' · '}
+            {/* El mail también está en la ficha del cliente, que es donde se lo busca cuando
+                hay que actualizar un contacto. Es la misma columna: se edite donde se edite,
+                es el mismo dato. */}
+            <Link href="/admin/clientes-venta" style={{ color: '#2563eb' }}>
+              también se edita en la ficha de cada cliente →
+            </Link>
           </p>
           <div style={{ marginTop: '10px' }}>
-            <ResumenImpagas
-              clientes={clientes
-                .map((c) => ({ id_control: String(c.id_control), nombre: nombreClienteVisible(c) }))
-                .sort((a, b) => a.nombre.localeCompare(b.nombre))}
-              facturasPorCliente={impagasCliente}
-              conRecordatorio={[...conRecordatorio]}
-              revisiones={revisionesUI}
-              diasRevisionVieja={DIAS_REVISION_VIEJA}
-              cortes={cortesPorCliente}
-              saldadasPorCliente={saldadasPorCliente}
-            />
+            <ClientesRecordatorio clientes={filas} />
           </div>
-        </div>
-        )}
+        </details>
 
         {/* Plegado: es para revisar que la corrida del lunes haya salido, no algo que se
             mire todos los días. */}
         <details className="card">
-          <summary style={{ cursor: 'pointer', fontSize: '14px', fontWeight: 700, color: '#111827', listStyle: 'revert' }}>
+          <summary style={encabezado('#6b7280', 13)}>
             Recordatorios enviados — últimos 7 días
             <span style={{ fontWeight: 400, color: '#9ca3af', fontSize: '12.5px' }}> · {historial.length}</span>
           </summary>
