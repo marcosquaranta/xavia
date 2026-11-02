@@ -582,6 +582,10 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
                 .sort((a, b) => a.nombre.localeCompare(b.nombre))}
               facturasPorCliente={{}}
               diasVentana={DIAS_PAGINA}
+              // Para ordenar el desplegable por deuda. Sale del MISMO cálculo que la lista de
+              // impagas —ya está hecho más arriba—, así que el número que se ve al lado del
+              // nombre no puede contradecir al de la tabla.
+              deuda={deudaPorCliente}
               saldadas={saldadas
                 .filter((f) => String(f.estado) !== 'revertida')
                 .map((f) => ({
