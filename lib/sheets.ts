@@ -217,6 +217,28 @@ export async function updateRow(sheetName: string, keyColumn: string, keyValue: 
   return updateRowWithRawData(sheets, headers, rows, sheetName, keyColumn, keyValue, updates);
 }
 
+// ── Cuando la clave no alcanza para distinguir la fila ──────────────────────────
+//
+// updateRow se queda con la PRIMERA fila que coincide, que es lo correcto mientras la clave
+// sea única. Dos filas de la bandeja quedaron con el mismo id_item y esa fila repetida no se
+// podía tocar nunca: todo lo que se hacía sobre ella caía en la otra. Con una segunda
+// columna que sí las distingue —el hash, que lleva el importe— se llega a la que se quiso.
+//
+// No reemplaza a updateRow: una clave repetida es un problema que hay que arreglar en el
+// origen. Esto es para poder salir del paso con las filas que ya quedaron mal.
+export async function updateRowDonde(
+  sheetName: string, keyColumn: string, keyValue: string,
+  extra: { columna: string; valor: string },
+  updates: Record<string, any>,
+): Promise<boolean> {
+  const sheets = getClient();
+  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`, valueRenderOption: 'UNFORMATTED_VALUE' });
+  const rows = response.data.values;
+  if (!rows || rows.length < 2) return false;
+  const headers = rows[0];
+  return updateRowWithRawData(sheets, headers, rows, sheetName, keyColumn, keyValue, updates, extra);
+}
+
 // Actualiza múltiples filas con una sola lectura y un solo batchUpdate.
 // Usar en lugar de llamar updateRow N veces seguidas.
 export async function batchUpdateRows(
@@ -266,11 +288,14 @@ export async function batchUpdateRows(
 
 function updateRowWithRawData(
   sheets: sheets_v4.Sheets, headers: string[], rows: string[][],
-  sheetName: string, keyColumn: string, keyValue: string, updates: Record<string, any>
+  sheetName: string, keyColumn: string, keyValue: string, updates: Record<string, any>,
+  extra?: { columna: string; valor: string },
 ): Promise<boolean> {
   const keyIndex = headers.indexOf(keyColumn);
   if (keyIndex === -1) throw new Error(`Columna ${keyColumn} no encontrada en ${sheetName}`);
-  const rowIndex = rows.findIndex((r, idx) => idx > 0 && String(r[keyIndex]) === String(keyValue));
+  const extraIndex = extra ? headers.indexOf(extra.columna) : -1;
+  const rowIndex = rows.findIndex((r, idx) => idx > 0 && String(r[keyIndex]) === String(keyValue)
+    && (extraIndex === -1 || String(r[extraIndex]) === String(extra!.valor)));
   if (rowIndex === -1) return Promise.resolve(false);
   const newRow = [...rows[rowIndex]];
   for (const [col, val] of Object.entries(updates)) {

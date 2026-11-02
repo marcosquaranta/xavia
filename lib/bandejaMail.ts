@@ -300,6 +300,12 @@ const leido = parsearAvisoPago(`${asunto}\n${texto}`);
   ].filter(Boolean).join(' · ');
 
   const idItem = nuevoIdItem(previos);
+  // Los ids que ya se usaron en ESTA importación. `previos` es la hoja como estaba antes
+  // de empezar, así que el id recién generado no está ahí: sin esta lista, el primer pago
+  // extra del mismo aviso volvía a calcular el mismo número y se escribían dos filas con
+  // el mismo id_item. Y como updateRow encuentra siempre la primera que coincide, la
+  // segunda no se podía confirmar ni descartar nunca: quedaba fija en la bandeja.
+  const usados: ItemBandeja[] = [...previos, { id_item: idItem, hash } as ItemBandeja];
   await appendRowObj(HOJA_BANDEJA, {
     id_item: idItem,
     fecha_importacion: hoy,
@@ -344,8 +350,13 @@ const leido = parsearAvisoPago(`${asunto}\n${texto}`);
     try {
       const fechaExtra = /^\d{4}-\d{2}-\d{2}$/.test(String(extra.fecha || '')) ? String(extra.fecha) : fecha;
       const hashExtra = hashMovimiento(fechaExtra, extra.importe, `aviso ${extra.comprobantes.join(',')} ${asunto}`);
-      if (previos.some((x) => String(x.hash) === hashExtra)) continue;
-      const idExtra = nuevoIdItem([...previos, ...idsExtra.map((x) => ({ id_item: x } as ItemBandeja))]);
+      // También contra las filas de este mismo aviso: `previos` es la hoja como estaba
+      // antes, así que no incluye ni el pago principal ni los extras ya escritos. Dos filas
+      // con el mismo hash Y el mismo id_item no se pueden distinguir después de ninguna
+      // manera, y una de las dos quedaría imposible de tocar.
+      if (usados.some((x) => String((x as any).hash) === hashExtra)) continue;
+      const idExtra = nuevoIdItem(usados);
+      usados.push({ id_item: idExtra, hash: hashExtra } as ItemBandeja);
       idsExtra.push(idExtra);
       await appendRowObj(HOJA_BANDEJA, {
         id_item: idExtra,

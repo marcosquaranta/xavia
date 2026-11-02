@@ -10,6 +10,9 @@ import { claveComprobante } from '@/lib/comprobantes';
 
 interface ItemUI {
   id_item: string;
+  // Desempata filas con el mismo id_item: hubo avisos con varios pagos que generaron dos
+  // filas con el mismo id y la segunda no se podía descartar.
+  hash?: string;
   fecha: string;
   importe: number;
   descripcion: string;
@@ -248,7 +251,7 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
       const r = await fetch('/api/cobranzas/bandeja', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id_item: item.id_item, accion,
+          id_item: item.id_item, hash: item.hash || '', accion,
           id_control: idControl, cuentaId: Number(cuentaId), comprobantes: elegidas,
           importe: importeNum,
           fecha: fechaCobro,
@@ -284,7 +287,7 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
     try {
       const r = await fetch('/api/cobranzas/bandeja', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_item: item.id_item, accion: 'descartar' }),
+        body: JSON.stringify({ id_item: item.id_item, hash: item.hash || '', accion: 'descartar' }),
       });
       const j = await r.json();
       if (r.status === 409 && j?.yaResuelto) {

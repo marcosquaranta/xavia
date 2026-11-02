@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { appendRowObj, appendRowsObj, asegurarHoja, readSheet, updateRow } from '@/lib/sheets';
+import { appendRowObj, appendRowsObj, asegurarHoja, readSheet, updateRow, updateRowDonde } from '@/lib/sheets';
 import { parsearFilasBanco } from '@/lib/importacionBanco';
 import {
   HOJA_BANDEJA, HEADERS_BANDEJA, HOJA_ALIAS, HEADERS_ALIAS,
@@ -116,8 +116,19 @@ export async function PATCH(req: NextRequest) {
     const accion = String(body.accion || '').trim();
     if (!idItem) return NextResponse.json({ error: 'Falta el item.' }, { status: 400 });
 
+    const hashItem = String(body.hash || '').trim();
     const items = await readSheet<ItemBandeja>(HOJA_BANDEJA).catch(() => [] as ItemBandeja[]);
-    const item = items.find(i => String(i.id_item) === idItem);
+    // Por id y hash cuando la pantalla manda el hash. Hubo filas con el id_item repetido, y
+    // buscar solo por id devolvía siempre la primera: la repetida no se podía descartar ni
+    // confirmar, quedaba fija en la bandeja. El hash lleva el importe, así que distingue.
+    const item = (hashItem && items.find(i => String(i.id_item) === idItem && String(i.hash) === hashItem))
+      || items.find(i => String(i.id_item) === idItem);
+    // Si el hash hizo falta para encontrarla, también hace falta para escribirla.
+    const hayRepetido = items.filter(i => String(i.id_item) === idItem).length > 1;
+    const escribir = (updates: Record<string, any>) =>
+      (hayRepetido && item && String(item.hash || ''))
+        ? updateRowDonde(HOJA_BANDEJA, 'id_item', idItem, { columna: 'hash', valor: String(item.hash) }, updates)
+        : updateRow(HOJA_BANDEJA, 'id_item', idItem, updates);
     if (!item) return NextResponse.json({ error: 'No se encontró ese movimiento en la bandeja.' }, { status: 404 });
     // Ya resuelto. Pasa cuando la pantalla quedó abierta desde antes, o cuando el registro
     // automático lo tomó mientras tanto. Devolver un error y dejarlo en la lista es lo peor
@@ -131,7 +142,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (accion === 'descartar') {
-      await updateRow(HOJA_BANDEJA, 'id_item', idItem, {
+      await escribir({
         estado: 'descartado',
         nota: String(body.nota || 'descartado a mano'),
         usuario: user.email,
@@ -183,7 +194,7 @@ export async function PATCH(req: NextRequest) {
 
     const clientes = await readSheet<ClienteVenta>('Clientes');
     const cli = clientes.find(c => String(c.id_control) === idControl);
-    await updateRow(HOJA_BANDEJA, 'id_item', idItem, {
+    await escribir({
       estado: 'confirmado',
       id_control: idControl,
       cliente: cli?.nombre_display || cli?.nombre_xubio || '',

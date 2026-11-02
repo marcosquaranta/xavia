@@ -112,6 +112,9 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
     .filter((i) => String(i.estado || '').trim() === 'pendiente')
     .map((i) => ({
       id_item: String(i.id_item),
+      // Para poder identificar la fila aunque el id_item se repita (ver el PATCH de
+      // /api/cobranzas/bandeja). El hash lleva el importe, así que no choca entre filas.
+      hash: String((i as any).hash || ''),
       fecha: String(i.fecha || '').split('T')[0],
       importe: Number(i.importe) || 0,
       descripcion: String(i.descripcion || ''),
