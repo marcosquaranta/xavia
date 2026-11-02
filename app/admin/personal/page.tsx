@@ -51,7 +51,7 @@ export default async function PersonalPage({ searchParams }: { searchParams: { a
     const ajustesDeEstaQuincena = ajustesData.filter((a) => String(a.anio) === String(anio) && String(a.mes) === String(mes) && String(a.quincena) === String(quincena));
     const ajustes: Record<string, AjusteQuincena> = {};
     for (const a of ajustesDeEstaQuincena) {
-      ajustes[String(a.workno)] = { presentismoManual: a.presentismo_manual, extras: Number(a.extras) || 0, horasExtras: Number(a.horas_extras) || 0, pagarExtras: a.pagar_extras || '' };
+      ajustes[String(a.workno)] = { presentismoManual: a.presentismo_manual, extras: Number(a.extras) || 0, horasExtras: Number(a.horas_extras) || 0, pagarExtras: a.pagar_extras || '', adelantoManual: Number((a as any).adelanto_manual) || 0 };
     }
     const { desde, hasta } = rangoQuincena(anio, mes, quincena);
     // Lee la caché local de fichajes (hoja FichajesDiarios) en vez de pedirle a CrossChex,

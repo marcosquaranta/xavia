@@ -23,7 +23,7 @@ const inp: React.CSSProperties = {
 };
 
 export default function AdelantosEmpleado({
-  workno, nombre, adelantos, medios, hasta,
+  workno, nombre, adelantos, medios, hasta, adelantoManual = 0, onAdelantoManual,
 }: {
   workno: string;
   nombre: string;
@@ -32,6 +32,10 @@ export default function AdelantosEmpleado({
   // El último día del período que se está mirando: un adelanto que se carga con fecha
   // posterior no se descuenta de este sueldo y parecería que no se guardó.
   hasta: string;
+  // El adelanto cargado a mano, sin gasto detrás. Decisión de Marcos: ver el comentario
+  // de `adelantoManual` en lib/personal.ts.
+  adelantoManual?: number;
+  onAdelantoManual?: (monto: number) => void;
 }) {
   const router = useRouter();
   const [nuevoMonto, setNuevoMonto] = useState('');
@@ -44,6 +48,7 @@ export default function AdelantosEmpleado({
   const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
 
   const total = adelantos.reduce((a, x) => a + x.monto, 0);
+  const [manual, setManual] = useState(String(Math.round(adelantoManual) || ''));
 
   async function agregar() {
     const monto = Math.round(Number(nuevoMonto));
@@ -180,6 +185,36 @@ export default function AdelantosEmpleado({
 
       {msg && (
         <p style={{ margin: '6px 0 0', fontSize: '11px', fontWeight: 600, color: msg.ok ? '#059669' : '#dc2626' }}>{msg.texto}</p>
+      )}
+
+      {/* ── Descuento a mano, sin gasto ──────────────────────────────────────
+          Va aparte y con otro color a propósito, no sumado al número de arriba. Los de
+          arriba son gastos: se puede ir a Gastos y ver el movimiento. Éste no existe en
+          ningún lado más que acá, así que la caja no se entera. Mezclarlos en un solo total
+          haría imposible saber cuánto de ese descuento tiene respaldo. */}
+      {onAdelantoManual && (
+        <div style={{ marginTop: '8px', borderTop: '1px dashed #fcd34d', paddingTop: '7px' }}>
+          <p style={{ margin: '0 0 4px', fontSize: '11px', fontWeight: 700, color: '#78350f' }}>
+            Descuento a mano <span style={{ fontWeight: 400 }}>— sin gasto detrás</span>
+          </p>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <input type="number" value={manual} onChange={(e) => setManual(e.target.value)} disabled={trabajando}
+              placeholder="0" style={{ ...inp, width: '110px' }} />
+            <button type="button" disabled={trabajando}
+              onClick={() => onAdelantoManual(Math.round(Number(manual) || 0))}
+              style={{ fontSize: '11px', padding: '4px 11px', background: '#b45309', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 600 }}>
+              Guardar descuento
+            </button>
+            {adelantoManual > 0 && (
+              <span style={{ fontSize: '11px', color: '#b45309' }}>hoy descuenta {fmt$(adelantoManual)}</span>
+            )}
+          </div>
+          <p style={{ margin: '4px 0 0', fontSize: '10px', color: '#92400e', lineHeight: 1.5 }}>
+            Se descuenta del sueldo a pagar y <strong>no se registra como gasto</strong>: la plata no figura salida
+            en ninguna caja ni en el resultado del mes. Para lo que se dio por fuera y no se quiere contabilizar.
+            Si tenés que verlo en la caja, cargalo arriba como adelanto normal.
+          </p>
+        </div>
       )}
 
       {/* Qué pasa con la plata. Es la confusión esperable de cargar un adelanto desde la

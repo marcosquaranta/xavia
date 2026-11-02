@@ -139,7 +139,12 @@ export interface DiaTrabajado {
   esDomingo: boolean; // domingo nunca es día programado — cualquier hora trabajada es "de más"
   entrada: string | null;
   salida: string | null;
+  // Las horas que se le computan. Si el día quedó incompleto —fichó la entrada y no la
+  // salida— son las esperadas de ese día y no las que alcanzó a marcar el reloj: vino, lo
+  // que falta es el dato de la salida. Ver el comentario en el cálculo.
   horas: number;
+  // Lo que de verdad marcó el reloj, para poder mostrar el dato crudo al lado del computado.
+  horasFichadas?: number;
   horasEsperadas: number | null; // según horas_lv/horas_sabado del empleado; null = sin horario configurado (no se puede comparar, salvo domingo)
   incompleto: boolean;
   tardanzaMin: number; // minutos de atraso reales (aunque no llegue al umbral de tardanza)
@@ -161,6 +166,17 @@ export interface AjusteQuincena {
   horasExtras?: number;
   // Si las horas extra se pagan en este período. Por defecto NO.
   pagarExtras?: 'SI' | 'NO' | '';
+  // ── Adelanto cargado a mano, sin gasto detrás ────────────────────────────────────
+  //
+  // Decisión de Marcos, tomada sabiendo lo que implica: los adelantos normales son gastos
+  // (la plata salió de una caja y figura en el resultado). Éste no: es solo un descuento
+  // del sueldo a pagar.
+  //
+  // Sirve para lo que se dio por fuera del circuito y no se quiere registrar como gasto.
+  // El costo es que la caja no se entera, así que se muestra marcado y aparte del otro,
+  // nunca mezclado en un solo número: un descuento que no se puede rastrear hasta un
+  // movimiento tiene que verse como lo que es.
+  adelantoManual?: number;
 }
 
 export interface ResumenEmpleado {
@@ -184,13 +200,17 @@ export interface ResumenEmpleado {
   sueldoTeorico: number;       // horas teóricas × sueldo/hora + presentismo
   sueldoExtras: number;        // extras $ + (horas extra × sueldo/hora, solo si se pagan)
   horasExtrasImporte: number;  // lo que valdrían las horas extra, se paguen o no
-  adelantos: number;           // adelantos de sueldo ya entregados en el período
+  adelantos: number;           // total descontado: los que son gasto + el cargado a mano
+  adelantoGastos?: number;     // los que tienen un gasto detrás (la plata salió de una caja)
+  adelantoManual?: number;     // el cargado a mano en esta pantalla, sin gasto detrás
   sueldoAPagar: number;        // teórico + extras, ANTES de descontar adelantos
   sueldoFinal: number;         // lo que queda por pagar: sueldoAPagar − adelantos
   diasSinDatos: number;
   tardanzas: number;
   diasIncompletos: number;
-  faltas: number; // días programados (lunes a viernes, o sábado si trabaja) sin ningún fichaje
+  faltas: number; // días programados sin fichaje de él Y con fichajes de otros: eso sí es falta suya
+  diasCerrados?: number;      // días programados en los que no fichó nadie (feriado, campo cerrado)
+  horasNoDebidas?: number;    // las horas teóricas de esos días, que no se le descuentan
   horasTeoricasAuto: boolean; // true = se calculó sola del calendario (horas_lv configurado), false = número manual
 }
 
@@ -229,6 +249,19 @@ export function calcularResumenQuincena(
     for (const fecha of porDia.keys()) if (fecha > ultimoDiaConDatos) ultimoDiaConDatos = fecha;
   }
 
+  // ── Los días en que fichó alguien ──────────────────────────────────────────────────
+  //
+  // Un día programado sin fichajes no siempre es una falta. Si no vino NADIE, lo normal es
+  // que no se haya trabajado: un feriado, un paro, el campo cerrado. Contarlo como falta de
+  // cada empleado hacía que todos perdieran el presentismo todos los meses — que es
+  // exactamente lo que se veía en pantalla: cinco empleados, cinco “presentismo perdido”.
+  //
+  // Falta es cuando el resto trabajó y él no. Eso sí es de él.
+  const diasConAlgunFichaje = new Set<string>();
+  for (const porDia of porEmpleadoDia.values()) {
+    for (const fecha of porDia.keys()) diasConAlgunFichaje.add(fecha);
+  }
+
   const todosWorknos = new Set<string>([...porEmpleadoDia.keys(), ...empleados.map((e) => String(e.workno))]);
   const resultados: ResumenEmpleado[] = [];
   for (const workno of todosWorknos) {
@@ -240,6 +273,11 @@ export function calcularResumenQuincena(
     const esAuto = horasLVEmp > 0;
     const dias: DiaTrabajado[] = [];
     let faltas = 0;
+    // Los días programados en los que no fichó nadie (feriado, paro, campo cerrado) y los
+    // que sí fueron falta de él. Se separan porque pesan distinto: los primeros no se le
+    // descuentan, los segundos sí.
+    const diasCerrados: string[] = [];
+    const diasFalta: string[] = [];
     for (let d = diasDesde; d <= diasHasta; d++) {
       const fecha = `${anio}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       const dow = new Date(anio, mes - 1, d).getDay(); // 0=domingo..6=sábado
@@ -265,9 +303,18 @@ export function calcularResumenQuincena(
         continue;
       }
       if (!checks.length) {
-        // Falta = día programado (lunes a viernes siempre; sábado solo si el empleado
-        // tiene horas de sábado configuradas) sin ningún fichaje ese día.
-        if (diaProgramado) faltas++;
+        // Falta = día programado sin ningún fichaje de ÉL, Y con fichajes de alguien más.
+        // Si no fichó nadie ese día no se trabajó, y no es falta de nadie: se trata como
+        // día no programado, igual que un domingo. Sin esto, cada feriado era una falta
+        // para todo el plantel y el presentismo se perdía siempre.
+        if (diaProgramado && diasConAlgunFichaje.has(fecha)) {
+          faltas++;
+          diasFalta.push(fecha);
+        } else if (diaProgramado) {
+          // Se anota para no contarlo al comparar horas: si nadie trabajó, esas horas
+          // teóricas no se debían.
+          diasCerrados.push(fecha);
+        }
         continue;
       }
       const { horas, entrada: entradaMin, salidaFinal: salidaMin, incompleto } = sumarHorasPares(checks);
@@ -287,16 +334,31 @@ export function calcularResumenQuincena(
       // salida) no se puede saber cuánto trabajó de verdad, así que no se marca "de menos"
       // — sería un falso "le faltaron N horas" cuando en realidad falta el dato, no el trabajo.
       const baseEsperada = horasEsperadas !== null ? horasEsperadas : HORAS_TURNO;
+      // ── Un día incompleto se paga como un día normal ──────────────────────────────
+      //
+      // Incompleto = fichó la entrada y no la salida (se olvidó, el reloj no lo tomó).
+      // Antes se sumaban las horas que el par incompleto dejaba, casi siempre pocas o cero,
+      // y el empleado aparecía con 80 horas de menos en el mes. No es que no trabajó: es
+      // que falta el dato de la salida.
+      //
+      // Como vino —hay fichaje de entrada— se le computan las horas esperadas de ese día.
+      // Es la hipótesis correcta por defecto: lo que hay que probar es la ausencia, y de la
+      // ausencia ya se ocupa el conteo de faltas de arriba.
+      const horasComputadas = incompleto ? baseEsperada : horas;
       const masCruda = incompleto ? 0 : Math.max(0, horas - baseEsperada);
       const menosCruda = incompleto ? 0 : Math.max(0, baseEsperada - horas);
       dias.push({
         fecha, diaSemana, esDomingo,
         entrada: fmtHoraMin(entradaMin), salida: salidaMin !== null ? fmtHoraMin(salidaMin) : null,
-        horas: Math.round(horas * 100) / 100, horasEsperadas, incompleto, tardanzaMin,
+        horas: Math.round(horasComputadas * 100) / 100, horasEsperadas, incompleto, tardanzaMin,
         esTardanza: tardanzaMin > TOLERANCIA_TARDANZA_MIN,
         horasDeMas: masCruda > 1 ? Math.round(masCruda) : 0,
         horasDeMenos: Math.round(menosCruda),
         sinDatosAun: false,
+        // Lo que de verdad marcó el reloj, para poder mostrarlo al abrir el día. `horas` ya
+        // es lo que se computa (ver arriba); sin esto no habría cómo ver el dato crudo y
+        // la corrección sería invisible.
+        horasFichadas: Math.round(horas * 100) / 100,
       });
     }
     const horasReales = Math.round(dias.reduce((a, d) => a + d.horas, 0) * 100) / 100;
@@ -332,6 +394,14 @@ export function calcularResumenQuincena(
     // los días que ya tienen datos — si no, los días de la quincena que todavía no se
     // cargaron aparecerían como si el empleado hubiera trabajado de menos y se comerían
     // las extras reales.
+    // Los días en que no fichó nadie no se debían: no entran ni como horas teóricas ni
+    // como horas de menos. Igual que los que todavía no tienen datos.
+    const horasCerradas = esAuto
+      ? diasCerrados.reduce((a, f) => {
+          const dow = new Date(f + 'T12:00:00').getDay();
+          return a + (dow === 0 ? 0 : dow === 6 ? horasSabEmp : horasLVEmp);
+        }, 0)
+      : 0;
     const horasTeoricasCubiertas = esAuto
       ? dias.filter((d) => !d.sinDatosAun).reduce((a, d) => a + (d.horasEsperadas ?? 0), 0)
       : horasTeoricas;
@@ -349,6 +419,10 @@ export function calcularResumenQuincena(
     const horasExtrasImporte = Math.round(horasExtras * sueldoHora * 100) / 100;
     const importeExtrasPagado = pagarExtras ? horasExtrasImporte : 0;
     const adelantos = Math.round((Number(adelantosPorWorkno[workno]) || 0) * 100) / 100;
+    // El adelanto cargado a mano, que no tiene gasto detrás. Se suma al descuento pero se
+    // lleva aparte en el resultado para poder mostrarlos separados (ver AjusteQuincena).
+    const adelantoManual = Math.round((Number(ajuste.adelantoManual) || 0) * 100) / 100;
+    const adelantoTotal = Math.round((adelantos + adelantoManual) * 100) / 100;
     const sueldoAPagar = Math.round((horasTeoricas * sueldoHora + presentismoAplicado + extras + importeExtrasPagado) * 100) / 100;
     resultados.push({
       workno, nombre: emp?.nombre || nombresCrossChex.get(workno) || workno,
@@ -364,15 +438,22 @@ export function calcularResumenQuincena(
       sueldoTeorico: Math.round((horasTeoricas * sueldoHora + presentismoAplicado) * 100) / 100,
       sueldoExtras: Math.round((extras + importeExtrasPagado) * 100) / 100,
       horasExtrasImporte,
-      adelantos,
+      adelantos: adelantoTotal,
       sueldoAPagar,
       // Lo que falta pagar. Un adelanto ya salió de la caja: volver a pagarlo entero a fin
       // de mes es pagar dos veces.
-      sueldoFinal: Math.round((sueldoAPagar - adelantos) * 100) / 100,
+      sueldoFinal: Math.round((sueldoAPagar - adelantoTotal) * 100) / 100,
       diasSinDatos: dias.filter((d) => d.sinDatosAun).length,
       tardanzas,
       diasIncompletos: dias.filter((d) => d.incompleto).length,
       faltas,
+      // Los días programados en los que no fichó NADIE. No son faltas de él y no se le
+      // descuentan, pero tienen que poder verse: si son muchos, o el reloj dejó de
+      // sincronizar o hubo feriados, y las dos cosas cambian cómo se lee el mes.
+      diasCerrados: diasCerrados.length,
+      horasNoDebidas: Math.round(horasCerradas * 100) / 100,
+      adelantoManual,
+      adelantoGastos: adelantos,
       horasTeoricasAuto: esAuto,
     });
   }

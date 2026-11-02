@@ -122,6 +122,41 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
     }
   }
 
+  // ── Guardar solo el ajuste del período ──────────────────────────────────────────────
+  //
+  // El botón “Editar” guarda la configuración del empleado Y el ajuste del período juntos, y
+  // eso está bien para cambiar el sueldo por hora. Pero tildar el presentismo o escribir
+  // cuántas horas extra pagar no debería obligar a abrir el formulario entero: son
+  // decisiones de este mes, no cambios en la ficha del empleado.
+  //
+  // Lo que no viene en `cambios` se manda como está hoy. Un POST parcial pisaría con 0 lo
+  // que no se mandó: el upsert escribe el registro completo.
+  async function guardarAjusteRapido(r: ResumenEmpleado, cambios: Record<string, any>) {
+    setGuardando(r.workno); setError(null);
+    try {
+      const res = await fetch('/api/admin/personal-quincena', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workno: r.workno, anio, mes, quincena,
+          presentismo_manual: r.presentismoManual || '',
+          extras: r.extras || 0,
+          // El valor GUARDADO, no el efectivo: `horasExtras` trae el calculado cuando no hay
+          // manual, y mandarlo lo congelaría como si alguien lo hubiera escrito.
+          horas_extras: r.horasExtrasManual ? r.horasExtras : 0,
+          pagar_extras: r.pagarExtras ? 'SI' : '',
+          adelanto_manual: r.adelantoManual || 0,
+          ...cambios,
+        }),
+      });
+      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || 'No se pudo guardar.'); }
+      router.refresh();
+    } catch (e: any) {
+      setError(e.message || 'No se pudo guardar.');
+    } finally {
+      setGuardando(null);
+    }
+  }
+
   if (!resumen.length) {
     return <div className="card" style={{ textAlign: 'center', padding: '30px', color: '#9ca3af' }}>No hay fichajes de CrossChex en este período.</div>;
   }
@@ -225,15 +260,41 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                           {r.diasSinDatos} día(s) sin datos aún
                         </span>
                       )}
+                      {(r.diasCerrados || 0) > 0 && (
+                        <span title="Días programados en los que no fichó NADIE: feriado, paro o campo cerrado. No son falta de él y no se le descuentan horas." style={{ display: 'block', fontSize: '10px', color: '#6b7280' }}>
+                          {r.diasCerrados} día(s) sin actividad de nadie
+                        </span>
+                      )}
                     </td>
 
                     {/* Sueldo teórico: lo que cobra por su horario, con el presentismo adentro */}
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <span style={{ fontWeight: 600 }}>{fmt$(editandoEsta ? teoricoPreview : r.sueldoTeorico)}</span>
-                      <span style={{ display: 'block', fontSize: '10px', color: r.presentismoAplicado > 0 ? '#059669' : '#dc2626' }}
-                        title={r.presentismoManual ? `Forzado a mano: ${r.presentismoManual}` : `Automático: se pierde por falta (${r.faltas}) o por 2+ tardanzas (${r.tardanzas})`}>
-                        {r.presentismoAplicado > 0 ? `+ ${fmt$(r.presentismoAplicado)} present.` : 'presentismo perdido'}
-                      </span>
+                      {/* El tilde decide si se paga el presentismo, sin abrir el formulario.
+                          Tildarlo o destildarlo lo deja FORZADO a mano; el “auto” de al lado
+                          vuelve a la regla (se pierde por falta o por 2+ tardanzas). Son tres
+                          estados y no dos, y por eso el auto se puede recuperar: si no,
+                          destildar una vez dejaría al empleado sin presentismo para siempre
+                          sin forma de volver atrás. */}
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'flex-end', fontSize: '10px', cursor: 'pointer',
+                        color: r.presentismoAplicado > 0 ? '#059669' : '#dc2626' }}
+                        title={r.presentismoManual
+                          ? `Forzado a mano: ${r.presentismoManual}`
+                          : `Automático: se pierde por falta (${r.faltas}) o por 2+ tardanzas (${r.tardanzas})`}>
+                        <input type="checkbox" checked={r.presentismoAplicado > 0} disabled={guardando === r.workno || r.presentismoConfigurado <= 0}
+                          onChange={(e) => guardarAjusteRapido(r, { presentismo_manual: e.target.checked ? 'SI' : 'NO' })} />
+                        {r.presentismoConfigurado <= 0
+                          ? <span style={{ color: '#9ca3af' }}>sin presentismo</span>
+                          : r.presentismoAplicado > 0 ? `+ ${fmt$(r.presentismoAplicado)} present.` : 'presentismo perdido'}
+                      </label>
+                      {r.presentismoManual && (
+                        <button type="button" onClick={() => guardarAjusteRapido(r, { presentismo_manual: '' })}
+                          disabled={guardando === r.workno}
+                          title="Volver a la regla automática"
+                          style={{ background: 'none', border: 'none', padding: 0, fontSize: '9.5px', color: '#2563eb', cursor: 'pointer', display: 'block', marginLeft: 'auto' }}>
+                          a mano · volver a auto
+                        </button>
+                      )}
                       {editandoEsta && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-end', marginTop: '3px' }}>
                           <input type="number" min={0} value={form.presentismo} onChange={(e) => setForm((f) => ({ ...f, presentismo: e.target.value }))}
@@ -261,18 +322,36 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                             pagar las hs. de más
                           </label>
                         </div>
-                      ) : (r.horasExtras === 0 && r.extras === 0) ? <span style={{ color: '#9ca3af' }}>—</span> : (
+                      ) : (r.horasExtras === 0 && r.extras === 0 && r.horasExtrasCalculadas === 0) ? <span style={{ color: '#9ca3af' }}>—</span> : (
                         <>
-                          {r.horasExtras > 0 && (
+                          {(r.horasExtras > 0 || r.horasExtrasCalculadas > 0) && (
                             <>
                               {/* Tachado cuando no se pagan: la información sigue —hizo esas
                                   horas— pero se ve de un vistazo que no están en el sueldo. */}
                               <span style={{ fontWeight: 600, color: r.pagarExtras ? '#d97706' : '#9ca3af', textDecoration: r.pagarExtras ? 'none' : 'line-through' }}>
                                 {fmt$(r.horasExtrasImporte)}
                               </span>
-                              <span style={{ display: 'block', fontSize: '10px', color: '#9ca3af' }}>
-                                {fmtN(r.horasExtras)} hs{r.horasExtrasManual ? ' (manual)' : ''}
-                                {!r.pagarExtras && ' · no se pagan'}
+                              {/* Cuántas pagar, escrito acá mismo. Un solo campo en vez de un
+                                  número más un sí/no: poner una cantidad ES decidir pagarlas, y
+                                  dejarlo en 0 es no pagarlas. Tener los dos controles separados
+                                  permitía el estado absurdo de “pagar 0 horas”. */}
+                              <span style={{ display: 'flex', gap: '3px', alignItems: 'center', justifyContent: 'flex-end', marginTop: '2px' }}>
+                                <input
+                                  type="number" min={0} step={0.5}
+                                  defaultValue={r.pagarExtras ? r.horasExtras : 0}
+                                  key={`hp-${r.workno}-${r.pagarExtras ? r.horasExtras : 0}`}
+                                  disabled={guardando === r.workno}
+                                  onBlur={(e) => {
+                                    const n = Number(e.target.value) || 0;
+                                    const actual = r.pagarExtras ? r.horasExtras : 0;
+                                    if (n === actual) return;
+                                    guardarAjusteRapido(r, { horas_extras: n, pagar_extras: n > 0 ? 'SI' : '' });
+                                  }}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                                  title={`Cuántas horas de más pagar. El reloj marcó ${fmtN(r.horasExtrasCalculadas)} hs; en 0 no se paga ninguna.`}
+                                  style={{ width: '54px', textAlign: 'right', fontSize: '10.5px', padding: '1px 3px' }}
+                                />
+                                <span style={{ fontSize: '9.5px', color: '#9ca3af' }}>de {fmtN(r.horasExtrasCalculadas)} hs</span>
                               </span>
                             </>
                           )}
@@ -297,6 +376,16 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                           textDecoration: 'underline', textDecorationStyle: 'dotted' }}>
                         {r.adelantos > 0 ? `− ${fmt$(r.adelantos)}` : '+ adelanto'}
                       </button>
+                      {/* Cuánto de ese descuento NO tiene gasto detrás. Se dice en la celda y
+                          no solo adentro del panel: el total es el número que se mira al
+                          liquidar, y sin esto no habría cómo saber que una parte no se puede
+                          rastrear hasta un movimiento de caja. */}
+                      {(r.adelantoManual || 0) > 0 && (
+                        <span style={{ display: 'block', fontSize: '9.5px', color: '#b45309' }}
+                          title="Cargado a mano en esta pantalla: se descuenta del sueldo pero no figura como gasto ni salió de ninguna caja.">
+                          {fmt$(r.adelantoManual || 0)} sin gasto
+                        </span>
+                      )}
                     </td>
 
                     <td style={{ textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap' }}>
@@ -380,6 +469,8 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                           adelantos={adelantosDetalle[r.workno] || []}
                           medios={medios}
                           hasta={hastaISO}
+                          adelantoManual={r.adelantoManual || 0}
+                          onAdelantoManual={(monto) => guardarAjusteRapido(r, { adelanto_manual: monto })}
                         />
                       </td>
                     </tr>
@@ -442,7 +533,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
         </table>
       </div>
       <p style={{ margin: '10px 0 0', fontSize: '11px', color: '#9ca3af' }}>
-        Entrada = primer fichaje del día · Salida = último fichaje del día. Tolerancia de 15 min para tardanzas (quedan siempre en minutos, sin redondear); un ingreso pasadas las 11 no cuenta (día raro/franco). "Hs. de más"/"Hs. de menos" comparan contra lo esperado ese día según horario configurado (o turno de 8hs si no hay horario cargado) — de más solo cuenta si supera 1 hora, y ambas se redondean a horas enteras. Los domingos no son día programado: cualquier hora trabajada un domingo cuenta directo como "de más" (marcada "domingo"). "A pagar" = horas teóricas × sueldo/hora + presentismo (si corresponde) + extras $ − adelantos. Las horas de más NO se pagan salvo que se tilde "pagar las hs. de más" en ese mes: se calculan y se muestran, pero liquidarlas es una decisión. Los adelantos salen de Gastos, con categoría "Adelanto de sueldo" y el empleado elegido. Presentismo se pierde por falta o por 2 o más tardanzas en el período. "Hs. teóricas (auto)" se calcula sola del calendario si el empleado tiene "horas por día" configuradas; si no, es el número manual de siempre, que está cargado POR QUINCENA y para un período mensual se usa el doble. Los adelantos se pueden ver y corregir apretando el número de la columna "Adelantos": se cargan como gasto, con la fecha en que salió la plata.
+        Entrada = primer fichaje del día · Salida = último fichaje del día. Tolerancia de 15 min para tardanzas (quedan siempre en minutos, sin redondear); un ingreso pasadas las 11 no cuenta (día raro/franco). "Hs. de más"/"Hs. de menos" comparan contra lo esperado ese día según horario configurado (o turno de 8hs si no hay horario cargado) — de más solo cuenta si supera 1 hora, y ambas se redondean a horas enteras. Los domingos no son día programado: cualquier hora trabajada un domingo cuenta directo como "de más" (marcada "domingo"). "A pagar" = horas teóricas × sueldo/hora + presentismo (si corresponde) + extras $ − adelantos. Las horas de más NO se pagan salvo que se tilde "pagar las hs. de más" en ese mes: se calculan y se muestran, pero liquidarlas es una decisión. Los adelantos salen de Gastos, con categoría "Adelanto de sueldo" y el empleado elegido. Presentismo se pierde por falta o por 2 o más tardanzas en el período, y se puede forzar con el tilde de la columna "Sueldo teórico" (el enlace de abajo vuelve a la regla automática). Un día INCOMPLETO —fichó la entrada y no la salida— se computa como día trabajado normal, con las horas esperadas: vino, lo que falta es el dato de la salida. Un día programado sin fichajes es falta solo si ese día fichó alguien más; si no fichó nadie (feriado, campo cerrado) no se le descuenta a nadie. Las horas de más se pagan escribiendo cuántas en la columna "Hs. de más": en 0 no se paga ninguna. "Hs. teóricas (auto)" se calcula sola del calendario si el empleado tiene "horas por día" configuradas; si no, es el número manual de siempre, que está cargado POR QUINCENA y para un período mensual se usa el doble. Los adelantos se pueden ver y corregir apretando el número de la columna "Adelantos": se cargan como gasto, con la fecha en que salió la plata.
       </p>
     </div>
   );
