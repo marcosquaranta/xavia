@@ -153,12 +153,30 @@ export function diasSeguridadDeArticulo(art: Articulo, porDefecto = DIAS_SEGURID
   return porDefecto;
 }
 
+// ── Los primeros días del mes, sin el cierre anterior cargado ───────────────────────
+//
+// El stock inicial de un mes es el final del anterior. Hasta que alguien carga ese cierre,
+// la alerta tiene que estimar desde el último conteo real que haya — y si ese conteo es de
+// hace dos meses, el uso teórico acumulado lo lleva a cero y salta todo junto.
+//
+// Es lo que pasaba los primeros días de cada mes: veinte alertas de reponer insumos que
+// están llenos. El problema no es que la estimación sea mala, es que en esos días no hay
+// con qué estimar, y una alerta sin fundamento entrena a ignorar el bloque entero — justo
+// donde también aparecen las de verdad.
+//
+// Así que se callan, pero NO en silencio: se avisa una sola vez que están pausadas y por
+// qué. Desactivar avisos sin decirlo es peor que el ruido que evita.
+export const DIAS_GRACIA_CIERRE = 4;
+
 export function alertasStockBajo(
   articulos: Articulo[], stocks: StockMes[],
   driversActual: DriversMes, driversMesAnterior: DriversMes,
   anioActual: number, mesActual: number, diasEnMesAnterior: number, umbralDias = DIAS_SEGURIDAD_DEFAULT
 ): Alerta[] {
   const diasTranscurridos = new Date().getDate();
+  const enGracia = diasTranscurridos <= DIAS_GRACIA_CIERRE;
+  // Cuántos artículos se callaron por esto, para poder decirlo en una línea al final.
+  let silenciadosPorCierre = 0;
   let mesAnteriorNum = mesActual - 1, anioAnteriorNum = anioActual;
   if (mesAnteriorNum === 0) { mesAnteriorNum = 12; anioAnteriorNum--; }
 
@@ -197,6 +215,9 @@ export function alertasStockBajo(
       .filter((r) => cargado(r.stock_final) && numAP(r.stock_final) > 0)
       .sort((a, b) => (Number(b.anio) - Number(a.anio)) || (Number(b.mes) - Number(a.mes)))[0];
     if (!iniCargado && !ultimoCierre) continue;
+    // Sin el cierre del mes anterior y recién empezado el mes: no hay con qué estimar bien.
+    // Se cuenta y se sigue; la línea que lo explica va al final.
+    if (!iniCargado && enGracia) { silenciadosPorCierre++; continue; }
 
     // Stock "del momento": si ya hay un conteo manual cargado este mes se usa ese (más preciso
     // que cualquier estimación); si no, se proyecta inicial + compras − uso teórico acumulado
@@ -262,5 +283,20 @@ export function alertasStockBajo(
       });
     }
   }
+
+  // Una sola línea, informativa, al final. No es un error: es el estado de las alertas.
+  // Sin esto, “no hay alertas de stock” los primeros días del mes significaría dos cosas
+  // distintas —todo bien, o nadie cargó el cierre— y no habría forma de distinguirlas.
+  if (silenciadosPorCierre > 0) {
+    alertas.push({
+      tipo: 'info',
+      categoria: 'general',
+      msg: `Alertas de stock en pausa para ${silenciadosPorCierre} insumo(s): falta cargar el cierre del mes pasado, `
+        + `así que no hay stock inicial del cual partir. Se reactivan al cargarlo, o solas a partir del día ${DIAS_GRACIA_CIERRE + 1}.`,
+      href: '/stocks',
+      clave: 'stock_sin_cierre_anterior',
+    });
+  }
+
   return alertas;
 }

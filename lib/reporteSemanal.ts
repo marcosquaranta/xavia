@@ -294,6 +294,21 @@ const UMBRAL_PESO_PCT = 8;          // % de cambio del peso promedio por paquete
 const UMBRAL_CICLO_PCT = 10;        // % de cambio del ciclo F2
 const UMBRAL_DESCARTE_PCT = 10;     // % de descarte sobre lo que pasó por la fase
 const UMBRAL_VENTA_PCT = 20;        // % de cambio de la venta total de la semana
+// Por producto el umbral es más alto que el del total: un producto solo se mueve mucho más
+// que el agregado, y con 20% entrarían tres o cuatro todas las semanas.
+const UMBRAL_PRODUCTO_PCT = 30;
+// ...y además tiene que mover volumen. Sin esto, la albahaca pasando de 8 a 14 unidades
+// ocupa el mismo lugar que la rúcula moviendo tres mil.
+const UMBRAL_PRODUCTO_UNIDADES = 120;
+// Cajones: se cuenta en bultos, no en unidades, así que el umbral de volumen es otro.
+const UMBRAL_CAJONES_PCT = 25;
+const UMBRAL_CAJONES_BULTOS = 8;
+// Cuánto tiene que moverse la proporción de la venta que va por cajón para que valga
+// contarlo: es un cambio de cómo se vende, no de cuánto, y eso cambia el precio promedio.
+const UMBRAL_MIX_PP = 8;
+// Mes contra mes, con el mes todavía abierto: se compara proyectado, así que el umbral es
+// alto para no gritar por una proyección de los primeros días.
+const UMBRAL_MES_PCT = 25;
 const UMBRAL_FALTANTE_PAQ = 100;    // paquetes faltantes en el conteo de cámara de la semana
 
 function destacadosDeLaSemana(d: Omit<ReporteSemanalData, 'destacados'>): Destacado[] {
@@ -312,6 +327,98 @@ function destacadosDeLaSemana(d: Omit<ReporteSemanalData, 'destacados'>): Destac
       titulo: `Venta de la semana ${pv > 0 ? 'subió' : 'bajó'} ${Math.abs(pv)}%`,
       detalle: `${fmtN(ventaAct)} u esta semana contra ${fmtN(ventaAnt)} la anterior.`,
     });
+  }
+
+  // ── Qué producto se movió ──────────────────────────────────────────────────────────
+  //
+  // El total de arriba dice que la venta subió o bajó, pero no de qué. Una semana en que
+  // la rúcula cae 25% y la lechuga sube 25% da un total plano, y es justamente la semana
+  // que hay que mirar.
+  //
+  // `otros` entra acá y no en el total de arriba a propósito: son los artículos dados de
+  // alta desde la app (microgreens, ensaladas) y su venta no estaba en ningún destacado.
+  for (const [label, act, ant] of [
+    ['Rúcula', d.ventasSemana.rucula, d.ventasSemanaAnterior.rucula],
+    ['Lechuga', d.ventasSemana.lechuga, d.ventasSemanaAnterior.lechuga],
+    ['Albahaca', d.ventasSemana.albahaca, d.ventasSemanaAnterior.albahaca],
+    ['Otros artículos', d.ventasSemana.otros, d.ventasSemanaAnterior.otros],
+  ] as const) {
+    const delta = act.unidades - ant.unidades;
+    const p = pctCambio(act.unidades, ant.unidades);
+    if (p === null) {
+      // Producto que no se vendió la semana pasada y esta sí (o al revés). No hay % posible
+      // pero si mueve volumen es de las cosas más útiles que puede decir el reporte.
+      if (ant.unidades === 0 && act.unidades >= UMBRAL_PRODUCTO_UNIDADES) {
+        out.push({ tono: 'bueno', titulo: `${label}: arrancó la venta`, detalle: `${fmtN(act.unidades)} u esta semana, la anterior no se vendió nada.` });
+      }
+      continue;
+    }
+    if (Math.abs(p) < UMBRAL_PRODUCTO_PCT || Math.abs(delta) < UMBRAL_PRODUCTO_UNIDADES) continue;
+    out.push({
+      tono: p > 0 ? 'bueno' : 'malo',
+      titulo: `${label} ${p > 0 ? 'subió' : 'bajó'} ${Math.abs(p)}%`,
+      detalle: `${fmtN(act.unidades)} u esta semana contra ${fmtN(ant.unidades)} la anterior (${signo(delta)}${fmtN(delta)} u).`,
+    });
+  }
+
+  // ── Cajones ────────────────────────────────────────────────────────────────────────
+  //
+  // Se cuentan en bultos porque es como se carga la venta y como se habla de ella. Van
+  // rúcula y lechuga juntos: lo que interesa acá es el movimiento del canal, no de qué
+  // cultivo — eso ya lo dice el bloque de arriba.
+  const cajAct = d.ventasSemana.rucula.cajones + d.ventasSemana.lechuga.cajones;
+  const cajAnt = d.ventasSemanaAnterior.rucula.cajones + d.ventasSemanaAnterior.lechuga.cajones;
+  const pc = pctCambio(cajAct, cajAnt);
+  const deltaCaj = cajAct - cajAnt;
+  if (pc !== null && Math.abs(pc) >= UMBRAL_CAJONES_PCT && Math.abs(deltaCaj) >= UMBRAL_CAJONES_BULTOS) {
+    out.push({
+      tono: pc > 0 ? 'bueno' : 'malo',
+      titulo: `Venta por cajón ${pc > 0 ? 'subió' : 'bajó'} ${Math.abs(pc)}%`,
+      detalle: `${fmtN(cajAct)} cajones esta semana contra ${fmtN(cajAnt)} la anterior (${signo(deltaCaj)}${fmtN(deltaCaj)}).`,
+    });
+  } else if (cajAnt === 0 && cajAct >= UMBRAL_CAJONES_BULTOS) {
+    out.push({ tono: 'neutro', titulo: 'Volvió la venta por cajón', detalle: `${fmtN(cajAct)} cajones esta semana; la anterior no hubo ninguno.` });
+  }
+
+  // ── Cuánto de lo que se vende va por cajón ──────────────────────────────────────────
+  //
+  // No es cuánto se vendió sino CÓMO. El cajón se cobra por kilo y el paquete por unidad,
+  // así que mover diez puntos de un canal al otro cambia el precio promedio y el margen sin
+  // que el volumen total se mueva un gramo. Es el cambio que el total esconde.
+  const mixDe = (v: VentasRango) => {
+    const tot = v.rucula.unidades + v.lechuga.unidades;
+    const porKg = v.rucula.unidadesKg + v.lechuga.unidadesKg;
+    return tot > 0 ? (porKg / tot) * 100 : null;
+  };
+  const mixAct = mixDe(d.ventasSemana);
+  const mixAnt = mixDe(d.ventasSemanaAnterior);
+  if (mixAct !== null && mixAnt !== null) {
+    const dpp = Math.round(mixAct - mixAnt);
+    if (Math.abs(dpp) >= UMBRAL_MIX_PP) {
+      out.push({
+        tono: 'neutro',
+        titulo: `${dpp > 0 ? 'Más' : 'Menos'} venta por cajón sobre el total`,
+        detalle: `${Math.round(mixAct)}% de la venta fue por cajón, contra ${Math.round(mixAnt)}% la semana anterior `
+          + `(${signo(dpp)}${dpp} puntos). El cajón se cobra por kilo: cambia el precio promedio aunque el volumen no se mueva.`,
+      });
+    }
+  }
+
+  // ── El mes, contra el anterior ─────────────────────────────────────────────────────
+  //
+  // El reporte es semanal pero la pregunta de fin de mes es otra. Se compara lo que va del
+  // mes PROYECTADO a mes completo contra el mes anterior cerrado: comparar 12 días contra
+  // 30 diría siempre que la venta se derrumbó.
+  if (d.ventasMesActual.proyeccionMes > 0 && d.ventasMesAnteriorTotal > 0) {
+    const pm = pctCambio(d.ventasMesActual.proyeccionMes, d.ventasMesAnteriorTotal);
+    if (pm !== null && Math.abs(pm) >= UMBRAL_MES_PCT) {
+      out.push({
+        tono: pm > 0 ? 'bueno' : 'malo',
+        titulo: `El mes proyecta ${pm > 0 ? 'cerrar arriba' : 'cerrar abajo'} ${Math.abs(pm)}%`,
+        detalle: `Proyectado ${fmtN(d.ventasMesActual.proyeccionMes)} u contra ${fmtN(d.ventasMesAnteriorTotal)} del mes pasado. `
+          + 'Es una proyección del ritmo de lo que va del mes, no una venta hecha.',
+      });
+    }
   }
 
   // ── Clientes con saltos o caídas fuertes ──
@@ -511,6 +618,13 @@ export interface ReporteSemanalData {
   // productividad y plantas por km se miden mes contra mes — una semana suelta de estos
   // números es ruido. Van igual en el reporte semanal porque es lo que se lee cada viernes.
   indicadoresMes: { label: string; valor: string; pct: number | null; mejorSiSube: boolean; detalle?: string }[];
+  // ── El resumen de arriba de todo, en tarjetas ──────────────────────────────────────
+  //
+  // Es la misma lectura rápida que la pantalla de estadísticas: cinco bloques con los
+  // números que se miran primero y su variación. No calcula nada nuevo — toma los valores
+  // que el reporte ya tenía, repartidos en seis tablas —; lo que agrega es poder verlos
+  // juntos sin bajar.
+  resumenTarjetas: { titulo: string; icono: string; items: { label: string; valor: string; pct: number | null; mejorSiSube: boolean; detalle?: string }[] }[];
   // Qué midió y contra qué, para cada registro fuera de rango de la semana. El contador
   // solo no deja decidir: no distingue un pH una décima arriba de una conductividad al triple.
   protocoloFueraDeRango: FueraDeRangoDetalle[];
@@ -754,6 +868,70 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     total: ajusteSemRuc.acumulado + ajusteSemLecCrespa.acumulado + ajusteSemLecRoble.acumulado + ajusteSemAlb.acumulado,
   };
 
+  // ── Resumen en tarjetas ────────────────────────────────────────────────────────────
+  //
+  // Todo sale de variables que ya están calculadas arriba. Si alguno de estos números se
+  // recalculara acá con otro criterio, el resumen y la tabla de más abajo dirían cosas
+  // distintas sobre lo mismo en el mismo mail.
+  const pctT = (act: number | null, ant: number | null): number | null =>
+    act === null || ant === null || !ant ? null : Math.round(((act - ant) / ant) * 100);
+
+  const itemsVentas: ReporteSemanalData['indicadoresMes'] = [
+    { label: 'Total mes al día', valor: `${fmtN(ventasMesActual.unidadesMes)} u`,
+      pct: pctT(ventasMesActual.unidadesMes, resumenMesPasado.unidadesMes), mejorSiSube: true },
+    { label: 'Total mes proyectada', valor: `${fmtN(ventasMesActual.proyeccionMes)} u`,
+      pct: pctT(ventasMesActual.proyeccionMes, ventasMesAnteriorTotal), mejorSiSube: true,
+      detalle: 'proyección del ritmo de lo que va del mes' },
+    { label: 'Precio promedio', valor: `$${fmtN(ventasMesActual.precioPromedioMes)}`,
+      pct: pctT(ventasMesActual.precioPromedioMes, resumenMesPasado.precioPromedioMes), mejorSiSube: true },
+  ];
+  // ── La venta por producto, que era lo que no se veía ──────────────────────────────
+  //
+  // El total dice que la venta se movió, no de qué. Una semana con rúcula −25% y lechuga
+  // +25% da un total plano y es la semana que hay que mirar. Va la SEMANA contra la
+  // anterior, que es el período del reporte.
+  for (const [label, act, ant] of [
+    ['Rúcula (sem)', ventasSemana.rucula, ventasSemanaAnterior.rucula],
+    ['Lechuga (sem)', ventasSemana.lechuga, ventasSemanaAnterior.lechuga],
+    ['Albahaca (sem)', ventasSemana.albahaca, ventasSemanaAnterior.albahaca],
+    ['Otros artículos (sem)', ventasSemana.otros, ventasSemanaAnterior.otros],
+  ] as const) {
+    // Un producto que no se vendió en ninguna de las dos semanas no ocupa una tarjeta.
+    if (act.unidades === 0 && ant.unidades === 0) continue;
+    itemsVentas.push({
+      label, valor: `${fmtN(act.unidades)} u`,
+      pct: pctT(act.unidades, ant.unidades), mejorSiSube: true,
+    });
+  }
+  const cajonesSem = ventasSemana.rucula.cajones + ventasSemana.lechuga.cajones;
+  const cajonesSemAnt = ventasSemanaAnterior.rucula.cajones + ventasSemanaAnterior.lechuga.cajones;
+  if (cajonesSem > 0 || cajonesSemAnt > 0) {
+    itemsVentas.push({
+      label: 'Cajones (sem)', valor: `${fmtN(cajonesSem)} caj`,
+      pct: pctT(cajonesSem, cajonesSemAnt), mejorSiSube: true,
+      detalle: `${ventasMesActual.pctCajones}% del volumen del mes salió en cajón`,
+    });
+  }
+
+  const resumenTarjetas: ReporteSemanalData['resumenTarjetas'] = [
+    { titulo: 'Ventas', icono: '💰', items: itemsVentas },
+    { titulo: 'Ciclos', icono: '🔁', items: [
+      // Menos días de ciclo es mejor: la planta sale antes y la mesada se libera antes.
+      { label: 'Rúcula', valor: `${fmtN(cicloSemana.rucula)}d`, pct: pctT(cicloSemana.rucula, cicloMesAnterior.rucula), mejorSiSube: false },
+      { label: 'Lechuga', valor: `${fmtN(cicloSemana.lechuga)}d`, pct: pctT(cicloSemana.lechuga, cicloMesAnterior.lechuga), mejorSiSube: false },
+    ].filter((x) => !x.valor.startsWith('0')) },
+    { titulo: 'Pesos', icono: '⚖️', items: [
+      // Más pesado es mejor: el mismo paquete lleva más producto.
+      { label: 'Rúcula (paq)', valor: `${fmtN(pesoSemana.rucula)}g`, pct: pctT(pesoSemana.rucula, pesoMesAnterior.rucula), mejorSiSube: true },
+      { label: 'Crespa (paq)', valor: `${fmtN(pesoSemana.lechugaCrespa)}g`, pct: pctT(pesoSemana.lechugaCrespa, pesoMesAnterior.lechugaCrespa), mejorSiSube: true },
+      { label: 'Roble (paq)', valor: `${fmtN(pesoSemana.lechugaRoble)}g`, pct: pctT(pesoSemana.lechugaRoble, pesoMesAnterior.lechugaRoble), mejorSiSube: true },
+    ].filter((x) => !x.valor.startsWith('0')) },
+    { titulo: 'Ocupación', icono: '🏠', items: ocupacion.map((o) => ({
+      label: `Nave ${o.nave}`, valor: `${o.pct}%`, pct: null, mejorSiSube: true,
+    })) },
+    { titulo: 'Producción', icono: '📊', items: indicadoresMes },
+  ].filter((g) => g.items.length > 0);
+
   // Los destacados se arman al final, sobre todo lo demás ya calculado — no leen nada por
   // su cuenta, solo marcan lo que se sale de lo normal en esos mismos números.
   const datosSinDestacados = {
@@ -767,7 +945,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     ocupacion, diasOcupacion, mesadasBajas, mesadasVacias, plantasPerdidasSubocupacion, ventasSemanas,
     descarteSemana, descarteSemanaAnterior, descarteMes,
     kmSemana, kmSemanaAnterior,
-    protocoloPendientes, protocoloHoy, protocoloCumplimiento, indicadoresMes,
+    protocoloPendientes, protocoloHoy, protocoloCumplimiento, indicadoresMes, resumenTarjetas,
     protocoloFueraDeRango: detalleFueraDeRango(registrosProtocolo, desdeSemana, hastaHoy),
     facturacion: controlFacturacion(ventas, precios, clientes, hastaHoy),
     stock, faltanteSemana, faltanteMes, descartePorFase,
@@ -1216,10 +1394,34 @@ export function construirHtml(d: ReporteSemanalData): string {
          </table>
        </div>`;
 
+  // ── El resumen de arriba, en tarjetas ────────────────────────────────────────────
+  //
+  // Con tablas y no con flex/grid: Outlook y Gmail ignoran la mitad del CSS moderno, y un
+  // resumen que se rompe en el cliente de mail donde se lee no sirve de nada. Dos columnas
+  // fijas, que es lo que entra bien en un celular.
+  const tarjetasHtml = d.resumenTarjetas.length === 0 ? '' : `
+    <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;border-spacing:0 8px;margin-bottom:18px">
+      ${d.resumenTarjetas.map((g) => `
+        <tr><td style="background:#fafafa;border:1px solid #eee;border-radius:8px;padding:10px 12px">
+          <p style="margin:0 0 7px;font-size:12px;font-weight:800;color:#374151;text-transform:uppercase;letter-spacing:.5px">
+            ${g.icono} ${g.titulo}
+          </p>
+          <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;font-size:13px">
+            ${g.items.map((it) => `<tr>
+              <td style="padding:2px 0;color:#6b7280">${it.label}${it.detalle ? `<span style="display:block;font-size:10.5px;color:#9ca3af">${it.detalle}</span>` : ''}</td>
+              <td style="padding:2px 0;text-align:right;font-weight:800;white-space:nowrap">${it.valor}</td>
+              <td style="padding:2px 0 2px 10px;text-align:right;white-space:nowrap">${flechaHtml(it.pct, it.mejorSiSube)}</td>
+            </tr>`).join('')}
+          </table>
+        </td></tr>`).join('')}
+    </table>`;
+
   return `
   <div style="font-family:system-ui,Arial,sans-serif;color:#111;max-width:640px">
     <h2 style="margin:0 0 4px">Reporte semanal — Xavia</h2>
     <p style="margin:0 0 20px;color:#6b7280;font-size:13px">${d.fechaGenerado}</p>
+
+    ${tarjetasHtml}
 
     ${destacadosHtml}
 
@@ -1334,6 +1536,14 @@ export function construirTexto(d: ReporteSemanalData): string {
   L.push(`📋 *Reporte semanal — Xavia*`);
   L.push(d.fechaGenerado);
   L.push('');
+
+  // El mismo resumen en tarjetas que el mail. Va primero por lo mismo que allá: es lo que
+  // se mira antes de decidir si hace falta leer el resto.
+  for (const g of d.resumenTarjetas) {
+    L.push(`${g.icono} *${g.titulo.toUpperCase()}*`);
+    for (const it of g.items) L.push(`  ${it.label}: ${it.valor} ${p2(it.pct)}`);
+    L.push('');
+  }
 
   if (d.destacados.length === 0) {
     L.push(`*Para mirar esta semana*`);
