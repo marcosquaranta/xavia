@@ -13,8 +13,12 @@ let cachedToken: { token: string; exp: number } | null = null;
 
 async function getToken(): Promise<string> {
   if (cachedToken && cachedToken.exp > Date.now() + 60_000) return cachedToken.token;
-  const id = process.env.XUBIO_CLIENT_ID;
-  const secret = process.env.XUBIO_SECRET;
+  // `.trim()`: ni el client_id ni el secret llevan espacios ni saltos de línea propios, así
+  // que recortarlos no puede romper una credencial válida y sí salva a la que se pegó con un
+  // enter de más al final. Es invisible en la pantalla de Vercel y da `invalid_client`, que
+  // es el mismo error que una credencial revocada: mirando el mensaje no se distinguen.
+  const id = process.env.XUBIO_CLIENT_ID?.trim();
+  const secret = process.env.XUBIO_SECRET?.trim();
   if (!id || !secret) throw new Error('Faltan credenciales XUBIO_CLIENT_ID / XUBIO_SECRET en el entorno');
   const basic = Buffer.from(`${id}:${secret}`).toString('base64');
   const res = await fetch(TOKEN_URL, {
