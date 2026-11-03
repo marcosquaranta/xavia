@@ -28,6 +28,38 @@ export const AVISOS: AvisoConfigurable[] = [
     descripcion: 'Todos los días a la mañana, solo si hay algo. Ventas cargadas hace más de 2 días que nunca se mandaron a Xubio, separando las que faltan facturar de las que parecen carga repetida.',
     porDefecto: ['marcos.quaranta@gmail.com'],
   },
+  {
+    clave: 'email_alertas_stocks',
+    titulo: 'Alertas de stocks e insumos (Franco)',
+    descripcion: 'Todos los días a la mañana, solo si hay algo. Insumos por debajo del mínimo de días de uso, y los que quedan en pausa porque falta el cierre del mes anterior.',
+    // El mail del responsable se carga en Admin → Avisos por mail, no acá: una
+    // dirección personal de otra persona no tiene por qué quedar versionada en el
+    // repositorio. Mientras no esté cargada, el aviso llega al dueño de la cuenta —que
+    // es mejor que mandarlo al vacío y que nadie se entere de que existía.
+    porDefecto: ['marcos.quaranta@gmail.com'],
+  },
+  {
+    clave: 'email_alertas_produccion',
+    titulo: 'Alertas de producción (Marcelo)',
+    descripcion: 'Todos los días a la mañana, solo si hay algo. Ocupación y mesadas bajas o vacías, falta de siembras, producto viejo en cámara.',
+    // El mail del responsable se carga en Admin → Avisos por mail, no acá: una
+    // dirección personal de otra persona no tiene por qué quedar versionada en el
+    // repositorio. Mientras no esté cargada, el aviso llega al dueño de la cuenta —que
+    // es mejor que mandarlo al vacío y que nadie se entere de que existía.
+    porDefecto: ['marcos.quaranta@gmail.com'],
+  },
+  {
+    clave: 'email_alertas_ventas',
+    titulo: 'Alertas de ventas (Juan Pablo)',
+    descripcion: 'Todos los días a la mañana, solo si hay algo. Cajones que no vuelven. Los clientes que dejaron de pedir y las ventas sin facturar tienen aviso propio, acá no se repiten.',
+    porDefecto: ['juanpablosoroeta@gmail.com'],
+  },
+  {
+    clave: 'email_alertas_plata',
+    titulo: 'Alertas de cobranzas y gastos (Marcos)',
+    descripcion: 'Todos los días a la mañana, solo si hay algo. Compras a proveedores vencidas.',
+    porDefecto: ['marcos.quaranta@gmail.com'],
+  },
 ];
 
 // Los mails de un aviso: lo que esté cargado en la planilla, y si no, el default.

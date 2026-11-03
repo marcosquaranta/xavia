@@ -1,5 +1,5 @@
 import type { Lote, Articulo, StockMes, Movimiento } from './types';
-import { calcularUsoTeorico, categoriaSinUsoTeorico, type DriversMes } from './usoTeorico';
+import { calcularUsoTeorico, type DriversMes } from './usoTeorico';
 
 // categoria 'lote_atraso' = atraso puntual de trasplante/cosecha de un lote — ese detalle
 // ya se ve en las secciones "Cosechar"/"Trasplantar" del home (con su propio color por
@@ -183,7 +183,22 @@ export function alertasStockBajo(
   const alertas: Alerta[] = [];
   // Se saltean las categorías sin uso teórico: la alerta proyecta el stock con ese mismo
   // número, así que sin uso teórico confiable no hay proyección confiable que avisar.
-  for (const art of articulos.filter((a) => a.activo === 'SI' && a.formula_uso && !categoriaSinUsoTeorico(a.categoria))) {
+  // ── Alcance: todo insumo con fórmula de uso declarada ─────────────────────────────
+  //
+  // Antes se saltaban además las categorías que por defecto no usan uso teórico
+  // (fertilizantes, ácido, cajones, varios). La regla de categoría tiene sentido como
+  // DEFAULT —en esos rubros la dosificación va por lectura de tanque, no por planchas
+  // sembradas— pero deja de tenerlo cuando alguien se tomó el trabajo de escribir una
+  // fórmula para ese artículo: eso es una decisión explícita, y la categoría es una
+  // suposición sobre la clase.
+  //
+  // Así que manda la fórmula. Un artículo de esas categorías SIN fórmula sigue afuera, que
+  // es el caso que la regla original protegía.
+  //
+  // Ojo: `usoTeoricoDeArticulo` sigue devolviendo null para esas categorías y la pantalla de
+  // Uso Teórico sigue mostrando "—". Son preguntas distintas: allá es "¿este número sirve
+  // para comparar consumos?" y acá "¿hay con qué estimar cuándo se acaba?".
+  for (const art of articulos.filter((a) => a.activo === 'SI' && a.formula_uso)) {
     const stockDelArticulo = stocks.filter((s) => String(s.id_articulo) === String(art.id_articulo));
     if (!stockDelArticulo.length) continue; // sin ningún registro histórico, no se puede estimar
 

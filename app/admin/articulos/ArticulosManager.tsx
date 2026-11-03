@@ -8,7 +8,31 @@ import { diasSeguridadDeArticulo } from '@/lib/alertasPanel';
 
 interface Props { articulos: Articulo[]; }
 
-function ArticuloRow({ a, onSaved, abrir }: { a: Articulo; onSaved: () => void; abrir?: boolean }) {
+// ── Las categorías salen de lo que ya hay cargado ───────────────────────────────────
+//
+// El campo era texto libre y por eso en la planilla conviven “Fertilizante”, “fertilizante”
+// y “Fertilizantes”. No rompe nada de entrada, pero todo lo que agrupa por categoría —el
+// uso teórico, el costo por rubro, la regla de qué insumos se alertan— las cuenta como
+// rubros distintos, y eso no se ve hasta que un total no cierra.
+//
+// La lista no es fija: se arma de los artículos existentes, así que crear una categoría
+// nueva sigue siendo posible —hay que escribirla una vez, a propósito, y desde la segunda
+// ya aparece en el desplegable—. Un desplegable cerrado obligaría a un deploy por cada
+// rubro nuevo, que es el problema que lib/articulos.ts vino a resolver del otro lado.
+function categoriasDe(articulos: Articulo[]): string[] {
+  const vistas = new Map<string, string>();
+  for (const a of articulos) {
+    const txt = String(a.categoria || '').trim();
+    if (!txt) continue;
+    // Se agrupan ignorando mayúsculas y acentos, y se muestra la primera grafía que
+    // apareció: ofrecer las tres variantes de “fertilizante” sería ofrecer el problema.
+    const k = txt.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (!vistas.has(k)) vistas.set(k, txt);
+  }
+  return [...vistas.values()].sort((a, b) => a.localeCompare(b));
+}
+
+function ArticuloRow({ a, onSaved, abrir, categoriasExistentes = [] }: { a: Articulo; onSaved: () => void; abrir?: boolean; categoriasExistentes?: string[] }) {
   const [open, setOpen] = useState(!!abrir);
   const ref = useRef<HTMLTableRowElement>(null);
   // Venir desde la alerta tiene que dejar el artículo abierto y a la vista: si solo se abriera
@@ -81,7 +105,14 @@ function ArticuloRow({ a, onSaved, abrir }: { a: Articulo; onSaved: () => void; 
                 </div>
                 <div>
                   <label style={{ fontSize: '11px' }}>Categoría</label>
-                  <input type="text" value={fields.categoria} onChange={(e) => setFields((f) => ({ ...f, categoria: e.target.value }))} disabled={saving} />
+                  {/* Mismo desplegable que el alta: corregir la grafía de un artículo viejo
+                      es justamente lo que unifica los rubros duplicados que ya hay. */}
+                  <select value={fields.categoria} onChange={(e) => setFields((f) => ({ ...f, categoria: e.target.value }))} disabled={saving}>
+                    {!categoriasExistentes.includes(fields.categoria) && fields.categoria && (
+                      <option value={fields.categoria}>{fields.categoria}</option>
+                    )}
+                    {categoriasExistentes.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
                 </div>
                 <div>
                   <label style={{ fontSize: '11px' }}>Unidad</label>
@@ -134,6 +165,10 @@ export default function ArticulosManager({ articulos }: Props) {
   const destacado = useSearchParams()?.get('art') || '';
   const router = useRouter();
   const [mostrarForm, setMostrarForm] = useState(false);
+  // Crear una categoría nueva es posible pero deliberado: hay que elegirlo del desplegable.
+  // Así el camino fácil es reusar una existente y el que inventa un rubro sabe que lo hace.
+  const [esCategoriaNueva, setEsCategoriaNueva] = useState(false);
+  const categorias = categoriasDe(articulos);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [categoria, setCategoria] = useState('');
@@ -171,7 +206,23 @@ export default function ArticulosManager({ articulos }: Props) {
           {error && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '8px 12px', marginBottom: '12px', fontSize: '13px', color: '#dc2626' }}>{error}</div>}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '14px' }}>
             <div><label>Nombre *</label><input type="text" value={nombre} onChange={(e) => setNombre(e.target.value)} required disabled={loading} /></div>
-            <div><label>Categoría *</label><input type="text" value={categoria} onChange={(e) => setCategoria(e.target.value)} required disabled={loading} /></div>
+            <div>
+              <label>Categoría *</label>
+              <select value={esCategoriaNueva ? '__nueva__' : categoria}
+                onChange={(e) => {
+                  if (e.target.value === '__nueva__') { setEsCategoriaNueva(true); setCategoria(''); }
+                  else { setEsCategoriaNueva(false); setCategoria(e.target.value); }
+                }}
+                required={!esCategoriaNueva} disabled={loading}>
+                <option value="">— Elegí —</option>
+                {categorias.map((c) => <option key={c} value={c}>{c}</option>)}
+                <option value="__nueva__">+ Categoría nueva…</option>
+              </select>
+              {esCategoriaNueva && (
+                <input type="text" value={categoria} onChange={(e) => setCategoria(e.target.value)} required disabled={loading}
+                  placeholder="Nombre de la categoría nueva" style={{ marginTop: '4px' }} autoFocus />
+              )}
+            </div>
             <div><label>Unidad de medida *</label><input type="text" value={unidad} onChange={(e) => setUnidad(e.target.value)} required disabled={loading} placeholder="kg, unidad, paquete..." /></div>
           </div>
           <p style={{ margin: '0 0 6px', fontSize: '11px', color: '#6b7280' }}>La fórmula de uso teórico se configura después, abriendo el artículo en la lista.</p>
@@ -196,11 +247,11 @@ export default function ArticulosManager({ articulos }: Props) {
             </tr>
           </thead>
           <tbody>
-            {activos.map((a) => <ArticuloRow key={a.id_articulo} a={a} onSaved={() => router.refresh()} abrir={String(a.id_articulo) === destacado} />)}
+            {activos.map((a) => <ArticuloRow key={a.id_articulo} a={a} onSaved={() => router.refresh()} abrir={String(a.id_articulo) === destacado} categoriasExistentes={categorias} />)}
             {inactivos.length > 0 && (
               <>
                 <tr><td colSpan={6} style={{ padding: '8px 6px 4px', fontSize: '11px', color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase' }}>Inactivos</td></tr>
-                {inactivos.map((a) => <ArticuloRow key={a.id_articulo} a={a} onSaved={() => router.refresh()} abrir={String(a.id_articulo) === destacado} />)}
+                {inactivos.map((a) => <ArticuloRow key={a.id_articulo} a={a} onSaved={() => router.refresh()} abrir={String(a.id_articulo) === destacado} categoriasExistentes={categorias} />)}
               </>
             )}
           </tbody>
