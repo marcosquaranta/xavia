@@ -63,7 +63,18 @@ export const LINEAS_VARIABLE: { label: string; claves?: string[]; cat?: Categori
 // "Otros ingresos y egresos" va acá adentro, no aparte: en el Excel es una línea más de
 // costos fijos (verificado — las ocho líneas suman exactamente el total del bloque).
 export const FIJOS: { label: string; cats: CategoriaGasto[]; esInversion?: boolean }[] = [
-  { label: 'Sueldos equipo', cats: ['sueldos'] },
+  // Los adelantos van ACÁ, no en una línea propia. Un adelanto no es un gasto distinto:
+  // es parte del sueldo de esa persona, pagada antes. La plata sale de una caja igual que
+  // el resto y tiene que pesar en el resultado del mes en que salió.
+  //
+  // Hasta acá no estaba en ninguna línea, así que no se sumaba en NINGÚN lado: no es que
+  // apareciera mal clasificada, es que desaparecía. En octubre de 2026 eso eran $1.591.000
+  // de costo laboral real que el EERR no mostraba, y el resultado salía mejor de lo que era.
+  //
+  // No se cuenta dos veces porque el gasto de "Sueldos" se carga por el NETO que se
+  // entrega, ya descontado el adelanto (ver lib/personal.ts). Adelanto + neto = lo que esa
+  // persona costó.
+  { label: 'Sueldos equipo', cats: ['sueldos', 'adelanto_sueldo'] },
   { label: 'Mantenimiento', cats: ['mantenimiento'] },
   { label: 'Inversión en equipamiento', cats: ['inversion_equipamiento', 'inversion_nave3'], esInversion: true },
   { label: 'Impuestos (autónomos, IVA, IIBB)', cats: ['impuestos'] },
@@ -222,7 +233,9 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
   }
   const totalFijos = lineasFijas.reduce((a, l) => a + l.monto, 0);
   const inversion = sumaCats(['inversion_equipamiento', 'inversion_nave3']);
-  const masaSalarial = sumaCats(['sueldos']);
+  // La masa salarial incluye los adelantos por la misma razón que la línea de arriba: es
+  // plata pagada al equipo por su trabajo, cobrada antes de fin de mes.
+  const masaSalarial = sumaCats(['sueldos', 'adelanto_sueldo']);
 
   // ── Avisos: lo que hace que el número no cierre ──
   const CATS_POR_STOCK: CategoriaGasto[] = ['insumos', 'cultivos_reventa'];

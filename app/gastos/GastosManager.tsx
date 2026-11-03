@@ -97,6 +97,40 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
   const [borrando, setBorrando] = useState<string | null>(null);
   const [exportando, setExportando] = useState(false);
   const [verResumen, setVerResumen] = useState(false);
+  // El gasto escrito en una frase, y lo que la app entendió de él. `leido` queda en
+  // pantalla después de completar el formulario: es lo que permite distinguir un dato que
+  // estaba escrito de uno que el modelo dedujo, y sin esa diferencia los dos se ven igual
+  // de seguros.
+  const [textoGasto, setTextoGasto] = useState('');
+  const [interpretando, setInterpretando] = useState(false);
+  const [leido, setLeido] = useState<{ razon: string; asumidos: string[] } | null>(null);
+
+  async function interpretar() {
+    setInterpretando(true); setError(null); setLeido(null);
+    try {
+      const r = await fetch('/api/gastos/interpretar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ texto: textoGasto }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'No pude interpretarlo');
+      const p = j.propuesta;
+      // Se escribe campo por campo en el formulario de siempre. No hay un "modo texto"
+      // aparte: a partir de acá es un gasto como cualquier otro, con los mismos controles
+      // y la misma validación. Un segundo camino de guardado sería un segundo lugar donde
+      // las reglas se pueden quedar viejas.
+      if (p.descripcion) setDescripcion(p.descripcion);
+      if (p.categoria) setCategoria(p.categoria);
+      if (p.monto) setMonto(p.monto);
+      if (p.medio_pago) setMedioPago(p.medio_pago);
+      if (p.fecha) setFecha(p.fecha);
+      if (p.proveedor) setProveedor(p.proveedor);
+      if (p.empleado) setEmpleadoAdelanto(p.empleado);
+      setLeido({ razon: p.razon, asumidos: p.asumidos || [] });
+    } catch (e: any) { setError(e.message); }
+    finally { setInterpretando(false); }
+  }
+
   const [msgExport, setMsgExport] = useState<string | null>(null);
 
   const delMes = useMemo(() => {
@@ -365,6 +399,38 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
       {/* ══ Alta de gasto ══ */}
       <form onSubmit={agregar} className="card" style={{ marginBottom: '14px' }}>
         <p className="card-title">Nuevo gasto</p>
+
+        {/* ── Escribirlo en vez de completarlo ──────────────────────────────────────────
+            Todo lo que el formulario pide ya está en la frase con que uno se lo contaría a
+            otra persona. Lo que costaba no era saberlo: era traducirlo a seis campos. Esto
+            hace la traducción y DEJA EL FORMULARIO LLENO — no guarda. Lo que toca plata se
+            propone y alguien lo acepta, igual que en la bandeja de cobranzas. */}
+        <div style={{ marginBottom: '12px', background: '#f5f8ff', border: '1px solid #bfdbfe', borderRadius: '7px', padding: '9px 11px' }}>
+          <div style={{ display: 'flex', gap: '7px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <input value={textoGasto} onChange={(e) => setTextoGasto(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); interpretar(); } }}
+              placeholder="Escribilo como se lo contarías a alguien: “Marcos pagó 50.000 de nafta”"
+              style={{ flex: '1 1 280px', fontSize: '12.5px', padding: '6px 9px', border: '1px solid #dbe4fb', borderRadius: '5px' }} />
+            <button type="button" onClick={interpretar} disabled={interpretando || textoGasto.trim().length < 4}
+              style={{ fontSize: '12px', padding: '6px 14px', background: '#1e40af', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 700 }}>
+              {interpretando ? 'Leyendo…' : 'Completar'}
+            </button>
+          </div>
+          {leido && (
+            <div style={{ marginTop: '8px', fontSize: '11.5px', color: '#1e3a8a', lineHeight: 1.55 }}>
+              <strong>Entendí:</strong> {leido.razon}
+              {leido.asumidos.length > 0 && (
+                <div style={{ marginTop: '4px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '5px', padding: '5px 8px' }}>
+                  Esto <strong>no estaba en el texto</strong> y quedó sin resolver: {leido.asumidos.join(', ')}. Completalo abajo antes de guardar.
+                </div>
+              )}
+              <div style={{ marginTop: '4px', color: '#6b7280' }}>
+                Quedó cargado abajo. Revisá y guardá como siempre — todavía no se guardó nada.
+              </div>
+            </div>
+          )}
+        </div>
+
         {error && <div className="alert-box error" style={{ marginBottom: '10px' }}>{error}</div>}
         {okMsg && (
           <div style={{ marginBottom: '10px', fontSize: '12px', color: '#065f46', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '6px', padding: '9px 11px', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>

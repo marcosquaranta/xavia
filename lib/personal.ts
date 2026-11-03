@@ -538,3 +538,37 @@ export function reciboWhatsApp(r: ResumenEmpleado, periodo: string): string {
 
   return L.join('\n');
 }
+
+// ── El resumen de todo lo que hay que pagar ──────────────────────────────────────────
+//
+// El recibo individual explica un sueldo; esto responde otra pregunta, la del que paga:
+// cuánto sale la quincena y cuánto le toca a cada uno. Son dos mensajes distintos y
+// mandarle a Marce seis recibos no es lo mismo que mandarle la lista.
+//
+// Igual que el recibo, no calcula nada propio: los números son los de la pantalla.
+export function resumenSueldosWhatsApp(resumenes: ResumenEmpleado[], periodo: string): string {
+  const $ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
+  // Los que no tienen nada que cobrar no entran: un empleado sin configurar aparece en la
+  // pantalla en $0 porque falta su $/hora, y en una lista de pagos eso se lee como "a
+  // éste no le debemos nada", que es lo contrario de lo que pasa.
+  const pagar = resumenes.filter(r => r.sueldoFinal > 0).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  if (!pagar.length) return `No hay sueldos para pagar en ${periodo}.`;
+
+  const L: string[] = [`*Sueldos a pagar — ${periodo}*`, ''];
+  for (const r of pagar) {
+    // El adelanto se nombra en la misma línea: es la diferencia entre lo que el empleado
+    // cree que cobra y lo que se le entrega, y es la pregunta que vuelve siempre.
+    L.push(`${r.nombre}: *${$(r.sueldoFinal)}*${r.adelantos > 0 ? `  (ya cobró ${$(r.adelantos)} de adelanto)` : ''}`);
+  }
+  L.push('');
+  L.push(`*Total: ${$(pagar.reduce((a, r) => a + r.sueldoFinal, 0))}*`);
+
+  // Los que quedaron afuera, dichos. Una lista de pagos a la que le falta alguien en
+  // silencio es la peor forma de enterarse de que faltaba configurarlo.
+  const afuera = resumenes.filter(r => r.sueldoFinal <= 0);
+  if (afuera.length) {
+    L.push('');
+    L.push(`No incluidos (sin sueldo calculado): ${afuera.map(r => r.nombre).join(', ')}`);
+  }
+  return L.join('\n');
+}

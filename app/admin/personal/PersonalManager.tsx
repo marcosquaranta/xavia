@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 
 const MESES_TXT = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 import type { Empleado } from '@/lib/types';
-import { horasTeoricasAuto, rangoQuincena, reciboWhatsApp, type ResumenEmpleado, type PeriodoPago } from '@/lib/personal';
+import { horasTeoricasAuto, rangoQuincena, reciboWhatsApp, resumenSueldosWhatsApp, type ResumenEmpleado, type PeriodoPago } from '@/lib/personal';
 import AdelantosEmpleado from '@/components/AdelantosEmpleado';
 import type { AdelantoDetalle } from '@/lib/adelantos';
 
@@ -52,6 +52,17 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
     } catch {
       // Sin permiso de portapapeles (pasa en algunos navegadores sobre http): mostrarlo
       // igual es mejor que un botón que no hace nada — se copia a mano y listo.
+      setError('No pude copiar solo. Copiá esto a mano:\n\n' + texto);
+    }
+  }
+
+  async function copiarResumen() {
+    const texto = resumenSueldosWhatsApp(resumen, periodoTexto);
+    try {
+      await navigator.clipboard.writeText(texto);
+      setCopiado('__todos__');
+      setTimeout(() => setCopiado((v) => (v === '__todos__' ? null : v)), 2000);
+    } catch {
       setError('No pude copiar solo. Copiá esto a mano:\n\n' + texto);
     }
   }
@@ -200,6 +211,15 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
             style={{ background: 'none', border: 'none', color: '#166534', fontSize: '13px', cursor: 'pointer', padding: '0 2px' }}>✕</button>
         </div>
       )}
+      {/* La lista completa de lo que hay que pagar, para el que paga. Es otra pregunta que
+          la del recibo individual: no "por qué cobro esto" sino "cuánto sale el mes". */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
+        <button type="button" onClick={copiarResumen}
+          title="Copia la lista de sueldos a pagar de este período, para mandar por WhatsApp"
+          style={{ fontSize: '12px', padding: '5px 13px', background: '#166534', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 700 }}>
+          {copiado === '__todos__' ? '✓ copiado' : 'Resumen de sueldos a pagar'}
+        </button>
+      </div>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ fontSize: '13px', width: '100%' }}>
           <thead>
