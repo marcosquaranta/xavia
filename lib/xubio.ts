@@ -23,7 +23,22 @@ async function getToken(): Promise<string> {
     body: 'grant_type=client_credentials',
     cache: 'no-store',
   });
-  if (!res.ok) throw new Error(`Xubio: error obteniendo token (HTTP ${res.status})`);
+  if (!res.ok) {
+    // ── Lo que Xubio contesta, no solo que falló ──────────────────────────────────────
+    //
+    // Un 400 pelado no dice nada: puede ser la credencial revocada, el grant no habilitado,
+    // o la cuenta sin acceso a la API. OAuth devuelve eso en el cuerpo
+    // (`{"error":"invalid_client", ...}`) y acá se descartaba, así que el diagnóstico de la
+    // pantalla mostraba "HTTP 400" y para saber algo más había que mirar logs.
+    //
+    // Es el cuerpo de la RESPUESTA de Xubio, no el de nuestro pedido: no lleva el secret.
+    // Se recorta por las dudas, y porque un HTML de error de 40 KB no aporta nada.
+    const detalle = await res.text().catch(() => '');
+    throw new Error(
+      `Xubio: error obteniendo token (HTTP ${res.status})`
+      + (detalle ? ` — contestó: ${detalle.replace(/\s+/g, ' ').slice(0, 300)}` : ' — sin cuerpo en la respuesta'),
+    );
+  }
   const j: any = await res.json();
   const expiresIn = Number(j.expires_in) || 3600;
   cachedToken = { token: j.access_token, exp: Date.now() + expiresIn * 1000 };
