@@ -121,7 +121,8 @@ export default async function PersonalPage({ searchParams }: { searchParams: { a
         )}
 
         {!err && diasSinSincronizar.length > 0 && (
-          <SincronizarFichajes desde={diasSinSincronizar[0]} hasta={diasSinSincronizar[diasSinSincronizar.length - 1]} dias={diasSinSincronizar} />
+          <SincronizarFichajes desde={diasSinSincronizar[0]} hasta={diasSinSincronizar[diasSinSincronizar.length - 1]} dias={diasSinSincronizar}
+            periodo={quincena === 0 ? 'este mes' : 'esta quincena'} />
         )}
 
         {!err && adelantosHuerfanos.length > 0 && (

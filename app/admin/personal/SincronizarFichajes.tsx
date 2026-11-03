@@ -2,10 +2,14 @@
 import { useState } from 'react';
 
 // Dispara a mano la sincronización de un rango contra CrossChex (el mismo endpoint que
-// corre el cron diario). Hace falta para quincenas viejas, anteriores a que existiera la
+// corre el cron diario). Hace falta para períodos viejos, anteriores a que existiera la
 // caché, o si una corrida del cron falló. Es lento a propósito: CrossChex admite 1 pedido
-// cada 15 segundos, así que un rango de una quincena puede tardar más de un minuto.
-export default function SincronizarFichajes({ desde, hasta, dias }: { desde: string; hasta: string; dias: string[] }) {
+// cada 15 segundos, así que un mes entero puede tardar varios minutos.
+//
+// `periodo` lo decide la pantalla, que es la que sabe si se está mirando el mes o una
+// quincena suelta. Decirlo acá a mano fue justamente el error que quedó cuando los sueldos
+// pasaron a pagarse por mes: el cartel siguió diciendo "quincena" meses después.
+export default function SincronizarFichajes({ desde, hasta, dias, periodo = 'este período' }: { desde: string; hasta: string; dias: string[]; periodo?: string }) {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; s: string } | null>(null);
 
@@ -26,7 +30,7 @@ export default function SincronizarFichajes({ desde, hasta, dias }: { desde: str
   return (
     <div className="alert-box" style={{ marginBottom: '14px', background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e' }}>
       <p style={{ margin: '0 0 6px', fontWeight: 700, fontSize: '13px' }}>
-        Faltan fichajes de {dias.length} día{dias.length !== 1 ? 's' : ''} de esta quincena
+        Faltan fichajes de {dias.length} día{dias.length !== 1 ? 's' : ''} de {periodo}
       </p>
       <p style={{ margin: '0 0 8px', fontSize: '12px' }}>
         Los fichajes se guardan una vez por día (10hs) desde CrossChex. Estos días todavía no están guardados,
