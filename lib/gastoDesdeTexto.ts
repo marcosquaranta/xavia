@@ -20,7 +20,11 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { CATEGORIAS_GASTO, MEDIOS_PAGO, type CategoriaGasto } from './types';
 
-const MODELO = 'claude-opus-5';
+// Haiku: esto es clasificacion corta -elegir un rubro de una lista, leer un numero- no un
+// problema de razonamiento. El modelo grande costaba ~50 veces mas por la misma respuesta.
+// El de los avisos de pago (lib/extraerAvisoIA.ts) sigue en Opus: ahi lee PDFs y fotos de
+// terceros y decide a que cliente imputar, que no es el mismo problema.
+const MODELO = 'claude-haiku-5-5';
 
 export interface GastoPropuesto {
   descripcion: string;
