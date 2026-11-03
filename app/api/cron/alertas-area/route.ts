@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import type { Lote, Articulo, StockMes, ClienteVenta, PrecioVenta, VentaDia, ConfigItem, Gasto, CajonMovimiento } from '@/lib/types';
-import { generarAlertas, alertasStockBajo } from '@/lib/alertasPanel';
+import { generarAlertas, alertasStockBajo, alertasCobrosComprometidos } from '@/lib/alertasPanel';
+import { comprometidasDeBandeja } from '@/lib/comprometidas';
+import { HOJA_BANDEJA, type ItemBandeja } from '@/lib/bandejaCobranzas';
+import { claveComprobante } from '@/lib/comprobantes';
 import { leerDescartes, sinDescartadas } from '@/lib/alertasDescartadas';
 import { calcularDriversMes } from '@/lib/usoTeorico';
 import { saldoPorCliente, alertasCajones } from '@/lib/cajones';
@@ -108,6 +111,19 @@ export async function GET(req: NextRequest) {
             + (masVieja < 0 ? ` — la más vieja venció hace ${Math.abs(masVieja)} días` : ''),
           href: '/gastos',
         });
+      }
+    } catch { /* idem */ }
+
+    // ── Plata: cobros avisados que nadie imputó ──
+    //
+    // Va acá y no en Cobranzas-a-secas porque la pregunta que abre no es de cobranzas sino
+    // de caja: la factura ya está cubierta, lo que falta es saber a qué cuenta entró la
+    // plata. Mientras eso no se diga, esas facturas tampoco se reclaman.
+    try {
+      const bandeja = await readSheet<ItemBandeja>(HOJA_BANDEJA).catch(() => [] as ItemBandeja[]);
+      const { sinImputar } = comprometidasDeBandeja(bandeja, hoyISO, claveComprobante);
+      for (const a of alertasCobrosComprometidos(sinImputar)) {
+        todas.push({ area: 'plata', tipo: a.tipo, msg: a.msg, href: a.href || '/cobranzas' });
       }
     } catch { /* idem */ }
 

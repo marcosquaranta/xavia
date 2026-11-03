@@ -8,6 +8,8 @@ import { HOJA_COBROS } from './cobros';
 import { VENTANA_MINIMA_DIAS } from './cobranzasVentana';
 import { leerEdiciones, imputacionesManuales } from './cobranzasEdit';
 import { leerAjustes, ajustesPorFactura } from './ajusteFactura';
+import { HOJA_BANDEJA, type ItemBandeja } from './bandejaCobranzas';
+import { comprometidasDeBandeja } from './comprometidas';
 
 // ── Recordatorios de cobro ────────────────────────────────────────────────────────────
 //
@@ -252,9 +254,16 @@ export function calcularEnvios(
     cobradas?: Set<string>;
     // Facturas corregidas después de emitidas: ver lib/ajusteFactura.ts.
     ajustes?: Map<string, { importeApp: number }>;
+    // Facturas que el cliente avisó que paga y todavía están en la bandeja sin imputar.
+    // No están cobradas —la plata puede no haber entrado, o haber entrado a una caja que
+    // nadie registró— pero reclamarlas es reclamar algo que el cliente ya contestó.
+    // Ver lib/comprometidas.ts: el compromiso tiene fecha de vencimiento, así que esto
+    // nunca esconde una factura para siempre.
+    comprometidas?: Set<string>;
   } = {},
-): { envios: EnvioRecordatorio[]; omitidos: EnvioOmitido[]; yaReclamadas: number } {
+): { envios: EnvioRecordatorio[]; omitidos: EnvioOmitido[]; yaReclamadas: number; comprometidas: number } {
   let yaReclamadas = 0;
+  let comprometidas = 0;
   const envios: EnvioRecordatorio[] = [];
   const omitidos: EnvioOmitido[] = [];
 
@@ -314,13 +323,19 @@ export function calcularEnvios(
         // Lo que ya se cobró —imputado desde la app o dado por saldado a mano— no se
         // reclama nunca. Se cuenta aparte para poder decir cuántas se dejaron afuera.
         if (opciones.cobradas?.has(k) || opciones.saldadas?.has(k)) { yaReclamadas++; return false; }
+        // Avisada y todavía sin imputar. Se cuenta aparte de las cobradas porque no es lo
+        // mismo: ésta sigue abierta y alguien tiene que cerrarla. Que no se reclame es una
+        // decisión con fecha de caducidad, no un cierre.
+        if (opciones.comprometidas?.has(k)) { comprometidas++; return false; }
         return true;
       })
       .sort((a, b) => a.fecha.localeCompare(b.fecha));
     if (!facturas.length) {
       omitidos.push({
         id_control: cliente.id_control, cliente: cliente.nombre,
-        motivo: `sus ${delCliente.length} factura(s) del período ya están cobradas o marcadas como saldadas`,
+        motivo: comprometidas > 0
+          ? `sus ${delCliente.length} factura(s) del período ya están cobradas, saldadas o avisadas por el cliente y esperando imputación`
+          : `sus ${delCliente.length} factura(s) del período ya están cobradas o marcadas como saldadas`,
       });
       continue;
     }
@@ -341,7 +356,7 @@ export function calcularEnvios(
       saldoCliente: saldo,
     });
   }
-  return { envios, omitidos, yaReclamadas };
+  return { envios, omitidos, yaReclamadas, comprometidas };
 }
 
 const fmtMoneda = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
@@ -455,6 +470,9 @@ export interface ResultadoCorrida {
   // Facturas que quedaron afuera por haberse reclamado antes. Permite decir con precisión
   // por qué no sale nada, en vez del ambiguo "o ya se reclamaron todas".
   yaReclamadas: number;
+  // Las que quedaron afuera porque el cliente avisó que las paga y el aviso sigue en la
+  // bandeja. Separadas de yaReclamadas a propósito: éstas siguen abiertas.
+  comprometidas: number;
 }
 
 // ── Reclamo manual ────────────────────────────────────────────────────────────────────
@@ -538,7 +556,7 @@ export async function correrRecordatoriosCobro(
   { soloSimular = false, usuario = 'cron', hoy = fechaArgentinaHoy(), soloCliente = '', reclamarDeNuevo = false }:
   { soloSimular?: boolean; usuario?: string; hoy?: string; soloCliente?: string; reclamarDeNuevo?: boolean } = {},
 ): Promise<ResultadoCorrida> {
-  const base: ResultadoCorrida = { ok: true, enviados: 0, omitidos: [], sinEmail: [], errores: [], detalle: [], yaReclamadas: 0 };
+  const base: ResultadoCorrida = { ok: true, enviados: 0, omitidos: [], sinEmail: [], errores: [], detalle: [], yaReclamadas: 0, comprometidas: 0 };
   try {
     await asegurarHoja(HOJA_RECORDATORIOS, HEADERS_RECORDATORIOS);
     for (const col of [COL_ACTIVO, COL_EMAIL, COL_ANTIGUEDAD, COL_ANTIGUEDAD_HASTA]) await asegurarColumna('Clientes', col);
@@ -572,12 +590,13 @@ export async function correrRecordatoriosCobro(
     // y calcular el saldo de cada cliente. Va hasta MAX_DIAS_ATRAS porque el mail ahora
     // lista todo lo impago, no solo lo que entraba en una ventana de antigüedad.
     const desde = sumarDias(hoy, -MAX_DIAS_ATRAS);
-    const [comprobantes, cobranzas, saldadasFilas, cobrosApp, edicionesCobranzas] = await Promise.all([
+    const [comprobantes, cobranzas, saldadasFilas, cobrosApp, edicionesCobranzas, bandeja] = await Promise.all([
       getComprobantes(desde, hoy),
       getCobranzas(desde, hoy).catch(() => []),
       leerSaldadas(),
       readSheet<{ estado: string; comprobantes: string }>(HOJA_COBROS).catch(() => []),
       leerEdiciones(),
+      readSheet<ItemBandeja>(HOJA_BANDEJA).catch(() => [] as ItemBandeja[]),
     ]);
     // Lo que no se reclama: lo dado por saldado a mano y lo ya imputado desde la app. Es
     // el caso que más quema la confianza en el recordatorio automático — reclamarle a un
@@ -599,18 +618,25 @@ export async function correrRecordatoriosCobro(
     for (const k of imputacionesManuales(edicionesCobranzas, claveComprobante).porFactura.keys()) {
       cobradas.add(k);
     }
+    // Lo que el cliente avisó que paga y sigue esperando en la bandeja. No es un cobro
+    // —puede no haber entrado, o haber entrado a una caja que nadie registró— pero
+    // reclamarlo es reclamar algo que el cliente ya contestó. El compromiso caduca solo a
+    // los DIAS_GRACIA_COMPROMISO, así que esto no puede tapar una factura para siempre.
+    const { cubiertas } = comprometidasDeBandeja(bandeja, hoy, claveComprobante);
     const ajustes = ajustesPorFactura(await leerAjustes());
     const saldos = calcularSaldos(comprobantes, cobranzas, saldadas, ajustes);
     // Insistir solo tiene sentido en el envío puntual: en la corrida completa reclamaría
     // de nuevo todo a todo el mundo.
-    const { envios, omitidos, yaReclamadas } = calcularEnvios(hoy, activos, comprobantes, previos, saldos, {
+    const { envios, omitidos, yaReclamadas, comprometidas } = calcularEnvios(hoy, activos, comprobantes, previos, saldos, {
       ignorarYaReclamadas: reclamarDeNuevo && !!soloCliente,
       saldadas,
       cobradas,
       ajustes,
+      comprometidas: new Set(cubiertas.keys()),
     });
     base.omitidos = omitidos;
     base.yaReclamadas = yaReclamadas;
+    base.comprometidas = comprometidas;
 
     let seq = previos.reduce((acc, r) => Math.max(acc, parseInt(String(r.id_recordatorio).replace(/\D/g, ''), 10) || 0), 0);
     for (const envio of envios) {

@@ -26,6 +26,7 @@ import RegistrarCobro from '@/components/RegistrarCobro';
 import { leerEdiciones, indiceEdiciones, aplicarEdicion, imputacionesManuales } from '@/lib/cobranzasEdit';
 import BandejaCobranzas from '@/components/BandejaCobranzas';
 import { HOJA_BANDEJA, HOJA_ALIAS, type ItemBandeja, type AliasCobranza } from '@/lib/bandejaCobranzas';
+import { comprometidasDeBandeja, DIAS_GRACIA_COMPROMISO } from '@/lib/comprometidas';
 import ReclamoManual from '@/components/ReclamoManual';
 import FacturasViejas from '@/components/FacturasViejas';
 import ResumenImpagas from '@/components/ResumenImpagas';
@@ -108,6 +109,10 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   } catch {}
 
   // Lo pendiente de imputar, de lo más nuevo a lo más viejo.
+  // Las facturas que estos avisos ya cubren. Misma función que usan los recordatorios, así
+  // que lo que la pantalla dice que no se reclama es exactamente lo que no se reclama.
+  const comprometidas = comprometidasDeBandeja(bandeja, hoyF, claveComprobante);
+
   const itemsBandeja = bandeja
     .filter((i) => String(i.estado || '').trim() === 'pendiente')
     .map((i) => ({
@@ -459,6 +464,23 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
         <div style={tarjeta('#166534', 5)}>
           <p style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: '#166534' }}>Bandeja — cobros por imputar</p>
           <p style={bajada}>Nada se registra en Xubio hasta que lo confirmás.</p>
+          {/* ── Lo que esta bandeja está silenciando ────────────────────────────────────
+              Mientras un aviso espera acá, sus facturas no salen en el reclamo del lunes.
+              Es lo correcto —el cliente ya contestó— pero deja a la bandeja decidiendo algo
+              que no se ve desde ninguna otra pantalla. Dicho acá, la fila deja de ser "una
+              cosa pendiente" y pasa a ser "la razón por la que no le estamos reclamando a
+              este cliente", que es lo que hace que alguien la cierre. */}
+          {comprometidas.sinImputar.length > 0 && (
+            <p style={{ margin: '8px 0 0', fontSize: '11.5px', color: '#1e3a8a', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', padding: '7px 10px', lineHeight: 1.55 }}>
+              <strong>{comprometidas.sinImputar.length} factura(s)</strong> que estos avisos mencionan no se están reclamando,
+              porque el cliente ya avisó que las paga. Lo que falta no es el cobro: es <strong>decir a qué cuenta o caja entró la plata</strong>.
+              {comprometidas.vencidas.length > 0 && (
+                <> · <span style={{ color: '#991b1b', fontWeight: 700 }}>
+                  {comprometidas.vencidas.length} ya pasaron {DIAS_GRACIA_COMPROMISO} días de la fecha prometida y volvieron al reclamo.
+                </span></>
+              )}
+            </p>
+          )}
           <div style={{ marginTop: '10px' }}>
             <BandejaCobranzas
               items={itemsBandeja}

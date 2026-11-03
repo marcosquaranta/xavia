@@ -153,6 +153,60 @@ export function diasSeguridadDeArticulo(art: Articulo, porDefecto = DIAS_SEGURID
   return porDefecto;
 }
 
+// ── Cobros avisados que nadie imputó ─────────────────────────────────────────────────
+//
+// Un aviso de pago en la bandeja saca a esas facturas del reclamo del lunes (ver
+// lib/comprometidas.ts). Esa es una decisión razonable y también una forma de silencio: la
+// factura deja de aparecer en todos lados y el único rastro es una fila en una bandeja que
+// nadie mira todos los días.
+//
+// El caso que lo hace obligatorio es el de los clientes que pagan en persona, como La
+// Esperanza: no hay transferencia que conciliar, la plata entra a la caja de alguno de los
+// socios, y el aviso se puede quedar semanas sin imputar. La factura está bien cubierta —el
+// cliente pagó— pero hay una pregunta abierta que no es "¿nos pagaron?" sino
+// "¿DÓNDE ESTÁ ESA PLATA?". Esa pregunta no vivía en ningún lado.
+//
+// Por eso son dos alertas y no una. Las que todavía están en fecha son un recordatorio
+// tibio; las vencidas ya volvieron a reclamarse solas y son un aviso de que el compromiso
+// no se cumplió o que la imputación se traspapeló.
+export function alertasCobrosComprometidos(
+  sinImputar: { cliente: string; importe: number; dias: number; vencida: boolean; idItem: string }[],
+): Alerta[] {
+  if (!sinImputar.length) return [];
+  const alertas: Alerta[] = [];
+  const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
+
+  // Por aviso, no por factura: un aviso que paga seis facturas es UNA plata que imputar, y
+  // seis alertas idénticas serían seis veces el mismo pendiente.
+  const porItem = new Map<string, { cliente: string; importe: number; dias: number; vencida: boolean }>();
+  for (const f of sinImputar) if (!porItem.has(f.idItem)) porItem.set(f.idItem, f);
+
+  const vencidos = [...porItem.values()].filter(f => f.vencida);
+  const enFecha = [...porItem.values()].filter(f => !f.vencida);
+
+  if (vencidos.length) {
+    const total = vencidos.reduce((a, f) => a + f.importe, 0);
+    alertas.push({
+      tipo: 'error', categoria: 'general',
+      msg: `${vencidos.length} cobro(s) avisado(s) por ${fmt$(total)} pasaron la fecha prometida y siguen sin imputar `
+        + `(${vencidos.map(f => `${f.cliente}, ${f.dias}d`).join(' · ')}). Sus facturas volvieron a entrar en el reclamo.`,
+      href: '/cobranzas',
+      clave: 'cobros_comprometidos_vencidos',
+    });
+  }
+  if (enFecha.length) {
+    const total = enFecha.reduce((a, f) => a + f.importe, 0);
+    alertas.push({
+      tipo: 'warn', categoria: 'general',
+      msg: `${enFecha.length} cobro(s) avisado(s) por ${fmt$(total)} esperan imputación `
+        + `(${enFecha.map(f => f.cliente).join(' · ')}). Sus facturas no se reclaman mientras tanto — falta decir a qué cuenta o caja entró la plata.`,
+      href: '/cobranzas',
+      clave: 'cobros_comprometidos',
+    });
+  }
+  return alertas;
+}
+
 // ── Los primeros días del mes, sin el cierre anterior cargado ───────────────────────
 //
 // El stock inicial de un mes es el final del anterior. Hasta que alguien carga ese cierre,

@@ -9,7 +9,10 @@ import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, Pre
 import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
 import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
 import { evolucionVentaPorArticulo, resumenMesActual } from '@/lib/estadisticasVentas';
-import { generarAlertas, motivoAlertaCosecha, alertasStockBajo, type MotivoAlertaCosecha } from '@/lib/alertasPanel';
+import { generarAlertas, motivoAlertaCosecha, alertasStockBajo, alertasCobrosComprometidos, type MotivoAlertaCosecha } from '@/lib/alertasPanel';
+import { comprometidasDeBandeja } from '@/lib/comprometidas';
+import { HOJA_BANDEJA, type ItemBandeja } from '@/lib/bandejaCobranzas';
+import { claveComprobante } from '@/lib/comprobantes';
 import { leerDescartes, sinDescartadas } from '@/lib/alertasDescartadas';
 import DescartarAlerta from '@/components/DescartarAlerta';
 import { calcularDriversMes } from '@/lib/usoTeorico';
@@ -286,6 +289,15 @@ export default async function PanelPage() {
       ...alertas,
       ...sinDescartadas(alertasStockPanel, descartesPanel, hoy.getFullYear(), hoy.getMonth() + 1).map(a => ({ ...a, href: '/stocks' })),
     ];
+  } catch {}
+
+  // Cobros avisados y todavía sin imputar. Están acá porque mientras esperan, sus facturas
+  // dejan de salir en el reclamo del lunes: si eso no se ve en ningún lado, una factura
+  // puede quedar sin reclamarse durante semanas sin que nadie haya decidido eso.
+  try {
+    const bandejaPanel = await readSheet<ItemBandeja>(HOJA_BANDEJA).catch(() => [] as ItemBandeja[]);
+    const { sinImputar } = comprometidasDeBandeja(bandejaPanel, fechaArgentinaHoy(), claveComprobante);
+    alertas = [...alertas, ...alertasCobrosComprometidos(sinImputar)];
   } catch {}
 
   // Producto viejo en cámara. El stock de cámara ya se muestra abajo, pero el número que
