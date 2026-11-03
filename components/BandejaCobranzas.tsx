@@ -774,6 +774,13 @@ export default function BandejaCobranzas({
   const [leido, setLeido] = useState<any>(null);
   const [importeManual, setImporteManual] = useState('');
   const [leyendo, setLeyendo] = useState(false);
+  // ── Las imágenes del aviso ──────────────────────────────────────────────────────────
+  //
+  // Muchos avisos no son texto: son la captura de la transferencia que manda el cliente por
+  // WhatsApp, o la foto de la orden de pago. Antes había que mirar la imagen y transcribir
+  // el importe a mano, que es justo lo que la app sabe hacer sola — el mismo lector ya lee
+  // los adjuntos del correo reenviado desde el principio.
+  const [imagenes, setImagenes] = useState<{ nombre: string; tipo: string; base64: string; url: string }[]>([]);
   const [verAliases, setVerAliases] = useState(false);
   const [borrandoAlias, setBorrandoAlias] = useState<string | null>(null);
 
@@ -798,12 +805,37 @@ export default function BandejaCobranzas({
     finally { setImportando(false); }
   }
 
+  // Un archivo a base64. El `split(',')` saca el prefijo "data:image/png;base64," que el
+  // navegador agrega y la API no quiere; la `url` entera sí se usa, para la miniatura.
+  function sumarArchivos(files: File[]) {
+    const buenos = files.filter(f => f.type.startsWith('image/') || f.type.includes('pdf'));
+    if (!buenos.length) return;
+    setErr(null);
+    for (const f of buenos.slice(0, 5)) {
+      const lector = new FileReader();
+      lector.onload = () => {
+        const url = String(lector.result || '');
+        const base64 = url.split(',')[1] || '';
+        if (!base64) return;
+        setImagenes(prev => prev.length >= 5 ? prev : [...prev, { nombre: f.name || 'captura', tipo: f.type, base64, url }]);
+      };
+      lector.readAsDataURL(f);
+    }
+  }
+
+  // Ctrl+V sobre el recuadro. Una captura va al portapapeles como archivo sin nombre, así
+  // que este es el camino natural y el que no obliga a guardarla antes en el disco.
+  function pegar(e: React.ClipboardEvent) {
+    const files = Array.from(e.clipboardData?.files || []);
+    if (files.length) { e.preventDefault(); sumarArchivos(files); }
+  }
+
   async function leerAviso() {
     setLeyendo(true); setErr(null); setMsg(null); setLeido(null);
     try {
       const r = await fetch('/api/cobranzas/bandeja/aviso', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ texto: textoAviso, soloLeer: true }),
+        body: JSON.stringify({ texto: textoAviso, soloLeer: true, adjuntos: imagenes.map(({ nombre, tipo, base64 }) => ({ nombre, tipo, base64 })) }),
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'Error');
@@ -818,12 +850,15 @@ export default function BandejaCobranzas({
     try {
       const r = await fetch('/api/cobranzas/bandeja/aviso', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ texto: textoAviso, importe: Number(importeManual) || 0, fecha: leido?.fecha }),
+        body: JSON.stringify({
+          texto: textoAviso, importe: Number(importeManual) || 0, fecha: leido?.fecha,
+          adjuntos: imagenes.map(({ nombre, tipo, base64 }) => ({ nombre, tipo, base64 })),
+        }),
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'Error');
       setMsg('✓ Aviso agregado a la bandeja, con las facturas que menciona ya propuestas.');
-      setAvisoAbierto(false); setTextoAviso(''); setLeido(null);
+      setAvisoAbierto(false); setTextoAviso(''); setLeido(null); setImagenes([]);
       router.refresh();
     } catch (e: any) { setErr(e.message); }
     finally { setLeyendo(false); }
@@ -865,20 +900,47 @@ export default function BandejaCobranzas({
       </div>
 
       {avisoAbierto && (
-        <div style={{ border: '1px solid #bfdbfe', background: '#f5f8ff', borderRadius: '8px', padding: '11px 13px', marginBottom: '12px' }}>
+        <div onPaste={pegar}
+          style={{ border: '1px solid #bfdbfe', background: '#f5f8ff', borderRadius: '8px', padding: '11px 13px', marginBottom: '12px' }}>
           <p style={{ margin: '0 0 6px', fontSize: '12px', color: '#1e3a8a', lineHeight: 1.5 }}>
-            Pegá el mail o el mensaje tal cual, con el encabezado y todo. La app saca el importe,
-            las facturas que menciona y la fecha.
+            Pegá el mail o el mensaje tal cual, con el encabezado y todo —o pegá directamente la
+            captura del comprobante con Ctrl+V. La app saca el importe, las facturas que menciona
+            y la fecha.
           </p>
           <textarea value={textoAviso} onChange={e => setTextoAviso(e.target.value)} rows={6}
-            placeholder="Pegá acá el aviso de pago…"
+            placeholder="Pegá acá el aviso de pago, o la imagen del comprobante…"
             style={{ ...inputStyle, fontFamily: 'inherit', resize: 'vertical' }} />
-          <div style={{ display: 'flex', gap: '8px', marginTop: '7px', flexWrap: 'wrap' }}>
-            <button onClick={leerAviso} disabled={leyendo || textoAviso.trim().length < 10}
+
+          {imagenes.length > 0 && (
+            <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+              {imagenes.map((img, i) => (
+                <div key={i} style={{ position: 'relative', border: '1px solid #dbe4fb', borderRadius: '6px', background: 'white', padding: '4px' }}>
+                  {img.tipo.startsWith('image/')
+                    ? <img src={img.url} alt={img.nombre} style={{ display: 'block', maxWidth: '110px', maxHeight: '90px', borderRadius: '3px' }} />
+                    : <div style={{ width: '110px', height: '90px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', color: '#6b7280', textAlign: 'center', padding: '4px' }}>📄 {img.nombre}</div>}
+                  <button type="button" title="Sacar esta imagen"
+                    onClick={() => setImagenes(prev => prev.filter((_, j) => j !== i))}
+                    style={{ position: 'absolute', top: '-7px', right: '-7px', width: '19px', height: '19px', lineHeight: '17px', borderRadius: '50%', border: '1px solid #e5e7eb', background: 'white', color: '#991b1b', cursor: 'pointer', fontSize: '12px', fontWeight: 700, padding: 0 }}>
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: '8px', marginTop: '7px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <button onClick={leerAviso} disabled={leyendo || (textoAviso.trim().length < 10 && imagenes.length === 0)}
               style={{ fontSize: '11.5px', padding: '5px 13px', background: '#1e40af', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 700 }}>
               {leyendo ? 'Leyendo…' : 'Leer'}
             </button>
-            <button onClick={() => { setAvisoAbierto(false); setTextoAviso(''); setLeido(null); }} disabled={leyendo}
+            {/* El selector de archivo existe para la foto que ya está guardada en el teléfono
+                o en el escritorio: ésa no pasa por el portapapeles. */}
+            <label style={{ fontSize: '11.5px', padding: '5px 12px', background: 'white', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer' }}>
+              📎 Elegir imagen
+              <input type="file" accept="image/*,application/pdf" multiple style={{ display: 'none' }}
+                onChange={e => { sumarArchivos(Array.from(e.target.files || [])); e.target.value = ''; }} />
+            </label>
+            <button onClick={() => { setAvisoAbierto(false); setTextoAviso(''); setLeido(null); setImagenes([]); }} disabled={leyendo}
               style={{ fontSize: '11.5px', padding: '5px 12px', background: 'white', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer' }}>
               Cancelar
             </button>
@@ -887,6 +949,14 @@ export default function BandejaCobranzas({
           {leido && (
             <div style={{ marginTop: '10px', background: 'white', border: '1px solid #dbe4fb', borderRadius: '6px', padding: '9px 11px' }}>
               <p style={{ margin: '0 0 6px', fontSize: '11px', fontWeight: 700, color: '#1e3a8a' }}>Esto entendí:</p>
+              {/* Una imagen ilegible devuelve todo en cero, que desde afuera es idéntico a un
+                  comprobante que no dice nada. Decirlo evita que se confirme una fila vacía. */}
+              {leido.leyoImagen && !leido.importe && (
+                <p style={{ margin: '0 0 7px', fontSize: '11px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '5px', padding: '6px 8px' }}>
+                  No pude sacar el importe de la imagen. Puede estar cortada o muy borrosa —
+                  escribilo a mano acá abajo y el resto sigue igual.
+                </p>
+              )}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: '8px', marginBottom: '7px' }}>
                 <div>
                   <label style={{ fontSize: '10.5px', color: '#6b7280', fontWeight: 600 }}>Importe</label>

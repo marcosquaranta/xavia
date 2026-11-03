@@ -11,7 +11,7 @@
 
 import { appendRowObj, asegurarHoja, asegurarColumnas, readSheet } from './sheets';
 import { parsearAvisoPago } from './avisosPago';
-import { extraerAvisoConIA, type AdjuntoIA, type ClienteParaIA } from './extraerAvisoIA';
+import { extraerAvisoConIA, clientesParaIA, type AdjuntoIA, type ClienteParaIA } from './extraerAvisoIA';
 import { hashMovimiento } from './importacionBanco';
 import { fechaArgentinaHoy } from './ocupacion';
 import {
@@ -198,15 +198,7 @@ const leido = parsearAvisoPago(`${asunto}\n${texto}`);
   // qué cancela — que es justo el trabajo que hay que hacer después a mano.
   const hayPdfSinDetalle = (args.pdfs?.length || 0) > 0 && comprobantes.length === 0;
   if (faltaImporte || !cand || hayPdfSinDetalle) {
-    const paraIA: ClienteParaIA[] = clientes
-      .filter(c => String(c.activo || '').toUpperCase() !== 'NO')
-      .map(c => ({
-        id: String(c.id_control),
-        nombre: nombreClienteVisible(c),
-        razonSocial: String(c.nombre_xubio || ''),
-        alias: String(c.alias || ''),
-        sucursales: String(c.sucursales || ''),
-      }));
+    const paraIA: ClienteParaIA[] = clientesParaIA(clientes);
 
     const ia = await extraerAvisoConIA({
       texto, asunto, remitente: args.remitente, pdfs: args.pdfs, clientes: paraIA,

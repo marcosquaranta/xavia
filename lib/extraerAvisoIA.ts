@@ -16,6 +16,7 @@
 // millón", lo único que puede lograr es que aparezca una fila para revisar.
 
 import Anthropic from '@anthropic-ai/sdk';
+import { nombreClienteVisible } from './clientes';
 
 // Un pago suelto dentro de un aviso. Casi siempre hay uno, pero una captura de una app de
 // pagos puede mostrar varios, cada uno con su importe, su fecha y su estado.
@@ -59,6 +60,22 @@ export interface ClienteParaIA {
   razonSocial: string;  // como factura
   alias: string;
   sucursales: string;
+}
+
+// La lista de clientes como la quiere el modelo. Vive acá, al lado del prompt que la
+// consume, porque la arman los dos caminos que llaman a la IA —el correo reenviado y el
+// aviso pegado a mano— y si cada uno la armara por su cuenta el modelo podría ver dos
+// listas distintas y elegir clientes distintos para el mismo aviso.
+export function clientesParaIA(clientes: any[]): ClienteParaIA[] {
+  return (clientes || [])
+    .filter(c => String(c?.activo || '').toUpperCase() !== 'NO')
+    .map(c => ({
+      id: String(c.id_control),
+      nombre: nombreClienteVisible(c),
+      razonSocial: String(c.nombre_xubio || ''),
+      alias: String(c.alias || ''),
+      sucursales: String(c.sucursales || ''),
+    }));
 }
 
 // Un adjunto para que lo lea el modelo. Puede ser PDF o imagen: la mitad de los avisos de
