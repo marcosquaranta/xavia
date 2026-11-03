@@ -1,8 +1,10 @@
 'use client';
 import { Fragment, useState } from 'react';
 import { useRouter } from 'next/navigation';
+
+const MESES_TXT = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 import type { Empleado } from '@/lib/types';
-import { horasTeoricasAuto, rangoQuincena, type ResumenEmpleado, type PeriodoPago } from '@/lib/personal';
+import { horasTeoricasAuto, rangoQuincena, reciboWhatsApp, type ResumenEmpleado, type PeriodoPago } from '@/lib/personal';
 import AdelantosEmpleado from '@/components/AdelantosEmpleado';
 import type { AdelantoDetalle } from '@/lib/adelantos';
 
@@ -32,6 +34,27 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
   const [form, setForm] = useState<Record<string, string>>({});
   const [guardando, setGuardando] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Cuál se acaba de copiar, para confirmarlo en el propio botón. Sin esa confirmación no
+  // hay forma de saber si el click hizo algo: el portapapeles no se ve.
+  const [copiado, setCopiado] = useState<string | null>(null);
+
+  // El período, dicho como lo diría una persona. Es lo que encabeza el recibo.
+  const periodoTexto = quincena === 0
+    ? `${MESES_TXT[mes - 1]} ${anio}`
+    : `${quincena === 1 ? '1ra' : '2da'} quincena de ${MESES_TXT[mes - 1]} ${anio}`;
+
+  async function copiarRecibo(r: ResumenEmpleado) {
+    const texto = reciboWhatsApp(r, periodoTexto);
+    try {
+      await navigator.clipboard.writeText(texto);
+      setCopiado(r.workno);
+      setTimeout(() => setCopiado((v) => (v === r.workno ? null : v)), 2000);
+    } catch {
+      // Sin permiso de portapapeles (pasa en algunos navegadores sobre http): mostrarlo
+      // igual es mejor que un botón que no hace nada — se copia a mano y listo.
+      setError('No pude copiar solo. Copiá esto a mano:\n\n' + texto);
+    }
+  }
 
   function toggle(workno: string, modo: 'dias' | 'tardanzas' | 'adelantos') {
     setAbierto((v) => (v && v.workno === workno && v.modo === modo ? null : { workno, modo }));
@@ -186,9 +209,9 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                   presentismo están en el desplegable de cada empleado. */}
               <th>Empleado</th>
               <th style={{ textAlign: 'right' }}>$ / hora</th>
-              <th style={{ textAlign: 'right' }}>Horas<br /><span style={{ fontWeight: 400, fontSize: '10px', color: '#9ca3af' }}>reales / teóricas</span></th>
-              <th style={{ textAlign: 'right' }}>Sueldo teórico<br /><span style={{ fontWeight: 400, fontSize: '10px', color: '#9ca3af' }}>por horas teóricas</span></th>
-              <th style={{ textAlign: 'right' }}>Hs. de más<br /><span style={{ fontWeight: 400, fontSize: '10px', color: '#9ca3af' }}>se pagan solo si se marca</span></th>
+              <th style={{ textAlign: 'right' }} title="Reales / teóricas">Horas</th>
+              <th style={{ textAlign: 'right' }} title="Horas teóricas × $/hora, más el presentismo si corresponde">Sueldo</th>
+              <th style={{ textAlign: 'right' }} title="Horas trabajadas por encima de las teóricas. Se pagan solo si marcás cuántas querés pagar.">Hs. extra</th>
               <th style={{ textAlign: 'right' }}>Adelantos</th>
               <th style={{ textAlign: 'right' }}>A pagar</th>
               <th style={{ textAlign: 'center' }}>Tardanzas</th>
@@ -416,20 +439,27 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                         </button>
                       ) : <span style={{ color: '#059669' }}>0</span>}
                     </td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <button onClick={() => toggle(r.workno, 'dias')} style={{ fontSize: '11px', background: 'none', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', marginRight: '4px' }}>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'flex', gap: '3px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                      <button onClick={() => toggle(r.workno, 'dias')} style={{ fontSize: '11px', background: 'none', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '2px 7px', cursor: 'pointer' }}>
                         {abierto?.workno === r.workno && abierto.modo === 'dias' ? 'Ocultar' : 'Días'}
+                      </button>
+                      {/* El detalle del sueldo en texto, para mandárselo al empleado. Sale
+                          del mismo resumen que la fila, así que no pueden discrepar. */}
+                      <button onClick={() => copiarRecibo(r)} title="Copiar el detalle del sueldo para mandar por WhatsApp"
+                        style={{ fontSize: '11px', background: 'none', border: '1px solid #bbf7d0', color: '#166534', borderRadius: '4px', padding: '2px 7px', cursor: 'pointer' }}>
+                        {copiado === r.workno ? '✓ copiado' : 'Recibo'}
                       </button>
                       {editandoEsta ? (
                         <>
-                          <button onClick={() => guardar(r)} disabled={guardando === r.workno} style={{ fontSize: '11px', background: '#166534', color: 'white', border: 'none', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', marginRight: '4px' }}>
+                          <button onClick={() => guardar(r)} disabled={guardando === r.workno} style={{ fontSize: '11px', background: '#166534', color: 'white', border: 'none', borderRadius: '4px', padding: '2px 7px', cursor: 'pointer' }}>
                             {guardando === r.workno ? '…' : 'Guardar'}
                           </button>
                           <button onClick={() => setEditando(null)} style={{ fontSize: '11px', background: 'none', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer' }}>Cancelar</button>
                         </>
                       ) : (
                         <>
-                          <button onClick={() => empezarEdicion(r)} style={{ fontSize: '11px', background: 'none', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', marginRight: '4px' }}>
+                          <button onClick={() => empezarEdicion(r)} style={{ fontSize: '11px', background: 'none', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '2px 7px', cursor: 'pointer' }}>
                             {esNuevo ? 'Configurar' : 'Editar'}
                           </button>
                           {!esNuevo && (
@@ -440,6 +470,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                           )}
                         </>
                       )}
+                      </div>
                     </td>
                   </tr>
                   {editandoEsta && (

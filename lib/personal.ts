@@ -106,7 +106,31 @@ function agruparPorEmpleadoYDia(registros: RegistroCrossChex[]): Map<string, Map
 // de punta a punta, incluyendo el hueco de en medio como si fuera trabajo. Si sobra un
 // fichaje sin pareja (se olvidó marcar la vuelta), se cuentan igual los pares completos
 // y el día queda marcado incompleto (no se puede saber cuánto duró esa última vuelta).
-function sumarHorasPares(checksMin: number[]): { horas: number; entrada: number; salidaFinal: number | null; incompleto: boolean } {
+// ── Dos marcas del mismo momento son una sola ────────────────────────────────────────
+//
+// Pasa seguido: el reloj no suena, o no se ve la luz verde, y la persona vuelve a apoyar
+// el dedo. Quedan dos fichajes separados por segundos.
+//
+// Para el emparejamiento eso es destructivo, no cosmético: con 3 marcas (07:00, 07:01,
+// 15:00) el primer par es un turno de UN MINUTO y la salida real se queda sin pareja, así
+// que el día computa casi cero horas y encima queda "incompleto". Nadie lo mira como un
+// error de lectura — se lee como que esa persona no vino.
+//
+// Nadie entra y sale de verdad en menos de este rato, así que colapsarlas no puede tapar
+// un turno real: el corte de almuerzo más corto dura más que esto.
+const MINUTOS_MISMA_MARCA = 5;
+
+function sinMarcasRepetidas(checksMin: number[]): number[] {
+  const out: number[] = [];
+  for (const m of checksMin) {
+    if (out.length && m - out[out.length - 1] <= MINUTOS_MISMA_MARCA) continue;
+    out.push(m);
+  }
+  return out;
+}
+
+function sumarHorasPares(checksRaw: number[]): { horas: number; entrada: number; salidaFinal: number | null; incompleto: boolean } {
+  const checksMin = sinMarcasRepetidas(checksRaw);
   const entrada = checksMin[0];
   if (checksMin.length < 2) return { horas: 0, entrada, salidaFinal: null, incompleto: true };
   let horas = 0;
@@ -469,4 +493,48 @@ export function tardanzasDeHoy(resumen: ResumenEmpleado[]): { nombre: string; ho
     if (dia) out.push({ nombre: r.nombre, hora: dia.entrada || '' });
   }
   return out;
+}
+
+// ── El recibo que se manda por WhatsApp ──────────────────────────────────────────────
+//
+// Hasta acá el detalle de un sueldo existía solo en esta pantalla, que ve una sola
+// persona. El empleado recibía un número y nada más, y cada diferencia respecto de lo que
+// esperaba —un adelanto que no recordaba, unas horas de menos, el presentismo que no
+// entró— se resolvía discutiendo de memoria.
+//
+// Esto arma el mismo detalle en texto plano. No calcula NADA: todos los números salen del
+// resumen que ya se mostró en pantalla, así que el mensaje y la fila no pueden decir cosas
+// distintas. Si algo está mal, está mal en los dos lados y se corrige en un solo lugar.
+//
+// Se escribe en el lenguaje del que lo recibe, no en el nuestro: "horas trabajadas" y no
+// "horas teóricas", "te descontamos" y no "adelantos". Un recibo que hay que traducir no
+// sirve para lo que se hizo.
+export function reciboWhatsApp(r: ResumenEmpleado, periodo: string): string {
+  const $ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
+  const hs = (n: number) => String(Math.round(n * 10) / 10).replace('.', ',');
+  const L: string[] = [];
+
+  L.push(`*${r.nombre}* — ${periodo}`);
+  L.push('');
+  L.push(`Horas: ${hs(r.horasTeoricas)} hs x ${$(r.sueldoHora)} = ${$(r.horasTeoricas * r.sueldoHora)}`);
+  if (r.presentismoAplicado > 0) L.push(`Presentismo: ${$(r.presentismoAplicado)}`);
+  // Decir por qué NO está es más útil que omitirlo: es la diferencia que el otro va a notar.
+  else if (r.presentismoConfigurado > 0) L.push(`Presentismo: no corresponde este mes`);
+  if (r.pagarExtras && r.horasExtras > 0) L.push(`Horas extra: ${hs(r.horasExtras)} hs = ${$(r.horasExtrasImporte)}`);
+  if (r.extras > 0) L.push(`Otros: ${$(r.extras)}`);
+
+  L.push(`Subtotal: ${$(r.sueldoAPagar)}`);
+  if (r.adelantos > 0) L.push(`Adelantos ya cobrados: -${$(r.adelantos)}`);
+  L.push('');
+  L.push(`*A cobrar: ${$(r.sueldoFinal)}*`);
+
+  // Lo que explica el número sin estar en la suma. Va al final y solo si existe: un recibo
+  // que dice "0 tardanzas" todos los meses deja de leerse.
+  const notas: string[] = [];
+  if (r.tardanzas > 0) notas.push(`${r.tardanzas} ${r.tardanzas === 1 ? 'llegada tarde' : 'llegadas tarde'}`);
+  if (r.faltas > 0) notas.push(`${r.faltas} ${r.faltas === 1 ? 'falta' : 'faltas'}`);
+  if (r.pagarExtras === false && r.horasExtras > 0) notas.push(`${hs(r.horasExtras)} hs extra registradas, no se liquidan este mes`);
+  if (notas.length) { L.push(''); L.push(notas.join(' · ')); }
+
+  return L.join('\n');
 }
