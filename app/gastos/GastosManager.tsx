@@ -104,6 +104,36 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
   const [textoGasto, setTextoGasto] = useState('');
   const [interpretando, setInterpretando] = useState(false);
   const [leido, setLeido] = useState<{ razon: string; asumidos: string[] } | null>(null);
+  // Lo que se acaba de cargar solo. Queda en pantalla hasta que se cierra: es el reemplazo
+  // del paso de confirmar, y sin él la carga automática sería invisible.
+  const [cargado, setCargado] = useState<any>(null);
+
+  // Guarda el gasto leído y lo deja a la vista. Si el guardado falla, NO se pierde: los
+  // campos ya quedaron cargados en el formulario y el error se muestra ahí, así que el
+  // camino de salida es el de siempre.
+  async function cargarDirecto(p: any) {
+    setGuardando(true);
+    try {
+      const res = await enviarGasto({
+        fecha: p.fecha, descripcion: p.descripcion, categoria: p.categoria,
+        monto: p.monto, medio_pago: p.medio_pago,
+        ...(p.proveedor ? { proveedor: p.proveedor } : {}),
+        ...(p.categoria === 'adelanto_sueldo' ? { empleado: p.empleado } : {}),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || 'Error al guardar');
+      setCargado({ ...p, id_gasto: j.id_gasto || '' });
+      setLeido(null);
+      setTextoGasto('');
+      // El formulario vuelve a cero: lo que se cargó ya está en la lista de abajo, y dejarlo
+      // lleno invita a guardarlo de nuevo.
+      setDescripcion(''); setMonto(0); setProveedor(''); setEmpleadoAdelanto('');
+      setFecha(hoyISO()); setCategoria('gastos_generales'); setMedioPago(MEDIOS[0]);
+      router.refresh();
+    } catch (err: any) {
+      setError((err.message || 'Error al guardar') + ' — quedó cargado en el formulario de abajo, revisalo y guardalo desde ahí.');
+    } finally { setGuardando(false); }
+  }
 
   async function interpretar() {
     setInterpretando(true); setError(null); setLeido(null);
@@ -127,6 +157,29 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
       if (p.proveedor) setProveedor(p.proveedor);
       if (p.empleado) setEmpleadoAdelanto(p.empleado);
       setLeido({ razon: p.razon, asumidos: p.asumidos || [] });
+
+      // ── Si no falta nada, se carga sola ────────────────────────────────────────────
+      //
+      // Confirmar un gasto que ya está completo y bien leído no agrega control: nadie mira
+      // dos veces lo que ya vio bien. El paso que vale es el de DESPUÉS — queda a la vista
+      // lo que se cargó, con Editar al lado.
+      //
+      // La puerta es angosta a propósito. Pide las cuatro cosas que no se pueden deducir ni
+      // corregir de memoria (monto, categoría, medio de pago, y que el modelo haya estado
+      // seguro), y deja afuera a los gastos que necesitan un dato que el texto NO puede
+      // traer:
+      //   · insumos → sin artículo y cantidad no entra al stock, y el consumo del mes sale
+      //     mal sin que nada avise
+      //   · movimiento interno → necesita la cuenta de destino: sin ella la plata sale de
+      //     un lado y no aparece del otro
+      //   · adelanto de sueldo sin empleado → sería un adelanto que no se le descuenta a
+      //     nadie a fin de mes
+      // Ésos siguen pasando por el formulario, que es donde esos campos existen.
+      const completo = p.asumidos?.length === 0 && p.confianza === 'alta'
+        && Number(p.monto) > 0 && !!p.categoria && !!p.medio_pago
+        && p.categoria !== 'insumos' && p.categoria !== 'movimiento_interno'
+        && !(p.categoria === 'adelanto_sueldo' && !p.empleado);
+      if (completo) await cargarDirecto(p);
     } catch (e: any) { setError(e.message); }
     finally { setInterpretando(false); }
   }
@@ -210,6 +263,16 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
   }, [delMes]);
 
+  // El POST, en un solo lugar. Lo usan el formulario y la carga directa por texto: si cada
+  // uno armara su pedido, una regla nueva del servidor se podría cumplir por un camino y
+  // no por el otro, y eso no se nota hasta que un gasto sale distinto según cómo se cargó.
+  async function enviarGasto(payload: Record<string, any>) {
+    return fetch('/api/gastos/nuevo', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  }
+
   async function agregar(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -232,16 +295,13 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
     if (aviso && !window.confirm(aviso)) return;
     setGuardando(true);
     try {
-      const res = await fetch('/api/gastos/nuevo', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const res = await enviarGasto({
           fecha, descripcion, categoria, monto, medio_pago: medioPago,
           ...(esMovimiento ? { medio_pago_destino: medioDestino } : {}),
           ...(esAdelanto ? { empleado: empleadoAdelanto } : {}),
           ...(pendiente ? { pendiente: true, proveedor: proveedor.trim(), vencimiento } : {}),
           ...(categoria === 'insumos' ? { id_articulo: idArticulo, cantidad } : {}),
           ...(cuotas > 1 ? { cuotas } : {}),
-        }),
       });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || 'Error al guardar');
@@ -416,6 +476,29 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
               {interpretando ? 'Leyendo…' : 'Completar'}
             </button>
           </div>
+          {/* Lo que se cargó solo. Reemplaza al paso de confirmar: el control no se saca,
+              se mueve después del hecho, que es donde todavía sirve y no estorba. */}
+          {cargado && (
+            <div style={{ marginTop: '8px', background: 'white', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '9px 11px' }}>
+              <p style={{ margin: '0 0 5px', fontSize: '12px', fontWeight: 700, color: '#166534' }}>✓ Cargado</p>
+              <p style={{ margin: '0 0 7px', fontSize: '12.5px', color: '#111' }}>
+                <strong>{cargado.descripcion}</strong> · {fmtMoneda(Number(cargado.monto))} · {CATEGORIAS_GASTO.find(c => c.value === cargado.categoria)?.label || cargado.categoria} · {cargado.medio_pago} · {fmtFecha(cargado.fecha)}
+              </p>
+              <p style={{ margin: '0 0 7px', fontSize: '11px', color: '#6b7280', lineHeight: 1.5 }}>{cargado.razon}</p>
+              <div style={{ display: 'flex', gap: '7px', flexWrap: 'wrap' }}>
+                <button type="button" onClick={() => { const g = gastos.find(x => String(x.id_gasto) === String(cargado.id_gasto)); if (g) empezarEdicion(g); setCargado(null); }}
+                  disabled={!cargado.id_gasto}
+                  style={{ fontSize: '11.5px', padding: '4px 11px', background: 'white', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer' }}>
+                  Editar
+                </button>
+                <button type="button" onClick={() => setCargado(null)}
+                  style={{ fontSize: '11.5px', padding: '4px 11px', background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer' }}>
+                  Listo
+                </button>
+              </div>
+            </div>
+          )}
+
           {leido && (
             <div style={{ marginTop: '8px', fontSize: '11.5px', color: '#1e3a8a', lineHeight: 1.55 }}>
               <strong>Entendí:</strong> {leido.razon}
