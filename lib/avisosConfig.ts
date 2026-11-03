@@ -60,6 +60,12 @@ export const AVISOS: AvisoConfigurable[] = [
     descripcion: 'Todos los días a la mañana, solo si hay algo. Compras a proveedores vencidas.',
     porDefecto: ['marcos.quaranta@gmail.com'],
   },
+  {
+    clave: 'email_cobro_automatico',
+    titulo: 'Cobros que se registran solos',
+    descripcion: 'En el momento en que pasa. Cuando llega un aviso de pago y las facturas que nombra suman exactamente lo que declara, la app registra la cobranza en Xubio sola y avisa al instante, con el detalle y el link para anularla.',
+    porDefecto: ['marcos.quaranta@gmail.com'],
+  },
 ];
 
 // Los mails de un aviso: lo que esté cargado en la planilla, y si no, el default.

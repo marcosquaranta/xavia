@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { crearItemDesdeAviso, htmlATexto } from '@/lib/bandejaMail';
 import { evaluarBandeja } from '@/lib/autoCobro';
+import { avisarCobroRegistrado } from '@/lib/avisoCobroAutomatico';
+import { readSheet } from '@/lib/sheets';
+import type { ConfigItem } from '@/lib/types';
 import type { AdjuntoIA } from '@/lib/extraerAvisoIA';
 
 export const dynamic = 'force-dynamic';
@@ -357,7 +360,19 @@ export async function POST(req: NextRequest) {
       try {
         const ev = await evaluarBandeja({ soloItem: String((r as any).idItem) });
         const reg = ev.registrados[0];
-        if (reg) auto = { registrado: true, idCobro: reg.idCobro, retencion: reg.retencion };
+        if (reg) {
+          auto = { registrado: true, idCobro: reg.idCobro, retencion: reg.retencion };
+          // El aviso sale ACÁ y no solo en el resumen del mediodía siguiente: esto es lo
+          // único que la app hace sin preguntar, y si quedó mal el momento de verlo es
+          // ahora. Va en su propio try porque un mail que falla no puede deshacer un cobro
+          // que ya está registrado en Xubio.
+          try {
+            const cfg = await readSheet<ConfigItem>('Configuracion').catch(() => [] as ConfigItem[]);
+            await avisarCobroRegistrado(ev, cfg);
+          } catch (e: any) {
+            console.error('[cobranzas/email] no se pudo avisar del cobro automático:', e);
+          }
+        }
         else {
           const err = ev.errores[0]?.error;
           const rech = ev.rechazados[0]?.motivo;

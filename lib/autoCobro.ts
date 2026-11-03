@@ -61,7 +61,12 @@ export interface Candidato {
   idItem: string;
   cliente: string;
   idControl: string;
+  // La fecha con la que se registra el cobro: la que dice el aviso. Para un pago programado
+  // es la fecha futura en la que va a entrar, no la de hoy.
   fecha: string;
+  // El aviso decía que estaba programado y todavía sin acreditar. Se registra igual (ver el
+  // comentario del gate en evaluarBandeja), y va marcado para poder decirlo en el acuse.
+  programado?: boolean;
   importe: number;
   retencion: number;
   comprobantes: string[];
@@ -88,6 +93,10 @@ export interface ResultadoAuto {
   registrados: {
     idItem: string; idCobro: string; cliente: string; importe: number;
     retencion: number; comprobantes: string[]; cuentaNombre: string; fecha: string;
+  // El aviso decía que el pago estaba programado y todavía no acreditado. Se registra igual
+  // (ver el comentario del gate), con la fecha que el aviso programa. Va marcado porque es
+  // lo único de este mail que conviene mirar: es plata contada antes de llegar.
+  programado?: boolean;
     numeroRecibo: string;
     // Se registró SIN mandarle la retención a Xubio, porque Xubio no acepta esa cuenta como
     // forma de cobro. Hay que decirlo: en Xubio esa factura queda abierta por el monto
@@ -228,12 +237,24 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
     // existen, son de este cliente, están abiertas y suman exacto, da igual con cuánta
     // seguridad lo leyó: el resultado es verificable por sí mismo.
     //
-    // Lo que sí sigue frenando es que la plata no haya entrado todavía. Eso no es una duda
-    // de lectura, es un hecho del mundo: el aviso dice que el pago está programado.
+    // ── Un pago programado también se registra ───────────────────────────────────────
+    //
+    // Antes esto frenaba: el aviso decía “programado” y el razonamiento era que la plata
+    // todavía no entró, así que registrarla descuadraba el banco.
+    //
+    // Decisión de Marcos, tomada con el caso a la vista: estos clientes siempre pagan, y lo
+    // que el aviso trae no es una promesa vaga sino una FECHA. Así que el cobro se registra
+    // con esa fecha — la que el aviso programa, no la de hoy (ver `fecha` más abajo: sale
+    // del aviso). En Xubio queda como un cobro de ese día.
+    //
+    // Lo que esto implica, para que no sorprenda: hasta esa fecha el saldo de la cuenta va a
+    // mostrar plata que todavía no llegó. Si alguna vez un pago no entra, hay que anular ese
+    // cobro — se puede, desde la misma pantalla de Cobranzas.
+    //
+    // La verificación aritmética de más abajo no cambia: sigue teniendo que cerrar exacto.
+    // Lo que se relajó es CUÁNDO entra la plata, no si el aviso dice la verdad.
     const conf = confianzaDe(it);
-    if (conf === 'pendiente_de_acreditar') {
-      rechazar('el aviso dice que el pago todavía no se acreditó'); continue;
-    }
+    const programado = conf === 'pendiente_de_acreditar';
     if (!String(it.id_control || '').trim()) { rechazar('no se reconoció a qué cliente corresponde'); continue; }
     if (importe <= 0) { rechazar('no se pudo leer el importe'); continue; }
     if (tope > 0 && importe > tope) {
@@ -285,7 +306,7 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
 
     out.candidatos.push({
       idItem: String(it.id_item), cliente, idControl: String(it.id_control),
-      fecha: String(it.fecha).split(/[T ]/)[0], importe, retencion,
+      fecha: String(it.fecha).split(/[T ]/)[0], importe, retencion, programado,
       comprobantes: nums, cuentaId: cuenta.id, cuentaNombre: cuenta.nombre,
       sumaFacturas: Math.round(suma),
     });
@@ -311,12 +332,14 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
       if (!r.ok) { out.errores.push({ idItem: c.idItem, cliente: c.cliente, error: r.error || 'Xubio lo rechazó' }); continue; }
       await updateRow(HOJA_BANDEJA, 'id_item', c.idItem, {
         estado: 'confirmado', id_cobro: r.idCobro || '', usuario: 'automático',
-        nota: 'registrado solo: las facturas suman exactamente lo que dice el aviso',
+        nota: c.programado
+          ? `registrado solo con la fecha programada del aviso (${c.fecha}): las facturas suman exactamente lo que dice`
+          : 'registrado solo: las facturas suman exactamente lo que dice el aviso',
       });
       out.registrados.push({
         idItem: c.idItem, idCobro: r.idCobro || '', cliente: c.cliente, importe: c.importe,
         retencion: c.retencion, comprobantes: c.comprobantes, cuentaNombre: c.cuentaNombre,
-        fecha: c.fecha, numeroRecibo: r.numeroRecibo || '',
+        fecha: c.fecha, numeroRecibo: r.numeroRecibo || '', programado: c.programado,
       });
     } catch (e: any) {
       out.errores.push({ idItem: c.idItem, cliente: c.cliente, error: e?.message || 'error' });

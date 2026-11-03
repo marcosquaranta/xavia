@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
 import { evaluarBandeja, CONFIG_ACTIVO } from '@/lib/autoCobro';
+import { readSheet } from '@/lib/sheets';
+import type { ConfigItem } from '@/lib/types';
+import { destinatariosDe } from '@/lib/avisosConfig';
+import { CLAVE_AVISO_AUTO } from '@/lib/avisoCobroAutomatico';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
-const DESTINATARIOS = ['administracion@xavia.com.ar'];
+// A quién le llega: la misma configuración que el aviso instantáneo, editable en
+// Admin → Avisos por mail. Estaba escrito a mano acá, y dos lugares donde decir a quién le
+// llega es uno que se queda atrás el día que cambie.
+const DESTINATARIOS_POR_DEFECTO = ['administracion@xavia.com.ar'];
 const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 
 // ── Registro automático de los cobros que no necesitan criterio ───────────────────────
@@ -31,6 +38,11 @@ export async function GET(req: NextRequest) {
 
   try {
     const r = await evaluarBandeja();
+    const cfgRows = await readSheet<ConfigItem>('Configuracion').catch(() => [] as ConfigItem[]);
+    const configurados = destinatariosDe(CLAVE_AVISO_AUTO, cfgRows);
+    // Administración sigue recibiéndolo aunque el aviso instantáneo vaya a otra persona:
+    // este resumen es el control de la corrida, no la notificación de un cobro puntual.
+    const destinatarios = [...new Set([...DESTINATARIOS_POR_DEFECTO, ...configurados])];
 
     // Sin candidatos no se manda nada. El aviso diario de la bandeja ya avisa que hay cosas
     // por imputar; un segundo mail que casi siempre dice "no hubo ninguno" enseña a ignorar
@@ -124,7 +136,7 @@ export async function GET(req: NextRequest) {
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         from: 'Xavia <ventas@xavia.com.ar>',
-        to: DESTINATARIOS,
+        to: destinatarios,
         subject: r.activo
           ? `Cobros imputados solos: ${r.registrados.length} · ${fmt$(totalRegistrado)}${r.errores.length ? ` · ${r.errores.length} con error` : ''}`
           : `${r.candidatos.length} cobro(s) se habrían imputado solos — ${CONFIG_ACTIVO} está en NO`,
