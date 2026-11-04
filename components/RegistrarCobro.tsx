@@ -608,15 +608,28 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
                       // puede tildar: imputarle un cobro a algo que ya está cobrado lo cuenta
                       // dos veces y deja otra factura abierta tapada.
                       const cerrada = !estaImpaga(f as any);
+                      // ── Una "cubierta" se puede tildar igual ──────────────────────────
+                      //
+                      // Las otras tres marcas son hechos: alguien registró el cobro, lo
+                      // imputó o la dio por saldada. "Cubierta" no: es una deducción de la
+                      // app repartiendo los cobros de Xubio de la más vieja a la más nueva.
+                      //
+                      // Bloquear por una deducción es lo peor de los dos mundos: si la app
+                      // se equivocó, el que sabe la verdad no puede corregirla desde acá y
+                      // tiene que ir a buscar otro camino. Se muestra el cartel y se deja
+                      // tildar — el aviso alcanza, el candado sobra.
+                      const soloDeducida = cerrada && !f.yaCobrada && !f.imputadaManual && !f.saldadaManual;
                       return (
                         <label key={f.numero}
                           style={{
                             display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 9px',
                             borderBottom: '1px solid #f3f4f6', cursor: 'pointer', fontSize: '12px',
                             background: tildada ? '#f0fdf4' : cerrada ? '#fafafa' : 'white',
-                            opacity: cerrada ? 0.6 : 1,
+                            // La deducida se ve apenas atenuada, no apagada: sigue siendo
+                            // una factura con la que se puede operar.
+                            opacity: cerrada ? (soloDeducida ? 0.85 : 0.6) : 1,
                           }}>
-                          <input type="checkbox" checked={tildada} disabled={loading || cerrada} onChange={() => toggleFactura(f.numero)} />
+                          <input type="checkbox" checked={tildada} disabled={loading || (cerrada && !soloDeducida)} onChange={() => toggleFactura(f.numero)} />
                           <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#1d4ed8', minWidth: '132px' }}>{f.numero}</span>
                           <span style={{ color: '#6b7280', minWidth: '78px' }}>{fmtDia(f.fecha)}</span>
                           <span style={{ color: '#9ca3af', fontSize: '10.5px', minWidth: '52px' }}>{diasDesde(f.fecha)}d</span>

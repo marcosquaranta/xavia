@@ -106,9 +106,32 @@ function repartir(facturas: FacturaCliente[], totalCobrado: number): Diagnostico
   return { cubiertas, corte, sobro: corte ? 0 : Math.max(0, resto), cubiertasMonto };
 }
 
+// ── Qué manda para decidir si una factura está cobrada ───────────────────────────────
+//
+// Desde noviembre de 2026, decisión de Marcos: manda LO QUE REGISTRAMOS NOSOTROS. Una
+// factura está cobrada si alguien lo dijo en la app —registró el cobro, lo imputó a mano, o
+// la dio por saldada—, y no porque la suma de las cobranzas de Xubio alcance a taparla.
+//
+// Por qué se saca el reparto automático, aunque fuera ingenioso: afirmaba algo que nadie
+// había verificado. Xubio no dice qué factura cancela cada cobranza, así que la app lo
+// adivinaba repartiendo de la más vieja a la más nueva. Cuando acertaba, nadie se enteraba;
+// cuando no, daba por cobrada una factura que había que cobrar —y esa es la clase de error
+// que no se ve hasta que el cliente dice que no debe nada—.
+//
+// Lo que esto implica y hay que tener presente: los cobros que viven SOLO en Xubio —los que
+// se cargaron allá a mano y nunca pasaron por la app— dejan de tapar facturas. Esas
+// facturas vuelven a figurar impagas aunque estén pagas. Se limpian de una con "marcar como
+// saldadas las de más de X días" en Cobranzas, que es exactamente el caso para el que ese
+// botón existe.
+//
+// Queda como una constante y no borrado: si alguna vez hay que volver atrás, es cambiar
+// esto por `true` y el reparto vuelve entero, con su diagnóstico de corte y todo.
+export const REPARTIR_COBROS_DE_XUBIO = false;
+
 export function cubrirConCobrosDeXubio(
   facturas: FacturaCliente[], totalCobrado: number,
 ): FacturaCliente[] {
+  if (!REPARTIR_COBROS_DE_XUBIO) return facturas.map((f) => ({ ...f, cubierta: false }));
   const { cubiertas } = repartir(facturas, totalCobrado);
   return facturas.map((f) => ({ ...f, cubierta: cubiertas.has(f.numero) }));
 }
@@ -291,7 +314,7 @@ export function facturasPorCliente(
 
   // De la más reciente a la más vieja, que es como se las busca al cobrar.
   for (const id of Object.keys(out)) {
-    if (cobranzas) {
+    if (cobranzas && REPARTIR_COBROS_DE_XUBIO) {
       const sinImputar = cobradoPorCliente.get(id) || 0;
       const d = repartir(out[id], sinImputar);
       out[id] = out[id].map((f) => ({ ...f, cubierta: d.cubiertas.has(f.numero) }));
