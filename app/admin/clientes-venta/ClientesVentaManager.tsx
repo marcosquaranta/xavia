@@ -340,6 +340,7 @@ export default function ClientesVentaManager({ clientes, precios, cambios, extra
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string|null>(null);
   const [ok, setOk] = useState(false);
+  const [copiado, setCopiado] = useState(false);
   const [nombreXubio, setNombreXubio] = useState('');
   const [alias, setAlias] = useState('');
   const [tipoFactura, setTipoFactura] = useState('A');
@@ -364,12 +365,68 @@ export default function ClientesVentaManager({ clientes, precios, cambios, extra
   const activos = clientes.filter(c => c.activo === 'SI');
   const inactivos = clientes.filter(c => c.activo === 'NO');
 
+  // ── Los mails de los clientes activos ────────────────────────────────────────────
+  //
+  // Un cliente puede tener varias direcciones en el mismo campo (separadas por coma o
+  // punto y coma), así que se parten y se juntan todas. Se deduplican ignorando
+  // mayúsculas: el mismo contacto cargado en dos clientes es una sola persona, y Gmail
+  // muestra el destinatario repetido a todos los demás.
+  //
+  // Es el `email` general y no el de cobranzas: esto es para avisos comerciales —una
+  // lista de precios, un cambio de horario—, no para reclamar una factura.
+  const mailsActivos = (() => {
+    const vistos = new Map<string, string>();
+    for (const c of activos) {
+      for (const m of String((c as any).email || '').split(/[,;]+/)) {
+        const dir = m.trim();
+        if (!dir.includes('@')) continue;
+        const k = dir.toLowerCase();
+        if (!vistos.has(k)) vistos.set(k, dir);
+      }
+    }
+    return [...vistos.values()];
+  })();
+
+  const sinMail = activos
+    .filter((c) => !String((c as any).email || '').includes('@'))
+    .map((c) => String((c as any).alias || (c as any).nombre_xubio || c.id_control));
+
+  async function copiarMails() {
+    // Coma y espacio: es lo que Gmail corta en destinatarios al pegar. Con punto y coma
+    // algunos clientes de correo pegan todo junto en una sola dirección inválida.
+    const texto = mailsActivos.join(', ');
+    try {
+      await navigator.clipboard.writeText(texto);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2500);
+    } catch {
+      setError('No pude copiar solo. Copiá esto a mano:\n\n' + texto);
+    }
+  }
+
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
         <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>{activos.length} activos · {inactivos.length} inactivos</p>
-        {!mostrarForm && <button type="button" className="btn" onClick={() => { reset(); setMostrarForm(true); }}>+ Nuevo cliente</button>}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Los mails de los activos, listos para pegar en el Para: de Gmail. */}
+          <button type="button" onClick={copiarMails}
+            title="Copiar los mails de los clientes activos, separados por coma"
+            style={{ fontSize: '12.5px', padding: '6px 12px', background: 'white', border: '1px solid #e5e7eb', borderRadius: '6px', cursor: 'pointer', color: '#374151', fontWeight: 600 }}>
+            {copiado ? `✓ ${mailsActivos.length} mails copiados` : '✉️ Copiar mails de activos'}
+          </button>
+          {!mostrarForm && <button type="button" className="btn" onClick={() => { reset(); setMostrarForm(true); }}>+ Nuevo cliente</button>}
+        </div>
       </div>
+
+      {/* Quiénes quedaron afuera. Un cliente activo sin mail cargado desaparece de la lista
+          sin decir nada, y el mail sale creyendo que fue a todos: el que falta no se entera
+          de nada y nadie se entera de que no se enteró. */}
+      {sinMail.length > 0 && (
+        <p style={{ margin: '0 0 12px', fontSize: '11.5px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '7px 10px', lineHeight: 1.55 }}>
+          <strong>{sinMail.length} cliente(s) activos no tienen mail cargado</strong> y no entran en la lista: {sinMail.join(' · ')}.
+        </p>
+      )}
 
       {ok && <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '10px 14px', marginBottom: '12px', fontSize: '13px', color: '#166534' }}>✓ Cliente creado</div>}
 
