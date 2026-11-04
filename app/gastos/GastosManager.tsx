@@ -30,9 +30,14 @@ interface Props {
   // Para elegir a quién se le adelantó el sueldo. Opcional: si la hoja de empleados no se
   // puede leer, el resto de la carga de gastos tiene que seguir funcionando igual.
   empleados?: { workno: string; nombre: string }[];
+  // Las tarjetas que arma la página del lado del servidor —cargar varios, deuda a
+  // proveedores—. Llegan como children para que el ORDEN de la pantalla se decida en un
+  // solo lugar: el formulario de nuevo gasto es lo que se usa todos los días y va primero,
+  // y lo demás abajo. Copiarlas acá adentro no se puede: leen de la planilla.
+  children?: React.ReactNode;
 }
 
-export default function GastosManager({ gastos, articulos, usuario, empleados = [] }: Props) {
+export default function GastosManager({ gastos, articulos, usuario, empleados = [], children }: Props) {
   const router = useRouter();
   const [anio, setAnio] = useState(HOY.getFullYear());
   const [mes, setMes] = useState(HOY.getMonth() + 1);
@@ -392,69 +397,6 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
 
   return (
     <div>
-      {/* ══ Resumen por categoría, pensado para sacarle una captura ══
-          Sin medio de pago, sin detalle, sin botones adentro del recuadro: lo que se
-          recorta y se pega en un mail tiene que ser solo conceptos y montos. */}
-      <div className="card" style={{ marginBottom: '14px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
-          <p className="card-title" style={{ margin: 0 }}>Resumen por categoría</p>
-          <button type="button" onClick={() => setVerResumen((v) => !v)}
-            style={{ background: 'none', border: '1px solid #e5e7eb', borderRadius: '5px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer', color: '#6b7280' }}>
-            {verResumen ? 'Ocultar' : 'Ver para copiar'}
-          </button>
-        </div>
-        {verResumen && (
-          resumenCategorias.filas.length === 0 ? (
-            <p style={{ margin: '10px 0 0', fontSize: '13px', color: '#9ca3af' }}>No hay gastos cargados en este mes.</p>
-          ) : (
-            <>
-              <div style={{ marginTop: '10px', background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px 18px', maxWidth: '460px' }}>
-                <p style={{ margin: '0 0 2px', fontSize: '16px', fontWeight: 800, color: '#111827' }}>
-                  Gastos de {MESES_NOMBRE[mes - 1]} {anio}
-                </p>
-                <p style={{ margin: '0 0 12px', fontSize: '11.5px', color: '#9ca3af' }}>Xavia</p>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-                  <tbody>
-                    {resumenCategorias.filas.map((f) => (
-                      <Fragment key={f.cat}>
-                        <tr style={{ borderBottom: f.grandes.length ? 'none' : '1px solid #f3f4f6' }}>
-                          <td style={{ padding: '6px 0', color: '#374151' }}>{f.label}</td>
-                          <td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                            {fmtMoneda(f.monto)}
-                          </td>
-                        </tr>
-                        {/* Los gastos grandes de la categoría, indentados: se leen como
-                            detalle de la línea de arriba, no como categorías nuevas. */}
-                        {f.grandes.map((g, i) => (
-                          <tr key={g.id} style={{ borderBottom: i === f.grandes.length - 1 ? '1px solid #f3f4f6' : 'none' }}>
-                            <td style={{ padding: '1px 0 1px 16px', fontSize: '12px', color: '#9ca3af' }}>
-                              {fmtDiaMes(g.fecha)} · {g.descripcion || 'sin detalle'}
-                            </td>
-                            <td style={{ padding: '1px 0', textAlign: 'right', fontSize: '12px', color: '#9ca3af', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                              {fmtMoneda(g.monto)}
-                            </td>
-                          </tr>
-                        ))}
-                      </Fragment>
-                    ))}
-                    <tr>
-                      <td style={{ padding: '10px 0 0', fontWeight: 800, fontSize: '15px' }}>Total</td>
-                      <td style={{ padding: '10px 0 0', textAlign: 'right', fontWeight: 800, fontSize: '15px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                        {fmtMoneda(resumenCategorias.total)}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <p style={{ margin: '7px 0 0', fontSize: '10.5px', color: '#9ca3af', lineHeight: 1.5 }}>
-                Recortá el recuadro blanco y pegalo en el mail. Abajo de cada categoría van los
-                gastos de más de {fmtMoneda(UMBRAL_DETALLE)}. No incluye los movimientos entre
-                medios de pago: no son gasto, es plata que pasa de una cuenta a otra.
-              </p>
-            </>
-          )
-        )}
-      </div>
 
       {/* ══ Alta de gasto ══ */}
       <form onSubmit={agregar} className="card" style={{ marginBottom: '14px' }}>
@@ -737,6 +679,74 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
 
         <button type="submit" className="btn" disabled={guardando}>{guardando ? 'Guardando…' : '+ Agregar gasto'}</button>
       </form>
+
+      {/* Cargar varios y la deuda a proveedores, que arma la página. Van DEBAJO del
+          formulario: lo que se usa todos los días va primero y lo ocasional después. */}
+      {children}
+
+      {/* ══ Resumen por categoría, pensado para sacarle una captura ══
+          Sin medio de pago, sin detalle, sin botones adentro del recuadro: lo que se
+          recorta y se pega en un mail tiene que ser solo conceptos y montos. */}
+      <div className="card" style={{ marginBottom: '14px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
+          <p className="card-title" style={{ margin: 0 }}>Resumen por categoría</p>
+          <button type="button" onClick={() => setVerResumen((v) => !v)}
+            style={{ background: 'none', border: '1px solid #e5e7eb', borderRadius: '5px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer', color: '#6b7280' }}>
+            {verResumen ? 'Ocultar' : 'Ver para copiar'}
+          </button>
+        </div>
+        {verResumen && (
+          resumenCategorias.filas.length === 0 ? (
+            <p style={{ margin: '10px 0 0', fontSize: '13px', color: '#9ca3af' }}>No hay gastos cargados en este mes.</p>
+          ) : (
+            <>
+              <div style={{ marginTop: '10px', background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px 18px', maxWidth: '460px' }}>
+                <p style={{ margin: '0 0 2px', fontSize: '16px', fontWeight: 800, color: '#111827' }}>
+                  Gastos de {MESES_NOMBRE[mes - 1]} {anio}
+                </p>
+                <p style={{ margin: '0 0 12px', fontSize: '11.5px', color: '#9ca3af' }}>Xavia</p>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                  <tbody>
+                    {resumenCategorias.filas.map((f) => (
+                      <Fragment key={f.cat}>
+                        <tr style={{ borderBottom: f.grandes.length ? 'none' : '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '6px 0', color: '#374151' }}>{f.label}</td>
+                          <td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                            {fmtMoneda(f.monto)}
+                          </td>
+                        </tr>
+                        {/* Los gastos grandes de la categoría, indentados: se leen como
+                            detalle de la línea de arriba, no como categorías nuevas. */}
+                        {f.grandes.map((g, i) => (
+                          <tr key={g.id} style={{ borderBottom: i === f.grandes.length - 1 ? '1px solid #f3f4f6' : 'none' }}>
+                            <td style={{ padding: '1px 0 1px 16px', fontSize: '12px', color: '#9ca3af' }}>
+                              {fmtDiaMes(g.fecha)} · {g.descripcion || 'sin detalle'}
+                            </td>
+                            <td style={{ padding: '1px 0', textAlign: 'right', fontSize: '12px', color: '#9ca3af', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                              {fmtMoneda(g.monto)}
+                            </td>
+                          </tr>
+                        ))}
+                      </Fragment>
+                    ))}
+                    <tr>
+                      <td style={{ padding: '10px 0 0', fontWeight: 800, fontSize: '15px' }}>Total</td>
+                      <td style={{ padding: '10px 0 0', textAlign: 'right', fontWeight: 800, fontSize: '15px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                        {fmtMoneda(resumenCategorias.total)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p style={{ margin: '7px 0 0', fontSize: '10.5px', color: '#9ca3af', lineHeight: 1.5 }}>
+                Recortá el recuadro blanco y pegalo en el mail. Abajo de cada categoría van los
+                gastos de más de {fmtMoneda(UMBRAL_DETALLE)}. No incluye los movimientos entre
+                medios de pago: no son gasto, es plata que pasa de una cuenta a otra.
+              </p>
+            </>
+          )
+        )}
+      </div>
 
       {/* ══ Vista: el mes para cerrar, o todo para buscar ══ */}
       <div style={{ display: 'flex', gap: '6px', marginBottom: '10px', flexWrap: 'wrap' }}>
