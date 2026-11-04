@@ -45,6 +45,9 @@ interface FacturaCliente {
   numero: string; fecha: string; importe: number;
   yaCobrada: boolean;
   cubierta?: boolean;
+  // El cobro de Xubio al que está imputada, cuando lo está. Permite decir a cuál, que es
+  // lo que sigue a "imputada".
+  imputadaA?: string;
   saldadaManual?: boolean;
   imputadaManual?: boolean;
 }
@@ -166,6 +169,14 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
       setFacturasError(e.message || 'No se pudieron traer las facturas');
     }
     setFacturasLoading(false);
+  }
+
+  // De la factura al cobro: "imputada" sola no dice a cuál, y el id de transacción de
+  // Xubio no se lee. Se muestra la fecha y el importe, que es con lo que uno lo reconoce.
+  function cobroDe(f: FacturaCliente): string {
+    if (!f.imputadaA) return '';
+    const c = cobrosXubio.find((x) => x.transaccionid === f.imputadaA);
+    return c ? `${fmtDia(c.fecha)} ${fmt$(c.importe)}` : '';
   }
 
   // Imputar un cobro de Xubio a facturas concretas. No toca Xubio: guarda de este lado QUÉ
@@ -627,12 +638,12 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
                           {cerrada && (
                             <span
                               title={f.yaCobrada ? 'Ya entró en un cobro registrado desde la app'
-                                : f.imputadaManual ? 'Se imputó a mano a un cobro de Xubio'
+                                : f.imputadaManual ? `Se imputó a mano al cobro ${cobroDe(f) || 'de Xubio'}`
                                 : f.saldadaManual ? 'Se dio por saldada a mano, sin registrar cobro en Xubio'
-                                : 'Los cobros que el cliente tiene en Xubio alcanzan a cubrirla (lo dedujo la app)'}
+                                : 'Los cobros que el cliente tiene en Xubio alcanzan a cubrirla. No es un hecho: lo dedujo la app repartiendo de la más vieja a la más nueva. Abrí "Cobros de este cliente en Xubio" para decir a cuál va de verdad.'}
                               style={{ fontSize: '9.5px', background: '#f3f4f6', color: '#6b7280', padding: '1px 6px', borderRadius: '8px', fontWeight: 700, whiteSpace: 'nowrap' }}>
                               {f.yaCobrada ? 'ya cobrada'
-                                : f.imputadaManual ? 'imputada'
+                                : f.imputadaManual ? `imputada${cobroDe(f) ? ` · ${cobroDe(f)}` : ''}`
                                 : f.saldadaManual ? 'saldada a mano'
                                 : 'cubierta'}
                             </span>

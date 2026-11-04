@@ -165,6 +165,10 @@ export async function GET(req: NextRequest) {
           yaCobrada: yaCobradas.has(claveComprobante(f.numero)),
           saldadaManual: saldadas.has(claveComprobante(f.numero)),
           imputadaManual: imputadas.porFactura.has(claveComprobante(f.numero)),
+          // A QUÉ cobro se imputó. Sin esto la factura dice "imputada" y no hay forma de
+          // llegar al movimiento: la pregunta que sigue siempre es "¿a cuál?", y había que
+          // buscarlo a ojo entre todos los cobros del cliente.
+          imputadaA: imputadas.porFactura.get(claveComprobante(f.numero))?.transaccionid || '',
         })),
         cobradoTotal,
       ).map((f) => ({ ...f, reclamadaEl: reclamadas.get(f.numero) || '' })),
