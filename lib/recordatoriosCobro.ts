@@ -1,5 +1,7 @@
 import { asegurarHoja, asegurarColumna, readSheet, appendRowObj, appendRowsObj } from './sheets';
-import { getComprobantes, getCobranzas, importeCobranza } from './xubio';
+// Solo los comprobantes: las facturas se emiten en Xubio y de ahí salen. Las cobranzas ya
+// no se leen — lo que decide si una factura está cobrada es lo que registramos nosotros.
+import { getComprobantes } from './xubio';
 import { fechaArgentinaHoy } from './ocupacion';
 import type { ClienteVenta } from './types';
 import { leerSaldadas, numerosSaldados } from './facturasSaldadas';
@@ -185,9 +187,18 @@ export function nombreClienteComprobante(c: any): string {
   return String(typeof cl === 'string' ? cl : (cl.nombre || cl.name || '')).trim();
 }
 
-// Saldo por cliente (normalizado) = facturado − cobrado en la ventana. Positivo = debe.
+// Saldo por cliente (normalizado) = facturado − lo que NOSOTROS dimos por cobrado.
+//
+// Antes restaba las cobranzas de Xubio. Dejó de hacerlo por la misma decisión que apagó el
+// reparto automático (ver lib/facturasCliente.ts): lo que decide si una factura está
+// cobrada es lo que registramos, no lo que se pueda deducir de la cuenta corriente de allá.
+//
+// La forma de restar cambia con eso. Una cobranza era un importe suelto que se restaba del
+// saldo; lo nuestro son FACTURAS cerradas, así que no se restan: se saltean, igual que las
+// saldadas a mano. Es más preciso, porque un cobro a cuenta de Xubio podía bajar el saldo
+// de un cliente sin corresponder a ninguna factura en particular.
 export function calcularSaldos(
-  comprobantes: any[], cobranzas: any[], saldadas?: Set<string>,
+  comprobantes: any[], cerradas?: Set<string>,
   // Facturas corregidas después de emitidas: la guarda de saldo tiene que mirar lo que hay
   // que cobrar, no lo que dice el comprobante. Si no, un cliente al que se le descontó
   // mercadería seguiría figurando en rojo por la diferencia y se le escribiría igual.
@@ -197,20 +208,15 @@ export function calcularSaldos(
   for (const c of comprobantes) {
     const k = norm(nombreClienteComprobante(c));
     if (!k) continue;
-    // Las que se dieron por saldadas a mano no suman deuda: si no, la guarda de saldo
-    // seguiría viendo al cliente en rojo por una factura que ya se decidió que está, y le
-    // seguiría escribiendo igual.
-    if (saldadas?.has(claveComprobante(c?.numeroDocumento))) continue;
+    // Lo que ya está cerrado —cobrado desde la app, imputado a mano o dado por saldado— no
+    // suma deuda: si no, la guarda de saldo seguiría viendo al cliente en rojo por una
+    // factura que ya se decidió que está, y le seguiría escribiendo igual.
+    if (cerradas?.has(claveComprobante(c?.numeroDocumento))) continue;
     // Las notas de crédito (tipo 3) restan: si no, un cliente al que se le anuló una
     // factura figuraría debiendo algo que ya no debe.
     const signo = Number(c?.tipo) === 3 ? -1 : 1;
     const aj = Number(c?.tipo) === 1 ? ajustes?.get(claveComprobante(c?.numeroDocumento)) : undefined;
     saldo.set(k, (saldo.get(k) || 0) + signo * (aj ? aj.importeApp : (Number(c?.importetotal) || 0)));
-  }
-  for (const cob of cobranzas) {
-    const k = norm(nombreClienteComprobante(cob));
-    if (!k) continue;
-    saldo.set(k, (saldo.get(k) || 0) - importeCobranza(cob));
   }
   return saldo;
 }
@@ -590,9 +596,8 @@ export async function correrRecordatoriosCobro(
     // y calcular el saldo de cada cliente. Va hasta MAX_DIAS_ATRAS porque el mail ahora
     // lista todo lo impago, no solo lo que entraba en una ventana de antigüedad.
     const desde = sumarDias(hoy, -MAX_DIAS_ATRAS);
-    const [comprobantes, cobranzas, saldadasFilas, cobrosApp, edicionesCobranzas, bandeja] = await Promise.all([
+    const [comprobantes, saldadasFilas, cobrosApp, edicionesCobranzas, bandeja] = await Promise.all([
       getComprobantes(desde, hoy),
-      getCobranzas(desde, hoy).catch(() => []),
       leerSaldadas(),
       readSheet<{ estado: string; comprobantes: string }>(HOJA_COBROS).catch(() => []),
       leerEdiciones(),
@@ -624,7 +629,11 @@ export async function correrRecordatoriosCobro(
     // los DIAS_GRACIA_COMPROMISO, así que esto no puede tapar una factura para siempre.
     const { cubiertas } = comprometidasDeBandeja(bandeja, hoy, claveComprobante);
     const ajustes = ajustesPorFactura(await leerAjustes());
-    const saldos = calcularSaldos(comprobantes, cobranzas, saldadas, ajustes);
+    // Cerradas = todo lo que NOSOTROS decidimos: cobrado desde la app, imputado a mano o
+    // dado por saldado. Es el mismo conjunto que decide a quién no se le reclama, así que
+    // la guarda de saldo y el filtro de facturas no pueden contradecirse.
+    const cerradas = new Set<string>([...saldadas, ...cobradas]);
+    const saldos = calcularSaldos(comprobantes, cerradas, ajustes);
     // Insistir solo tiene sentido en el envío puntual: en la corrida completa reclamaría
     // de nuevo todo a todo el mundo.
     const { envios, omitidos, yaReclamadas, comprometidas } = calcularEnvios(hoy, activos, comprobantes, previos, saldos, {
