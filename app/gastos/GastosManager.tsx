@@ -140,6 +140,21 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
     } finally { setGuardando(false); }
   }
 
+  // Deja el formulario armado para pagar el resumen de la tarjeta. No guarda: el monto
+  // sale del resumen que manda el banco, que la app no lee, así que lo pone una persona.
+  function prepararPagoTarjeta() {
+    setCategoria('movimiento_interno');
+    setMedioDestino('VISA');
+    setDescripcion(`Pago resumen VISA`);
+    setMonto(0);
+    setFecha(hoyISO());
+    setCuotas(1); setPendiente(false); setIdArticulo(''); setCantidad('');
+    setLeido(null); setCargado(null);
+    setOkMsg(consumoTarjetaMesPasado > 0
+      ? `Con la tarjeta se consumieron ${fmtMoneda(consumoTarjetaMesPasado)} el mes pasado. El débito del resumen debería andar por ahí — poné el importe real que te debitaron.`
+      : 'Poné el importe que te debitaron y de qué cuenta salió.');
+  }
+
   async function interpretar() {
     setInterpretando(true); setError(null); setLeido(null);
     try {
@@ -393,6 +408,19 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
     }
   }
 
+  // Lo que se consumió con la tarjeta el mes pasado: la referencia de cuánto debería
+  // rondar el débito de este mes. La app no lee el resumen del banco, así que no puede
+  // afirmar el monto — solo decir "buscá algo parecido a esto".
+  const consumoTarjetaMesPasado = (() => {
+    let m = mes - 1, a = anio;
+    if (m === 0) { m = 12; a--; }
+    const pref = `${a}-${String(m).padStart(2, '0')}`;
+    return gastos
+      .filter((g) => String(g.medio_pago) === 'VISA' && g.categoria !== 'movimiento_interno'
+        && String(g.fecha || '').startsWith(pref))
+      .reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
+  })();
+
   const MESES_NOMBRE = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
   return (
@@ -400,7 +428,20 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
 
       {/* ══ Alta de gasto ══ */}
       <form onSubmit={agregar} className="card" style={{ marginBottom: '14px' }}>
-        <p className="card-title">Nuevo gasto</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
+          <p className="card-title" style={{ margin: 0 }}>Nuevo gasto</p>
+          {/* ── Pagar el resumen de la tarjeta ──────────────────────────────────────────
+              Pagar la VISA no es un gasto: los consumos YA se cargaron uno por uno cuando
+              se hicieron. Lo que pasa al pagar el resumen es que la plata se mueve de una
+              cuenta a la tarjeta, y por eso va como movimiento interno — cargarlo como
+              gasto contaría el mes entero de consumos por segunda vez.
+              El botón existe porque esa distinción es exactamente la que uno no se acuerda
+              una vez por mes, y equivocarse duplica el resultado del mes. */}
+          <button type="button" onClick={prepararPagoTarjeta}
+            style={{ fontSize: '11.5px', padding: '4px 11px', background: 'white', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer', color: '#374151', fontWeight: 600 }}>
+            💳 Pago de tarjeta
+          </button>
+        </div>
 
         {/* ── Escribirlo en vez de completarlo ──────────────────────────────────────────
             Todo lo que el formulario pide ya está en la frase con que uno se lo contaría a
