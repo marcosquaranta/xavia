@@ -76,6 +76,15 @@ export default function ResumenTarjeta({ categoriasPrevias = [], yaCargados = []
     };
   }, [yaCargados]);
 
+  // Un renglón vacío al final, listo para escribirle encima. Va tildado: se agrega a
+  // propósito, así que el valor por defecto es que se cargue.
+  function agregarRenglon() {
+    setFilas((p) => [...p, {
+      fecha: fechaDefecto, descripcion: '', monto: 0, categoria: 'gastos_generales',
+      esTotal: false, esIngreso: false, usar: true, repetido: null,
+    } as any]);
+  }
+
   function analizar() {
     const anio = Number(fechaDefecto.slice(0, 4)) || new Date().getFullYear();
     const lineas = parsearResumen(texto, anio, (d) => previas.get(d.trim().toUpperCase()) || null);
@@ -91,6 +100,17 @@ export default function ResumenTarjeta({ categoriasPrevias = [], yaCargados = []
 
   async function cargar() {
     if (!aCargar.length) return;
+    // Un renglón agregado a mano arranca vacío, así que puede llegar hasta acá sin monto o
+    // sin descripción. Se frena nombrando CUÁL está mal: "faltan datos" obliga a buscarlo
+    // en una tabla de treinta renglones. Y se frena en vez de descartarlo solo, porque el
+    // renglón lo agregó alguien a propósito.
+    const incompleto = aCargar.findIndex((f) => !(Number(f.monto) > 0) || !String(f.descripcion || '').trim());
+    if (incompleto >= 0) {
+      const f = aCargar[incompleto];
+      setMsg({ ok: false, texto: `Hay un renglón tildado sin ${!String(f.descripcion || '').trim() ? 'descripción' : 'importe'}`
+        + `${String(f.descripcion || '').trim() ? ` ("${f.descripcion}")` : ''}. Completalo o destildalo.` });
+      return;
+    }
     setGuardando(true); setMsg(null);
     try {
       const r = await fetch('/api/gastos/masivo', {
@@ -160,9 +180,29 @@ export default function ResumenTarjeta({ categoriasPrevias = [], yaCargados = []
         style={{ width: '100%', fontSize: '12.5px', fontFamily: 'ui-monospace, monospace', padding: '8px', border: '1px solid #d1d5db', borderRadius: '6px' }}
       />
       <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <button type="button" className="btn secondary" style={{ fontSize: '12.5px' }} onClick={analizar} disabled={!texto.trim() || guardando}>
-          Analizar
+        {/* Volver a analizar PISA la tabla de abajo, incluidas las correcciones hechas a
+            mano. Mientras no haya nada abajo eso no importa; una vez que hay renglones
+            tocados, perderlos sin avisar es perder trabajo que no se ve que se perdió. */}
+        <button type="button" className="btn secondary" style={{ fontSize: '12.5px' }}
+          onClick={() => {
+            if (filas.length && !window.confirm('Se vuelve a leer el texto de arriba y se pierden las correcciones hechas en la tabla. ¿Seguimos?')) return;
+            analizar();
+          }}
+          disabled={!texto.trim() || guardando}>
+          {filas.length ? 'Volver a analizar' : 'Analizar'}
         </button>
+        {/* Empezar de nuevo sin tener que cargar lo que ya está en pantalla. Antes la
+            única forma de salir de una tanda equivocada era cargarla o cerrar la tarjeta. */}
+        {(filas.length > 0 || texto.trim()) && (
+          <button type="button" style={{ fontSize: '12.5px', padding: '5px 12px', background: 'none', border: '1px solid #e5e7eb', borderRadius: '5px', cursor: 'pointer', color: '#6b7280' }}
+            onClick={() => {
+              if (filas.length && !window.confirm('Se borra el texto y la tabla, sin cargar nada. ¿Seguimos?')) return;
+              setTexto(''); setFilas([]); setMsg(null);
+            }}
+            disabled={guardando}>
+            Limpiar
+          </button>
+        )}
         {filas.length > 0 && (
           <span style={{ fontSize: '12px', color: '#6b7280' }}>
             {filas.length} renglones · {aCargar.length} para cargar · {fmt$(total)}
@@ -228,6 +268,16 @@ export default function ResumenTarjeta({ categoriasPrevias = [], yaCargados = []
             </table>
           </div>
 
+          {/* Un renglón a mano. El resumen del banco casi nunca trae TODO: falta el gasto
+              que se pagó en efectivo ese mismo día, o uno que el parser no supo leer y se
+              borró. Sin esto hay que cargar la tanda y después ir al formulario de arriba
+              a agregar el que faltaba, que es el camino por el que se olvida. */}
+          <button type="button" onClick={agregarRenglon} disabled={guardando}
+            style={{ fontSize: '12px', marginTop: '8px', padding: '4px 11px', background: 'none', border: '1px dashed #d1d5db', borderRadius: '5px', cursor: 'pointer', color: '#6b7280' }}>
+            + Agregar un renglón
+          </button>
+
+          <br />
           <button type="button" className="btn" style={{ fontSize: '13px', marginTop: '10px' }}
             onClick={cargar} disabled={guardando || !aCargar.length}>
             {guardando ? 'Cargando…' : `Cargar ${aCargar.length} gastos por ${fmt$(total)}`}
