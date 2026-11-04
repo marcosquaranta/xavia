@@ -83,7 +83,9 @@ export function construirHtmlCierre(act: MesEERR, ant: MesEERR): string {
   const margenAnt = ant.eerr.ventas.total > 0 ? Math.round((ant.eerr.resultado / ant.eerr.ventas.total) * 1000) / 10 : null;
 
   const avisos = [
-    ...e.avisos,
+    // En un mail no hay a dónde hacer click que sirva igual, así que va el texto. El link
+    // vive en la pantalla, que es donde se arregla.
+    ...e.avisos.map((a) => a.texto),
     // Un mes sin previsiones confirmadas no está cerrado, y en un informe que se manda por
     // mail eso no se puede dejar implícito: el resultado se lee como definitivo.
     ...(act.previsionesConfirmadas ? [] : ['Las previsiones de despidos y SAC no están confirmadas: el resultado no las incluye.']),

@@ -1,6 +1,7 @@
 'use client';
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import type { EERR } from '@/lib/eerr';
+import { agruparGastos } from '@/lib/gastosAgrupados';
 
 // Tabla del EERR con las mismas líneas que el Excel, en el mismo orden y aunque el mes no
 // tenga movimiento — si las líneas aparecen y desaparecen según el mes no se puede comparar
@@ -93,9 +94,11 @@ export interface DetalleLinea {
   esCompra: boolean;
 }
 
-export default function TablaEERR({ act, ant, nombre, nombrePrev, detalle = {}, desglose }: {
+export default function TablaEERR({ act, ant, nombre, nombrePrev, detalle = {}, detallePrev = {}, desglose }: {
   act: EERR; ant: EERR; nombre: string; nombrePrev: string;
   detalle?: Record<string, DetalleLinea>;
+  // Los gastos del mes anterior de cada línea, para comparar concepto contra concepto.
+  detallePrev?: Record<string, DetalleLinea>;
   // Las ventas abiertas por artículo y por cliente. Van plegadas: el EERR es un resumen y
   // dos listas largas arriba de todo lo convierten en otra cosa.
   desglose?: { porArticulo: { label: string; unidades: number; monto: number }[]; porCliente: { label: string; unidades: number; monto: number }[] };
@@ -239,29 +242,55 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev, detalle = {}, 
   function DetalleDe({ label }: { label: string }) {
     if (lineaAbierta !== label) return null;
     const det = detalle[label];
-    if (!det || !det.items.length) return null;
+    const prev = detallePrev[label];
+    if (!det || (!det.items.length && !prev?.items.length)) return null;
     const suma = det.items.reduce((a, g) => a + g.monto, 0);
+    // ── Agrupado por concepto y comparado con el mes anterior ────────────────────────
+    //
+    // La lista cruda de movimientos servía para auditar, no para la pregunta que uno trae
+    // al abrir una línea: "¿por qué subió?". Agrupado y ordenado por cuánto se movió, lo
+    // que explica el cambio queda arriba de todo.
+    const grupos = agruparGastos(det.items, prev?.items || []);
     return (
       <tr>
         <td colSpan={8} style={{ padding: '0 10px 10px 30px', background: '#fafaf9' }}>
           <p style={{ margin: '0 0 5px', fontSize: '11px', color: '#6b7280' }}>
             {det.esCompra
               ? `Compras del mes de estos artículos — ${$(suma)}. La línea de arriba es el CONSUMO (había + compró − quedó), así que no tiene por qué dar lo mismo.`
-              : `${det.items.length} movimiento(s) · ${$(suma)}`}
+              : `${det.items.length} movimiento(s) en ${grupos.length} concepto(s) · ${$(suma)} · ordenados por cuánto se movieron contra ${nombrePrev}`}
           </p>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
             <tbody>
-              {det.items.map((g) => (
-                <tr key={g.id_gasto} style={{ borderTop: '1px solid #f3f4f6' }}>
-                  <td style={{ padding: '3px 8px 3px 0', color: '#6b7280', whiteSpace: 'nowrap', width: '70px' }}>
-                    {g.fecha.slice(8, 10)}/{g.fecha.slice(5, 7)}
-                  </td>
-                  <td style={{ padding: '3px 8px 3px 0' }}>{g.descripcion || <span style={{ color: '#d1d5db' }}>sin detalle</span>}</td>
-                  <td style={{ padding: '3px 8px 3px 0', color: '#9ca3af', whiteSpace: 'nowrap' }}>{g.medio_pago}</td>
-                  <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                    {$(g.monto)}
-                  </td>
-                </tr>
+              {grupos.map((gr, i) => (
+                <Fragment key={`${gr.label}-${i}`}>
+                  <tr style={{ borderTop: '1px solid #e7e5e4' }}>
+                    <td style={{ padding: '4px 8px 4px 0', fontWeight: 600 }}>
+                      {gr.label}
+                      {gr.items.length > 1 && <span style={{ color: '#9ca3af', fontWeight: 400 }}> ·{gr.items.length}</span>}
+                      {gr.esNuevo && <span style={{ color: '#1d4ed8', fontWeight: 600, fontSize: '10px' }}> NUEVO</span>}
+                      {gr.monto === 0 && <span style={{ color: '#9ca3af', fontWeight: 400, fontSize: '10px' }}> — no se repitió</span>}
+                    </td>
+                    <td style={{ padding: '4px 8px 4px 0', textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                      {$(gr.monto)}
+                    </td>
+                    <td style={{ padding: '4px 8px 4px 0', textAlign: 'right', color: '#9ca3af', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                      {gr.montoPrev > 0 ? $(gr.montoPrev) : '—'}
+                    </td>
+                    <td style={{ padding: '4px 0', textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap',
+                      color: gr.dif === null ? '#1d4ed8' : gr.dif > 0 ? '#dc2626' : gr.dif < 0 ? '#059669' : '#d1d5db' }}>
+                      {gr.dif === null ? 'nuevo' : gr.dif === 0 ? '=' : `${gr.dif > 0 ? '↑' : '↓'} ${$(Math.abs(gr.dif))}`}
+                    </td>
+                  </tr>
+                  {/* Los movimientos que componen el concepto. Van en chico y debajo: el
+                      detalle sigue estando para auditar, pero ya no es lo primero. */}
+                  {gr.items.length > 1 && gr.items.map((g) => (
+                    <tr key={g.id_gasto}>
+                      <td colSpan={4} style={{ padding: '1px 0 1px 14px', fontSize: '10.5px', color: '#9ca3af' }}>
+                        {g.fecha.slice(8, 10)}/{g.fecha.slice(5, 7)} · {g.descripcion || 'sin detalle'} · {g.medio_pago} · {$(g.monto)}
+                      </td>
+                    </tr>
+                  ))}
+                </Fragment>
               ))}
             </tbody>
           </table>

@@ -106,6 +106,16 @@ export interface LineaEERR {
   compras?: number;
   variacionStock?: number;  // positivo = quedó más stock que al empezar
 }
+export interface Aviso {
+  texto: string;
+  // A dónde ir a resolverlo. Opcional: hay avisos —un gasto con ceros de más— que no
+  // tienen una pantalla única, y un link que lleva a cualquier lado es peor que ninguno.
+  href?: string;
+  // Qué decir en el botón. Un verbo, no un destino: "Aplicar a stock" dice qué va a pasar,
+  // "Ir a Stocks" obliga a adivinarlo.
+  accion?: string;
+}
+
 export interface LineaVenta { label: string; unidades: number; monto: number }
 
 export interface EERR {
@@ -118,7 +128,12 @@ export interface EERR {
   resultado: number;
   resultadoSinInversion: number;
   masaSalarial: number;        // base de las previsiones de despidos y SAC
-  avisos: string[];            // datos faltantes que hacen que el resultado no cierre
+  // ── Datos faltantes que hacen que el resultado no cierre ──────────────────────────
+  //
+  // Cada aviso lleva A DÓNDE SE ARREGLA. Decir "hay una compra sin aplicar a Stocks" y
+  // dejar que el otro busque dónde es media ayuda: el aviso sabe exactamente qué pantalla
+  // lo resuelve, y esconderlo solo agrega una búsqueda.
+  avisos: Aviso[];
 }
 
 export interface DatosEERR {
@@ -167,7 +182,7 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
   const totalVentas = porCultivo.reduce((a, c) => a + c.monto, 0);
 
   // ── Costo variable de insumos: consumo valorizado, por categoría de artículo ──
-  const avisos: string[] = [];
+  const avisos: Aviso[] = [];
   const activos = d.articulos.filter((a) => a.activo === 'SI');
   const consumoPorCat = new Map<string, number>();
   const comprasPorCat = new Map<string, number>();
@@ -252,16 +267,30 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
   const insumosSinAplicar = gastosMes.filter((g) => CATS_POR_STOCK.includes(g.categoria) && g.aplicado_stock !== 'SI');
   if (insumosSinAplicar.length) {
     const monto = insumosSinAplicar.reduce((a, g) => a + num(g.monto), 0);
-    avisos.push(`${insumosSinAplicar.length} compra(s) de insumos por $${Math.round(monto).toLocaleString('es-AR')} sin aplicar a Stocks: esa compra no está en el costo de ningún lado.`);
+    avisos.push({
+      texto: `${insumosSinAplicar.length} compra(s) de insumos por $${Math.round(monto).toLocaleString('es-AR')} sin aplicar a Stocks: esa compra no está en el costo de ningún lado.`,
+      href: '/stocks', accion: 'Aplicar a stock',
+    });
   }
   // Una línea de costo mayor que las ventas del mes no puede ser real: significaría que cada
   // peso vendido costó más de un peso solo en ese renglón. Casi siempre es un gasto con ceros
   // de más, y hasta que alguien lo nota el resultado del mes está mal.
   for (const l of lineasImposibles([...lineasVariable, ...lineasFijas], totalVentas)) {
-    avisos.push(`"${l.label}" da $${Math.round(l.monto).toLocaleString('es-AR')}, más que todas las ventas del mes. Revisá si hay un gasto cargado con ceros de más.`);
+    // Sin link: el gasto con ceros de más puede estar en cualquier categoría, y mandar a
+    // la lista entera de Gastos no es más útil que no mandar a ningún lado. El renglón se
+    // encuentra abriendo esa línea del EERR, que está acá mismo.
+    avisos.push({ texto: `"${l.label}" da $${Math.round(l.monto).toLocaleString('es-AR')}, más que todas las ventas del mes. Revisá si hay un gasto cargado con ceros de más.` });
   }
-  if (sinStockFinal) avisos.push(`${sinStockFinal} artículo(s) con movimiento pero sin stock final cargado: su consumo no se puede calcular y falta en el costo variable.`);
-  if (sinPrecio) avisos.push(`${sinPrecio} artículo(s) consumidos sin precio de compra conocido: su consumo no se puede valorizar.`);
+  if (sinStockFinal) avisos.push({
+    texto: `${sinStockFinal} artículo(s) con movimiento pero sin stock final cargado: su consumo no se puede calcular y falta en el costo variable.`,
+    href: '/stocks', accion: 'Cargar stock final',
+  });
+  if (sinPrecio) avisos.push({
+    texto: `${sinPrecio} artículo(s) consumidos sin precio de compra conocido: su consumo no se puede valorizar.`,
+    // El precio sale de una compra: se carga el gasto de ese insumo con artículo y
+    // cantidad, y el precio queda. Por eso va a Gastos y no a Artículos.
+    href: '/gastos', accion: 'Cargar una compra',
+  });
 
   // Igual que en el Excel: ventas menos los dos bloques de costo, sin sumar nada aparte.
   // Verificado contra agosto — 22.681.957 − 5.208.704 − 18.507.309 = −1.034.056, exacto.

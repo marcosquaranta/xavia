@@ -315,7 +315,18 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
           <div className="alert-box" style={{ marginBottom: '12px', background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', fontSize: '12.5px' }}>
             <p style={{ margin: '0 0 4px', fontWeight: 700 }}>Datos que faltan y hacen que el resultado no cierre</p>
             <ul style={{ margin: 0, paddingLeft: '18px' }}>
-              {act.avisos.map((a, i) => <li key={i} style={{ marginBottom: '2px' }}>{a}</li>)}
+              {act.avisos.map((a, i) => (
+                <li key={i} style={{ marginBottom: '4px' }}>
+                  {a.texto}
+                  {/* El link va pegado al aviso que resuelve. Un bloque de avisos sin
+                      salida obliga a leerlos, acordarse y después buscar la pantalla. */}
+                  {a.href && (
+                    <Link href={a.href} style={{ marginLeft: '6px', color: '#1d4ed8', fontWeight: 700, textDecoration: 'none', whiteSpace: 'nowrap' }}>
+                      {a.accion || 'Resolver'} →
+                    </Link>
+                  )}
+                </li>
+              ))}
             </ul>
           </div>
         )}
@@ -334,6 +345,14 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
           detalle={Object.fromEntries(
             [...act.costoVariable.lineas, ...act.costosFijos.lineas].map((l) => [
               l.label, gastosDeLinea(gastos, articulos, l.label, anio, mes),
+            ]),
+          )}
+          // Los mismos gastos del mes anterior, para comparar concepto contra concepto
+          // adentro de cada línea. Se calcula acá, del lado del servidor, con los gastos
+          // que ya están leídos: no cuesta una lectura más.
+          detallePrev={Object.fromEntries(
+            [...act.costoVariable.lineas, ...act.costosFijos.lineas].map((l) => [
+              l.label, gastosDeLinea(gastos, articulos, l.label, anioPrev, mesPrev),
             ]),
           )} />
 
