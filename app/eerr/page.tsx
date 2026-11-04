@@ -5,7 +5,7 @@ import { readSheet } from '@/lib/sheets';
 import { calcularEERR, previsionesSugeridas, gastosDeLinea, desgloseVentas } from '@/lib/eerr';
 import type { Articulo, StockMes, Gasto, VentaDia, PrecioVenta, ClienteVenta } from '@/lib/types';
 import Header from '@/components/Header';
-import { leerPrevisiones, previsionDelMes } from '@/lib/previsiones';
+import { leerPrevisiones, previsionDelMes, acumuladoPrevisiones } from '@/lib/previsiones';
 import PrevisionesEditor from './PrevisionesEditor';
 import TablaEERR from './TablaEERR';
 import EnviarInforme from './EnviarInforme';
@@ -110,7 +110,12 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   // Manda lo guardado. La sugerencia solo se usa mientras nadie la confirmó: un mes cerrado
   // no puede cambiar de números porque mañana se corrija un sueldo cargado tarde.
   const previsionesDelMes = guardada
-    ? { despidos: Number(guardada.despidos) || 0, sac: Number(guardada.sac) || 0 }
+    ? {
+        despidos: Number(guardada.despidos) || 0, sac: Number(guardada.sac) || 0,
+        // Lo usado se resta: es lo que evita contar el aguinaldo dos veces el mes que se paga.
+        usadoDespidos: Number((guardada as any).usado_despidos) || 0,
+        usadoSac: Number((guardada as any).usado_sac) || 0,
+      }
     : null;
   const act = calcularEERR({ ...datos, previsiones: previsionesDelMes }, anio, mes);
 
@@ -118,7 +123,11 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
   const ant = calcularEERR({
     ...datos,
     previsiones: guardadaPrev
-      ? { despidos: Number(guardadaPrev.despidos) || 0, sac: Number(guardadaPrev.sac) || 0 }
+      ? {
+          despidos: Number(guardadaPrev.despidos) || 0, sac: Number(guardadaPrev.sac) || 0,
+          usadoDespidos: Number((guardadaPrev as any).usado_despidos) || 0,
+          usadoSac: Number((guardadaPrev as any).usado_sac) || 0,
+        }
       : null,
   }, anioPrev, mesPrev);
 
@@ -341,11 +350,14 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
           </p>
           <PrevisionesEditor
             anio={anio} mes={mes} masaSalarial={act.masaSalarial} sugeridas={prev}
+            acumulado={acumuladoPrevisiones(previsiones, anio, mes)}
             guardadas={guardada ? {
               despidos: Number(guardada.despidos) || 0,
               sac: Number(guardada.sac) || 0,
               alquiler: Number(guardada.alquiler) || 0,
               epe: Number(guardada.epe) || 0,
+              usadoDespidos: Number((guardada as any).usado_despidos) || 0,
+              usadoSac: Number((guardada as any).usado_sac) || 0,
               notas: String(guardada.notas || ''),
               fecha: String(guardada.fecha_carga || ''),
             } : null}

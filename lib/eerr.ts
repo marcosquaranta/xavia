@@ -131,7 +131,7 @@ export interface DatosEERR {
   //
   // Solo despidos y SAC: alquiler y EPE también se cargan como previsión, pero esos SÍ se
   // registran como gasto cuando se pagan, así que sumarlos acá los contaría dos veces.
-  previsiones?: { despidos: number; sac: number } | null;
+  previsiones?: { despidos: number; sac: number; usadoDespidos?: number; usadoSac?: number } | null;
 
   ventas: VentaDia[];
   precios: PrecioVenta[];
@@ -225,8 +225,18 @@ export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
   //
   // Ojo con la masa salarial: sale de los GASTOS de sueldos, no de esta línea. Si saliera de
   // acá, las previsiones se calcularían sobre sí mismas y creciendo mes a mes.
-  const montoPrevisiones = Math.round((d.previsiones?.despidos || 0) + (d.previsiones?.sac || 0));
-  if (montoPrevisiones > 0) {
+  // Lo previsto este mes MENOS lo que se usó de la reserva acumulada. Restar lo usado es
+  // lo que evita contar el costo laboral dos veces: el aguinaldo que se paga en junio ya se
+  // fue cargando mes a mes, así que en junio solo tiene que pesar lo devengado en junio.
+  //
+  // Puede quedar negativo —si se usa más de lo que el mes devenga, que es lo normal al
+  // pagar un aguinaldo— y eso está bien: ese número negativo es justamente lo que cancela
+  // el gasto de sueldos del pago, que ya entró por su propia categoría.
+  const montoPrevisiones = Math.round(
+    (d.previsiones?.despidos || 0) + (d.previsiones?.sac || 0)
+    - (d.previsiones?.usadoDespidos || 0) - (d.previsiones?.usadoSac || 0),
+  );
+  if (montoPrevisiones !== 0) {
     const sueldos = lineasFijas.find((l) => l.label === 'Sueldos equipo');
     if (sueldos) sueldos.monto += montoPrevisiones;
     else lineasFijas.push({ label: 'Sueldos equipo', monto: montoPrevisiones, fuente: 'gastos' as const });

@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { anio, mes, despidos, sac, alquiler, epe, notas } = body;
+    const { anio, mes, despidos, sac, alquiler, epe, usadoDespidos, usadoSac, notas } = body;
     const a = Number(anio), m = Number(mes);
     if (!a || !m || m < 1 || m > 12) return NextResponse.json({ error: 'mes_invalido' }, { status: 400 });
 
@@ -25,7 +25,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'monto_invalido' }, { status: 400 });
     }
 
-    await guardarPrevision({ anio: a, mes: m, ...montos, notas: String(notas || ''), usuario: user.email });
+    await guardarPrevision({
+      anio: a, mes: m, ...montos,
+      // Lo que se consumió de la reserva este mes. Nunca negativo: "usar menos que cero"
+      // no significa nada y entraría al EERR sumando un costo que nadie decidió.
+      usadoDespidos: Math.max(0, Number(usadoDespidos) || 0),
+      usadoSac: Math.max(0, Number(usadoSac) || 0),
+      notas: String(notas || ''), usuario: user.email,
+    });
     return NextResponse.json({ ok: true });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'server_error' }, { status: 500 });
