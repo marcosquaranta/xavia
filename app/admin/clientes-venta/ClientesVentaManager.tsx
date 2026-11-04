@@ -2,6 +2,7 @@
 import { PCT_RETENCION_GANANCIAS } from '@/lib/retenciones';
 
 import { useState } from 'react';
+import { clientesDuplicados } from '@/lib/clientesDuplicados';
 import { useRouter } from 'next/navigation';
 import type { ClienteVenta, PrecioVenta } from '@/lib/types';
 
@@ -341,6 +342,13 @@ export default function ClientesVentaManager({ clientes, precios, cambios, extra
   const [error, setError] = useState<string|null>(null);
   const [ok, setOk] = useState(false);
   const [copiado, setCopiado] = useState(false);
+  // ── Fichas que podrían ser el mismo cliente ───────────────────────────────────────
+  //
+  // Dos fichas del mismo cliente no dan error: las dos funcionan y las dos muestran deuda.
+  // Lo que rompen es todo lo que agrupa por cliente —la deuda aparece partida, el
+  // recordatorio sale dos veces o ninguna, el ranking miente—. Números que se leen bien y
+  // están mal, que es la clase de problema que no se encuentra mirando.
+  const duplicados = clientesDuplicados(clientes as any);
   const [nombreXubio, setNombreXubio] = useState('');
   const [alias, setAlias] = useState('');
   const [tipoFactura, setTipoFactura] = useState('A');
@@ -425,6 +433,26 @@ export default function ClientesVentaManager({ clientes, precios, cambios, extra
           {!mostrarForm && <button type="button" className="btn" onClick={() => { reset(); setMostrarForm(true); }}>+ Nuevo cliente</button>}
         </div>
       </div>
+
+      {duplicados.length > 0 && (
+        <div style={{ margin: '0 0 12px', fontSize: '12px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '7px', padding: '9px 11px', lineHeight: 1.6 }}>
+          <strong>{duplicados.length} par(es) de clientes se parecen</strong> — puede que sean el mismo cargado dos veces.
+          <ul style={{ margin: '5px 0 0', paddingLeft: '18px' }}>
+            {duplicados.slice(0, 8).map((d, i) => (
+              <li key={i} style={{ marginBottom: '2px' }}>
+                <strong>{d.a.nombre}</strong>{!d.a.activo && <span style={{ color: '#991b1b' }}> (dado de baja)</span>}
+                {' y '}
+                <strong>{d.b.nombre}</strong>{!d.b.activo && <span style={{ color: '#991b1b' }}> (dado de baja)</span>}
+                <span style={{ color: '#9ca3af' }}> — comparten “{d.comun}”</span>
+              </li>
+            ))}
+          </ul>
+          <p style={{ margin: '6px 0 0', fontSize: '11px' }}>
+            No se unen solos: unir dos clientes no se puede deshacer del lado de las facturas ya emitidas.
+            Si son el mismo, dejá una ficha con la razón social que usa Xubio y pasale el otro nombre como alias.
+          </p>
+        </div>
+      )}
 
       {/* Quiénes quedaron afuera. Un cliente activo sin mail cargado desaparece de la lista
           sin decir nada, y el mail sale creyendo que fue a todos: el que falta no se entera
