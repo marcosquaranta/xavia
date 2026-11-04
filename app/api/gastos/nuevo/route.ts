@@ -79,7 +79,10 @@ export async function POST(req: NextRequest) {
       categoria: categoriaFinal,
       medio_pago,
       medio_pago_destino: categoria === 'movimiento_interno' ? medio_pago_destino : '',
-      empleado: categoria === 'adelanto_sueldo' ? String(empleado).trim() : '',
+      // También en 'sueldos': es lo que permite saber a QUIÉN se le liquidó. Un sueldo sin
+      // empleado sigue siendo válido —se carga así desde Gastos— pero no se puede atribuir,
+      // y la pantalla de personal no puede decir a quién ya se le pagó.
+      empleado: (categoria === 'adelanto_sueldo' || categoria === 'sueldos') ? String(empleado || '').trim() : '',
       usuario: user.email,
       fecha_carga: fechaCarga,
     };

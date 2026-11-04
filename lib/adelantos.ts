@@ -80,3 +80,47 @@ export function adelantosSinAsignar(gastos: Gasto[], desde: string, hasta: strin
     return !!f && f >= desde && f <= hasta;
   });
 }
+
+// ── El sueldo ya liquidado ───────────────────────────────────────────────────────────
+//
+// Un adelanto es parte del sueldo pagada antes; esto es el resto, pagado cuando toca. Vive
+// en Gastos por el mismo motivo: la plata sale de una caja y tiene que figurar ahí, no en
+// un campo de la pantalla de sueldos que la caja no ve.
+//
+// Lo que resuelve tenerlo identificado por empleado: la pantalla puede decir a quién ya se
+// le pagó. Sin eso, el mes que se paga en tres tandas no hay forma de saber quién falta
+// salvo acordarse, y "me parece que a Leo ya le pagué" no es un estado.
+export const CATEGORIA_SUELDO = 'sueldos';
+
+export interface LiquidacionDetalle {
+  id_gasto: string;
+  fecha: string;
+  monto: number;
+  medio_pago: string;
+}
+
+// Un empleado puede tener más de una fila en el mismo período —se pagó en dos veces— así
+// que se devuelven todas y la pantalla suma. Quedarse con la primera escondería la segunda.
+export function liquidacionesPorEmpleado(
+  gastos: Gasto[], desde: string, hasta: string,
+): Record<string, LiquidacionDetalle[]> {
+  const out: Record<string, LiquidacionDetalle[]> = {};
+  for (const g of gastos || []) {
+    if (String(g?.categoria) !== CATEGORIA_SUELDO) continue;
+    // Sin empleado no se puede atribuir: son los sueldos cargados a mano desde Gastos, que
+    // existen y están bien, pero no dicen de quién son. Se ignoran acá en vez de repartirse
+    // por adivinanza.
+    const workno = String((g as any)?.empleado || '').trim();
+    if (!workno) continue;
+    const f = String(g?.fecha || '').split(/[T ]/)[0];
+    if (!f || f < desde || f > hasta) continue;
+    (out[workno] ||= []).push({
+      id_gasto: String(g.id_gasto),
+      fecha: f,
+      monto: Number(g.monto) || 0,
+      medio_pago: String(g.medio_pago || ''),
+    });
+  }
+  for (const k of Object.keys(out)) out[k].sort((a, b) => a.fecha.localeCompare(b.fecha));
+  return out;
+}

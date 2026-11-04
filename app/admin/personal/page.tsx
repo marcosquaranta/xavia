@@ -5,7 +5,7 @@ import { readSheet } from '@/lib/sheets';
 import { leerFichajesCache, diasEnCache } from '@/lib/fichajesCache';
 import { calcularResumenQuincena, rangoQuincena, hoyArg, type AjusteQuincena, type ResumenEmpleado, type PeriodoPago } from '@/lib/personal';
 import type { Empleado, PersonalQuincena, Gasto } from '@/lib/types';
-import { adelantosPorEmpleado, adelantosSinAsignar, adelantosDetallePorEmpleado, type AdelantoDetalle } from '@/lib/adelantos';
+import { adelantosPorEmpleado, adelantosSinAsignar, adelantosDetallePorEmpleado, liquidacionesPorEmpleado, type AdelantoDetalle, type LiquidacionDetalle } from '@/lib/adelantos';
 import { MEDIOS_PAGO } from '@/lib/types';
 import Header from '@/components/Header';
 import PersonalManager from './PersonalManager';
@@ -38,6 +38,8 @@ export default async function PersonalPage({ searchParams }: { searchParams: { a
   // sueldos. Sale de los MISMOS gastos que el total que se descuenta: si se leyera de otro
   // lado, la lista y el número descontado podrían no coincidir.
   let adelantosDetalle: Record<string, AdelantoDetalle[]> = {};
+  // Los sueldos ya pagados del período, por empleado: es lo que deja decir a quién falta.
+  let liquidaciones: Record<string, LiquidacionDetalle[]> = {};
   let hastaISO = '';
   let err: string | null = null;
   const diasSinSincronizar: string[] = [];
@@ -64,6 +66,7 @@ export default async function PersonalPage({ searchParams }: { searchParams: { a
     const adelantos = adelantosPorEmpleado(gastos, desdeDia, hastaDia);
     adelantosHuerfanos = adelantosSinAsignar(gastos, desdeDia, hastaDia);
     adelantosDetalle = adelantosDetallePorEmpleado(gastos, desdeDia, hastaDia);
+    liquidaciones = liquidacionesPorEmpleado(gastos, desdeDia, hastaDia);
     hastaISO = hastaDia;
     resumen = calcularResumenQuincena(registros, empleados, anio, mes, quincena, ajustes, adelantos);
     // Días de la quincena (hasta hoy) que todavía no tienen ningún fichaje guardado — para
@@ -132,7 +135,7 @@ export default async function PersonalPage({ searchParams }: { searchParams: { a
           </div>
         )}
 
-        {!err && <PersonalManager resumen={resumen} empleados={empleados} anio={anio} mes={mes} quincena={quincena} adelantosDetalle={adelantosDetalle} medios={[...MEDIOS_PAGO]} hastaISO={hastaISO} />}
+        {!err && <PersonalManager resumen={resumen} empleados={empleados} anio={anio} mes={mes} quincena={quincena} adelantosDetalle={adelantosDetalle} liquidaciones={liquidaciones} medios={[...MEDIOS_PAGO]} hastaISO={hastaISO} />}
       </div>
     </>
   );

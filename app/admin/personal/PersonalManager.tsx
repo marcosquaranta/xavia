@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 const MESES_TXT = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 import type { Empleado } from '@/lib/types';
 import { horasTeoricasAuto, rangoQuincena, reciboWhatsApp, resumenSueldosWhatsApp, type ResumenEmpleado, type PeriodoPago } from '@/lib/personal';
+import { CATEGORIA_SUELDO, type LiquidacionDetalle } from '@/lib/adelantos';
 import AdelantosEmpleado from '@/components/AdelantosEmpleado';
 import type { AdelantoDetalle } from '@/lib/adelantos';
 
@@ -13,6 +14,9 @@ interface Props {
   // El detalle de los adelantos por empleado, para poder verlos y corregirlos acá mismo.
   // Son los gastos reales: lo que se edita se edita sobre el gasto (ver AdelantosEmpleado).
   adelantosDetalle?: Record<string, AdelantoDetalle[]>;
+  // Lo ya pagado de sueldo en este período, por empleado. Puede haber más de una fila: un
+  // mes se puede pagar en dos tandas.
+  liquidaciones?: Record<string, LiquidacionDetalle[]>;
   medios?: string[];
   // Último día del período: es la fecha con la que se propone un adelanto nuevo, porque
   // cargarlo fuera del período no lo descuenta de este sueldo.
@@ -24,7 +28,7 @@ const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 // Horas de más/de menos van siempre en enteras (ya vienen redondeadas desde calcularResumenQuincena) — a diferencia de fmtN, sin decimales.
 const fmtH = (n: number) => Math.round(n).toLocaleString('es-AR');
 
-export default function PersonalManager({ resumen, empleados, anio, mes, quincena, adelantosDetalle = {}, medios = [], hastaISO = '' }: Props) {
+export default function PersonalManager({ resumen, empleados, anio, mes, quincena, adelantosDetalle = {}, liquidaciones = {}, medios = [], hastaISO = '' }: Props) {
   const router = useRouter();
   const [abierto, setAbierto] = useState<{ workno: string; modo: 'dias' | 'tardanzas' | 'adelantos' } | null>(null);
   // La confirmación de lo último que se guardó, arriba de la lista. Va acá y no adentro
@@ -37,6 +41,62 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
   // Cuál se acaba de copiar, para confirmarlo en el propio botón. Sin esa confirmación no
   // hay forma de saber si el click hizo algo: el portapapeles no se ve.
   const [copiado, setCopiado] = useState<string | null>(null);
+  // Qué empleado está en el panel de liquidar, con qué fecha y de qué cuenta sale.
+  const [liquidando, setLiquidando] = useState<string | null>(null);
+  const [liqFecha, setLiqFecha] = useState(hastaISO || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }));
+  const [liqMedio, setLiqMedio] = useState(medios[0] || '');
+  const [liqMonto, setLiqMonto] = useState('');
+
+  // ── Liquidar el sueldo ────────────────────────────────────────────────────────────
+  //
+  // Registra el pago como gasto de sueldos, con el empleado adentro. Va a Gastos y no a un
+  // campo de esta pantalla porque la plata sale de una caja: si viviera solo acá, el saldo
+  // de la caja no se enteraría de que se pagaron cinco sueldos.
+  //
+  // El monto se propone pero se edita: lo que se paga de verdad puede diferir del calculado
+  // —un redondeo, algo acordado aparte— y forzar el número calculado obligaría a cargar la
+  // diferencia por otro lado, que es como se terminan teniendo dos versiones del sueldo.
+  async function liquidar(r: ResumenEmpleado) {
+    const monto = Math.round(Number(liqMonto));
+    if (!isFinite(monto) || monto <= 0) { setError('El monto tiene que ser mayor a 0.'); return; }
+    if (!liqMedio) { setError('Elegí de qué cuenta sale la plata.'); return; }
+    setGuardando(r.workno); setError(null);
+    try {
+      const res = await fetch('/api/gastos/nuevo', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fecha: liqFecha,
+          descripcion: `Sueldo ${r.nombre} — ${periodoTexto}`,
+          categoria: CATEGORIA_SUELDO,
+          monto, medio_pago: liqMedio, empleado: r.workno,
+        }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.error || 'No se pudo registrar el pago.');
+      setLiquidando(null); setLiqMonto('');
+      setAviso(`✓ Sueldo de ${r.nombre} liquidado: ${fmt$(monto)} desde ${liqMedio}.`);
+      router.refresh();
+    } catch (e: any) { setError(e?.message || 'No se pudo registrar el pago.'); }
+    finally { setGuardando(null); }
+  }
+
+  // Deshacer: borra el gasto. Existe porque liquidar escribe en Gastos y un pago cargado
+  // por error, sin forma de sacarlo desde acá, obliga a ir a buscarlo entre cientos.
+  async function deshacerLiquidacion(l: LiquidacionDetalle, nombre: string) {
+    if (!window.confirm(`Se va a borrar el pago de ${fmt$(l.monto)} a ${nombre} del ${l.fecha}. ¿Confirmás?`)) return;
+    setGuardando(nombre); setError(null);
+    try {
+      const res = await fetch('/api/gastos/borrar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_gasto: l.id_gasto }),
+      });
+      if (!res.ok) throw new Error('No se pudo borrar el pago.');
+      setAviso(`Pago de ${nombre} borrado.`);
+      router.refresh();
+    } catch (e: any) { setError(e?.message || 'No se pudo borrar.'); }
+    finally { setGuardando(null); }
+  }
+
 
   // El período, dicho como lo diría una persona. Es lo que encabeza el recibo.
   const periodoTexto = quincena === 0
@@ -466,7 +526,35 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                       </button>
                       {/* El detalle del sueldo en texto, para mandárselo al empleado. Sale
                           del mismo resumen que la fila, así que no pueden discrepar. */}
-                      <button onClick={() => copiarRecibo(r)} title="Copiar el detalle del sueldo para mandar por WhatsApp"
+                      {/* Liquidar: registra el pago como gasto de sueldos. Si ya se pagó,
+                          el botón deja de ofrecerse y la fila lo dice. */}
+                      {(() => {
+                        const ls = liquidaciones[r.workno] || [];
+                        const pagado = ls.reduce((a, l) => a + l.monto, 0);
+                        if (ls.length) {
+                          return (
+                            <span title={`Pagado el ${ls.map((l) => l.fecha).join(', ')}`}
+                              style={{ fontSize: '11px', padding: '2px 7px', background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#166534', borderRadius: '4px', fontWeight: 700 }}>
+                              ✓ {fmt$(pagado)}
+                              <button type="button" onClick={() => deshacerLiquidacion(ls[ls.length - 1], r.nombre)}
+                                title="Borrar el último pago registrado"
+                                style={{ marginLeft: '5px', background: 'none', border: 'none', color: '#991b1b', cursor: 'pointer', padding: 0, fontSize: '11px' }}>×</button>
+                            </span>
+                          );
+                        }
+                        return (
+                          <button type="button" title="Registrar el pago del sueldo como gasto"
+                            onClick={() => {
+                              setLiquidando(liquidando === r.workno ? null : r.workno);
+                              setLiqMonto(String(Math.round(r.sueldoFinal)));
+                              setError(null);
+                            }}
+                            style={{ fontSize: '11px', background: 'none', border: '1px solid #bfdbfe', color: '#1d4ed8', borderRadius: '4px', padding: '2px 7px', cursor: 'pointer', fontWeight: 600 }}>
+                            {liquidando === r.workno ? 'Cancelar' : 'Liquidar'}
+                          </button>
+                        );
+                      })()}
+                      <button type="button" onClick={() => copiarRecibo(r)} title="Copiar el detalle del sueldo para mandar por WhatsApp"
                         style={{ fontSize: '11px', background: 'none', border: '1px solid #bbf7d0', color: '#166534', borderRadius: '4px', padding: '2px 7px', cursor: 'pointer' }}>
                         {copiado === r.workno ? '✓ copiado' : 'Recibo'}
                       </button>
@@ -493,6 +581,49 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                       </div>
                     </td>
                   </tr>
+                  {/* ── Liquidar el sueldo ──────────────────────────────────────────────
+                      Se registra como gasto de sueldos porque la plata sale de una caja: si
+                      viviera solo en esta pantalla, el saldo de esa caja no se enteraría de
+                      que se pagaron cinco sueldos. El monto viene propuesto pero se edita —
+                      lo que se paga puede diferir de lo calculado, y forzar el número
+                      obligaría a cargar la diferencia por otro lado. */}
+                  {liquidando === r.workno && (
+                    <tr style={{ background: '#f5f8ff' }}>
+                      <td colSpan={13} style={{ padding: '9px 12px' }}>
+                        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '10.5px', color: '#6b7280', fontWeight: 600 }}>Monto a pagar</label>
+                            <input type="number" value={liqMonto} onChange={(e) => setLiqMonto(e.target.value)}
+                              style={{ width: '120px', textAlign: 'right', fontSize: '13px', padding: '4px 7px', border: '1px solid #e5e7eb', borderRadius: '5px' }} />
+                            {Math.abs(Number(liqMonto) - Math.round(r.sueldoFinal)) >= 1 && (
+                              <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#b45309' }}>
+                                Calculado: {fmt$(r.sueldoFinal)}
+                              </p>
+                            )}
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '10.5px', color: '#6b7280', fontWeight: 600 }}>Fecha del pago</label>
+                            <input type="date" value={liqFecha} onChange={(e) => setLiqFecha(e.target.value)}
+                              style={{ fontSize: '13px', padding: '4px 7px', border: '1px solid #e5e7eb', borderRadius: '5px' }} />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '10.5px', color: '#6b7280', fontWeight: 600 }}>De qué cuenta sale</label>
+                            <select value={liqMedio} onChange={(e) => setLiqMedio(e.target.value)}
+                              style={{ fontSize: '13px', padding: '4px 7px', border: '1px solid #e5e7eb', borderRadius: '5px' }}>
+                              {medios.map((m) => <option key={m} value={m}>{m}</option>)}
+                            </select>
+                          </div>
+                          <button type="button" onClick={() => liquidar(r)} disabled={guardando === r.workno}
+                            style={{ fontSize: '12px', padding: '6px 14px', background: '#166534', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 700 }}>
+                            {guardando === r.workno ? 'Registrando…' : 'Registrar el pago'}
+                          </button>
+                          <span style={{ fontSize: '10.5px', color: '#6b7280', maxWidth: '280px', lineHeight: 1.45 }}>
+                            Se carga en Gastos como sueldo de {r.nombre}. Los adelantos ya descontados no se vuelven a cargar.
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                   {editandoEsta && (
                     <tr style={{ background: '#f9fafb' }}>
                       <td colSpan={13} style={{ padding: '8px 12px', fontSize: '12px', color: '#6b7280' }}>
