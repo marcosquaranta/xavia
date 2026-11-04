@@ -302,7 +302,27 @@ export default function CuentasEditor({ anio, mes, saldos, movimientos, detalle 
                   <td style={{ ...celNum, color: s.gastos ? '#b45309' : '#d1d5db' }}>{$(s.gastos)}</td>
                   <td style={{ ...celNum, color: '#6b7280' }}>{$(s.entradas - s.salidas)}</td>
                   <td style={{ ...celNum, fontWeight: 700 }}>{$(s.calculado)}</td>
-                  <td style={{ ...cel, textAlign: 'right' }}>
+                  <td style={{ ...cel, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {/* El "=" copia el teórico al real. Es el caso más común de todos: la
+                        cuenta cerró y escribir el mismo número a mano es puro trabajo, con
+                        la chance de tipear mal justo el número que define si cerró.
+                        Copiarlo NO es lo mismo que dejarlo vacío: vacío significa "nadie lo
+                        miró todavía", y copiado significa "lo miré y da igual". Esa
+                        diferencia es la que hace que el cierre sepa qué falta revisar. */}
+                    <button type="button" title="Poner el mismo importe que el saldo teórico"
+                      disabled={ocupado}
+                      onClick={() => {
+                        const v = String(Math.round(s.calculado));
+                        setSaldoReal((p) => ({ ...p, [s.medio]: v }));
+                        llamar({ accion: 'saldo_guardar', anio, mes, medio_pago: s.medio, saldo_real: Math.round(s.calculado) });
+                      }}
+                      style={{
+                        marginRight: '5px', width: '24px', height: '24px', padding: 0, borderRadius: '4px',
+                        border: '1px solid #e5e7eb', background: 'white', color: '#6b7280',
+                        cursor: ocupado ? 'default' : 'pointer', fontSize: '13px', fontWeight: 700, verticalAlign: 'middle',
+                      }}>
+                      =
+                    </button>
                     <input type="number" value={saldoReal[s.medio] ?? ''} step={1} disabled={ocupado}
                       onChange={(e) => setSaldoReal((p) => ({ ...p, [s.medio]: e.target.value }))}
                       onBlur={() => guardarReal(s)}
