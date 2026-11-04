@@ -53,6 +53,16 @@ interface FacturaCliente {
 // Diagnóstico + carga de cobros. El diagnóstico va primero a propósito: hasta no verlo en
 // verde no se sabe si las credenciales y las cuentas están bien, y el primer cobro no es
 // el momento de descubrirlo.
+interface CobroXubio {
+  transaccionid: string;
+  fecha: string;
+  importe: number;
+  numero: string;
+  // Las facturas que este cobro YA tiene imputadas a mano. Vacío significa que es uno de
+  // los que se reparten solos, que es lo que hay que poder corregir.
+  imputadas: string[];
+}
+
 export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = [], errorCuentas = null, ultimaCuentaPorCliente = {} }: {
   clientes: ClienteOpt[]; cobros: CobroFila[];
   cuentasIniciales?: { id: number; nombre: string }[];
@@ -99,6 +109,15 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
 
   // Facturas del cliente elegido, para tildar cuáles cubre el cobro.
   const [facturas, setFacturas] = useState<FacturaCliente[]>([]);
+  // Los cobros que este cliente tiene en Xubio. Son los que producen las "cubierta": la app
+  // los reparta de la factura más vieja a la más nueva porque Xubio no dice cuál cancela
+  // cada uno. Mostrarlos es lo que convierte una deducción en algo revisable.
+  const [cobrosXubio, setCobrosXubio] = useState<CobroXubio[]>([]);
+  const [verCobros, setVerCobros] = useState(false);
+  // Qué cobro se está imputando a mano, y a qué facturas.
+  const [imputando, setImputando] = useState<string | null>(null);
+  const [imputarA, setImputarA] = useState<string[]>([]);
+  const [imputandoMsg, setImputandoMsg] = useState<string | null>(null);
   const [diasVentana, setDiasVentana] = useState(365);
   const [facturasLoading, setFacturasLoading] = useState(false);
   const [facturasError, setFacturasError] = useState<string | null>(null);
@@ -125,7 +144,7 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
       const costumbre = cuentaDeCostumbre(idControl);
       if (costumbre) setCuentaId(costumbre);
     }
-    setFacturas([]); setElegidas([]); setFacturasError(null);
+    setFacturas([]); setElegidas([]); setFacturasError(null); setCobrosXubio([]);
     setImporte(''); setImporteTocado(false);
     // Cada cliente retiene un porcentaje distinto (o ninguno): dejar el número del cliente
     // anterior es peor que dejarlo vacío.
@@ -137,6 +156,8 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'No se pudieron traer las facturas');
       setFacturas(j.facturas || []);
+      setCobrosXubio(j.cobrosXubio || []);
+      setVerCobros(false); setImputando(null); setImputarA([]); setImputandoMsg(null);
       setDiasVentana(Number(j.dias) || 365);
       // La ventana la decide la API (365 días). La pantalla decía 120 y era mentira: hacía
       // creer que faltaban facturas por estar fuera de rango cuando el rango era otro.
@@ -145,6 +166,29 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
       setFacturasError(e.message || 'No se pudieron traer las facturas');
     }
     setFacturasLoading(false);
+  }
+
+  // Imputar un cobro de Xubio a facturas concretas. No toca Xubio: guarda de este lado QUÉ
+  // cancela ese cobro, que es lo que Xubio no puede decir. A partir de ahí esas facturas
+  // dejan de depender del reparto automático y figuran como "imputada", que es un hecho.
+  async function imputarCobro(c: CobroXubio) {
+    if (!imputarA.length) { setImputandoMsg('Tildá al menos una factura.'); return; }
+    setImputandoMsg('Guardando…');
+    try {
+      const r = await fetch('/api/cobranzas/editar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transaccionid: c.transaccionid, comprobantes: imputarA.join(', ') }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'No se pudo guardar');
+      setImputandoMsg('✓ Imputado. Recargá para ver las facturas actualizadas.');
+      setImputando(null); setImputarA([]);
+      // Se vuelven a pedir las facturas: lo que cambió es justamente cómo quedan marcadas,
+      // y dejar la lista vieja en pantalla haría dudar de si el guardado funcionó.
+      cambiarCliente(cliente);
+    } catch (e: any) {
+      setImputandoMsg(e.message || 'No se pudo guardar');
+    }
   }
 
   // Tildar facturas completa el importe solo (la suma de las elegidas), salvo que ya lo
@@ -399,6 +443,91 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
             <div style={{ marginTop: '7px' }}>
               <CobroEnPartes total={Number(importe) || 0} partes={partes} onChange={setPartes} disabled={loading}
                 nota={Number(retencion) > 0 ? 'La retención va entera en la primera.' : ''} />
+            </div>
+          )}
+
+          {/* ── Los cobros que este cliente tiene en Xubio ──────────────────────────────
+              "CUBIERTA" no sale de un movimiento que se pueda abrir: la app suma lo que el
+              cliente cobró y lo reparte de la factura más vieja a la más nueva, porque
+              Xubio no dice qué factura cancela cada cobranza.
+              Eso dejaba a quien mira sin nada que revisar. Acá están esos cobros, y de cada
+              uno se puede decir QUÉ factura cancela: imputado deja de ser una deducción y
+              pasa a ser un hecho. */}
+          {cliente && cobrosXubio.length > 0 && (
+            <div style={{ marginTop: '12px', border: '1px solid #e5e7eb', borderRadius: '7px', padding: '8px 10px', background: '#fafaf9' }}>
+              <button type="button" onClick={() => setVerCobros((v) => !v)}
+                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: '11.5px', fontWeight: 700, color: '#374151' }}>
+                {verCobros ? '▾' : '▸'} Cobros de este cliente en Xubio ({cobrosXubio.length}) · {fmt$(cobrosXubio.reduce((a, c) => a + c.importe, 0))}
+              </button>
+              <p style={{ margin: '3px 0 0', fontSize: '10.5px', color: '#9ca3af', lineHeight: 1.5 }}>
+                Son los que hacen que arriba diga <strong>CUBIERTA</strong>. Xubio no dice qué factura
+                cancela cada uno, así que la app los reparte de la más vieja a la más nueva. Si el reparto
+                no es el correcto, decile a cuál va.
+              </p>
+              {verCobros && (
+                <div style={{ marginTop: '7px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {cobrosXubio.map((c) => (
+                    <div key={c.transaccionid} style={{ borderTop: '1px solid #f3f4f6', paddingTop: '4px' }}>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap', fontSize: '11.5px' }}>
+                        <span style={{ color: '#6b7280', whiteSpace: 'nowrap' }}>{fmtDia(c.fecha)}</span>
+                        <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmt$(c.importe)}</span>
+                        {c.numero && <span style={{ color: '#9ca3af', fontFamily: 'ui-monospace, monospace', fontSize: '10.5px' }}>{c.numero}</span>}
+                        {c.imputadas.length > 0 ? (
+                          <span style={{ fontSize: '10.5px', color: '#166534' }}>
+                            paga {c.imputadas.join(', ')}
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '10.5px', color: '#b45309' }}>se reparte solo</span>
+                        )}
+                        <button type="button"
+                          onClick={() => {
+                            setImputando(imputando === c.transaccionid ? null : c.transaccionid);
+                            setImputarA(c.imputadas);
+                            setImputandoMsg(null);
+                          }}
+                          style={{ marginLeft: 'auto', fontSize: '10.5px', padding: '2px 8px', background: 'white', border: '1px solid #e5e7eb', borderRadius: '4px', cursor: 'pointer', color: '#1d4ed8', fontWeight: 600 }}>
+                          {imputando === c.transaccionid ? 'Cancelar' : c.imputadas.length ? 'Cambiar' : 'Decir qué paga'}
+                        </button>
+                      </div>
+                      {imputando === c.transaccionid && (
+                        <div style={{ margin: '6px 0 4px', padding: '7px 9px', background: 'white', border: '1px solid #dbe4fb', borderRadius: '6px' }}>
+                          <p style={{ margin: '0 0 5px', fontSize: '10.5px', color: '#6b7280' }}>
+                            Tildá las facturas que cancela este cobro de {fmt$(c.importe)}.
+                          </p>
+                          <div style={{ maxHeight: '150px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            {facturas.map((f) => (
+                              <label key={f.numero} style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '11px', cursor: 'pointer' }}>
+                                <input type="checkbox" checked={imputarA.includes(f.numero)}
+                                  onChange={() => setImputarA((p) => p.includes(f.numero) ? p.filter((x) => x !== f.numero) : [...p, f.numero])} />
+                                <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '10.5px' }}>{f.numero}</span>
+                                <span style={{ color: '#9ca3af' }}>{fmtDia(f.fecha)}</span>
+                                <span style={{ marginLeft: 'auto', fontWeight: 600 }}>{fmt$(f.importe)}</span>
+                              </label>
+                            ))}
+                          </div>
+                          {imputarA.length > 0 && (() => {
+                            const suma = facturas.filter((f) => imputarA.includes(f.numero)).reduce((a, f) => a + f.importe, 0);
+                            const dif = Math.round(suma - c.importe);
+                            return (
+                              <p style={{ margin: '6px 0 0', fontSize: '10.5px', color: Math.abs(dif) < 1 ? '#166534' : '#b45309' }}>
+                                Tildadas: {fmt$(suma)} · cobro: {fmt$(c.importe)}
+                                {/* La diferencia se dice, no se bloquea: un pago parcial o uno
+                                    con retención no cierran exacto y son legítimos. */}
+                                {Math.abs(dif) >= 1 && ` · ${dif > 0 ? 'faltan' : 'sobran'} ${fmt$(Math.abs(dif))} — puede ser un pago parcial o una retención`}
+                              </p>
+                            );
+                          })()}
+                          <button type="button" onClick={() => imputarCobro(c)}
+                            style={{ marginTop: '7px', fontSize: '11px', padding: '4px 11px', background: '#166534', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 700 }}>
+                            Guardar
+                          </button>
+                          {imputandoMsg && <span style={{ marginLeft: '8px', fontSize: '10.5px', color: imputandoMsg.startsWith('✓') ? '#166534' : '#b45309' }}>{imputandoMsg}</span>}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

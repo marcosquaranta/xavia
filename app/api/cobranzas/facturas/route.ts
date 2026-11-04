@@ -128,10 +128,37 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // ── Los cobros que producen las "cubierta" ──────────────────────────────────────
+    //
+    // "Cubierta" no sale de ningún movimiento que se pueda abrir: es una deducción. La app
+    // suma lo que el cliente cobró en Xubio y lo reparte de la factura más vieja a la más
+    // nueva, porque Xubio no dice qué factura cancela cada cobranza.
+    //
+    // Eso deja a quien mira sin nada que revisar: ve "CUBIERTA" y no tiene cómo llegar a la
+    // plata que la cubre. Acá van esos cobros, para poder mirarlos y —lo que importa—
+    // imputarlos a facturas concretas: imputado deja de ser una deducción y pasa a ser un
+    // hecho, y recién entonces se puede discutir.
+    const cobrosXubio = cobranzas
+      .filter((cob: any) => norm(nombreClienteComprobante(cob)) === k)
+      .map((cob: any) => {
+        const tid = String(cob?.transaccionid || '').trim();
+        return {
+          transaccionid: tid,
+          fecha: soloFecha(cob?.fecha),
+          importe: Math.round(importeCobranza(cob)),
+          numero: String(cob?.numeroDocumento || '').trim(),
+          // Las facturas que este cobro ya tiene imputadas. Vacío = este cobro es de los
+          // que se están repartiendo solos, que es lo que produce las "cubierta".
+          imputadas: imputadas.porTransaccion.get(tid) || [],
+        };
+      })
+      .sort((a: any, b: any) => b.fecha.localeCompare(a.fecha));
+
     return NextResponse.json({
       ok: true,
       cliente: cli.nombre_display || cli.nombre_xubio,
       dias,
+      cobrosXubio,
       facturas: cubrirConCobrosDeXubio(
         facturas.map((f) => ({
           ...f,

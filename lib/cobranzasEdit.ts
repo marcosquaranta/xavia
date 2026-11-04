@@ -171,6 +171,10 @@ export async function guardarEdicion(p: {
 export interface ImputacionesManuales {
   porFactura: Map<string, { transaccionid: string }>;
   transaccionesImputadas: Set<string>;
+  // Al revés: qué facturas tiene imputadas cada cobro. Lo necesita la pantalla para poder
+  // mostrar, al lado de un cobro de Xubio, qué está cancelando — que es justo lo que no se
+  // podía ver y obligaba a deducirlo.
+  porTransaccion: Map<string, string[]>;
 }
 
 export function imputacionesManuales(
@@ -178,11 +182,13 @@ export function imputacionesManuales(
 ): ImputacionesManuales {
   const porFactura = new Map<string, { transaccionid: string }>();
   const transaccionesImputadas = new Set<string>();
+  const porTransaccion = new Map<string, string[]>();
   for (const f of filas || []) {
     const tid = String(f?.transaccionid || '').trim();
     const nums = comprobantesDeEdicion(f);
     if (!tid || !nums.length) continue;
     transaccionesImputadas.add(tid);
+    porTransaccion.set(tid, nums.map((n) => String(n).trim()).filter(Boolean));
     for (const n of nums) {
       const k = clave(n);
       // La primera gana: imputar la misma factura a dos cobros distintos es un error de
@@ -190,5 +196,5 @@ export function imputacionesManuales(
       if (k && !porFactura.has(k)) porFactura.set(k, { transaccionid: tid });
     }
   }
-  return { porFactura, transaccionesImputadas };
+  return { porFactura, transaccionesImputadas, porTransaccion };
 }
