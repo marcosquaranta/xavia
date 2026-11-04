@@ -351,8 +351,17 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
     }
   }
 
+  // ── Los dados de baja que todavía deben ─────────────────────────────────────────
+  //
+  // Un cliente inactivo se sacaba de esta lista. Parece razonable —ya no se le vende— pero
+  // la deuda no se da de baja con el cliente: seguía apareciendo en "Facturas impagas por
+  // cliente" marcada "sin recordatorio", y al ir a prendérselo no estaba. Dos pantallas
+  // diciendo cosas distintas sobre el mismo cliente, sin forma de saber cuál tenía razón.
+  //
+  // Entran los que deben algo. Los dados de baja sin deuda no: esos sí terminaron.
+  const debeAlgo = (id: string) => (deudaPorCliente[String(id)]?.cantidad ?? 0) > 0;
   const filas: ClienteFila[] = clientes
-    .filter((c) => String(c.activo || '').toUpperCase() !== 'NO')
+    .filter((c) => String(c.activo || '').toUpperCase() !== 'NO' || debeAlgo(c.id_control))
     .map((c) => ({
       id_control: c.id_control,
       nombre: nombreClienteVisible(c),
@@ -515,15 +524,20 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
             <Link href="/cobranzas" style={{ fontSize: '12px', color: '#2563eb' }}>Ocultar</Link>
           </div>
           <p className="card-sub">
-            Todo lo facturado en los últimos {DIAS_PAGINA} días que no figura cobrado: ni imputado desde la app,
-            ni dado por saldado a mano, ni imputado a un cobro, ni cubierto por los cobros que el cliente tiene en
-            Xubio. Están <strong>todos los clientes</strong>: los que no tienen el recordatorio prendido quedan
-            marcados, porque esa deuda existe igual pero no se reclama sola.
+            Todo lo facturado en los últimos {DIAS_PAGINA} días que <strong>nosotros</strong> no dimos por cobrado:
+            ni imputado desde la app, ni imputado a mano, ni dado por saldado. Los cobros de Xubio ya no cuentan acá.
+            Están <strong>todos los clientes</strong>, incluidos los dados de baja que todavía deben: esa deuda existe
+            igual y no se reclama sola.
           </p>
           <div style={{ marginTop: '10px' }}>
             <ResumenImpagas
               clientes={clientes
-                .map((c) => ({ id_control: String(c.id_control), nombre: nombreClienteVisible(c) }))
+                .map((c) => ({
+                  id_control: String(c.id_control), nombre: nombreClienteVisible(c),
+                  // Dado de baja. Se pasa para que la tabla pueda decir el motivo real por
+                  // el que no se le reclama, que no es el mismo que "tiene el aviso apagado".
+                  inactivo: String(c.activo || '').toUpperCase() === 'NO',
+                }))
                 .sort((a, b) => a.nombre.localeCompare(b.nombre))}
               facturasPorCliente={impagasCliente}
               conRecordatorio={[...conRecordatorio]}

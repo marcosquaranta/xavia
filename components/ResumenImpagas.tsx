@@ -12,7 +12,14 @@ import type { FacturaCliente } from '@/lib/facturasCliente';
 // Importa que sea el MISMO cálculo y no uno parecido: si la pantalla y el mail dieran
 // números distintos, no habría forma de saber cuál está bien, y el mail ya salió.
 
-export interface ClienteImpagas { id_control: string; nombre: string }
+export interface ClienteImpagas {
+  id_control: string;
+  nombre: string;
+  // Dado de baja en Clientes. La deuda no se da de baja con el cliente, así que sigue
+  // apareciendo acá: lo que cambia es el motivo por el que no se le reclama, y con él
+  // dónde hay que ir a resolverlo.
+  inactivo?: boolean;
+}
 
 // Dónde se cortó el reparto de los cobros de Xubio, por cliente. Es la explicación del caso
 // más desconcertante de esta pantalla: si la factura más vieja no entra entera en lo que el
@@ -168,6 +175,7 @@ export default function ResumenImpagas({
           total,
           masVieja: impagas[0]?.fecha || '',
           reclama: prendidos.has(String(c.id_control)),
+          inactivo: !!c.inactivo,
           rev,
           diasRev: rev ? diasDesde(rev.fecha) : null,
         };
@@ -207,7 +215,16 @@ export default function ResumenImpagas({
                   <td style={{ padding: '6px 8px', fontWeight: 600 }}>
                     <span style={{ color: '#9ca3af', fontSize: '10px', marginRight: '5px' }}>{esta ? '▾' : '▸'}</span>
                     {f.nombre}
-                    {!f.reclama && (
+                    {/* El motivo exacto, no "no se reclama" a secas. Un cliente dado de
+                        baja y uno con el aviso apagado se arreglan distinto, y decir
+                        "sin recordatorio" de uno dado de baja mandaba a buscarlo a una
+                        lista donde no estaba. */}
+                    {f.inactivo ? (
+                      <span title="Este cliente está dado de baja. La deuda sigue existiendo y no se reclama sola."
+                        style={{ marginLeft: '6px', fontSize: '9.5px', fontWeight: 700, padding: '1px 5px', borderRadius: '8px', background: '#fee2e2', color: '#991b1b' }}>
+                        dado de baja
+                      </span>
+                    ) : !f.reclama && (
                       <span title="Este cliente no tiene el recordatorio prendido: esta deuda no se reclama sola"
                         style={{ marginLeft: '6px', fontSize: '9.5px', fontWeight: 700, padding: '1px 5px', borderRadius: '8px', background: '#fef3c7', color: '#92400e' }}>
                         sin recordatorio
