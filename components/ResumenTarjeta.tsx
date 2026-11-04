@@ -35,6 +35,16 @@ export default function ResumenTarjeta({ categoriasPrevias = [], yaCargados = []
   const [texto, setTexto] = useState('');
   const [medio, setMedio] = useState<string>('VISA');
   const [fechaDefecto, setFechaDefecto] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }));
+  // ── Una fecha para toda la tanda ───────────────────────────────────────────────────
+  //
+  // Es lo normal en un resumen de tarjeta: los consumos son de meses distintos —"13 Mayo",
+  // "14 Octubre"— pero lo que se está cargando es UN resumen, de una fecha. Respetando la
+  // fecha de cada consumo, una sola tanda desparrama gastos por todo el año y el resultado
+  // de meses ya cerrados se mueve solo.
+  //
+  // Queda destildable porque el resumen del banco es otra cosa: ahí cada movimiento sí pasó
+  // el día que dice, y la fecha propia es el dato bueno.
+  const [fechaParaTodos, setFechaParaTodos] = useState(true);
   const [filas, setFilas] = useState<(LineaResumen & { usar: boolean; repetido?: GastoYaCargado | null })[]>([]);
   const [guardando, setGuardando] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
@@ -88,7 +98,11 @@ export default function ResumenTarjeta({ categoriasPrevias = [], yaCargados = []
   function analizar() {
     const anio = Number(fechaDefecto.slice(0, 4)) || new Date().getFullYear();
     const lineas = parsearResumen(texto, anio, (d) => previas.get(d.trim().toUpperCase()) || null);
-    setFilas(lineas.map((l) => {
+    setFilas(lineas.map((l0) => {
+      // La fecha elegida pisa a la del renglón cuando corresponde. Se hace ACÁ, antes de
+      // buscar repetidos, para que la detección de duplicados compare contra la fecha con
+      // la que el gasto va a quedar guardado y no contra la que traía el texto.
+      const l = fechaParaTodos ? { ...l0, fecha: fechaDefecto } : l0;
       const repetido = yaEstaba(l.fecha, l.monto);
       return { ...l, usar: !l.esTotal && !l.esIngreso && !repetido, repetido };
     }));
@@ -166,8 +180,13 @@ export default function ResumenTarjeta({ categoriasPrevias = [], yaCargados = []
           </select>
         </div>
         <div>
-          <label style={{ fontSize: '11px' }}>Fecha para los que no la traigan</label>
+          <label style={{ fontSize: '11px' }}>{fechaParaTodos ? 'Fecha para todos' : 'Fecha para los que no la traigan'}</label>
           <input type="date" value={fechaDefecto} onChange={(e) => setFechaDefecto(e.target.value)} disabled={guardando} />
+          <label style={{ display: 'block', fontSize: '10.5px', color: '#6b7280', marginTop: '3px', cursor: 'pointer', fontWeight: 400 }}>
+            <input type="checkbox" checked={fechaParaTodos} disabled={guardando}
+              onChange={(e) => setFechaParaTodos(e.target.checked)} style={{ marginRight: '4px' }} />
+            usarla para todos los renglones
+          </label>
         </div>
       </div>
 
