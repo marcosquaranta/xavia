@@ -10,7 +10,20 @@ import { avisoMontoSospechoso } from '@/lib/montoSospechoso';
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const MEDIOS = MEDIOS_PAGO;
 const LABEL_CAT: Record<string, string> = Object.fromEntries(CATEGORIAS_GASTO.map((c) => [c.value, c.label]));
-const ORDEN_CAT: CategoriaGasto[] = CATEGORIAS_GASTO.map((c) => c.value);
+const ORDEN_CAT: CategoriaGasto[] = CATEGORIAS_GASTO.map((c) => c.value).filter((c) => !(c in AGRUPA_EN));
+
+// ── Categorías que se MUESTRAN dentro de otra ────────────────────────────────────────
+//
+// Un adelanto no es un gasto distinto del sueldo: es parte del sueldo de esa persona,
+// pagada antes. Separarlos en dos tarjetas obligaba a sumar a ojo para saber qué costó el
+// equipo este mes —y en octubre los adelantos eran más que los sueldos, así que la tarjeta
+// de "Sueldos" mostraba menos de la mitad de lo real—.
+//
+// Se agrupan para MOSTRAR, no en el dato: la categoría de la fila sigue siendo
+// adelanto_sueldo, que es lo que permite descontarla del sueldo a fin de mes y no contarla
+// dos veces. Lo mismo hace el EERR, donde ya suman dentro de "Sueldos equipo".
+const AGRUPA_EN: Record<string, CategoriaGasto> = { adelanto_sueldo: 'sueldos' };
+const catDeVista = (cat: string): string => AGRUPA_EN[cat] || cat;
 const HOY = new Date();
 const hoyISO = () => HOY.toISOString().split('T')[0];
 const fmtMoneda = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
@@ -222,7 +235,7 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
 
   const porCategoria = useMemo(() => {
     return ORDEN_CAT.map((cat) => ({
-      cat, items: delMes.filter((g) => g.categoria === cat).sort((a, b) => String(a.fecha).localeCompare(String(b.fecha))),
+      cat, items: delMes.filter((g) => catDeVista(g.categoria) === cat).sort((a, b) => String(a.fecha).localeCompare(String(b.fecha))),
     })).filter((g) => g.items.length > 0);
   }, [delMes]);
 
@@ -254,7 +267,7 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
     const map = new Map<string, number>();
     for (const g of delMes) {
       if (g.categoria === 'movimiento_interno') continue;
-      map.set(g.categoria, (map.get(g.categoria) || 0) + (Number(g.monto) || 0));
+      map.set(catDeVista(g.categoria), (map.get(catDeVista(g.categoria)) || 0) + (Number(g.monto) || 0));
     }
     const filas = Array.from(map.entries())
       .map(([cat, monto]) => ({

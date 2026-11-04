@@ -378,11 +378,19 @@ export function asuntoRecordatorio(envio: EnvioRecordatorio): string {
 }
 
 export function cuerpoRecordatorioHtml(envio: EnvioRecordatorio, datosPago: string): string {
-  const filas = envio.facturas.map((f) => `<tr>
+  // Los días que lleva cada factura. Es el dato que convierte un listado en un reclamo:
+  // "A-0002-00917 por $294.206" se lee como un recordatorio, "hace 38 días" se lee como lo
+  // que es. Y el que recibe el mail puede priorizar sin tener que sacar la cuenta.
+  const hoyISO = fechaArgentinaHoy();
+  const filas = envio.facturas.map((f) => {
+    const d = diasEntre(f.fecha, hoyISO);
+    return `<tr>
       <td style="padding:7px 12px;border-bottom:1px solid #eee">${f.numero}</td>
       <td style="padding:7px 12px;border-bottom:1px solid #eee">${fmtFecha(f.fecha)}</td>
+      <td style="padding:7px 12px;border-bottom:1px solid #eee;text-align:right;color:${d >= 30 ? '#b91c1c' : '#6b7280'};font-weight:${d >= 30 ? '700' : '400'}">${d > 0 ? `${d} días` : 'hoy'}</td>
       <td style="padding:7px 12px;border-bottom:1px solid #eee;text-align:right">${fmtMoneda(f.importe)}</td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
   const pago = datosPago.split('\n').filter(Boolean)
     .map((l) => `<p style="margin:0;font-size:13px;color:#111">${l}</p>`).join('');
   return `
@@ -395,11 +403,12 @@ export function cuerpoRecordatorioHtml(envio: EnvioRecordatorio, datosPago: stri
       <thead><tr style="background:#f5f5f5">
         <th style="padding:7px 12px;text-align:left">Comprobante</th>
         <th style="padding:7px 12px;text-align:left">Fecha</th>
+        <th style="padding:7px 12px;text-align:right">Antigüedad</th>
         <th style="padding:7px 12px;text-align:right">Importe</th>
       </tr></thead>
       <tbody>${filas}</tbody>
       <tfoot><tr>
-        <td colspan="2" style="padding:8px 12px;font-weight:700">Total</td>
+        <td colspan="3" style="padding:8px 12px;font-weight:700">Total</td>
         <td style="padding:8px 12px;text-align:right;font-weight:800">${fmtMoneda(envio.total)}</td>
       </tr></tfoot>
     </table>
@@ -424,7 +433,14 @@ export function cuerpoRecordatorioHtml(envio: EnvioRecordatorio, datosPago: stri
 export function cuerpoRecordatorioTexto(envio: EnvioRecordatorio, datosPago: string): string {
   const L: string[] = ['Hola, ¿cómo están?', ''];
   L.push(`Les enviamos el detalle de ${envio.facturas.length === 1 ? 'el comprobante que nos figura pendiente' : 'los comprobantes que nos figuran pendientes'} de pago:`);
-  for (const f of envio.facturas) L.push(`  ${f.numero} · ${fmtFecha(f.fecha)} · ${fmtMoneda(f.importe)}`);
+  // La versión en texto lleva la misma antigüedad que el HTML: es la que ve quien tiene el
+  // correo en texto plano, y una de las dos sin el dato sería otra vez dos versiones del
+  // mismo mail diciendo cosas distintas.
+  const hoyTxt = fechaArgentinaHoy();
+  for (const f of envio.facturas) {
+    const d = diasEntre(f.fecha, hoyTxt);
+    L.push(`  ${f.numero} · ${fmtFecha(f.fecha)} · ${d > 0 ? `${d} días` : 'hoy'} · ${fmtMoneda(f.importe)}`);
+  }
   L.push(`  TOTAL: ${fmtMoneda(envio.total)}`, '');
   if (datosPago.trim()) { L.push('Datos para transferir:'); for (const l of datosPago.split('\n').filter(Boolean)) L.push('  ' + l); L.push(''); }
   L.push('IMPORTANTE: si alguno de estos comprobantes ya está pagado, por favor envíennos el');
