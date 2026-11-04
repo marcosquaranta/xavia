@@ -98,7 +98,10 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
 
   // Los artículos de venta dados de alta desde Admin: sin esto su facturación no entra en
   // el total de ventas del mes.
-  const articulosExtra = (await leerArticulosExtra()).map((a) => ({ key: a.key, unidad: a.unidad }));
+  // El label va además de la clave: el desglose por artículo lo muestra, y sin él un
+  // artículo dado de alta en Admin aparecería como su clave interna o directamente no
+  // aparecería —que es lo que pasaba— aunque su facturación sí esté en el total.
+  const articulosExtra = (await leerArticulosExtra()).map((a) => ({ key: a.key, unidad: a.unidad, label: a.labelLargo || a.label }));
   const datos = { articulos, stocks, gastos, ventas, precios, clientes, articulosExtra };
   // Dos pasadas: la primera para conocer la masa salarial —que es la base de las
   // previsiones— y la segunda ya con las previsiones adentro del resultado. Sin la primera

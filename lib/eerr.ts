@@ -144,7 +144,7 @@ export interface DatosEERR {
   lotes?: Lote[];
   // Los artículos de venta dados de alta desde Admin. Sin esto su facturación no entra en
   // el total de ventas del mes: se emite la factura y el resultado no la ve.
-  articulosExtra?: { key: string; unidad: string }[];
+  articulosExtra?: { key: string; unidad: string; label?: string }[];
 }
 
 export function calcularEERR(d: DatosEERR, anio: number, mes: number): EERR {
@@ -381,6 +381,22 @@ export function desgloseVentas(d: Omit<DatosEERR, 'previsiones'>, anio: number, 
   const hasta = `${anio}-${mm}-${String(new Date(anio, mes, 0).getDate()).padStart(2, '0')}`;
   const clienteMap = new Map(d.clientes.map((c) => [String(c.id_control), c]));
 
+  // ── Los artículos dados de alta en Admin también ────────────────────────────────
+  //
+  // Recorría solo ARTICULOS, la lista del código. Un artículo creado desde Admin —los
+  // microgreens, cualquier alta nueva— no aparecía en este desglose aunque su facturación
+  // sí estuviera en el total de ventas: los porcentajes no sumaban 100% y faltaba plata en
+  // la lista sin que nada lo dijera.
+  //
+  // Es el mismo agujero que tenía el historial de facturación, por el mismo motivo: una
+  // lista fija de artículos adentro de un cálculo, al lado de un total que sí los contaba.
+  const catalogo = [
+    ...ARTICULOS.map((a) => ({ key: a.key, label: a.labelLargo || a.label })),
+    ...(d.articulosExtra || [])
+      .filter((e) => !ARTICULOS.some((a) => a.key === e.key))
+      .map((e) => ({ key: e.key, label: e.label || e.key })),
+  ];
+
   const porArticulo = new Map<string, DesgloseVenta>();
   const porCliente = new Map<string, DesgloseVenta>();
 
@@ -390,12 +406,12 @@ export function desgloseVentas(d: Omit<DatosEERR, 'previsiones'>, anio: number, 
     const cli = clienteMap.get(String(v.id_control));
     const nombreCli = nombreClienteVisible(cli) || String(v.id_control);
 
-    for (const art of ARTICULOS) {
+    for (const art of catalogo) {
       const qty = Number((v as any)[art.key]) || 0;
       if (qty <= 0) continue;
       const monto = qty * precioFinal(d.precios, String(v.id_control), v.sucursal, art.key, cli);
 
-      const a = porArticulo.get(art.label) || { label: art.labelLargo || art.label, unidades: 0, monto: 0 };
+      const a = porArticulo.get(art.key) || { label: art.label, unidades: 0, monto: 0 };
       a.unidades += qty; a.monto += monto;
       porArticulo.set(art.label, a);
 

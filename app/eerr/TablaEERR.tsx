@@ -374,7 +374,9 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev, detalle = {}, 
                           {$(f.monto)}
                         </td>
                         <td style={{ padding: '3px 0 3px 8px', textAlign: 'right', color: '#9ca3af', whiteSpace: 'nowrap' }}>
-                          {act.ventas.total > 0 ? `${Math.round((f.monto / act.ventas.total) * 100)}%` : ''}
+                          {/* Con un decimal: redondeado a entero, todo lo que pesa menos
+                              del 0,5% se lee como "0%" y parece que no se vendió. */}
+                          {act.ventas.total > 0 ? `${((f.monto / act.ventas.total) * 100).toFixed(1).replace('.', ',')}%` : ''}
                         </td>
                       </tr>
                     ))}
