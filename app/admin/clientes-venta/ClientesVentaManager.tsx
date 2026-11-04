@@ -372,12 +372,19 @@ export default function ClientesVentaManager({ clientes, precios, cambios, extra
   // mayúsculas: el mismo contacto cargado en dos clientes es una sola persona, y Gmail
   // muestra el destinatario repetido a todos los demás.
   //
-  // Es el `email` general y no el de cobranzas: esto es para avisos comerciales —una
-  // lista de precios, un cambio de horario—, no para reclamar una factura.
+  // Primero el `email` general, que es el que corresponde para un aviso comercial —una
+  // lista de precios, un cambio de horario—. Si no hay, va el de cobranzas: escribirle a
+  // la administración del cliente es peor que al contacto comercial, pero muchísimo mejor
+  // que dejarlo afuera del aviso. Es de a uno: el que tiene general NO recibe además el de
+  // cobranzas, para no mandarle el mismo mail dos veces a la misma empresa.
+  const mailDe = (c: any) => String(c?.email || '').includes('@')
+    ? String(c.email)
+    : String(c?.email_cobranza || '');
+
   const mailsActivos = (() => {
     const vistos = new Map<string, string>();
     for (const c of activos) {
-      for (const m of String((c as any).email || '').split(/[,;]+/)) {
+      for (const m of mailDe(c).split(/[,;]+/)) {
         const dir = m.trim();
         if (!dir.includes('@')) continue;
         const k = dir.toLowerCase();
@@ -388,7 +395,7 @@ export default function ClientesVentaManager({ clientes, precios, cambios, extra
   })();
 
   const sinMail = activos
-    .filter((c) => !String((c as any).email || '').includes('@'))
+    .filter((c) => !mailDe(c).includes('@'))
     .map((c) => String((c as any).alias || (c as any).nombre_xubio || c.id_control));
 
   async function copiarMails() {
