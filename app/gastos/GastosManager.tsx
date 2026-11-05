@@ -10,8 +10,6 @@ import { avisoMontoSospechoso } from '@/lib/montoSospechoso';
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const MEDIOS = MEDIOS_PAGO;
 const LABEL_CAT: Record<string, string> = Object.fromEntries(CATEGORIAS_GASTO.map((c) => [c.value, c.label]));
-const ORDEN_CAT: CategoriaGasto[] = CATEGORIAS_GASTO.map((c) => c.value).filter((c) => !(c in AGRUPA_EN));
-
 // ── Categorías que se MUESTRAN dentro de otra ────────────────────────────────────────
 //
 // Un adelanto no es un gasto distinto del sueldo: es parte del sueldo de esa persona,
@@ -22,8 +20,15 @@ const ORDEN_CAT: CategoriaGasto[] = CATEGORIAS_GASTO.map((c) => c.value).filter(
 // Se agrupan para MOSTRAR, no en el dato: la categoría de la fila sigue siendo
 // adelanto_sueldo, que es lo que permite descontarla del sueldo a fin de mes y no contarla
 // dos veces. Lo mismo hace el EERR, donde ya suman dentro de "Sueldos equipo".
+//
+// VA ANTES DE ORDEN_CAT y no después: ORDEN_CAT la usa en su propia definición, y un
+// `const` leído antes de su línea no es undefined, tira ReferenceError. Eso pasa al cargar
+// el módulo, así que no rompía el formulario: rompía la pantalla entera de Gastos, en
+// blanco. El build no lo ve porque el uso está adentro de un closure.
 const AGRUPA_EN: Record<string, CategoriaGasto> = { adelanto_sueldo: 'sueldos' };
 const catDeVista = (cat: string): string => AGRUPA_EN[cat] || cat;
+
+const ORDEN_CAT: CategoriaGasto[] = CATEGORIAS_GASTO.map((c) => c.value).filter((c) => !(c in AGRUPA_EN));
 const HOY = new Date();
 const hoyISO = () => HOY.toISOString().split('T')[0];
 const fmtMoneda = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
