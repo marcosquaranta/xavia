@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { estaImpaga } from '@/lib/conciliacionCobro';
 
 interface ClienteOpt { id_control: string; nombre: string }
@@ -48,7 +48,14 @@ const diasDesde = (f: string) => Math.round((Date.now() - new Date(f + 'T12:00:0
 // Reclamo puntual, aparte del automático. La idea es no tener que tocar la configuración
 // de las alertas semanales para mandar algo una sola vez: se elige el cliente, se marca
 // desde qué fecha (o se tildan las facturas una por una) y se manda.
-export default function ReclamoManual({ clientes }: { clientes: ClienteOpt[] }) {
+// `clienteInicial` existe para poder abrir esto DENTRO de la fila de un cliente en la
+// tabla de impagas. Las dos pantallas listaban lo mismo con criterios que tenían que
+// coincidir, y mantener dos listas que deben coincidir es cómo terminan diciendo cosas
+// distintas. Ahora es la misma: se ve la deuda y se reclama en el mismo lugar.
+//
+// `sinSelector` esconde el desplegable de clientes cuando ya se sabe de quién es: elegir
+// un cliente adentro de la fila de otro no tendría sentido.
+export default function ReclamoManual({ clientes, clienteInicial, sinSelector = false }: { clientes: ClienteOpt[]; clienteInicial?: string; sinSelector?: boolean }) {
   const [cliente, setCliente] = useState('');
   const [facturas, setFacturas] = useState<Factura[]>([]);
   // Cuánto cobró este cliente en la ventana. Es lo que se reparte de la factura más vieja a
@@ -60,6 +67,13 @@ export default function ReclamoManual({ clientes }: { clientes: ClienteOpt[] }) 
   const [cargando, setCargando] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; s: string } | null>(null);
+
+  // Carga sola al abrirse apuntada a un cliente. El efecto corre una vez: volver a
+  // dispararlo al cambiar de cliente a mano pisaría lo que se esté tildando.
+  useEffect(() => {
+    if (clienteInicial) cambiarCliente(String(clienteInicial));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clienteInicial]);
 
   async function cambiarCliente(id: string) {
     setCliente(id); setFacturas([]); setElegidas([]); setDesde(''); setMsg(null);
@@ -138,13 +152,15 @@ export default function ReclamoManual({ clientes }: { clientes: ClienteOpt[] }) 
   return (
     <div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: '8px' }}>
-        <div>
-          <label style={labelStyle}>Cliente *</label>
-          <select value={cliente} onChange={(e) => cambiarCliente(e.target.value)} disabled={enviando} style={inputStyle}>
-            <option value="">— Elegir —</option>
-            {clientes.map((c) => <option key={c.id_control} value={c.id_control}>{c.nombre}</option>)}
-          </select>
-        </div>
+        {!sinSelector && (
+          <div>
+            <label style={labelStyle}>Cliente *</label>
+            <select value={cliente} onChange={(e) => cambiarCliente(e.target.value)} disabled={enviando} style={inputStyle}>
+              <option value="">— Elegir —</option>
+              {clientes.map((c) => <option key={c.id_control} value={c.id_control}>{c.nombre}</option>)}
+            </select>
+          </div>
+        )}
         <div>
           <label style={labelStyle}>Reclamar desde esta fecha</label>
           <input type="date" value={desde} onChange={(e) => aplicarDesde(e.target.value)} disabled={enviando || !facturas.length} style={inputStyle} />

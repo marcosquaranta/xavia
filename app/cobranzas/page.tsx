@@ -642,6 +642,8 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
           <p style={bajada}>
             Un reclamo puntual, sin tocar la configuración del recordatorio automático. Elegís el cliente,
             marcás desde qué fecha (o tildás las facturas una por una) y se manda.
+            {' '}También se puede reclamar <strong>desde "Facturas impagas por cliente"</strong>, abriendo el cliente:
+            ahí ya está la deuda a la vista y es el mismo reclamo.
           </p>
           <div style={{ marginTop: '10px' }}>
             <ReclamoManual clientes={filas.map((f) => ({ id_control: f.id_control, nombre: f.nombre }))} />

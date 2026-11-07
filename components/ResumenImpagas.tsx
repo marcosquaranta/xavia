@@ -1,4 +1,5 @@
 'use client';
+import ReclamoManual from './ReclamoManual';
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { FacturaCliente } from '@/lib/facturasCliente';
@@ -64,6 +65,9 @@ export default function ResumenImpagas({
 }) {
   const router = useRouter();
   const [abierto, setAbierto] = useState<string | null>(null);
+  // El reclamo abierto dentro de la fila. Se cierra al cambiar de cliente: dejarlo abierto
+  // mostraría el reclamo de uno adentro de la fila de otro.
+  const [reclamando, setReclamando] = useState(false);
   // La cuenta corriente del cliente, accionable. Hasta ahora el detalle se podía mirar y
   // nada más: para dar una factura por cobrada había que irse a otra pantalla, buscarla de
   // nuevo y volver, y por eso en la práctica quedaban figurando impagas para siempre.
@@ -211,7 +215,7 @@ export default function ResumenImpagas({
               const esta = abierto === f.id_control;
               return (
                 <tr key={f.id_control} style={{ borderTop: '1px solid #f3f4f6', cursor: 'pointer', background: esta ? '#f8fafc' : undefined }}
-                  onClick={() => setAbierto(esta ? null : f.id_control)}>
+                  onClick={() => { setReclamando(false); setAbierto(esta ? null : f.id_control); }}>
                   <td style={{ padding: '6px 8px', fontWeight: 600 }}>
                     <span style={{ color: '#9ca3af', fontSize: '10px', marginRight: '5px' }}>{esta ? '▾' : '▸'}</span>
                     {f.nombre}
@@ -415,6 +419,31 @@ export default function ResumenImpagas({
                 </p>
               </div>
             )}
+
+            {/* ── Reclamar, acá mismo ─────────────────────────────────────────────────
+                "Facturas impagas por cliente" y "Reclamar facturas a un cliente" eran dos
+                pantallas que listaban lo mismo: la deuda abierta de un cliente. Mantener
+                dos listas que tienen que coincidir es cómo terminan diciendo cosas
+                distintas —y ya pasó— además de obligar a elegir el cliente dos veces.
+                Ahora se ve la deuda y se reclama en el mismo lugar. La lista de facturas
+                no se duplica: el reclamo pide las suyas a la misma API. */}
+            <div style={{ marginTop: '10px', borderTop: '1px solid #f3f4f6', paddingTop: '9px' }}>
+              {!reclamando ? (
+                <button type="button" onClick={() => setReclamando(true)}
+                  style={{ fontSize: '12px', fontWeight: 700, padding: '6px 13px', background: 'white', border: '1px solid #ddd6fe', color: '#6d28d9', borderRadius: '6px', cursor: 'pointer' }}>
+                  ✉️ Reclamarle estas facturas a {f.nombre}
+                </button>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px' }}>
+                    <p style={{ margin: 0, fontSize: '12px', fontWeight: 700, color: '#6d28d9' }}>Reclamo a {f.nombre}</p>
+                    <button type="button" onClick={() => setReclamando(false)}
+                      style={{ background: 'none', border: 'none', fontSize: '11.5px', color: '#2563eb', cursor: 'pointer' }}>Cerrar</button>
+                  </div>
+                  <ReclamoManual clientes={[{ id_control: f.id_control, nombre: f.nombre }]} clienteInicial={f.id_control} sinSelector />
+                </>
+              )}
+            </div>
           </div>
         );
       })()}
