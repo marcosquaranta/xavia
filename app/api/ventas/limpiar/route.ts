@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { readSheet, updateRow } from '@/lib/sheets';
+import { readSheet, batchUpdateRows } from '@/lib/sheets';
 import type { VentaDia } from '@/lib/types';
-import { PROD_KEYS } from '@/lib/articulos';
-import { leerArticulosExtra } from '@/lib/articulosVenta';
+import { clavesDeVenta, tieneCantidad } from '@/lib/clavesVenta';
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
@@ -50,18 +49,36 @@ export async function POST(req: NextRequest) {
     // Es el mismo agujero que tenían el historial y el desglose de ventas del EERR, por el
     // mismo motivo: una lista fija de artículos adentro de un cálculo que corre sobre
     // filas que pueden tener más columnas de las que esa lista conoce.
-    const keysExtra = (await leerArticulosExtra().catch(() => []))
-      .map((a) => a.key)
-      .filter((k) => !PROD_KEYS.includes(k));
-    const enCero = Object.fromEntries([...PROD_KEYS, ...keysExtra].map((k) => [k, 0]));
+    const clavesTodas = await clavesDeVenta();
+    const enCero = Object.fromEntries(clavesTodas.map((k) => [k, 0]));
 
-    for (const v of aLimpiar) {
-      await updateRow('Ventas', 'id_venta', v.id_venta, {
-        ...enCero,
-        rucula_kg: 0, lechuga_kg: 0, lechuga_kg_crespa: 0, lechuga_kg_roble: 0,
-      });
-    }
-    return NextResponse.json({ ok: true, limpiados: aLimpiar.length });
+    // ── Una sola escritura, no una por fila ─────────────────────────────────────────
+    //
+    // Era un updateRow por venta, y cada uno lee la hoja ENTERA antes de escribir. Con
+    // treinta pendientes son sesenta llamadas a Google en pocos segundos: la cuota se corta
+    // a la mitad, las primeras filas quedan borradas y el resto no, y desde la pantalla se
+    // ve como que "no borra".
+    await batchUpdateRows('Ventas', 'id_venta', aLimpiar.map((v) => ({
+      keyValue: v.id_venta,
+      updates: { ...enCero, rucula_kg: 0, lechuga_kg: 0, lechuga_kg_crespa: 0, lechuga_kg_roble: 0 },
+    })));
+
+    // Se vuelve a leer para confirmar que de verdad quedaron en cero. Es una lectura de
+    // más, y la paga: "borré 6" cuando en realidad no se borró ninguna es exactamente el
+    // reporte que hizo perder la tarde. Si quedó alguna, se dice cuántas.
+    const despues = await readSheet<VentaDia>('Ventas');
+    const porId = new Map(despues.map((v) => [String(v.id_venta), v]));
+    const noSeBorraron = aLimpiar.filter((v) => {
+      const ahora = porId.get(String(v.id_venta));
+      return ahora ? tieneCantidad(ahora, clavesTodas) : false;
+    });
+
+    return NextResponse.json({
+      ok: true,
+      limpiados: aLimpiar.length - noSeBorraron.length,
+      intentados: aLimpiar.length,
+      ...(noSeBorraron.length ? { sinBorrar: noSeBorraron.length } : {}),
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

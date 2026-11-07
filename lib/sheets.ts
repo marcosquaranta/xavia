@@ -1,5 +1,20 @@
 import { google, sheets_v4 } from 'googleapis';
 
+// ── Por qué el rango llega hasta ZZ y no hasta AH ───────────────────────────────────
+//
+// Todo esto leía y escribía `A:AH`: 34 columnas. Alcanzaba cuando los artículos estaban
+// escritos en el código, pero desde que se puede crear uno desde Admin la hoja de Ventas
+// suma una columna por artículo y se pasó de largo.
+//
+// Lo que provocaba no era un error, que es lo peor: las columnas más allá de AH se leían
+// como vacías —la cantidad de un artículo nuevo era invisible para toda la app— y, peor,
+// al escribir una fila se la truncaba al ancho del encabezado leído, borrando esas
+// columnas. Una venta de berro podía desaparecer sola al tocar cualquier otra cosa de esa
+// fila.
+//
+// ZZ son 702 columnas. No es "más grande por las dudas": es un ancho que ninguna hoja de
+// esta app va a alcanzar, y el costo de pedir columnas vacías es nulo.
+
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const SA_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
 const PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
@@ -104,7 +119,7 @@ export async function readSheet<T = Record<string, any>>(sheetName: string): Pro
   // la interpreta como 1.85 (punto = decimal en JS) — achicaba cualquier cantidad
   // ≥1000 en una celda con ese formato por 1000.
   const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`, valueRenderOption: 'UNFORMATTED_VALUE',
+    spreadsheetId: SHEET_ID, range: `${sheetName}!A:ZZ`, valueRenderOption: 'UNFORMATTED_VALUE',
   });
   const rows = response.data.values;
   if (!rows || rows.length < 2) return [];
@@ -146,7 +161,7 @@ export async function readSheet<T = Record<string, any>>(sheetName: string): Pro
 export async function appendRow(sheetName: string, values: any[]): Promise<void> {
   const sheets = getClient();
   await sheets.spreadsheets.values.append({
-    spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`,
+    spreadsheetId: SHEET_ID, range: `${sheetName}!A:ZZ`,
     valueInputOption: 'USER_ENTERED', requestBody: { values: [values] },
   });
 }
@@ -164,7 +179,7 @@ export async function appendRowsObj(sheetName: string, objs: Record<string, any>
   if (!headers.length) throw new Error(`No se pudo leer el header de ${sheetName}`);
   const values = objs.map(obj => headers.map(h => (obj[h] !== undefined && obj[h] !== null ? obj[h] : '')));
   await sheets.spreadsheets.values.append({
-    spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`,
+    spreadsheetId: SHEET_ID, range: `${sheetName}!A:ZZ`,
     valueInputOption: 'USER_ENTERED', requestBody: { values },
   });
 }
@@ -176,7 +191,7 @@ export async function appendRowObj(sheetName: string, obj: Record<string, any>):
   if (!headers.length) throw new Error(`No se pudo leer el header de ${sheetName}`);
   const row = headers.map(h => (obj[h] !== undefined && obj[h] !== null ? obj[h] : ''));
   await sheets.spreadsheets.values.append({
-    spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`,
+    spreadsheetId: SHEET_ID, range: `${sheetName}!A:ZZ`,
     valueInputOption: 'USER_ENTERED', requestBody: { values: [row] },
   });
 }
@@ -185,7 +200,7 @@ export async function appendRows(sheetName: string, rows: any[][]): Promise<void
   if (!rows.length) return;
   const sheets = getClient();
   await sheets.spreadsheets.values.append({
-    spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`,
+    spreadsheetId: SHEET_ID, range: `${sheetName}!A:ZZ`,
     valueInputOption: 'USER_ENTERED', requestBody: { values: rows },
   });
 }
@@ -193,7 +208,7 @@ export async function appendRows(sheetName: string, rows: any[][]): Promise<void
 // Lee las filas crudas (array posicional) incluyendo el header.
 export async function readRaw(sheetName: string): Promise<string[][]> {
   const sheets = getClient();
-  const resp = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`, valueRenderOption: 'UNFORMATTED_VALUE' });
+  const resp = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:ZZ`, valueRenderOption: 'UNFORMATTED_VALUE' });
   return (resp.data.values as string[][]) || [];
 }
 
@@ -210,7 +225,7 @@ export async function setRowByHeader(sheetName: string, rowNumber: number, heade
 
 export async function updateRow(sheetName: string, keyColumn: string, keyValue: string, updates: Record<string, any>): Promise<boolean> {
   const sheets = getClient();
-  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`, valueRenderOption: 'UNFORMATTED_VALUE' });
+  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:ZZ`, valueRenderOption: 'UNFORMATTED_VALUE' });
   const rows = response.data.values;
   if (!rows || rows.length < 2) return false;
   const headers = rows[0];
@@ -232,7 +247,7 @@ export async function updateRowDonde(
   updates: Record<string, any>,
 ): Promise<boolean> {
   const sheets = getClient();
-  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`, valueRenderOption: 'UNFORMATTED_VALUE' });
+  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:ZZ`, valueRenderOption: 'UNFORMATTED_VALUE' });
   const rows = response.data.values;
   if (!rows || rows.length < 2) return false;
   const headers = rows[0];
@@ -254,7 +269,7 @@ export async function batchUpdateRows(
   if (!updates.length) return;
   const sheets = getClient();
   const rows = filasPrecargadas ?? (await sheets.spreadsheets.values.get({
-    spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`, valueRenderOption: 'UNFORMATTED_VALUE',
+    spreadsheetId: SHEET_ID, range: `${sheetName}!A:ZZ`, valueRenderOption: 'UNFORMATTED_VALUE',
   })).data.values;
   if (!rows || rows.length < 2) return;
   const headers = rows[0];
@@ -327,7 +342,7 @@ export async function deleteRow(sheetName: string, keyColumn: string, keyValue: 
   const sheet = sheetMeta.data.sheets?.find((s) => s.properties?.title === sheetName);
   if (!sheet) throw new Error(`Pestaña ${sheetName} no encontrada`);
   const sheetId = sheet.properties?.sheetId;
-  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:AH`, valueRenderOption: 'UNFORMATTED_VALUE' });
+  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${sheetName}!A:ZZ`, valueRenderOption: 'UNFORMATTED_VALUE' });
   const rows = response.data.values;
   if (!rows || rows.length < 2) return false;
   const headers = rows[0];

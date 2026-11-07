@@ -365,9 +365,14 @@ export default function HistorialManager() {
   }
   useEffect(() => { cargar(); }, []);
 
-  async function limpiar(body: Record<string, any>) {
+  // Devuelve lo que el servidor dice que hizo. Antes no se miraba: si borraba cero filas,
+  // la pantalla recargaba igual y todo quedaba como estaba, sin una palabra. "No pasa nada
+  // al apretar" es el peor resultado posible, porque no se sabe si falló o si no había nada.
+  async function limpiar(body: Record<string, any>): Promise<{ limpiados?: number; intentados?: number; sinBorrar?: number }> {
     const r = await fetch('/api/ventas/limpiar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Error'); }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || 'Error');
+    return j;
   }
 
   // Solo las de ESE cliente en esa fecha. Antes borraba todo lo pendiente del día: con la
@@ -376,7 +381,11 @@ export default function HistorialManager() {
   async function eliminarPendiente(fecha: string, idControl: string, cliente: string) {
     if (!confirm(`¿Eliminar las ventas no facturadas de ${cliente} del ${fecha}? Esto no se puede deshacer.`)) return;
     setEliminando(`${fecha}__${idControl}`); setMsg(null);
-    try { await limpiar({ fecha, id_control: idControl, soloPendientesDelDia: true }); cargar(); }
+    try {
+      const j = await limpiar({ fecha, id_control: idControl, soloPendientesDelDia: true });
+      setMsg(j.sinBorrar ? `Quedaron ${j.sinBorrar} sin borrar — probá de nuevo.` : `✓ Borrado (${j.limpiados ?? 0}).`);
+      cargar();
+    }
     catch (e: any) { setMsg(e.message); }
     setEliminando(null);
   }
@@ -384,7 +393,13 @@ export default function HistorialManager() {
   async function eliminarTodosPendientes() {
     if (!confirm('¿Eliminar TODAS las ventas no facturadas (de cualquier fecha)? Esto no se puede deshacer.')) return;
     setEliminandoTodosPend(true); setMsg(null);
-    try { await limpiar({ soloPendientes: true }); cargar(); }
+    try {
+      const j = await limpiar({ soloPendientes: true });
+      setMsg(j.sinBorrar
+        ? `Se borraron ${j.limpiados} de ${j.intentados}. ${j.sinBorrar} no se pudieron borrar — probá de nuevo; si persiste, avisá.`
+        : `✓ Se borraron ${j.limpiados ?? 0} venta(s) no facturadas.`);
+      cargar();
+    }
     catch (e: any) { setMsg(e.message); }
     setEliminandoTodosPend(false);
   }
