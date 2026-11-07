@@ -5,6 +5,7 @@ import type { ClienteVenta, PrecioVenta, VentaDia, PedidoFijo } from '@/lib/type
 import { ventasCargadasSemana, precioFinal } from '@/lib/estadisticasVentas';
 import { nombreClienteVisible } from '@/lib/clientes';
 import { ARTICULOS_UNIDAD, KEYS_UNIDAD, KEYS_KG, KG_POR_CAJON, kgDeCajones, cajonesDeKg, type Articulo } from '@/lib/articulos';
+import AcuseFacturacion, { type Acuse } from '@/components/AcuseFacturacion';
 import { DIAS_CAMARA_ALERTA } from '@/lib/camara';
 
 // Los artículos salen del catálogo (lib/articulos.ts), no de una lista escrita acá: esa
@@ -148,6 +149,13 @@ const soloDia = (v: any) => String(v || '').split(/[T ]/)[0];
 export default function VentasManager({clientes,precios,frecuencias,stats,pedidosFijos,initialFecha,articulosExtra=[]}:{clientes:ClienteVenta[];precios:PrecioVenta[];frecuencias:Record<string,number>;stats:Stats;pedidosFijos:PedidoFijo[];initialFecha?:string;articulosExtra?:Articulo[]}) {
   // El catálogo de esta pantalla = los del código + los dados de alta desde Admin.
   const {unidad:ARTS_UNIDAD, PP, PE, ALL, APARTE} = listasDe(articulosExtra);
+  // ── Las claves que se mandan al guardar ───────────────────────────────────────────
+  //
+  // La pantalla MUESTRA los artículos dados de alta en Admin (ARTS_UNIDAD los trae), pero
+  // al armar el pedido usaba KEYS_UNIDAD, la lista del código. Resultado: se tipeaba la
+  // cantidad de berro, se veía en pantalla, y al guardar esa columna iba en cero. La venta
+  // se perdía sin un solo error.
+  const KEYS_ENVIO = ARTS_UNIDAD.map((a) => a.key);
   const hoy = hoyArg();
   const [fecha,setFecha]=useState(initialFecha || hoy);
   const [fc,setFc]=useState<Record<string,string>>({});
@@ -162,6 +170,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   const [loading,setLoading]=useState(false);
   const [exp,setExp]=useState(false);
   const [msg,setMsg]=useState<{t:'ok'|'err';s:string}|null>(null);
+  // El acuse de la última carga. Se muestra como pantalla completa: confirma lo que Xubio
+  // tiene de verdad, no solo que el pedido salió.
+  const [acuse,setAcuse]=useState<Acuse|null>(null);
   const [showP,setShowP]=useState(false);
   // Mostrar también los clientes sin precio de paquete. Apagado: son los que no compran así.
   const [mostrarSinPrecio,setMostrarSinPrecio]=useState(false);
@@ -338,7 +349,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
     if(q(f.id_control,f.sucursal,k)==='')return;
     se(f.id_control,f.sucursal,k,'saving');
     try{
-      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0]))}]})});
+      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_ENVIO.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0]))}]})});
       if(!r.ok)throw new Error();
       se(f.id_control,f.sucursal,k,'saved');setTimeout(()=>se(f.id_control,f.sucursal,k,'idle'),2000);
       cargarVentasSemana();
@@ -383,13 +394,17 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       // que es la que vale — de las normales se saca a los que también están allá.
       const clavesKg = new Set(filasKg.map(f=>`${f.id_control}__${f.sucursal}`));
       const todasLineas = [
-        ...filasNormales.filter(f=>!clavesKg.has(`${f.id_control}__${f.sucursal}`)).map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
-        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:kgDeCajones('rucula_kg',Number(dr?.rucula_kg?.value)||0),lechuga_kg_crespa:kgDeCajones('lechuga_kg_crespa',Number(dr?.lechuga_kg_crespa?.value)||0),lechuga_kg_roble:kgDeCajones('lechuga_kg_roble',Number(dr?.lechuga_kg_roble?.value)||0)};}),
-      ].filter((l:LineaCarga)=>[...KEYS_UNIDAD,...KEYS_KG].some(k=>Number(l[k])>0));
+        ...filasNormales.filter(f=>!clavesKg.has(`${f.id_control}__${f.sucursal}`)).map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_ENVIO.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
+        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_ENVIO.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:kgDeCajones('rucula_kg',Number(dr?.rucula_kg?.value)||0),lechuga_kg_crespa:kgDeCajones('lechuga_kg_crespa',Number(dr?.lechuga_kg_crespa?.value)||0),lechuga_kg_roble:kgDeCajones('lechuga_kg_roble',Number(dr?.lechuga_kg_roble?.value)||0)};}),
+      ].filter((l:LineaCarga)=>[...KEYS_ENVIO,...KEYS_KG].some(k=>Number(l[k])>0));
       const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:todasLineas})});
       if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar ventas');}
       const r=await fetch('/api/ventas/cargar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha})});
       const j=await r.json();if(!r.ok)throw new Error(j.error);
+      // El acuse ocupa la pantalla: lo que informa es irreversible del lado de AFIP y un
+      // renglón al pie no se mira. El mensaje de siempre queda abajo como respaldo, para
+      // cuando el acuse no se pudo armar (si Xubio no contesta, por ejemplo).
+      if (j.acuse) setAcuse(j.acuse);
       const nEmit=(j.emitidas||[]).length, nErr=(j.errores||[]).length;
       // Antes solo se mostraba la cantidad de errores ("revisá en Facturación") sin el
       // detalle — y esa página no guarda el error en ningún lado, solo lo muestra al
@@ -414,10 +429,10 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       // sola vez, desde la de cajones, que ya lleva también las cantidades por unidad.
       const clavesKgExp = new Set(filasKg.map(f=>`${f.id_control}__${f.sucursal}`));
       const todasLineas = [
-        ...filasNormales.filter(f=>!clavesKgExp.has(`${f.id_control}__${f.sucursal}`)).map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
-        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_UNIDAD.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:kgDeCajones('rucula_kg',Number(dr?.rucula_kg?.value)||0),lechuga_kg_crespa:kgDeCajones('lechuga_kg_crespa',Number(dr?.lechuga_kg_crespa?.value)||0),lechuga_kg_roble:kgDeCajones('lechuga_kg_roble',Number(dr?.lechuga_kg_roble?.value)||0)};}),
+        ...filasNormales.filter(f=>!clavesKgExp.has(`${f.id_control}__${f.sucursal}`)).map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_ENVIO.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
+        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_ENVIO.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:kgDeCajones('rucula_kg',Number(dr?.rucula_kg?.value)||0),lechuga_kg_crespa:kgDeCajones('lechuga_kg_crespa',Number(dr?.lechuga_kg_crespa?.value)||0),lechuga_kg_roble:kgDeCajones('lechuga_kg_roble',Number(dr?.lechuga_kg_roble?.value)||0)};}),
       // Solo enviar líneas con al menos una cantidad > 0
-      ].filter((l:LineaCarga)=>[...KEYS_UNIDAD,...KEYS_KG].some(k=>Number(l[k])>0));
+      ].filter((l:LineaCarga)=>[...KEYS_ENVIO,...KEYS_KG].some(k=>Number(l[k])>0));
       const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:todasLineas})});
       if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar ventas');}
       const r=await fetch('/api/ventas/exportar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,fechasCliente:fc,correlaA:Number(correlaA),correlaB:Number(correlaB),enviarEmail})});
@@ -647,6 +662,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
 
   return (
     <div>
+      {acuse && <AcuseFacturacion acuse={acuse} onCerrar={() => setAcuse(null)} />}
       {/* Stock disponible — cerca de donde se carga, para chequear de un vistazo antes de cargar */}
       <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'8px',padding:'8px 14px',marginBottom:'12px'}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'8px',flexWrap:'wrap',gap:'6px'}}>

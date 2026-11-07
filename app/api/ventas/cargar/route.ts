@@ -5,6 +5,10 @@ import { emitirPendientes } from '@/lib/facturacionEmitir';
 import { avisarEntregasNuevas } from '@/lib/avisoCobroEntrega';
 import type { VentaDia, ClienteVenta } from '@/lib/types';
 import { clavesDeVenta, tieneCantidad } from '@/lib/clavesVenta';
+import { verificarEnXubio, facturadoAntes } from '@/lib/acuseFacturacion';
+import { getComprobantes } from '@/lib/xubio';
+import { LABELS_LARGOS } from '@/lib/articulos';
+import { leerArticulosExtra } from '@/lib/articulosVenta';
 
 // A quién le llega el aviso de "hay que cobrar en la entrega".
 const DESTINATARIOS_AVISO = ['administracion@xavia.com.ar'];
@@ -59,8 +63,10 @@ export async function POST(req: NextRequest) {
     // acá hay que forzar string también — si no, el Set nunca matchea y la emisión
     // queda vacía en silencio (sin error, sin factura).
     const idControls = Array.from(new Set(aCargar.map(v => String(v.id_control))));
-    let emitidas: { cliente: string; numero?: string; cae?: string }[] = [];
-    let errores: { cliente: string; error: string }[] = [];
+    // El objeto entero, no solo cliente/numero: el acuse necesita los renglones y el total
+    // para poder decir QUÉ se facturó y contrastarlo contra lo que Xubio guardó.
+    let emitidas: any[] = [];
+    let errores: any[] = [];
     try {
       const r = await emitirPendientes(idControls);
       emitidas = r.emitidas; errores = r.errores;
@@ -87,7 +93,52 @@ export async function POST(req: NextRequest) {
       console.error('[ventas/cargar] no se pudo mandar el aviso de cobro en entrega:', e);
     }
 
-    return NextResponse.json({ ok: true, lineas: aCargar.length, clientes, emitidas, errores, avisoCobro });
+    // ── El acuse ────────────────────────────────────────────────────────────────────
+    //
+    // "Se emitieron N facturas" confirma que la app hizo el pedido, no que Xubio lo tenga.
+    // Acá se le vuelve a preguntar a Xubio y se compara: una factura que la app cree
+    // emitida y Xubio no tiene es mercadería entregada y sin facturar, y hasta ahora nadie
+    // se iba a enterar.
+    //
+    // Todo adentro de su propio try: la carga YA se hizo y las facturas YA se emitieron.
+    // Que falle la verificación no puede convertir eso en un error en pantalla.
+    let acuse: any = null;
+    try {
+      const nombrePorId = new Map(
+        (await readSheet<ClienteVenta>('Clientes')).map((c) => [String(c.id_control), c.nombre_display || c.nombre_xubio || String(c.id_control)]),
+      );
+      const extra = await leerArticulosExtra().catch(() => []);
+      const etiquetas = [
+        ...Object.entries(LABELS_LARGOS).map(([key, label]) => ({ key, label })),
+        ...extra.filter((a) => a.key).map((a) => ({ key: a.key, label: a.labelLargo || a.label || a.key })),
+        { key: 'rucula_kg', label: 'Rúcula (kg)' },
+        { key: 'lechuga_kg', label: 'Lechuga (kg)' },
+        { key: 'lechuga_kg_crespa', label: 'Lechuga Crespa (kg)' },
+        { key: 'lechuga_kg_roble', label: 'Lechuga Roble (kg)' },
+      ];
+
+      // La ventana es amplia porque la factura puede haber salido con otra fecha que la
+      // venta (ver fechaDeFactura): buscarla solo en el día de la venta la daría por
+      // perdida cuando está.
+      const desde = new Date(Date.parse(`${fecha}T12:00:00Z`) - 7 * 86400000).toISOString().slice(0, 10);
+      const hasta = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+      const comprobantes = await getComprobantes(desde, hasta).catch(() => []);
+
+      acuse = {
+        fecha,
+        emitidas: verificarEnXubio(emitidas, comprobantes),
+        errores,
+        antes: facturadoAntes(
+          ventas, fecha, new Set(aCargar.map((v) => String(v.id_venta))),
+          (id) => nombrePorId.get(String(id)) || String(id),
+          etiquetas,
+        ),
+      };
+    } catch (e) {
+      console.error('[ventas/cargar] no se pudo armar el acuse:', e);
+    }
+
+    return NextResponse.json({ ok: true, lineas: aCargar.length, clientes, emitidas, errores, avisoCobro, acuse });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Error' }, { status: 500 });
   }
