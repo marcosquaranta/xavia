@@ -150,6 +150,29 @@ function cajonesVendidosEntre(cultivo: CultivoCamara, ventas: VentaDia[], desde:
   return kg / kgPorCajon;
 }
 
+// ── Lo vendido por kilo, en paquetes-equivalente ────────────────────────────────────
+//
+// `vendidoEntre` cuenta solo paquetes y `cajonesVendidosEntre` cuenta cajones: son dos
+// pilas distintas y para el STOCK está bien, porque de la cámara salen bultos distintos.
+//
+// Pero para comparar contra un recuento no sirven separadas, y ahí estaba el error: el
+// faltante hacía `cosechado − vendidoEnPaquetes`, y lo cosechado (unidades_cosechadas) YA
+// incluye los cajones convertidos a paquetes. O sea que sumaba los cajones del lado de lo
+// que entró y no los restaba del lado de lo que salió. El faltante que mostraba era,
+// exactamente, lo que se había vendido en cajones: en octubre de 2026, −5.012 paquetes de
+// rúcula contra 154 cajones vendidos (≈5.082 paquetes). No faltaba nada.
+//
+// Esto convierte los kilos vendidos a paquetes con el peso real de la última semana —para
+// eso existía gramosPorPaqueteUltimaSemana, que había quedado escrita y sin usar.
+function vendidoEnKgComoPaquetes(cultivo: CultivoCamara, ventas: VentaDia[], lotes: Lote[], desde: Date, momentoRef: Date): number {
+  const cajones = cajonesVendidosEntre(cultivo, ventas, desde, momentoRef);
+  if (!(cajones > 0)) return 0;
+  const kgPorCajon = kgPorCajonDe(cultivo === 'rucula' ? 'rucula' : 'lechuga');
+  const gr = gramosPorPaqueteUltimaSemana(cultivo, lotes, momentoRef);
+  if (!(gr > 0)) return 0;
+  return (cajones * kgPorCajon * 1000) / gr;
+}
+
 // Lo vendido en PAQUETES. Lo que sale por kilo ya no entra acá: se cuenta como cajones.
 function vendidoEntre(cultivo: CultivoCamara, ventas: VentaDia[], lotes: Lote[], desde: Date, momentoRef: Date): number {
   return ventas
@@ -438,7 +461,10 @@ export function diferenciaAjuste(
   if (!prev) return 0; // sin base previa, no hay con qué comparar
 
   const cosechado = cosechadoEntre(cultivo, lotes, prev._f, fecha);
-  const vendido = vendidoEntre(cultivo, ventas, lotes, prev._f, fecha);
+  // Paquetes Y lo que salió en cajones: lo cosechado incluye las dos cosas, así que lo
+  // vendido tiene que incluirlas también o la cuenta no cierra nunca.
+  const vendido = vendidoEntre(cultivo, ventas, lotes, prev._f, fecha)
+    + vendidoEnKgComoPaquetes(cultivo, ventas, lotes, prev._f, fecha);
   const teorico = Math.max(0, (Number(prev.cantidad_paq) || 0) + cosechado - vendido);
   return Math.round(cantidadNueva - teorico);
 }
@@ -473,7 +499,9 @@ export function diferenciaAjustesRango(
     if (curr._f < desde || curr._f > hasta) continue;
     const prev = ordenados[i - 1];
     const cosechado = cosechadoEntre(cultivo, lotes, prev._f, curr._m);
-    const vendido = vendidoEntre(cultivo, ventas, lotes, prev._f, curr._m);
+    // Idem: sin los cajones, el faltante acumulado del mes era igual a lo vendido por kilo.
+    const vendido = vendidoEntre(cultivo, ventas, lotes, prev._f, curr._m)
+      + vendidoEnKgComoPaquetes(cultivo, ventas, lotes, prev._f, curr._m);
     const teorico = Math.max(0, (Number(prev.cantidad_paq) || 0) + cosechado - vendido);
     acumulado += Number(curr.cantidad_paq) - teorico;
     cantidadAjustes++;

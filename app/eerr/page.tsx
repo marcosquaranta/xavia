@@ -237,6 +237,28 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
     diferenciaDeCuentas: difDeCuentas,
     movimientoSinConfirmar,
     cuentasSinReal: sinReal.map((x) => x.medio),
+    // ── Los sospechosos del residuo ────────────────────────────────────────────────
+    //
+    // No entran en el puente —si entraran serían renglones, no residuo— pero son lo que
+    // más veces lo explica. Se calculan acá, de los mismos gastos que ya están leídos.
+    retencionesMes: gastos
+      .filter((g) => g.categoria === 'retenciones_sufridas')
+      .filter((g) => { const f = String(g.fecha || '').split(/[T ]/)[0]; return f >= desdeMes && f <= hastaMes; })
+      .reduce((a, g) => a + (Number(g.monto) || 0), 0),
+    internosSinDestino: (() => {
+      const rotos = gastos
+        .filter((g) => g.categoria === 'movimiento_interno' && !String((g as any).medio_pago_destino || '').trim())
+        .filter((g) => { const f = String(g.fecha || '').split(/[T ]/)[0]; return f >= desdeMes && f <= hastaMes; });
+      return { cantidad: rotos.length, monto: rotos.reduce((a, g) => a + (Number(g.monto) || 0), 0) };
+    })(),
+    pagosDeComprasViejas: gastos
+      .filter((g) => {
+        const fPago = String((g as any).fecha_pago || '').split(/[T ]/)[0];
+        const fCompra = String(g.fecha || '').split(/[T ]/)[0];
+        // Pagada en este mes, comprada antes: el costo fue en otro mes y la plata salió ahora.
+        return !!fPago && fPago >= desdeMes && fPago <= hastaMes && !!fCompra && fCompra < desdeMes;
+      })
+      .reduce((a, g) => a + (Number(g.monto) || 0), 0),
   });
 
   const esMesActual = anio === hoy.getFullYear() && mes === (hoy.getMonth() + 1);

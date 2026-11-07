@@ -115,6 +115,31 @@ export default function OrigenAplicacionCard({ datos, causas = [], nombreMes }: 
               </tr>
             </tbody>
           </table>
+
+          {/* ── Por dónde buscar ese residuo ──────────────────────────────────────────
+              Decir "no se puede explicar" y nada más deja a quien lo lee sin nada que
+              hacer: no se busca algo que no tiene nombre. Esto NO lo descompone —si se
+              pudiera, serían renglones del puente— pero lista los sospechosos habituales
+              con su monto, para poder descartarlos de a uno. */}
+          {(datos.pistas || []).length > 0 && (
+            <div style={{ marginTop: '9px', borderTop: '1px solid #fde68a', paddingTop: '8px' }}>
+              <p style={{ margin: '0 0 5px', fontSize: '11.5px', fontWeight: 700, color: '#92400e' }}>
+                Por dónde buscar — lo que suele estar adentro
+              </p>
+              <ul style={{ margin: 0, paddingLeft: '17px' }}>
+                {(datos.pistas || []).map((p, i) => (
+                  <li key={i} style={{ marginBottom: '4px', fontSize: '11.5px', color: '#374151', lineHeight: 1.5 }}>
+                    <strong>{p.titulo}: {fmt(p.monto)}</strong>
+                    <span style={{ color: '#9ca3af' }}> — {p.detalle}</span>
+                  </li>
+                ))}
+              </ul>
+              <p style={{ margin: '6px 0 0', fontSize: '10.5px', color: '#9ca3af', lineHeight: 1.45 }}>
+                Son candidatos, no una descomposición: pueden sumar más o menos que el residuo.
+                Sirven para descartar, que es como se encuentra el que sí está.
+              </p>
+            </div>
+          )}
           {/* Cuánto de todo esto es directamente incertidumbre. No es un error: es que no
               hay con qué comparar. Mientras sea grande, el "sin explicar" no significa nada
               y buscar el movimiento que falta es perder el tiempo. */}

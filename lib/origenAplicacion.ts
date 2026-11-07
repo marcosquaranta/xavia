@@ -41,6 +41,8 @@ export interface OrigenAplicacion {
   cajaEsperada: number;
   cajaReal: number | null;   // null = no hay saldos cargados para comparar
   sinExplicar: number | null;
+  // Sospechosos del residuo, con monto. No lo descomponen: ayudan a descartar.
+  pistas: PistaResiduo[];
   // El "sin explicar", partido en las dos cosas distintas que lo componen. Un solo número
   // junta dos problemas que se arreglan en lugares diferentes, y entonces no se arregla
   // ninguno: hay que saber cuánto es "falta cargar un movimiento" y cuánto es "el puente
@@ -50,6 +52,9 @@ export interface OrigenAplicacion {
   movimientoSinConfirmar: number;
   cuentasSinReal: string[];
 }
+
+// Una pista sobre el residuo: algo medible que PODRÍA estar adentro.
+export interface PistaResiduo { titulo: string; monto: number; detalle: string }
 
 // Cuánto se debía a proveedores al cierre de un día: compras cargadas hasta esa fecha que
 // a esa fecha todavía no estaban pagadas.
@@ -110,6 +115,16 @@ export interface EntradasFondos {
   // Cuánto movimiento quedó sin confirmar porque esa cuenta no tiene saldo del resumen.
   movimientoSinConfirmar: number;
   cuentasSinReal: string[];
+  // ── Para explicar el residuo ──────────────────────────────────────────────────────
+  //
+  // Datos que no entran en el puente pero que son los sospechosos habituales de que no
+  // cierre. Opcionales: sin ellos el residuo se informa igual, solo que sin pistas.
+  retencionesMes?: number;
+  // Movimientos entre cuentas sin punta de entrada: la plata sale de una cuenta y no entra
+  // a ninguna. Es el que más veces explica un residuo.
+  internosSinDestino?: { cantidad: number; monto: number };
+  // Compras de meses anteriores pagadas en este: el costo fue antes y la plata salió ahora.
+  pagosDeComprasViejas?: number;
 }
 
 export function origenYAplicacion(e: EntradasFondos): OrigenAplicacion {
@@ -211,7 +226,47 @@ export function origenYAplicacion(e: EntradasFondos): OrigenAplicacion {
   const porCuentasQueNoCierran = cajaReal === null ? null : Math.round(e.diferenciaDeCuentas);
   const porElPuente = sinExplicar === null ? null : Math.round(sinExplicar - (porCuentasQueNoCierran || 0));
 
+  // ── Qué puede haber adentro del residuo ─────────────────────────────────────────
+  //
+  // El residuo es, por definición, lo que el puente no nombra. Decirlo y nada más deja a
+  // quien lo lee sin nada que hacer: no se puede buscar algo que no tiene nombre.
+  //
+  // Esto no lo descompone —si se pudiera, serían renglones del puente y no residuo—. Lista
+  // los sospechosos habituales CON su monto, para poder descartarlos de a uno. Ordenados
+  // por plata, que es por donde conviene empezar.
+  const pistas: PistaResiduo[] = [];
+  if (Math.abs(Math.round(e.retencionesMes || 0)) >= 1) {
+    pistas.push({
+      titulo: 'Retenciones sufridas del mes',
+      monto: Math.round(e.retencionesMes || 0),
+      detalle: 'El cliente retuvo y pagó neto. Si la factura entró completa y el cobro vino con la retención descontada, esa diferencia aparece acá.',
+    });
+  }
+  if ((e.internosSinDestino?.cantidad || 0) > 0) {
+    pistas.push({
+      titulo: `${e.internosSinDestino!.cantidad} movimiento(s) entre cuentas sin cuenta de destino`,
+      monto: Math.round(e.internosSinDestino!.monto),
+      detalle: 'La plata salió de una cuenta y no entró a ninguna. Es el que más veces explica un residuo, y se arregla editando el movimiento en Gastos.',
+    });
+  }
+  if (Math.abs(Math.round(e.pagosDeComprasViejas || 0)) >= 1) {
+    pistas.push({
+      titulo: 'Compras de meses anteriores pagadas este mes',
+      monto: Math.round(e.pagosDeComprasViejas || 0),
+      detalle: 'El costo fue en otro mes y la plata salió en este. Si la deuda a proveedores del mes anterior no quedó cargada, el puente no tiene de dónde restarlo.',
+    });
+  }
+  if (e.cuentasSinReal.length) {
+    pistas.push({
+      titulo: `${e.cuentasSinReal.length} cuenta(s) sin saldo del resumen`,
+      monto: Math.round(e.movimientoSinConfirmar),
+      detalle: `${e.cuentasSinReal.join(', ')}. Mientras no tengan saldo real, su movimiento entero está sin confirmar y puede estar adentro de este número.`,
+    });
+  }
+  pistas.sort((a, b) => Math.abs(b.monto) - Math.abs(a.monto));
+
   return {
+    pistas,
     resultado: Math.round(e.resultado),
     lineas,
     cajaEsperada,
@@ -270,11 +325,27 @@ export function causasDeLaDiferencia(saldos: SaldoParaCausas[]): CausaDiferencia
     if (s.real !== null && Math.abs(s.diferencia || 0) < 1) continue;
 
     if (s.real !== null) {
+      // ── Una tarjeta se lee al revés que una caja ─────────────────────────────────
+      //
+      // En una caja, un saldo más chico que el calculado es plata que falta. En una
+      // TARJETA el saldo es deuda: más negativo significa que se debe MÁS, no menos.
+      //
+      // Escrito como "el resumen dice $-4.400.000 y la app calculó $-3.706.509 → −$693.491"
+      // el renglón es ilegible: hay que acordarse del signo de la cuenta para saber si eso
+      // es bueno o malo, y es exactamente donde uno se equivoca. Para las cuentas que se
+      // mueven en negativo se dice en deuda, con todas las letras.
+      const esDeuda = (s.real ?? 0) <= 0 && (s.calculado ?? 0) <= 0;
+      const dif = Math.round(s.diferencia || 0);
+      const detalle = esDeuda
+        ? (dif < 0
+            ? `Debés ${fmt(Math.abs(dif))} MÁS de lo que la app tiene registrado: el resumen dice ${fmt(s.real)} y la app ${fmt(s.calculado)}. Falta cargar consumos.`
+            : `Debés ${fmt(Math.abs(dif))} MENOS de lo que la app tiene registrado: el resumen dice ${fmt(s.real)} y la app ${fmt(s.calculado)}. Puede haber un pago no registrado, o un consumo cargado de más.`)
+        : `El resumen dice ${fmt(s.real)} y la app calculó ${fmt(s.calculado)}`;
       out.push({
         cuenta: s.medio,
-        monto: Math.round(s.diferencia || 0),
+        monto: dif,
         motivo: 'descuadre',
-        detalle: `El resumen dice ${fmt(s.real)} y la app calculó ${fmt(s.calculado)}`,
+        detalle,
       });
     } else if (Math.abs(s.calculado) >= 1 || s.hayInicial) {
       // Sin saldo real no se puede saber si cuadra: su movimiento entero queda sin confirmar.
