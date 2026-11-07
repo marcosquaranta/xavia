@@ -252,7 +252,11 @@ export default function CuentasEditor({ anio, mes, saldos, movimientos, detalle 
 
       {/* ── Conciliación ── */}
       <p style={{ margin: '14px 0 6px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-        Saldos por cuenta
+        Saldos por cuenta · libro mayor
+      </p>
+      <p style={{ margin: '0 0 8px', fontSize: '11.5px', color: '#9ca3af' }}>
+        Click en el nombre de una cuenta para ver <strong>todos sus movimientos del mes</strong>, en orden y con el
+        saldo corriendo: cobros, gastos y pases entre cuentas. La suma da el saldo teórico.
       </p>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '640px' }}>
@@ -277,6 +281,11 @@ export default function CuentasEditor({ anio, mes, saldos, movimientos, detalle 
                     title="Ver todos los movimientos de esta cuenta en el mes">
                     <span style={{ color: '#9ca3af', fontSize: '10px', marginRight: '4px' }}>{esta ? '▾' : '▸'}</span>
                     {s.medio}
+                    {/* El nombre de lo que hay adentro, dicho. Sin esto el triangulito gris
+                        era la única pista de que existe el extracto del mes. */}
+                    <span style={{ marginLeft: '6px', fontSize: '10px', fontWeight: 600, color: '#2563eb' }}>
+                      {esta ? 'ocultar' : 'ver movimientos'}
+                    </span>
                     {!s.hayInicial && <span title="No hay saldo de cierre del mes anterior: el inicial arranca en cero" style={{ color: '#b45309', marginLeft: '4px' }}>·</span>}
                   </td>
                   <td style={{ ...cel, textAlign: 'right' }}>

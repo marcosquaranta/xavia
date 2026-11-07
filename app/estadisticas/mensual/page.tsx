@@ -22,6 +22,7 @@ import { GraficoVentaPorArticulo, GraficoVentaPorCliente, GraficoPrecioPromedio 
 import GraficoValorComercial from '@/app/ventas/GraficoValorComercial';
 import { ultimaSubaPorClienteRecord } from '@/lib/preciosHistoricoServer';
 import CopiarInformeBoton from './CopiarInformeBoton';
+import { descartePorFaseMes } from '@/lib/descarte';
 import { PROD_KEYS } from '@/lib/articulos';
 export const dynamic = 'force-dynamic';
 
@@ -131,7 +132,7 @@ function evolucionDescartes(lotes: Lote[], b: Buckets) {
 const PROD_KEYS_CLI = PROD_KEYS;
 function totalVenta(v: VentaDia): number { return PROD_KEYS_CLI.reduce((a, k) => a + (Number((v as any)[k]) || 0), 0); }
 function sumaPorClienteEnMes(ventas: VentaDia[], anio: number, mes: number): Map<string, number> {
-  const mk = `${anio}-${String(mes).padStart(2, '0')}`;
+  const mk = `${anio}-${String(mes).padStart(2, "0")}`;
   const map = new Map<string, number>();
   for (const v of ventas) {
     if (String(v.fecha || '').slice(0, 7) !== mk) continue;
@@ -267,6 +268,11 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
   // Todo por MES. Las series diarias se sacaron del informe: un informe mensual que
   // muestra el zigzag de cada día obliga a leer ruido para encontrar la tendencia, que es
   // lo único que se decide una vez por mes.
+  // El descarte del mes del informe, con la cámara. Misma función que usa Estadísticas:
+  // dos cálculos distintos del mismo descarte darían dos números y nadie sabría cuál mirar.
+  const mesesDescarteRep = descartePorFaseMes(lotesRep, movimientos, registrosCamara, 14);
+  const descarteMesRep = mesesDescarteRep.find((m) => m.mes === `${anioSel}-${String(mesSel).padStart(2, "0")}`) || null;
+
   const evoCiclos180 = evolucionCiclos(lotesRep, movimientos, b180);
   const evoPlantasPaqMes = evolucionPlantasPorPaquete(lotesRep, b180);
   const evoDescartesMes = evolucionDescartes(lotesRep, b180);
@@ -540,6 +546,55 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
                 ? <GraficoEvolucion series={evoEficienciaCultivoRep.series} labels={evoEficienciaCultivoRep.labels} hoyIdx={evoEficienciaCultivoRep.hoyIdx} unidad="%" yMin={0} yMax={100} />
                 : <p style={{ color: '#9ca3af', fontSize: '12px', textAlign: 'center', padding: '16px' }}>Sin lotes cosechados en el período.</p>}
               <Link href="/estadisticas#descarte-por-fase" style={{ fontSize: '11px', color: '#2563eb', textDecoration: 'none', fontWeight: 600, display: 'inline-block', marginTop: '8px' }}>Ver desglose de descarte por fase →</Link>
+            </div>
+
+            {/* ── Descarte del mes, con la cámara adentro ──────────────────────────────
+                La eficiencia de arriba mide SIEMPRE las tres etapas de cultivo y deja la
+                cámara afuera a propósito: son plantas que no llegaron vs. producto
+                terminado que se tiró, y mezclarlos da un número que no significa nada.
+                Pero dejar la cámara sin informar hacía que el descarte más caro —el que ya
+                pagó semilla, agua, cosecha y empaque— no apareciera en ningún lado del
+                informe del mes. Va acá, en su propio bloque y en su propia unidad. */}
+            <div style={{ ...cardStyle, margin: 0, border: '1px solid #f3f4f6' }}>
+              <p style={{ margin: '0 0 2px', fontSize: '12.5px', fontWeight: 700 }}>2b. Descarte del mes</p>
+              <p style={{ margin: '0 0 8px', fontSize: '11px', color: '#9ca3af' }}>
+                Las tres etapas de cultivo en plantas, y la cámara en paquetes — producto terminado que se tiró.
+              </p>
+              {!descarteMesRep ? (
+                <p style={{ color: '#9ca3af', fontSize: '12px' }}>Sin descarte cargado en el mes.</p>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ color: '#9ca3af', fontSize: '10.5px', textTransform: 'uppercase' }}>
+                      <th style={{ textAlign: 'left', padding: '3px 4px' }}>Cultivo</th>
+                      <th style={{ textAlign: 'right', padding: '3px 4px' }}>Plantín→F1</th>
+                      <th style={{ textAlign: 'right', padding: '3px 4px' }}>F1→F2</th>
+                      <th style={{ textAlign: 'right', padding: '3px 4px' }}>F2→Cosecha</th>
+                      <th style={{ textAlign: 'right', padding: '3px 4px', color: '#b45309' }}>Cámara (paq)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(['rucula', 'lechuga_crespa', 'lechuga_roble', 'albahaca'] as const).map((c) => {
+                      const d = descarteMesRep[c];
+                      const hay = d.plantinF1 + d.f1F2 + d.f2Cosecha + d.camara;
+                      if (hay <= 0) return null;
+                      const nom = c === 'rucula' ? 'Rúcula' : c === 'lechuga_crespa' ? 'Crespa' : c === 'lechuga_roble' ? 'Roble' : 'Albahaca';
+                      return (
+                        <tr key={c} style={{ borderTop: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '4px' }}>{nom}</td>
+                          <td style={{ padding: '4px', textAlign: 'right' }}>{Math.round(d.plantinF1).toLocaleString('es-AR')}</td>
+                          <td style={{ padding: '4px', textAlign: 'right' }}>{Math.round(d.f1F2).toLocaleString('es-AR')}</td>
+                          <td style={{ padding: '4px', textAlign: 'right' }}>{Math.round(d.f2Cosecha).toLocaleString('es-AR')}</td>
+                          <td style={{ padding: '4px', textAlign: 'right', fontWeight: 700, color: d.camara > 0 ? '#b45309' : '#d1d5db' }}>
+                            {Math.round(d.camara).toLocaleString('es-AR')}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+              <Link href="/estadisticas#descarte-por-fase" style={{ fontSize: '11px', color: '#2563eb', textDecoration: 'none', fontWeight: 600, display: 'inline-block', marginTop: '8px' }}>Ver la evolución mes a mes →</Link>
             </div>
 
             <div style={{ ...cardStyle, margin: 0, border: '1px solid #f3f4f6' }}>
