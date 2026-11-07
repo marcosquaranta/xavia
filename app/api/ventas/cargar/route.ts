@@ -4,12 +4,10 @@ import { readSheet, batchUpdateRows } from '@/lib/sheets';
 import { emitirPendientes } from '@/lib/facturacionEmitir';
 import { avisarEntregasNuevas } from '@/lib/avisoCobroEntrega';
 import type { VentaDia, ClienteVenta } from '@/lib/types';
-import { PROD_KEYS } from '@/lib/articulos';
+import { clavesDeVenta, tieneCantidad } from '@/lib/clavesVenta';
 
 // A quién le llega el aviso de "hay que cobrar en la entrega".
 const DESTINATARIOS_AVISO = ['administracion@xavia.com.ar'];
-
-const QTY_KEYS = PROD_KEYS;
 
 // Marca las ventas borrador de una fecha como PENDIENTE y las emite DIRECTO a Xubio
 // (una factura por cliente, sin pasar por la sección Facturación). Las que fallen
@@ -26,12 +24,30 @@ export async function POST(req: NextRequest) {
     if (!fecha) return NextResponse.json({ error: 'fecha requerida' }, { status: 400 });
 
     const ventas = await readSheet<VentaDia>('Ventas');
+    // ── Las claves salen de la hoja, no del código ──────────────────────────────────
+    //
+    // Esto miraba solo PROD_KEYS. Una venta de un artículo dado de alta en Admin —el berro
+    // hidropónico fue el primero— tenía todas esas columnas en cero, así que el filtro no
+    // la encontraba y la app contestaba "no hay ventas para cargar en esa fecha" con la
+    // venta cargada y a la vista. Las ventas por kilo caían en lo mismo.
+    const claves = await clavesDeVenta();
     const aCargar = ventas.filter(v =>
       v.fecha === fecha &&
       (!v.exportado || v.exportado === '') &&
-      QTY_KEYS.some(k => Number((v as any)[k]) > 0)
+      tieneCantidad(v, claves)
     );
-    if (!aCargar.length) return NextResponse.json({ error: 'No hay ventas para cargar en esa fecha' }, { status: 400 });
+    if (!aCargar.length) {
+      // El motivo, no solo el hecho. Son tres situaciones distintas —no hay nada cargado,
+      // ya se facturó todo, o hay filas pero vacías— y las tres se leían igual.
+      const delDia = ventas.filter(v => v.fecha === fecha);
+      const yaExportadas = delDia.filter(v => v.exportado && v.exportado !== '').length;
+      const motivo = !delDia.length
+        ? 'No hay ninguna venta cargada en esa fecha.'
+        : yaExportadas === delDia.length
+          ? `Las ${delDia.length} venta(s) de esa fecha ya se facturaron.`
+          : 'Hay ventas cargadas en esa fecha pero todas están en cero: no hay mercadería que facturar.';
+      return NextResponse.json({ error: motivo }, { status: 400 });
+    }
 
     await batchUpdateRows('Ventas', 'id_venta', aCargar.map(v => ({
       keyValue: v.id_venta,

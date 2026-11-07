@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     const cliente = clientes.find(c => String(c.id_control) === String(id_control));
     if (!cliente) return NextResponse.json({ error: 'Cliente no encontrado' }, { status: 404 });
 
-    const dias = detallePendientePorDia(ventas, precios, cliente);
+    const dias = await detallePendientePorDia(ventas, precios, cliente);
     if (!dias.length) return NextResponse.json({ error: 'Ese cliente no tiene ventas pendientes de facturar' }, { status: 400 });
 
     const nombre = nombreClienteVisible(cliente) || String(id_control);

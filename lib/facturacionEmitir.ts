@@ -7,6 +7,35 @@ import { getClientesXubio, matchClienteXubio, emitirFactura, ultimaFechaPorLetra
 
 // lechuga_kg queda para no perder ventas por kg cargadas antes del split crespa/roble.
 import { PROD_KEYS, LABELS_LARGOS } from './articulos';
+import { leerArticulosExtra } from './articulosVenta';
+
+// ── El catálogo completo, leído de la hoja ──────────────────────────────────────────
+//
+// Los mapas de abajo se arman con ARTICULOS, la lista escrita en el código. Un artículo
+// dado de alta desde Admin —el berro hidropónico fue el primero— no estaba en ninguno de
+// los dos, así que su renglón NO entraba en la factura: la venta se mandaba a Xubio sin
+// esa mercadería, o la factura salía vacía y el envío fallaba entero.
+//
+// Esto lee los extras en el momento y los agrega. Se devuelven las dos cosas juntas —cómo
+// se llama el renglón y con qué código va a Xubio— porque son el mismo dato del mismo
+// artículo: separarlos permitiría tener uno sin el otro, que es un renglón que se ve bien
+// en el detalle y que Xubio rechaza.
+async function catalogoCompleto(): Promise<{ keys: string[]; nombre: Record<string, string>; codigo: Record<string, string> }> {
+  const extra = await leerArticulosExtra().catch(() => []);
+  const nombre: Record<string, string> = { ...NOMBRE_PROD };
+  const codigo: Record<string, string> = { ...PRODUCTO_CODIGO };
+  const keys = [...PROD_KEYS];
+  for (const a of extra) {
+    if (!a.key || keys.includes(a.key)) continue;
+    keys.push(a.key);
+    nombre[a.key] = a.labelLargo || a.label || a.key;
+    // Sin nombre de producto en Xubio no se puede facturar ese renglón. Igual se agrega la
+    // clave: el renglón va a fallar contra Xubio con su mensaje, que es mejor que
+    // desaparecer en silencio de la factura.
+    codigo[a.key] = (a as any).xubio || '';
+  }
+  return { keys, nombre, codigo };
+}
 
 const NOMBRE_PROD: Record<string, string> = {
   // El catálogo primero como red: lo de abajo lo pisa donde haga falta un nombre más
@@ -102,7 +131,10 @@ export interface DiaPendiente {
   total: number;
 }
 
-export function detallePendientePorDia(ventas: VentaDia[], precios: PrecioVenta[], cliente: ClienteVenta): DiaPendiente[] {
+// Pasa a async porque el catálogo de artículos ya no está en el código: vive en la hoja y
+// hay que leerlo. Es el precio de que se puedan crear artículos sin un deploy.
+export async function detallePendientePorDia(ventas: VentaDia[], precios: PrecioVenta[], cliente: ClienteVenta): Promise<DiaPendiente[]> {
+  const cat = await catalogoCompleto();
   const soloFecha = (v: any) => String(v || '').split(/[T ]/)[0];
   const porDia = new Map<string, DiaPendiente>();
   for (const v of ventas) {
@@ -111,11 +143,11 @@ export function detallePendientePorDia(ventas: VentaDia[], precios: PrecioVenta[
     const fecha = soloFecha(v.fecha);
     if (!porDia.has(fecha)) porDia.set(fecha, { fecha, lineas: [], unidades: 0, total: 0 });
     const dia = porDia.get(fecha)!;
-    for (const key of PROD_KEYS) {
+    for (const key of cat.keys) {
       const cantidad = Number((v as any)[key]) || 0;
       if (cantidad <= 0) continue;
       const precio = getPrecio(precios, String(cliente.id_control), v.sucursal, key, cliente.sucursales);
-      dia.lineas.push({ nombre: NOMBRE_PROD[key] || key, sucursal: v.sucursal || '', cantidad, precio, importe: cantidad * precio });
+      dia.lineas.push({ nombre: cat.nombre[key] || key, sucursal: v.sucursal || '', cantidad, precio, importe: cantidad * precio });
       dia.unidades += cantidad;
       dia.total += cantidad * precio;
     }
@@ -266,6 +298,10 @@ export interface ParFechaCliente { id_control: string; fecha: string }
 export async function emitirPendientes(
   idControls?: string[] | null, opciones: { pares?: ParFechaCliente[]; porFecha?: boolean } = {},
 ): Promise<ResultadoEmision> {
+  // Una sola lectura del catálogo para toda la corrida: incluye los artículos dados de
+  // alta en Admin, que antes no entraban en ningún renglón de la factura.
+  const cat = await catalogoCompleto();
+
   const [clientes, precios, ventas] = await Promise.all([
     readSheet<ClienteVenta>('Clientes'),
     readSheet<PrecioVenta>('Precios'),
@@ -353,7 +389,7 @@ export async function emitirPendientes(
     const detalle: { nombre: string; cantidad: number; precio: number; importe: number }[] = [];
     const itemsVerificacion: ItemFacturado[] = [];
     for (const l of lineas) {
-      for (const key of PROD_KEYS) {
+      for (const key of cat.keys) {
         const qty = Number((l as any)[key]) || 0;
         if (qty <= 0) continue;
         const precio = getPrecio(precios, idControl, l.sucursal, key, cliente.sucursales);
@@ -362,7 +398,7 @@ export async function emitirPendientes(
         // pedido, esté la factura separada por sucursal o combinada con otras. Clientes
         // sin sucursales (l.sucursal vacío) mantienen la descripción simple de siempre —
         // no tiene sentido inventarles una "sucursal" con su propio nombre.
-        const nombreProd = NOMBRE_PROD[key] || key;
+        const nombreProd = cat.nombre[key] || key;
         // La descripción ARRANCA por lo que distingue al renglón — la sucursal, y si hace
         // falta la fecha de entrega. En la grilla de Xubio se ve solo el principio del
         // campo: con "Sucursal Funes — Rúcula" todos los renglones empezaban igual
@@ -370,7 +406,7 @@ export async function emitirPendientes(
         const prefijo = [l.sucursal || '', mostrarFecha ? ddmm(String(l.fecha || '')) : '']
           .filter(Boolean).join(' ');
         const descripcion = prefijo ? `${prefijo} — ${nombreProd}` : nombreProd;
-        items.push({ codigo: PRODUCTO_CODIGO[key], cantidad: qty, precio, descripcion });
+        items.push({ codigo: cat.codigo[key], cantidad: qty, precio, descripcion });
         detalle.push({ nombre: l.sucursal ? `${nombreProd} (${l.sucursal})` : nombreProd, cantidad: qty, precio, importe: qty * precio });
         // Se acumula por producto+sucursal: dos renglones del mismo producto a la misma
         // sucursal son una sola cosa para el que controló la carga del camión.
