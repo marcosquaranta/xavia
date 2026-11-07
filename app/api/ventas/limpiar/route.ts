@@ -3,6 +3,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { readSheet, updateRow } from '@/lib/sheets';
 import type { VentaDia } from '@/lib/types';
 import { PROD_KEYS } from '@/lib/articulos';
+import { leerArticulosExtra } from '@/lib/articulosVenta';
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
@@ -39,9 +40,24 @@ export async function POST(req: NextRequest) {
       // comparta la misma fecha calendario con ventas todavía pendientes.
       aLimpiar = ventas.filter(v => v.fecha === fecha && noExportado(v));
     }
+    // ── También los artículos dados de alta en Admin ────────────────────────────────
+    //
+    // Esto ponía en cero solo PROD_KEYS, la lista de artículos del código. Un artículo
+    // creado desde Admin —microgreens, cualquier alta nueva— conservaba su cantidad, así
+    // que la fila seguía teniendo mercadería: el comprobante volvía a aparecer como
+    // pendiente y parecía que el borrar no había hecho nada.
+    //
+    // Es el mismo agujero que tenían el historial y el desglose de ventas del EERR, por el
+    // mismo motivo: una lista fija de artículos adentro de un cálculo que corre sobre
+    // filas que pueden tener más columnas de las que esa lista conoce.
+    const keysExtra = (await leerArticulosExtra().catch(() => []))
+      .map((a) => a.key)
+      .filter((k) => !PROD_KEYS.includes(k));
+    const enCero = Object.fromEntries([...PROD_KEYS, ...keysExtra].map((k) => [k, 0]));
+
     for (const v of aLimpiar) {
       await updateRow('Ventas', 'id_venta', v.id_venta, {
-        ...Object.fromEntries(PROD_KEYS.map((k) => [k, 0])),
+        ...enCero,
         rucula_kg: 0, lechuga_kg: 0, lechuga_kg_crespa: 0, lechuga_kg_roble: 0,
       });
     }

@@ -5,7 +5,7 @@ import { readSheet } from '@/lib/sheets';
 import { calcularEERR, previsionesSugeridas, gastosDeLinea, desgloseVentas } from '@/lib/eerr';
 import type { Articulo, StockMes, Gasto, VentaDia, PrecioVenta, ClienteVenta } from '@/lib/types';
 import Header from '@/components/Header';
-import { leerPrevisiones, previsionDelMes, acumuladoPrevisiones } from '@/lib/previsiones';
+import { leerPrevisiones, previsionDelMes, acumuladoPrevisiones, previsionInicial } from '@/lib/previsiones';
 import PrevisionesEditor from './PrevisionesEditor';
 import TablaEERR from './TablaEERR';
 import EnviarInforme from './EnviarInforme';
@@ -373,6 +373,7 @@ export default async function CierreMensualPage({ searchParams }: { searchParams
           <PrevisionesEditor
             anio={anio} mes={mes} masaSalarial={act.masaSalarial} sugeridas={prev}
             acumulado={acumuladoPrevisiones(previsiones, anio, mes)}
+            inicial={previsionInicial(previsiones)}
             guardadas={guardada ? {
               despidos: Number(guardada.despidos) || 0,
               sac: Number(guardada.sac) || 0,

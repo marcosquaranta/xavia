@@ -45,6 +45,18 @@ export interface PrevisionMes {
 
 export const idPrevision = (anio: number, mes: number) => `PREV-${anio}-${String(mes).padStart(2, '0')}`;
 
+// ── Lo que ya se venía reservando antes de que existiera esta pantalla ───────────────
+//
+// La reserva de SAC y despidos no empezó el día que se cargó el primer mes acá: venía de
+// antes, en el Excel y en la cabeza. Sin forma de decirlo, el disponible arrancaba en cero
+// y el primer aguinaldo iba a aparecer como si no se hubiera previsto nada — justo el mes
+// en que más importa que el número esté bien.
+//
+// Vive en la misma hoja, como una fila con mes 0: es una previsión más, solo que de un
+// período que no tiene fecha. Guardarla en otro lado habría significado dos lugares desde
+// donde se suma la misma reserva.
+export const ID_PREVISION_INICIAL = 'PREV-INICIAL';
+
 export async function leerPrevisiones(): Promise<PrevisionMes[]> {
   return readSheet<PrevisionMes>(HOJA_PREVISIONES).catch(() => []);
 }
@@ -107,6 +119,13 @@ export function acumuladoPrevisiones(
 ): { despidos: number; sac: number } {
   let despidos = 0, sac = 0;
   for (const f of filas || []) {
+    // El arrastre de antes de la app cuenta siempre: no tiene mes, así que no puede ser
+    // "posterior" al que se está mirando.
+    if (String(f.id_prevision) === ID_PREVISION_INICIAL) {
+      despidos += numPrev(f.despidos) - numPrev(f.usado_despidos);
+      sac += numPrev(f.sac) - numPrev(f.usado_sac);
+      continue;
+    }
     const a = Number(f.anio), m = Number(f.mes);
     if (!a || !m) continue;
     if (a * 12 + m >= anio * 12 + mes) continue;  // solo meses anteriores
@@ -117,4 +136,31 @@ export function acumuladoPrevisiones(
   // —el primer aguinaldo después de empezar a prever— y no es un error: es que la reserva
   // no alcanzaba. Se muestra en cero porque como "disponible" no hay nada.
   return { despidos: Math.max(0, Math.round(despidos)), sac: Math.max(0, Math.round(sac)) };
+}
+
+// La fila de arrastre, si está cargada. La pantalla la muestra para poder cambiarla.
+export function previsionInicial(filas: PrevisionMes[]): { despidos: number; sac: number } | null {
+  const f = (filas || []).find((x) => String(x.id_prevision) === ID_PREVISION_INICIAL);
+  return f ? { despidos: numPrev(f.despidos), sac: numPrev(f.sac) } : null;
+}
+
+export async function guardarPrevisionInicial(args: {
+  despidos: number; sac: number; usuario: string;
+}): Promise<void> {
+  await asegurarHoja(HOJA_PREVISIONES, HEADERS_PREVISIONES);
+  await asegurarColumna(HOJA_PREVISIONES, 'usado_despidos');
+  await asegurarColumna(HOJA_PREVISIONES, 'usado_sac');
+  const fila = {
+    id_prevision: ID_PREVISION_INICIAL,
+    // Mes 0: la hace invisible para el cálculo por período y visible para el arrastre.
+    anio: 0, mes: 0,
+    despidos: Math.max(0, Math.round(args.despidos)),
+    sac: Math.max(0, Math.round(args.sac)),
+    alquiler: 0, epe: 0, usado_despidos: 0, usado_sac: 0,
+    notas: 'Reserva que venía de antes de la app',
+    usuario: args.usuario,
+    fecha_carga: new Date().toISOString(),
+  };
+  const actualizada = await updateRow(HOJA_PREVISIONES, 'id_prevision', ID_PREVISION_INICIAL, fila);
+  if (!actualizada) await appendRowObj(HOJA_PREVISIONES, fila);
 }

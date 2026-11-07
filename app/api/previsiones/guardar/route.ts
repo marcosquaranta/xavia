@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, isAdmin } from '@/lib/auth';
-import { guardarPrevision, borrarPrevision } from '@/lib/previsiones';
+import { guardarPrevision, borrarPrevision, guardarPrevisionInicial } from '@/lib/previsiones';
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
@@ -15,6 +15,17 @@ export async function POST(req: NextRequest) {
 
     // Deshace un guardado — pensado para sacar una fila de prueba, no para uso normal
     // desde la pantalla: el checklist del cierre lee "existe la fila" como "ya se guardó".
+    // El arrastre de antes de la app: una sola fila, sin mes. Va antes de validar año y
+    // mes porque justamente no tiene.
+    if (body.accion === 'inicial') {
+      await guardarPrevisionInicial({
+        despidos: Number(body.despidos) || 0,
+        sac: Number(body.sac) || 0,
+        usuario: user.email,
+      });
+      return NextResponse.json({ ok: true });
+    }
+
     if (body.accion === 'eliminar') {
       const ok = await borrarPrevision(a, m);
       return NextResponse.json({ ok, error: ok ? undefined : 'no_encontrada' }, { status: ok ? 200 : 404 });

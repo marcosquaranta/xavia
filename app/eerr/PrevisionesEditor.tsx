@@ -17,13 +17,16 @@ const subtitulo: React.CSSProperties = {
   textTransform: 'uppercase', letterSpacing: '0.4px',
 };
 
-export default function PrevisionesEditor({ anio, mes, masaSalarial, sugeridas, guardadas, acumulado }: {
+export default function PrevisionesEditor({ anio, mes, masaSalarial, sugeridas, guardadas, acumulado, inicial = null }: {
   anio: number; mes: number; masaSalarial: number;
   sugeridas: { despidos: number; sac: number };
   guardadas: { despidos: number; sac: number; alquiler: number; epe: number; usadoDespidos?: number; usadoSac?: number; notas: string; fecha: string } | null;
   // Lo previsto en meses anteriores y todavía sin usar: es lo que se puede consumir al
   // pagar el aguinaldo sin que el mes muestre un costo que ya se había cargado.
   acumulado: { despidos: number; sac: number };
+  // Lo que ya se venía reservando antes de que existiera esta pantalla. null = nunca se
+  // cargó, que no es lo mismo que cero: uno es "no hay arrastre", el otro "nadie lo dijo".
+  inicial?: { despidos: number; sac: number } | null;
 }) {
   // Arranca cerrado. Es un bloque que se toca una vez por mes, y ocupaba media pantalla
   // todos los días arriba del EERR. Cerrado dice lo único que hay que saber de un vistazo:
@@ -42,6 +45,25 @@ export default function PrevisionesEditor({ anio, mes, masaSalarial, sugeridas, 
   // o una indemnización, que es cuando la previsión deja de ser una reserva y se gasta.
   const [usadoDespidos, setUsadoDespidos] = useState(String(Math.round(guardadas?.usadoDespidos ?? 0)));
   const [usadoSac, setUsadoSac] = useState(String(Math.round(guardadas?.usadoSac ?? 0)));
+  const [verInicial, setVerInicial] = useState(false);
+  const [iniDespidos, setIniDespidos] = useState(String(Math.round(inicial?.despidos ?? 0)));
+  const [iniSac, setIniSac] = useState(String(Math.round(inicial?.sac ?? 0)));
+  const [iniMsg, setIniMsg] = useState<string | null>(null);
+
+  // El arrastre se guarda aparte del mes: no pertenece a ningún período, y meterlo en el
+  // mismo botón haría que corregirlo obligara a volver a guardar el mes.
+  async function guardarInicial() {
+    setIniMsg('Guardando…');
+    try {
+      const res = await fetch('/api/previsiones/guardar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion: 'inicial', despidos: Number(iniDespidos) || 0, sac: Number(iniSac) || 0 }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || 'No se pudo guardar');
+      setIniMsg('✓ Guardado. Recargá para ver el disponible actualizado.');
+    } catch (e: any) { setIniMsg(e?.message || 'No se pudo guardar'); }
+  }
   const hayUso = Number(usadoDespidos) > 0 || Number(usadoSac) > 0;
 
   const difDespidos = Math.abs(Number(despidos) - sugeridas.despidos) > 1;
@@ -173,6 +195,51 @@ export default function PrevisionesEditor({ anio, mes, masaSalarial, sugeridas, 
           El pago se carga aparte, como gasto de sueldos. Lo que ponés acá hace que
           <strong> no se cuente dos veces</strong>: ya lo cargaron los meses que lo fueron reservando.
         </p>
+      )}
+
+      {/* ── El arrastre de antes de la app ──────────────────────────────────────────
+          La reserva no empezó el día que se cargó el primer mes acá: venía de antes. Sin
+          forma de decirlo, el disponible arranca en cero y el primer aguinaldo aparece
+          como si no se hubiera previsto nada, justo el mes en que más importa.
+          Se guarda aparte del mes porque no pertenece a ningún período: corregirlo no
+          tiene que obligar a volver a guardar octubre. */}
+      <p style={{ ...subtitulo, marginTop: '18px' }}>
+        Arrastre — lo que ya venías reservando antes de la app
+        <button type="button" onClick={() => setVerInicial((v) => !v)}
+          style={{ marginLeft: '8px', background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', padding: 0, fontSize: '11px', fontWeight: 600, textTransform: 'none', letterSpacing: 0 }}>
+          {verInicial ? 'cerrar' : (inicial ? 'cambiar' : 'cargar')}
+        </button>
+      </p>
+      {!verInicial ? (
+        <p style={{ margin: '0 0 4px', fontSize: '11.5px', color: inicial ? '#374151' : '#b45309' }}>
+          {inicial
+            ? <>Cargado: SAC {$(inicial.sac)} · despidos {$(inicial.despidos)}. Ya está sumado en el disponible.</>
+            : <>Sin cargar. Si venías reservando antes de usar la app, el disponible de arriba está incompleto.</>}
+        </p>
+      ) : (
+        <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '7px', padding: '9px 11px', marginBottom: '6px' }}>
+          <p style={{ margin: '0 0 7px', fontSize: '11px', color: '#6b7280', lineHeight: 1.5 }}>
+            El saldo de reserva que ya tenías juntado el día que empezaste a cargar el EERR acá.
+            No es de ningún mes: se suma al disponible y se consume igual que el resto.
+          </p>
+          <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '10.5px', color: '#6b7280', fontWeight: 600 }}>SAC que venía de antes</label>
+              <input type="number" value={iniSac} min={0} onChange={(e) => { setIniSac(e.target.value); setIniMsg(null); }}
+                style={{ width: '140px', textAlign: 'right', fontSize: '14px', fontWeight: 700, padding: '5px 8px', border: '1px solid #e5e7eb', borderRadius: '6px' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '10.5px', color: '#6b7280', fontWeight: 600 }}>Despidos que venían de antes</label>
+              <input type="number" value={iniDespidos} min={0} onChange={(e) => { setIniDespidos(e.target.value); setIniMsg(null); }}
+                style={{ width: '140px', textAlign: 'right', fontSize: '14px', fontWeight: 700, padding: '5px 8px', border: '1px solid #e5e7eb', borderRadius: '6px' }} />
+            </div>
+            <button type="button" onClick={guardarInicial}
+              style={{ fontSize: '12px', padding: '6px 14px', background: '#374151', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 700 }}>
+              Guardar arrastre
+            </button>
+            {iniMsg && <span style={{ fontSize: '11px', color: iniMsg.startsWith('✓') ? '#059669' : '#b45309' }}>{iniMsg}</span>}
+          </div>
+        </div>
       )}
 
       <p style={{ ...subtitulo, marginTop: '18px' }}>Cuentas corrientes — deuda con un tercero</p>
