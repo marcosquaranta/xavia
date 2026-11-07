@@ -13,6 +13,8 @@ import { readSheet } from './sheets';
 import { compararFacturado, controlFacturacion, DIF_MINIMA_PESOS, DIAS_CORRIMIENTO, DIAS_MISMO_IMPORTE, type ComparacionFacturado, type ControlFacturacion } from './controlFacturacion';
 import { comprobantesParaMirar } from './xubioLectura';
 import { fechaArgentinaHoy } from './ocupacion';
+import { compararPorComprobante, type ComparacionPorComprobante } from './controlFacturacion';
+import { clavesDeArticulo } from './clavesVenta';
 import type { VentaDia, PrecioVenta, ClienteVenta } from './types';
 import { cobranzasParaMirar } from './xubioLectura';
 import { medirDependencia, type Dependencia } from './dependenciaXubio';
@@ -27,6 +29,10 @@ export interface DatosInformeFacturacion {
   desde: string;
   hasta: string;
   comparacion: ComparacionFacturado;
+  // El control que de verdad sirve: cruza por NÚMERO de comprobante, no por fecha. El de
+  // arriba queda como totales por cliente; el detalle por día se reemplazó, porque la
+  // factura no sale siempre con la fecha de la venta y eso generaba diferencias falsas.
+  porComprobante: ComparacionPorComprobante;
   control: ControlFacturacion;
   // Cuánto de lo que hay en Xubio NO salió de la app. Es el indicador de si el objetivo
   // —que Xubio sea solo donde se emite— es real o es una intención.
@@ -51,6 +57,7 @@ export async function obtenerDatosInformeFacturacion(): Promise<DatosInformeFact
   return {
     desde, hasta,
     comparacion: compararFacturado(ventas, precios, clientes, comprobantes, desde, hasta),
+    porComprobante: compararPorComprobante(ventas, precios, clientes, comprobantes, desde, hasta, await clavesDeArticulo()),
     control: controlFacturacion(ventas, precios, clientes, hasta),
     dependencia: medirDependencia({
       comprobantes, cobranzas, desde, hasta,
@@ -80,35 +87,52 @@ export function construirHtmlFacturacion(d: DatosInformeFacturacion): string {
         </tr>`).join('')}</tbody>
       </table>`;
 
-  const difHtml = !c.disponible
+  // ── Las diferencias, comprobante por comprobante ────────────────────────────────
+  //
+  // Antes esto se listaba por (cliente, día) y el informe era ilegible: la factura no sale
+  // siempre con la fecha de la venta —AFIP exige numeración correlativa, así que la app
+  // corre la fecha cuando hace falta— y cada venta facturada un día después producía DOS
+  // renglones en rojo: "sin factura en Xubio" el día de la venta y plata de más el día de
+  // la factura. Con el informe lleno de diferencias que no existían, las de verdad no se
+  // veían.
+  //
+  // Ahora se cruza por el NÚMERO de comprobante, que la app guarda al emitir. El cruce es
+  // exacto y no depende de ninguna fecha.
+  const pc = d.porComprobante;
+  const ETIQUETA_ESTADO: Record<string, { txt: string; color: string }> = {
+    falta_en_xubio: { txt: 'la app la emitió y Xubio no la tiene', color: '#991b1b' },
+    difiere:        { txt: 'importes distintos', color: '#b45309' },
+    solo_en_xubio:  { txt: 'cargada a mano en Xubio', color: '#6b7280' },
+  };
+  const difHtml = !pc.disponible
     ? '<p style="margin:0;font-size:12px;color:#9ca3af">No se pudo leer Xubio para contrastar.</p>'
-    : !c.porCliente.length
-      ? `<p style="margin:0;font-size:13px;color:#059669">✓ Ningún cliente con diferencias de más de ${fmtMoneda(DIF_MINIMA_PESOS)}.</p>`
-      : `<table style="border-collapse:collapse;width:100%;font-size:12.5px">
+    : !pc.comprobantes.length
+      ? `<p style="margin:0;font-size:13px;color:#059669">✓ Los ${pc.coinciden} comprobantes del período cierran con Xubio.</p>`
+      : `<p style="margin:0 0 6px;font-size:12px;color:#6b7280">
+           ${pc.coinciden} comprobante(s) cierran. Estos ${pc.comprobantes.length} no:
+         </p>
+         <table style="border-collapse:collapse;width:100%;font-size:12.5px">
           <thead><tr style="background:#f9fafb;color:#6b7280">
+            <th style="padding:5px 8px;text-align:left">Comprobante</th>
             <th style="padding:5px 8px;text-align:left">Cliente</th>
             <th style="padding:5px 8px;text-align:right">Según la app</th>
             <th style="padding:5px 8px;text-align:right">En Xubio</th>
             <th style="padding:5px 8px;text-align:right">Diferencia</th>
           </tr></thead>
-          <tbody>${c.porCliente.map((x) => `<tr>
-              <td style="padding:5px 8px;border-bottom:${x.dias.length ? 'none' : '1px solid #f3f4f6'}">${x.cliente}</td>
-              <td style="padding:5px 8px;border-bottom:${x.dias.length ? 'none' : '1px solid #f3f4f6'};text-align:right">${fmtMoneda(x.app)}</td>
-              <td style="padding:5px 8px;border-bottom:${x.dias.length ? 'none' : '1px solid #f3f4f6'};text-align:right">${fmtMoneda(x.xubio)}</td>
-              <td style="padding:5px 8px;border-bottom:${x.dias.length ? 'none' : '1px solid #f3f4f6'};text-align:right;font-weight:700;color:${x.diferencia > 0 ? '#dc2626' : '#b45309'}">${x.diferencia > 0 ? '+' : '−'}${fmtMoneda(Math.abs(x.diferencia))}</td>
-            </tr>
-            ${x.dias.slice(0, 4).map((dia, i, arr) => {
-              const ultimo = i === arr.length - 1 && x.dias.length <= 4;
-              const borde = ultimo ? '1px solid #f3f4f6' : 'none';
-              const nros = dia.comprobantes.map((n) => n.slice(-4)).join(', ');
-              return `<tr style="color:#9ca3af;font-size:11.5px">
-                <td style="padding:1px 8px 1px 20px;border-bottom:${borde}">${fmtDia(dia.fecha)}${nros ? ` · factura ${nros}` : ' · sin factura en Xubio'}</td>
-                <td style="padding:1px 8px;border-bottom:${borde};text-align:right">${fmtMoneda(dia.app)}</td>
-                <td style="padding:1px 8px;border-bottom:${borde};text-align:right">${fmtMoneda(dia.xubio)}</td>
-                <td style="padding:1px 8px;border-bottom:${borde};text-align:right">${dia.diferencia > 0 ? '+' : '−'}${fmtMoneda(Math.abs(dia.diferencia))}</td>
-              </tr>`;
-            }).join('')}
-            ${x.dias.length > 4 ? `<tr style="color:#9ca3af;font-size:11.5px"><td colspan="4" style="padding:1px 8px 1px 20px;border-bottom:1px solid #f3f4f6">y ${x.dias.length - 4} días más con diferencias</td></tr>` : ''}`).join('')}
+          <tbody>${pc.comprobantes.slice(0, 25).map((x) => {
+            const e = ETIQUETA_ESTADO[x.estado];
+            return `<tr>
+              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;font-family:ui-monospace,monospace;font-size:11.5px">
+                ${x.numero}<br><span style="color:${e.color};font-family:inherit;font-size:10.5px">${e.txt}</span>
+              </td>
+              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6">${x.cliente || '(sin cliente)'}</td>
+              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;text-align:right">${x.app ? fmtMoneda(x.app) : '—'}</td>
+              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;text-align:right">${x.xubio ? fmtMoneda(x.xubio) : '—'}</td>
+              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;text-align:right;font-weight:700;color:${e.color}">${x.diferencia > 0 ? '+' : '−'}${fmtMoneda(Math.abs(x.diferencia))}</td>
+            </tr>`;
+          }).join('')}
+          ${pc.comprobantes.length > 25 ? `<tr><td colspan="5" style="padding:4px 8px;color:#9ca3af;font-size:11.5px">y ${pc.comprobantes.length - 25} más</td></tr>` : ''}
+          </tbody>
         </table>`;
 
   // ── Cuánto se sigue haciendo fuera de la app ──
@@ -176,15 +200,24 @@ export function construirTextoFacturacion(d: DatosInformeFacturacion): string {
   for (const p of d.control.pendientes) {
     L.push(`  ${p.cliente}: ${p.unidades.toLocaleString('es-AR')} u · ${fmtMoneda(p.monto)} · desde ${fmtDia(p.diaMasViejo)} (${p.atraso} días)`);
   }
-  L.push('', '*App vs Xubio*');
-  if (!d.comparacion.disponible) L.push('  No se pudo leer Xubio.');
-  else if (!d.comparacion.porCliente.length) L.push(`  ✓ Ningún cliente con diferencias de más de ${fmtMoneda(DIF_MINIMA_PESOS)}.`);
-  for (const x of d.comparacion.porCliente) {
-    L.push(`  ${x.cliente}: app ${fmtMoneda(x.app)} vs Xubio ${fmtMoneda(x.xubio)} — ${x.diferencia > 0 ? '+' : '−'}${fmtMoneda(Math.abs(x.diferencia))}`);
-    for (const dia of x.dias.slice(0, 4)) {
-      const nros = dia.comprobantes.map((n) => n.slice(-4)).join(', ');
-      L.push(`      ${fmtDia(dia.fecha)}: ${dia.diferencia > 0 ? '+' : '−'}${fmtMoneda(Math.abs(dia.diferencia))}${nros ? ` (factura ${nros})` : ' (sin factura en Xubio)'}`);
+  // Mismo criterio que el HTML: por número de comprobante. Las dos versiones del mismo
+  // informe no pueden listar cosas distintas.
+  L.push('', '*App vs Xubio — por comprobante*');
+  const pcT = d.porComprobante;
+  const MOTIVO: Record<string, string> = {
+    falta_en_xubio: 'la app la emitió y Xubio no la tiene',
+    difiere: 'importes distintos',
+    solo_en_xubio: 'cargada a mano en Xubio',
+  };
+  if (!pcT.disponible) L.push('  No se pudo leer Xubio.');
+  else if (!pcT.comprobantes.length) L.push(`  ✓ Los ${pcT.coinciden} comprobantes del período cierran.`);
+  else {
+    L.push(`  ${pcT.coinciden} cierran. Estos ${pcT.comprobantes.length} no:`);
+    for (const x of pcT.comprobantes.slice(0, 20)) {
+      L.push(`  ${x.numero} · ${x.cliente || '(sin cliente)'} — ${MOTIVO[x.estado]}`);
+      L.push(`      app ${x.app ? fmtMoneda(x.app) : '—'} vs Xubio ${x.xubio ? fmtMoneda(x.xubio) : '—'} (${x.diferencia > 0 ? '+' : '−'}${fmtMoneda(Math.abs(x.diferencia))})`);
     }
+    if (pcT.comprobantes.length > 20) L.push(`  y ${pcT.comprobantes.length - 20} más`);
   }
   const d2 = d.dependencia;
   if (d2.totalComprobantes > 0 || d2.totalCobranzas > 0) {

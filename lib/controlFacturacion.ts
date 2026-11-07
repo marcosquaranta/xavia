@@ -403,3 +403,130 @@ export function compararFacturado(
     porCliente, disponible: true,
   };
 }
+
+// ── Control por COMPROBANTE, no por fecha ────────────────────────────────────────────
+//
+// El control cruzaba app contra Xubio por (cliente, día). No funcionaba, y el motivo es
+// estructural: la factura NO siempre sale con la fecha de la venta. La numeración del
+// punto de venta es correlativa y AFIP no acepta un número mayor con fecha anterior, así
+// que la app corre la fecha cuando hace falta (ver fechaDeFactura en facturacionEmitir).
+//
+// El resultado era un informe lleno de diferencias que no existían: la venta del 19/10
+// aparecía como "sin factura en Xubio" y la factura del 21/10 como plata que la app no
+// tenía. Dos renglones en rojo por una venta correctamente facturada. Con eso, el informe
+// dejó de leerse — que es peor que no tenerlo, porque las diferencias reales estaban ahí
+// adentro y nadie las veía.
+//
+// Lo que había que usar estaba desde el principio: al emitir, la app guarda en `exportado`
+// el NÚMERO de comprobante que devolvió Xubio. Con eso el cruce es exacto y no depende de
+// ninguna fecha.
+
+export interface DiferenciaComprobante {
+  numero: string;
+  cliente: string;
+  fechaXubio: string;
+  app: number;
+  xubio: number;
+  diferencia: number;
+  // Qué le pasa a este comprobante. Son tres problemas distintos y se arreglan distinto.
+  estado:
+    | 'difiere'        // los dos lo tienen, por montos distintos
+    | 'falta_en_xubio' // la app lo da por emitido y Xubio no lo tiene: lo más grave
+    | 'solo_en_xubio'; // está en Xubio y no salió de la app (carga manual allá)
+}
+
+export interface ComparacionPorComprobante {
+  desde: string;
+  hasta: string;
+  totalApp: number;
+  totalXubio: number;
+  diferencia: number;
+  comprobantes: DiferenciaComprobante[];
+  // Facturas que la app emitió y Xubio sí tiene, con el mismo importe. Se cuentan para
+  // poder decir "238 de 241 cierran": un informe que solo lista problemas no deja saber si
+  // el control está mirando todo o se quedó corto.
+  coinciden: number;
+  disponible: boolean;
+}
+
+// `claves` son todas las columnas de artículo, incluidas las dadas de alta en Admin. Entra
+// como parámetro porque leerlas es asíncrono y esto es una función pura: si usara la lista
+// del código, un artículo nuevo valdría cero del lado de la app y aparecería como
+// diferencia en todas las facturas que lo tengan.
+export function compararPorComprobante(
+  ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[],
+  comprobantes: any[] | null, desde: string, hasta: string, claves: string[],
+): ComparacionPorComprobante {
+  const vacio: ComparacionPorComprobante = {
+    desde, hasta, totalApp: 0, totalXubio: 0, diferencia: 0, comprobantes: [], coinciden: 0, disponible: false,
+  };
+  if (!comprobantes) return vacio;
+
+  // ── Lado app, agrupado por el número que Xubio devolvió al emitir ──
+  const app = new Map<string, { monto: number; cliente: string }>();
+  for (const v of ventas) {
+    const numero = String(v.exportado || '').trim();
+    // Sin número no hay con qué cruzar: PENDIENTE y FACTURADO (el fallback viejo) quedan
+    // afuera y los cuenta el control de pendientes, que es su problema.
+    if (!numero || numero === 'PENDIENTE' || numero === 'FACTURADO') continue;
+    const cliente = clientes.find((c) => String(c.id_control) === String(v.id_control));
+    let monto = 0;
+    for (const key of claves) {
+      const qty = Number((v as any)[key]) || 0;
+      if (qty <= 0) continue;
+      monto += qty * precioDe(precios, String(v.id_control), v.sucursal, key, cliente?.sucursales);
+    }
+    if (monto <= 0) continue;
+    if (llevaIva(cliente)) monto = monto * (1 + IVA_FACTURA_A);
+    const prev = app.get(numero);
+    if (prev) prev.monto += monto;
+    else app.set(numero, { monto, cliente: nombreClienteVisible(cliente) || String(v.nombre_cliente || '') });
+  }
+
+  // ── Lado Xubio, por número ──
+  const xubio = new Map<string, { monto: number; cliente: string; fecha: string }>();
+  for (const c of comprobantes) {
+    const f = soloFecha(c?.fecha);
+    if (!f || f < desde || f > hasta) continue;
+    const numero = String(c?.numeroDocumento || '').trim();
+    if (!numero) continue;
+    const signo = Number(c?.tipo) === 3 ? -1 : 1;
+    const prev = xubio.get(numero);
+    const monto = signo * (Number(c?.importetotal) || 0);
+    if (prev) prev.monto += monto;
+    else xubio.set(numero, { monto, cliente: nombreDeComprobante(c), fecha: f });
+  }
+
+  const out: DiferenciaComprobante[] = [];
+  let coinciden = 0;
+  for (const numero of new Set([...app.keys(), ...xubio.keys()])) {
+    const a = Math.round(app.get(numero)?.monto || 0);
+    const x = Math.round(xubio.get(numero)?.monto || 0);
+    const enApp = app.has(numero), enXubio = xubio.has(numero);
+    const dif = a - x;
+
+    // Una factura que la app emitió y Xubio no tiene en la ventana puede ser simplemente
+    // una factura más vieja que el rango: se informa igual, pero por eso el texto del
+    // informe dice "revisá", no "falta".
+    if (enApp && !enXubio) {
+      out.push({ numero, cliente: app.get(numero)!.cliente, fechaXubio: '', app: a, xubio: 0, diferencia: a, estado: 'falta_en_xubio' });
+      continue;
+    }
+    if (!enApp && enXubio) {
+      const d = xubio.get(numero)!;
+      out.push({ numero, cliente: d.cliente, fechaXubio: d.fecha, app: 0, xubio: x, diferencia: -x, estado: 'solo_en_xubio' });
+      continue;
+    }
+    if (Math.abs(dif) < DIF_MINIMA_PESOS) { coinciden++; continue; }
+    out.push({ numero, cliente: app.get(numero)!.cliente || xubio.get(numero)!.cliente, fechaXubio: xubio.get(numero)!.fecha, app: a, xubio: x, diferencia: dif, estado: 'difiere' });
+  }
+
+  // Lo más grave primero —una factura que falta en Xubio es mercadería sin facturar— y
+  // dentro de cada grupo, por plata.
+  const orden = { falta_en_xubio: 0, difiere: 1, solo_en_xubio: 2 } as const;
+  out.sort((p, q) => (orden[p.estado] - orden[q.estado]) || (Math.abs(q.diferencia) - Math.abs(p.diferencia)));
+
+  const totalApp = Math.round([...app.values()].reduce((acc, v) => acc + v.monto, 0));
+  const totalXubio = Math.round([...xubio.values()].reduce((acc, v) => acc + v.monto, 0));
+  return { desde, hasta, totalApp, totalXubio, diferencia: totalApp - totalXubio, comprobantes: out, coinciden, disponible: true };
+}
