@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import CumplimientoObjetivo from '@/components/CumplimientoObjetivo';
 import { OBJETIVOS_MARCE } from '@/lib/objetivosMarce';
+import { alertasDelInforme } from '@/lib/alertasInforme';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { calcularDiasPorFase } from '@/lib/lotes';
@@ -386,6 +387,41 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
   const capProd = calcularCapacidadProductiva(lotesRep, movimientos, ubicaciones, 'anio', 'todas');
   const resumenCiclos = resumenCiclosPorCultivoYNave(capProd.ciclosMesadas);
 
+  // ── Qué hay que mirar de este informe ────────────────────────────────────────────
+  //
+  // Va arriba de todo. El informe son cuarenta números bien puestos y eso no dice por
+  // dónde empezar: hay que recorrerlo entero para descubrir que lo único raro del mes fue
+  // el descarte de cámara. Esto no agrega información —lee los mismos números de abajo—,
+  // los ordena por cuánto se movieron.
+  const alertasInf = (() => {
+    const pp = evoPlantasPaqMes.series[0]?.puntos || [];
+    const difNaves = resumenCiclos.flatMap((rc: any) => {
+      const n1 = rc.porNave.find((x: any) => x.nave === 1);
+      const n2 = rc.porNave.find((x: any) => x.nave === 2);
+      if (!n1 || !n2 || !(n1.total > 0) || !(n2.total > 0)) return [];
+      return [{ cultivo: rc.cultivo, dias: n2.total - n1.total }];
+    });
+    const camara = descarteMesRep
+      ? (['rucula', 'lechuga_crespa', 'lechuga_roble', 'albahaca'] as const)
+          .reduce((a, c) => a + (Number(descarteMesRep[c]?.camara) || 0), 0)
+      : 0;
+    return alertasDelInforme({
+      ventasMes: null, ventasMesAnterior: null,
+      // Primer y último punto de la serie de plantas/paquete: es la tendencia del semestre,
+      // que es donde el cambio se nota. Mes contra mes se pierde en el ruido.
+      plantasPaqPrimero: pp.length > 1 ? pp[0][1] : null,
+      plantasPaqUltimo: pp.length > 1 ? pp[pp.length - 1][1] : null,
+      descarteCamaraPaq: camara,
+      eficienciaPct: eficienciaUltimoMesRep?.pctGlobal ?? null,
+      eficienciaObjetivo: OBJETIVOS_MARCE.eficiencia.objetivo ?? null,
+      ocupacionPct: ocupacionUltimoMesRep?.total.pct ?? null,
+      ocupacionObjetivo: OBJETIVOS_MARCE.ocupacion.objetivo ?? null,
+      difNaves,
+      clientesEnCaida: [],
+    });
+  })();
+
+
   // Ocupación promedio 30 días por nave — sobre el historial diario (siempre relativo a
   // hoy: es un snapshot físico, no tiene sentido "rebobinarlo" a un mes viejo)
   const ocupacionProm30 = ocupacionPromedioPorNave(ocupHistRows, 30);
@@ -613,8 +649,35 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
           </div>
         </div>
 
+        {/* ══ LO QUE HAY QUE MIRAR ══
+            Primero de todo y antes de cualquier número: si el informe no dice por dónde
+            empezar, se lee entero o no se lee. */}
+        <div style={{ border: `2px solid ${alertasInf.some(a => a.nivel === 'alta') ? '#fecaca' : '#e5e7eb'}`,
+          background: alertasInf.some(a => a.nivel === 'alta') ? '#fef2f2' : '#fafafa',
+          borderRadius: '10px', padding: '13px 15px', marginBottom: '16px' }}>
+          <p style={{ margin: '0 0 7px', fontSize: '13px', fontWeight: 800, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            Qué mirar de este mes
+          </p>
+          {alertasInf.length === 0 ? (
+            <p style={{ margin: 0, fontSize: '13px', color: '#166534' }}>
+              ✓ Nada se movió fuera de lo normal. El mes se puede leer tranquilo.
+            </p>
+          ) : (
+            <ul style={{ margin: 0, paddingLeft: '18px' }}>
+              {alertasInf.map((a, i) => (
+                <li key={i} style={{ marginBottom: '5px', fontSize: '13px', lineHeight: 1.5 }}>
+                  <strong style={{ color: a.nivel === 'alta' ? '#991b1b' : a.nivel === 'media' ? '#92400e' : '#1d4ed8' }}>
+                    {a.titulo}
+                  </strong>
+                  {a.detalle && <span style={{ color: '#6b7280' }}> — {a.detalle}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
         {/* ══ 1. VENTAS ══ */}
-        <h2 style={tituloSeccion}>1. Ventas</h2>
+        <h2 id="ventas" style={tituloSeccion}>1. Ventas</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '14px', marginBottom: '14px' }}>
           <div>
             <GraficoVentaPorArticulo datos={evolArticulo} />
@@ -716,7 +779,7 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
         </div>
 
         {/* ══ 2. PRODUCCIÓN ══ */}
-        <h2 style={tituloSeccion}>2. Producción</h2>
+        <h2 id="produccion" style={tituloSeccion}>2. Producción</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '14px', marginBottom: '14px' }}>
           <div style={cardStyle}>
             <p className="card-title" style={{ margin: '0 0 2px' }}>Evolución de ciclo</p>
