@@ -329,7 +329,18 @@ export function resumenCiclosPorCultivoYNave(ciclosMesadas: CicloMesada[]): Resu
   });
   function prom(arr: typeof filas, campo: 'f1' | 'f2' | 'total' | 'plantasPorPaq' | 'peso'): number {
     const vals = arr.filter(f => f[campo] > 0).map(f => f[campo]);
-    return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+    if (!vals.length) return 0;
+    const media = vals.reduce((a, b) => a + b, 0) / vals.length;
+    // ── Plantas por paquete va con un decimal ────────────────────────────────────────
+    //
+    // Redondeado a entero este número no dice nada: la rúcula viene cayendo de 3,2 a 2,4
+    // plantas por paquete —el mismo paquete con menos material, que es lo que encarece el
+    // producto— y la tabla mostraba 3 todos los meses. El gráfico de al lado mostraba la
+    // caída, así que la misma pantalla afirmaba dos cosas distintas sobre el mismo dato.
+    //
+    // Los días y los gramos sí son enteros: un ciclo de 33,4 días no significa nada
+    // distinto de 33, y el gramaje se mide en gramos enteros.
+    return campo === 'plantasPorPaq' ? Math.round(media * 10) / 10 : Math.round(media);
   }
   function filaProm(arr: typeof filas, nave: number): ResumenCicloNave {
     return { nave, f1: prom(arr, 'f1'), f2: prom(arr, 'f2'), total: prom(arr, 'total'), plantasPorPaq: prom(arr, 'plantasPorPaq'), peso: prom(arr, 'peso'), n: arr.reduce((a, f) => a + f.n, 0) };

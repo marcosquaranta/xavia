@@ -15,9 +15,20 @@ async function svgAPng(svg: SVGSVGElement, escala = 2): Promise<string> {
       img.onerror = () => reject(new Error('No se pudo renderizar un gráfico'));
       img.src = url;
     });
+    // ── De dónde sale el tamaño, en orden ───────────────────────────────────────────
+    //
+    // El fallback a 700×300 era una bomba: un SVG sin viewBox y sin layout —clientWidth
+    // en 0, que pasa con cualquier cosa fuera de pantalla o dentro de un flex que todavía
+    // no midió— se dibujaba estirado a 700×300. Con las leyendas, que miden 24×10, eso
+    // convertía un puntito en un círculo gigante encima del texto del informe.
+    //
+    // Los atributos width/height van ANTES del clientWidth: son lo que el autor del
+    // gráfico declaró, y valen aunque el elemento no esté medido.
     const viewBox = svg.viewBox?.baseVal;
-    const ancho = (viewBox && viewBox.width) || svg.clientWidth || 700;
-    const alto = (viewBox && viewBox.height) || svg.clientHeight || 300;
+    const attrW = Number(svg.getAttribute('width')) || 0;
+    const attrH = Number(svg.getAttribute('height')) || 0;
+    const ancho = (viewBox && viewBox.width) || attrW || svg.clientWidth || 700;
+    const alto = (viewBox && viewBox.height) || attrH || svg.clientHeight || 300;
     const canvas = document.createElement('canvas');
     canvas.width = ancho * escala;
     canvas.height = alto * escala;

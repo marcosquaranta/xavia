@@ -111,7 +111,7 @@ export default function GraficoEvolucion({ series, pesoSeries, labels, hoyIdx, u
       <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '10px', fontSize: '12px' }}>
         {series.map((s) => (
           <div key={s.nombre} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <svg width={24} height={10}>
+            <svg width={24} height={10} viewBox="0 0 24 10" style={{ width: 24, height: 10, flex: 'none' }}>
               <line x1={0} y1={5} x2={24} y2={5} stroke={s.color} strokeWidth={3} />
               <circle cx={12} cy={5} r={3.5} fill={s.color} />
             </svg>
@@ -120,7 +120,7 @@ export default function GraficoEvolucion({ series, pesoSeries, labels, hoyIdx, u
         ))}
         {(pesoSeries || []).filter(s => s.puntos.length > 0).map((s) => (
           <div key={`leyenda-peso-${s.nombre}`} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <svg width={24} height={10}>
+            <svg width={24} height={10} viewBox="0 0 24 10" style={{ width: 24, height: 10, flex: 'none' }}>
               <line x1={0} y1={5} x2={24} y2={5} stroke={s.color} strokeWidth={2} strokeDasharray="5 4" />
               <circle cx={12} cy={5} r={3} fill="white" stroke={s.color} strokeWidth={1.5} />
             </svg>

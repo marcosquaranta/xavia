@@ -139,7 +139,7 @@ export default function GraficoCiclosMesadas({ datos }: { datos: CicloMesada[] }
           <span style={{ width: 10, height: 10, background: '#134e4a', borderRadius: 2, display: 'inline-block' }} /> Rúcula F2
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <svg width={10} height={10} style={{ display: 'inline-block' }}>
+          <svg width={10} height={10} viewBox="0 0 10 10" style={{ display: 'inline-block', width: 10, height: 10, flex: 'none' }}>
             <circle cx={5} cy={5} r={4} fill="#fb923c" />
           </svg>
           Peso prom. gr/paq (eje derecho →)
