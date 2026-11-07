@@ -75,13 +75,23 @@ export default function CargarDescarteCamara({ cultivo, label, compacto = false,
 
   if (!abierto) {
     return (
+      // ── Por qué el nombre del cultivo NO va en el botón compacto ──────────────────
+      //
+      // "🗑️ Cargar descarte · Lechuga Crespa" con `nowrap` mide unos 230px que no pueden
+      // achicarse. Adentro de una tarjeta de una grilla, eso le pone un ancho MÍNIMO a la
+      // tarjeta: en un teléfono la grilla no entra, la página scrollea para el costado y
+      // todo aparece corrido y tapándose. El cultivo ya está escrito arriba en la misma
+      // tarjeta, así que repetirlo costaba la pantalla y no agregaba nada.
       <button type="button" onClick={() => setAbierto(true)}
+        title={`Cargar descarte${label ? ` de ${label}` : ''}`}
         style={{
           fontSize: compacto ? '11px' : '12px', fontWeight: 700, padding: compacto ? '4px 10px' : '6px 12px',
           background: '#fff', color: '#991b1b', border: '1px solid #fecaca', borderRadius: '6px', cursor: 'pointer',
-          whiteSpace: 'nowrap',
+          // Sin nowrap: si no entra en una línea, que corte. Un botón de dos renglones se
+          // lee igual; una pantalla corrida para el costado, no.
+          maxWidth: '100%',
         }}>
-        🗑️ Cargar descarte{label ? ` · ${label}` : ''}
+        🗑️ {compacto ? 'Descarte' : `Cargar descarte${label ? ` · ${label}` : ''}`}
       </button>
     );
   }
@@ -89,7 +99,12 @@ export default function CargarDescarteCamara({ cultivo, label, compacto = false,
   return (
     <form onSubmit={guardar} style={{
       border: '1px solid #fecaca', background: '#fef2f2', borderRadius: '8px',
-      padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '240px',
+      padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '8px',
+      // `minWidth: 240px` hacía lo mismo que el botón: le ponía un piso al ancho de la
+      // tarjeta que la contiene y desbordaba la grilla en un teléfono. `minWidth: 0` es lo
+      // que permite que un hijo de flex/grid se achique de verdad —sin eso el default es
+      // `auto`, que significa "nunca más chico que mi contenido"—.
+      minWidth: 0, width: '100%', boxSizing: 'border-box',
     }}>
       <div>
         <p style={{ margin: 0, fontSize: '12px', fontWeight: 800, color: '#991b1b' }}>
