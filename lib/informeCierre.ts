@@ -1,4 +1,5 @@
 import { calcularMes, cargarDatosHistorico, MESES_CORTO_EERR, type MesEERR } from './eerrHistorico';
+import type { OrigenAplicacion } from './origenAplicacion';
 import { LINEAS_VARIABLE, FIJOS } from './eerr';
 
 // ── Informe del cierre mensual, por mail y A PEDIDO ───────────────────────────────────
@@ -54,7 +55,23 @@ function filasDelInforme(act: MesEERR, ant: MesEERR): FilaInforme[] {
   return filas.filter((f) => f.nivel !== 'detalle' || Math.round(f.monto) !== 0 || Math.round(f.anterior) !== 0);
 }
 
-function filaHtml(f: FilaInforme): string {
+// ── El peso de cada rubro sobre las ventas ──────────────────────────────────────────
+//
+// La plata sola engaña cuando las ventas se mueven: un costo que sube $400.000 en un mes
+// que vendió 30% más puede estar pesando MENOS que antes, y al revés. El peso sobre las
+// ventas es lo que dice si el rubro mejoró o empeoró de verdad.
+//
+// La variación va en PUNTOS PORCENTUALES, no en %: pasar de 30% a 35% es +5 p.p., no
+// +16,7%. Decirlo en % de un % es la forma más rápida de que nadie entienda el número.
+//
+// Y el color se da vuelta para los costos: que un costo pese MENOS es bueno y va en verde,
+// aunque el número baje. Es lo contrario de la columna de plata, y es a propósito —
+// `subirEsBueno` ya marca cuál es cuál.
+function pesoSobreVentas(monto: number, ventas: number): number | null {
+  return ventas > 0 ? Math.round((monto / ventas) * 1000) / 10 : null;
+}
+
+function filaHtml(f: FilaInforme, ventas: number, ventasAnt: number): string {
   const dif = Math.round(f.monto) - Math.round(f.anterior);
   const hayRef = Math.round(f.anterior) !== 0;
   const pct = hayRef ? Math.round((dif / Math.abs(Math.round(f.anterior))) * 100) : null;
@@ -67,16 +84,79 @@ function filaHtml(f: FilaInforme): string {
   const bd = 'border-bottom:1px solid #eee';
   const fondo = esRes ? 'background:#fafaf9;' : '';
   const sangria = f.nivel === 'detalle' ? 'padding-left:26px' : '';
+
+  // En la fila de Ventas el peso es siempre 100% y no dice nada: se deja vacío.
+  const esVentas = f.label === 'Ventas';
+  const pA = esVentas ? null : pesoSobreVentas(f.monto, ventas);
+  const pB = esVentas ? null : pesoSobreVentas(f.anterior, ventasAnt);
+  const pp = pA !== null && pB !== null ? Math.round((pA - pB) * 10) / 10 : null;
+  // Para un costo, pesar menos es bueno. Para ventas y resultados, pesar más.
+  const ppBueno = pp === null || pp === 0 ? null : (f.subirEsBueno ? pp > 0 : pp < 0);
+  const colorPp = ppBueno === null ? '#9ca3af' : ppBueno ? '#059669' : '#dc2626';
+
   return `<tr>
     <td style="padding:6px 10px;${bd};${fondo}font-weight:${peso};${sangria}">${f.label}</td>
     <td style="padding:6px 10px;${bd};${fondo}text-align:right;font-weight:${esTotal || esRes ? 800 : 600};${esRes && f.monto < 0 ? 'color:#dc2626' : ''}">${$(f.monto)}</td>
     <td style="padding:6px 10px;${bd};${fondo}text-align:right;color:#9ca3af">${$(f.anterior)}</td>
     <td style="padding:6px 10px;${bd};${fondo}text-align:right;color:${color};font-weight:700">${dif === 0 ? '·' : `${dif > 0 ? '+' : '−'}${$(Math.abs(dif))}`}</td>
     <td style="padding:6px 10px;${bd};${fondo}text-align:right;color:${color};font-weight:700">${pct === null ? '—' : pct === 0 ? '·' : `${pct > 0 ? '↑' : '↓'} ${Math.abs(pct)}%`}</td>
+    <td style="padding:6px 10px;${bd};${fondo}text-align:right;color:#6b7280">${pA === null ? '—' : `${pA.toString().replace('.', ',')}%`}</td>
+    <td style="padding:6px 10px;${bd};${fondo}text-align:right;color:${colorPp};font-weight:700">${pp === null || pp === 0 ? '·' : `${pp > 0 ? '↑' : '↓'} ${Math.abs(pp).toString().replace('.', ',')} p.p.`}</td>
   </tr>`;
 }
 
-export function construirHtmlCierre(act: MesEERR, ant: MesEERR): string {
+// ── El control de flujo de fondos, en el mail ───────────────────────────────────────
+//
+// El estado de resultados dice cuánto ganó el mes; esto dice dónde está esa plata. Son dos
+// preguntas distintas y la segunda es la que se hace cualquiera al ver un resultado
+// positivo y una caja que no creció.
+//
+// Usa origenYAplicacion, la misma función que la pantalla: un puente calculado aparte
+// daría otro número y no habría forma de saber cuál mirar.
+function flujoHtml(f: OrigenAplicacion | null): string {
+  if (!f) return '';
+  const fila = (label: string, monto: number, detalle: string, fuerte = false) => `<tr>
+    <td style="padding:5px 10px;border-bottom:1px solid #f3f4f6;font-weight:${fuerte ? 700 : 400}">
+      ${label}${detalle ? `<span style="display:block;font-size:11px;color:#9ca3af">${detalle}</span>` : ''}
+    </td>
+    <td style="padding:5px 10px;border-bottom:1px solid #f3f4f6;text-align:right;font-weight:${fuerte ? 800 : 700};color:${monto === 0 ? '#9ca3af' : monto > 0 ? '#059669' : '#b45309'}">
+      ${monto === 0 ? '·' : `${monto > 0 ? '+' : '−'}${$(Math.abs(monto))}`}
+    </td></tr>`;
+
+  return `
+  <h3 style="font-size:14px;margin:22px 0 6px">¿Dónde está esa plata?</h3>
+  <p style="font-size:12px;color:#6b7280;margin:0 0 8px">
+    Un resultado positivo y una caja que no creció es lo normal, no un error: se vendió y todavía no se cobró,
+    se compró a crédito, se previsionó. Esto es el puente entre los dos.
+  </p>
+  <table style="border-collapse:collapse;width:100%;font-size:13px">
+    <tbody>
+      ${fila('Resultado del mes', f.resultado, '', true)}
+      ${f.lineas.map((l) => fila(l.label, l.monto, l.detalle)).join('')}
+      ${fila('Debería haber quedado en caja', f.cajaEsperada, '', true)}
+      ${f.cajaReal === null
+        ? `<tr><td colspan="2" style="padding:6px 10px;color:#b45309;font-size:12px">
+             No hay saldos del resumen cargados, así que no hay contra qué comparar. Cargalos en el EERR y el
+             control cierra solo.</td></tr>`
+        : `${fila('Lo que de verdad se movió la caja', f.cajaReal, '', true)}
+           <tr style="background:${Math.abs(f.sinExplicar || 0) > 1000 ? '#fffbeb' : '#f0fdf4'}">
+             <td style="padding:6px 10px;font-weight:700;color:${Math.abs(f.sinExplicar || 0) > 1000 ? '#92400e' : '#166534'}">
+               ${Math.abs(f.sinExplicar || 0) > 1000 ? 'Sin explicar' : '✓ Cierra'}
+               ${(f.pistas || []).length
+                 ? `<span style="display:block;font-size:11px;font-weight:400;color:#92400e">
+                      Por dónde buscar: ${(f.pistas || []).slice(0, 3).map((x) => `${x.titulo} (${$(x.monto)})`).join(' · ')}
+                    </span>`
+                 : ''}
+             </td>
+             <td style="padding:6px 10px;text-align:right;font-weight:800;color:${Math.abs(f.sinExplicar || 0) > 1000 ? '#92400e' : '#166534'}">
+               ${$(f.sinExplicar || 0)}
+             </td>
+           </tr>`}
+    </tbody>
+  </table>`;
+}
+
+export function construirHtmlCierre(act: MesEERR, ant: MesEERR, fondos: OrigenAplicacion | null = null): string {
   const filas = filasDelInforme(act, ant);
   const e = act.eerr;
   const margen = e.ventas.total > 0 ? Math.round((e.resultado / e.ventas.total) * 1000) / 10 : null;
@@ -102,8 +182,10 @@ export function construirHtmlCierre(act: MesEERR, ant: MesEERR): string {
         <th style="padding:6px 10px;text-align:right">${ant.label}</th>
         <th style="padding:6px 10px;text-align:right">Dif. $</th>
         <th style="padding:6px 10px;text-align:right">Dif. %</th>
+        <th style="padding:6px 10px;text-align:right">% s/ventas</th>
+        <th style="padding:6px 10px;text-align:right">Δ p.p.</th>
       </tr></thead>
-      <tbody>${filas.map(filaHtml).join('')}</tbody>
+      <tbody>${filas.map((f) => filaHtml(f, e.ventas.total, ant.eerr.ventas.total)).join('')}</tbody>
     </table>
 
     <p style="margin:0 0 16px;font-size:12px;color:#6b7280">
@@ -116,7 +198,13 @@ export function construirHtmlCierre(act: MesEERR, ant: MesEERR): string {
       En rojo lo que empeoró: un costo que subió o un resultado que bajó. Van el % y la plata porque no dicen lo mismo —
       una línea chica que se duplica da +100% y son dos mangos, y un 5% de sueldos es mucha plata. Una línea que no existía
       el mes anterior muestra la plata y deja el % vacío, porque ahí el porcentaje no está definido.
+      <br />La columna <strong>% s/ventas</strong> es cuánto pesa cada rubro sobre lo vendido, y <strong>Δ p.p.</strong>
+      cuánto cambió ese peso contra ${ant.label}, en puntos porcentuales. Ahí el color va al revés de la plata: que un
+      costo pese MENOS es bueno aunque el número baje. Es lo que dice si el rubro mejoró de verdad — un costo puede
+      subir en plata y pesar menos, si las ventas subieron más que él.
     </p>
+
+    ${flujoHtml(fondos)}
 
     ${avisos.length === 0 ? '' : `
     <div style="border:1px solid #fde68a;background:#fffbeb;border-radius:8px;padding:10px 12px;font-size:12.5px">
