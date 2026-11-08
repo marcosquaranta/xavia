@@ -140,6 +140,47 @@ export default function OrigenAplicacionCard({ datos, causas = [], nombreMes }: 
               </p>
             </div>
           )}
+
+          {/* ── El orden en que conviene buscar ───────────────────────────────────────
+              Las pistas de arriba dicen QUÉ puede ser; esto dice POR DÓNDE empezar. Están
+              ordenadas por lo que más veces resuelve y menos cuesta mirar: no tiene
+              sentido revisar factura por factura antes de haber cargado los saldos que
+              faltan, porque mientras falte un saldo el número ni siquiera es confiable. */}
+          <details style={{ marginTop: '9px' }}>
+            <summary style={{ cursor: 'pointer', fontSize: '11.5px', fontWeight: 700, color: '#92400e' }}>
+              Cómo buscar la diferencia, paso a paso
+            </summary>
+            <ol style={{ margin: '6px 0 0', paddingLeft: '18px', fontSize: '11.5px', color: '#374151', lineHeight: 1.6 }}>
+              <li>
+                <strong>Cargá los saldos del resumen que falten.</strong> Mientras una cuenta no tenga saldo real,
+                su movimiento entero está sin confirmar y el "sin explicar" no significa nada. Es lo primero
+                siempre, y muchas veces alcanza.
+              </li>
+              <li>
+                <strong>Mirá cuenta por cuenta, de la que más se despega a la que menos.</strong> El bloque de abajo
+                las ordena. Abrí la que más difiere: el extracto del mes muestra todos sus movimientos con el saldo
+                corriendo, y lo que buscás es el que está en el resumen y no está ahí, o el que está dos veces.
+              </li>
+              <li>
+                <strong>Revisá los movimientos entre cuentas.</strong> Una transferencia a la que le falta la punta
+                de entrada saca plata de un lado y no la pone en ninguno: descuadra las dos cuentas y el total.
+                Es la causa más común después de los saldos.
+              </li>
+              <li>
+                <strong>Fijate en la tarjeta aparte.</strong> Su saldo sale de dos lados —el resumen, y los consumos
+                cargados menos los pagos— y se cuadra distinto que una caja: abrí la cuenta y mirá la cuenta de la deuda.
+              </li>
+              <li>
+                <strong>Recién ahí, lo devengado contra lo pagado.</strong> Compras de otros meses pagadas en este,
+                retenciones, cobros que entraron por fuera. Es lo último porque es lo más caro de revisar y lo que
+                menos veces es la causa.
+              </li>
+            </ol>
+            <p style={{ margin: '6px 0 0', fontSize: '10.5px', color: '#9ca3af', lineHeight: 1.45 }}>
+              Si después de los cinco pasos sigue sin cerrar, anotalo y seguí: un mes puede quedar con un residuo
+              chico. Lo que no puede pasar es que crezca mes a mes — ahí hay algo sistemático y conviene mirarlo junto.
+            </p>
+          </details>
           {/* Cuánto de todo esto es directamente incertidumbre. No es un error: es que no
               hay con qué comparar. Mientras sea grande, el "sin explicar" no significa nada
               y buscar el movimiento que falta es perder el tiempo. */}

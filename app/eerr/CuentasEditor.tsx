@@ -45,6 +45,19 @@ export interface MovimientoCuenta {
   destino: string;
 }
 
+// ── Qué cuenta se lee como una tarjeta ─────────────────────────────────────────────
+//
+// Por el DATO y no por el nombre: una tarjeta nueva no tiene por qué llamarse VISA, y
+// atarlo al nombre significa que el día que haya otra, el bloque no aparece y nadie se
+// entera de que falta.
+//
+// Una tarjeta es una cuenta cuyo saldo es deuda: negativa de los dos lados que se puedan
+// mirar. El "o" es a propósito: el primer mes puede no tener saldo del resumen cargado.
+function esTarjeta(s: { calculado: number; real: number | null; inicial: number }): boolean {
+  const negativos = [s.calculado, s.real, s.inicial].filter((x) => x !== null) as number[];
+  return negativos.some((x) => x < 0) && !negativos.some((x) => x > 0);
+}
+
 export default function CuentasEditor({ anio, mes, saldos, movimientos, detalle = {} }: {
   anio: number; mes: number; saldos: SaldoMes[];
   movimientos: MovimientoCuenta[];
@@ -387,6 +400,47 @@ export default function CuentasEditor({ anio, mes, saldos, movimientos, detalle 
                           Todo lo que movió <strong>{s.medio}</strong> este mes, en orden. La suma da el saldo teórico:
                           lo que buscás es el movimiento que está en el resumen y no está acá, o el que está dos veces.
                         </p>
+                        {/* ── Cómo se arma el saldo de una TARJETA ──────────────────
+                            Una tarjeta tiene dos orígenes y hay que poder mirarlos
+                            separados: lo que dice el resumen del banco, y lo que sale de
+                            los consumos que cargamos menos los pagos que hicimos.
+                            El renglón de arriba comparaba los dos totales, pero el total
+                            de la app es una resta de tres cosas y, sin verlas, "falta
+                            plata" no dice si faltan consumos o falta registrar el pago.
+                            Son dos problemas distintos. */}
+                        {esTarjeta(s) && (
+                          <div style={{ marginBottom: '9px', background: 'white', border: '1px solid #e5e7eb', borderRadius: '7px', padding: '8px 10px' }}>
+                            <p style={{ margin: '0 0 5px', fontSize: '11px', fontWeight: 700, color: '#374151' }}>Cómo se arma esta deuda</p>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                              <tbody>
+                                <tr><td style={{ padding: '2px 0', color: '#6b7280' }}>Deuda al cierre del mes anterior</td>
+                                  <td style={{ ...celNum, padding: '2px 0' }}>{$(Math.abs(s.inicial))}</td></tr>
+                                <tr><td style={{ padding: '2px 0', color: '#6b7280' }}>+ Consumos cargados este mes</td>
+                                  <td style={{ ...celNum, padding: '2px 0', color: '#b45309' }}>{$(s.gastos)}</td></tr>
+                                <tr><td style={{ padding: '2px 0', color: '#6b7280' }}>− Pagos a la tarjeta</td>
+                                  <td style={{ ...celNum, padding: '2px 0', color: '#059669' }}>{$(s.entradas)}</td></tr>
+                                <tr style={{ borderTop: '1px solid #e5e7eb' }}>
+                                  <td style={{ padding: '4px 0', fontWeight: 700 }}>= Deuda según la app</td>
+                                  <td style={{ ...celNum, padding: '4px 0', fontWeight: 800 }}>{$(Math.abs(s.calculado))}</td></tr>
+                                <tr>
+                                  <td style={{ padding: '2px 0', fontWeight: 700 }}>Deuda según el resumen</td>
+                                  <td style={{ ...celNum, padding: '2px 0', fontWeight: 800 }}>{s.real === null ? '— sin cargar' : $(Math.abs(s.real))}</td></tr>
+                                {s.real !== null && Math.abs(s.diferencia || 0) >= 1 && (
+                                  <tr style={{ borderTop: '1px solid #e5e7eb' }}>
+                                    <td style={{ padding: '4px 0', fontWeight: 700, color: '#991b1b' }}>
+                                      {(s.diferencia || 0) < 0 ? 'Debés MÁS de lo registrado' : 'Debés MENOS de lo registrado'}
+                                      <span style={{ display: 'block', fontWeight: 400, fontSize: '10.5px', color: '#9ca3af' }}>
+                                        {(s.diferencia || 0) < 0
+                                          ? 'Faltan cargar consumos: buscá en el resumen los que no estén en la lista de abajo.'
+                                          : 'Sobran consumos cargados, o falta registrar un pago a la tarjeta.'}
+                                      </span>
+                                    </td>
+                                    <td style={{ ...celNum, padding: '4px 0', fontWeight: 800, color: '#991b1b' }}>{$(Math.abs(s.diferencia || 0))}</td></tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
                         {(detalle[s.medio] || []).length === 0 ? (
                           <p style={{ margin: 0, fontSize: '12px', color: '#9ca3af' }}>Esta cuenta no tuvo ningún movimiento registrado este mes.</p>
                         ) : (
