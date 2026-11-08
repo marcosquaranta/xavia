@@ -173,6 +173,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   // El acuse de la última carga. Se muestra como pantalla completa: confirma lo que Xubio
   // tiene de verdad, no solo que el pedido salió.
   const [acuse,setAcuse]=useState<Acuse|null>(null);
+
   const [showP,setShowP]=useState(false);
   // Mostrar también los clientes sin precio de paquete. Apagado: son los que no compran así.
   const [mostrarSinPrecio,setMostrarSinPrecio]=useState(false);
@@ -184,6 +185,27 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   type CamaraCultivo = { stockActual:number; diasPromedio:number; diasMasViejo:number; cantidadMasVieja:number; cajones?:{stockActual:number;diasPromedio:number;diasMasViejo:number;cantidadMasVieja:number} };
   const [stockCamara,setStockCamara]=useState<{rucula:CamaraCultivo;lechuga_crespa:CamaraCultivo;lechuga_roble:CamaraCultivo;albahaca:CamaraCultivo;factorGrPaq:{rucula:number;lechuga_crespa:number;lechuga_roble:number;albahaca:number};ventasHoyYaDescontadas:boolean}|null>(null);
   const [ctdsKg,setCtdsKg]=useState<CKG>({});
+  // ── Avisar antes de irse con una venta a medio cargar ─────────────────────────────
+  //
+  // Lo que se tipea acá no está guardado hasta que se aprieta Cargar: hay un guardado
+  // automático con retraso, pero cerrar la pestaña en el medio se lleva lo último, y una
+  // venta que se escribió y no se mandó no existe en ningún lado —ni en la app, ni en
+  // Xubio— y nadie se entera hasta que el cliente reclama la factura.
+  //
+  // El navegador no deja elegir el texto del cartel (lo fija él, por seguridad): lo único
+  // que se puede decidir es si aparece. Por eso aparece solo cuando hay algo tipeado sin
+  // enviar, y no siempre: un cartel que sale cada vez que uno se va se aprende a ignorar.
+  const hayCargaSinEnviar = Object.values(ctds).some((fila: any) =>
+    Object.values(fila || {}).some((v: any) => Number(v) > 0),
+  ) || Object.values(ctdsKg).some((fila: any) =>
+    Object.values(fila || {}).some((v: any) => Number(v) > 0),
+  );
+  useEffect(() => {
+    if (!hayCargaSinEnviar) return;
+    const avisar = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', avisar);
+    return () => window.removeEventListener('beforeunload', avisar);
+  }, [hayCargaSinEnviar]);
   const [ventas7,setVentas7]=useState<VentaDia[]>([]);
   const [facturadasHoy,setFacturadasHoy]=useState<VentaDia[]>([]);
   const [ventasSemana,setVentasSemana]=useState<VentaDia[]>([]);

@@ -28,6 +28,26 @@ export interface AlertaVenta {
 // de la venta de hoy, que todavía no tiene por qué estar facturada.
 export const DIAS_SIN_FACTURAR = 2;
 
+// ── Hasta cuántos días atrás avisa el MAIL ─────────────────────────────────────────
+//
+// Decisión de Marcos: una venta sin facturar se arregla el día después, o ya no se
+// arregla. Pasados tres días el aviso deja de ser una tarea y pasa a ser un recordatorio
+// de algo que ya no tiene vuelta — y un mail que repite todos los días las mismas seis
+// ventas viejas deja de abrirse, con lo cual la de ayer tampoco se ve.
+//
+// Las viejas NO desaparecen: siguen en la pantalla de Ventas y en el historial, que es
+// donde se las mira cuando uno decide ponerse con eso. Lo que cambia es que no interrumpen
+// todos los días.
+export const DIAS_MAX_AVISO_MAIL = 3;
+
+// Las que entran en el mail: lo bastante viejas para que facturarlas ya debería haber
+// pasado, y lo bastante nuevas para que todavía se pueda hacer algo.
+export function paraElMail(
+  lista: { dias: number }[], diasMin = DIAS_SIN_FACTURAR, diasMax = DIAS_MAX_AVISO_MAIL,
+): typeof lista {
+  return lista.filter((x) => x.dias >= diasMin && x.dias <= diasMax);
+}
+
 export interface PendienteSinFacturar {
   fecha: string;
   id_control: string;

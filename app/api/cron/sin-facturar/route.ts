@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import type { VentaDia, ClienteVenta, ConfigItem } from '@/lib/types';
-import { ventasSinFacturar, DIAS_SIN_FACTURAR } from '@/lib/alertasVentas';
+import { ventasSinFacturar, paraElMail, DIAS_SIN_FACTURAR, DIAS_MAX_AVISO_MAIL } from '@/lib/alertasVentas';
 import { leerArticulosExtra } from '@/lib/articulosVenta';
 import { destinatariosDe } from '@/lib/avisosConfig';
 
@@ -48,9 +48,23 @@ export async function GET(req: NextRequest) {
     const hoy = hoyArgentina();
     // La misma función que alimenta la sección de alertas de Ventas. Si acá se contara
     // distinto, el mail y la pantalla dirían números diferentes sobre lo mismo.
-    const lista = ventasSinFacturar(ventas, clientes, hoy, extras.map((a) => a.key));
+    const todas = ventasSinFacturar(ventas, clientes, hoy, extras.map((a) => a.key));
+    // ── Solo las que todavía se pueden arreglar ─────────────────────────────────────
+    //
+    // Una venta sin facturar se corrige al día siguiente o ya no se corrige. Pasados unos
+    // días el aviso deja de ser una tarea, y un mail que repite todos los días las mismas
+    // seis ventas viejas deja de abrirse — con lo cual la de ayer, que SÍ se puede
+    // arreglar, tampoco se ve.
+    //
+    // Las viejas no desaparecen: siguen en Ventas y en el historial, que es donde se las
+    // mira cuando uno decide ponerse con eso.
+    const lista = paraElMail(todas) as typeof todas;
+    const viejas = todas.length - lista.length;
 
-    if (!lista.length) return NextResponse.json({ ok: true, enviado: false, motivo: 'nada sin facturar', hoy });
+    if (!lista.length) {
+      return NextResponse.json({ ok: true, enviado: false, hoy,
+        motivo: viejas ? `nada reciente sin facturar (${viejas} vieja(s) quedan en la pantalla)` : 'nada sin facturar' });
+    }
     if (!process.env.RESEND_API_KEY) return NextResponse.json({ ok: false, error: 'RESEND_API_KEY no configurada' }, { status: 500 });
 
     const destinatarios = destinatariosDe(CLAVE_CONFIG, config);
@@ -99,7 +113,9 @@ export async function GET(req: NextRequest) {
           repetidas, '#1d4ed8',
         )}
         <p style="margin:14px 0 0;font-size:11.5px;color:#9ca3af">
-          No entran las de los últimos ${DIAS_SIN_FACTURAR} días: una venta cargada hoy todavía no tiene por qué estar facturada.
+          No entran las de los últimos ${DIAS_SIN_FACTURAR} días —una venta cargada hoy todavía no tiene por qué estar
+          facturada— ni las de más de ${DIAS_MAX_AVISO_MAIL}: ésas ya no se arreglan a tiempo y quedan en la pantalla de Ventas.
+          ${viejas ? `<strong>Hay ${viejas} más de ${DIAS_MAX_AVISO_MAIL} días</strong> que no entran en este mail.` : ''}
         </p>
         <p style="margin:16px 0 0">
           <a href="${URL_HISTORIAL}" style="background:#166534;color:white;text-decoration:none;padding:9px 16px;border-radius:6px;font-weight:700;display:inline-block">
