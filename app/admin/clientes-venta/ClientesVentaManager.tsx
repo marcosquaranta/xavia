@@ -134,7 +134,7 @@ function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, 
   );
 }
 
-function ClienteRow({ c, precios, cambios, onSaved, extrasUnidad = [], extrasKg = [] }: { c: ClienteVenta; precios: PrecioVenta[]; cambios: Record<string, CambioPrecioUI>; onSaved: () => void; extrasUnidad?: EtiquetaArticulo[]; extrasKg?: EtiquetaArticulo[] }) {
+function ClienteRow({ c, precios, cambios, onSaved, todos = [], extrasUnidad = [], extrasKg = [] }: { c: ClienteVenta; precios: PrecioVenta[]; cambios: Record<string, CambioPrecioUI>; onSaved: () => void; todos?: ClienteVenta[]; extrasUnidad?: EtiquetaArticulo[]; extrasKg?: EtiquetaArticulo[] }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string|null>(null);
@@ -172,6 +172,50 @@ function ClienteRow({ c, precios, cambios, onSaved, extrasUnidad = [], extrasKg 
     } catch (e: any) { setErr(e.message); }
     finally { setSaving(false); }
   }
+
+  // ── Fusionar con otra ficha ───────────────────────────────────────────────────────
+  //
+  // Lo que de verdad hace falta cuando hay un duplicado: las ventas de esta ficha pasan a
+  // la que queda y recién ahí ésta se puede borrar. Borrar sin mudar dejaría las ventas
+  // apuntando a un cliente que no existe.
+  //
+  // Se muestra lo que se va a mover ANTES de hacerlo: una fusión no se deshace.
+  async function fusionarCon(idHacia: string) {
+    if (!idHacia) return;
+    setSaving(true); setErr(null);
+    try {
+      const prev = await fetch('/api/admin/clientes-venta/fusionar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ desde: c.id_control, hacia: idHacia, soloVer: true }),
+      });
+      const pj = await prev.json().catch(() => ({}));
+      if (!prev.ok) throw new Error(pj?.error || 'No se pudo revisar la fusión');
+
+      const texto = `Se van a pasar ${pj.ventas} venta(s)`
+        + (pj.facturadas ? ` (${pj.facturadas} ya facturadas)` : '')
+        + ` de "${pj.desde.nombre}" a "${pj.hacia.nombre}", y después se borra la ficha vieja.`
+        + (pj.desde.sucursales ? `\n\nOjo: la ficha vieja tiene cargadas estas sucursales: ${pj.desde.sucursales}. No se copian solas — si hacen falta, agregalas a mano en la que queda.` : '')
+        + `\n\nEsto NO se puede deshacer. ¿Confirmás?`;
+      if (!window.confirm(texto)) { setSaving(false); return; }
+
+      const r = await fetch('/api/admin/clientes-venta/fusionar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ desde: c.id_control, hacia: idHacia, borrarDespues: true }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error || 'No se pudo fusionar');
+      onSaved();
+    } catch (e: any) { setErr(e?.message || 'No se pudo fusionar'); }
+    finally { setSaving(false); }
+  }
+
+  // Las otras fichas con la MISMA razón social: son las únicas con las que se puede
+  // fusionar, y ofrecer otras sería ofrecer el error fiscal que el servidor rechaza.
+  const mismaRazon = (todos || []).filter((x: any) =>
+    String(x.id_control) !== String(c.id_control)
+    && String(x.nombre_xubio || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+       === String(c.nombre_xubio || '').toLowerCase().replace(/[^a-z0-9]/g, ''),
+  );
 
   async function borrarCliente() {
     const nombre = String((c as any).alias || (c as any).nombre_display || c.nombre_xubio);
@@ -342,6 +386,23 @@ function ClienteRow({ c, precios, cambios, onSaved, extrasUnidad = [], extrasKg 
                     Desactivar, que conserva su historia—. El servidor frena si tiene
                     ventas: borrarla dejaría esas ventas apuntando a un cliente que no
                     existe, sumando al resultado sin saber de quién son. */}
+                {/* Fusionar aparece SOLO si existe otra ficha con la misma razón social.
+                    Sin eso no hay fusión posible —el servidor la rechaza— y el botón sería
+                    una promesa que no se puede cumplir. */}
+                {mismaRazon.length > 0 && (
+                  <select
+                    value=""
+                    onChange={(e) => fusionarCon(e.target.value)}
+                    disabled={saving}
+                    style={{ fontSize: '11px', padding: '5px 8px', borderRadius: '6px', border: '1px solid #ddd6fe', color: '#6d28d9', fontWeight: 600 }}>
+                    <option value="">Fusionar con…</option>
+                    {mismaRazon.map((x: any) => (
+                      <option key={x.id_control} value={x.id_control}>
+                        #{x.id_control} {x.alias || x.nombre_display || x.nombre_xubio}{String(x.activo) === 'NO' ? ' (de baja)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <button className="btn secondary" style={{ fontSize: '11px', padding: '5px 12px', borderColor: '#fecaca', color: '#b91c1c' }}
                   onClick={borrarCliente} disabled={saving}>
                   Borrar ficha
@@ -573,11 +634,11 @@ export default function ClientesVentaManager({ clientes, precios, cambios, extra
             </tr>
           </thead>
           <tbody>
-            {activos.map(c => <ClienteRow key={c.id_control} c={c} precios={precios} cambios={cambios} onSaved={() => router.refresh()} extrasUnidad={extrasUnidad} extrasKg={extrasKg} />)}
+            {activos.map(c => <ClienteRow key={c.id_control} c={c} precios={precios} cambios={cambios} onSaved={() => router.refresh()} todos={clientes} extrasUnidad={extrasUnidad} extrasKg={extrasKg} />)}
             {inactivos.length > 0 && (
               <>
                 <tr><td colSpan={8} style={{ padding: '8px 6px 4px', fontSize: '11px', color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase' }}>Inactivos</td></tr>
-                {inactivos.map(c => <ClienteRow key={c.id_control} c={c} precios={precios} cambios={cambios} onSaved={() => router.refresh()} extrasUnidad={extrasUnidad} extrasKg={extrasKg} />)}
+                {inactivos.map(c => <ClienteRow key={c.id_control} c={c} precios={precios} cambios={cambios} onSaved={() => router.refresh()} todos={clientes} extrasUnidad={extrasUnidad} extrasKg={extrasKg} />)}
               </>
             )}
           </tbody>
