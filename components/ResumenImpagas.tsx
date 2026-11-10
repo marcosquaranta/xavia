@@ -1,5 +1,6 @@
 'use client';
 import ReclamoManual from './ReclamoManual';
+import MayorCliente from './MayorCliente';
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { FacturaCliente } from '@/lib/facturasCliente';
@@ -443,6 +444,17 @@ export default function ResumenImpagas({
                   <ReclamoManual clientes={[{ id_control: f.id_control, nombre: f.nombre }]} clienteInicial={f.id_control} sinSelector />
                 </>
               )}
+
+              {/* ── El libro mayor ──────────────────────────────────────────────────
+                  Arriba está cuánto debe. Acá está cómo se llegó a ese número:
+                  facturas y cobros en orden, con el saldo al lado. Es lo que hace
+                  falta cuando el cliente discute, y es lo único que no se podía
+                  contestar desde esta pantalla.
+
+                  Se pide al abrirlo. Traer el mayor de todos los clientes con la
+                  página es exactamente lo que la hacía lenta, y esto se mira de a
+                  un cliente por vez. */}
+              <MayorCliente idControl={f.id_control} nombre={f.nombre} deuda={f.total} />
             </div>
           </div>
         );

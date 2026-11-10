@@ -27,7 +27,6 @@ import { leerEdiciones, indiceEdiciones, aplicarEdicion, imputacionesManuales } 
 import BandejaCobranzas from '@/components/BandejaCobranzas';
 import { HOJA_BANDEJA, HOJA_ALIAS, type ItemBandeja, type AliasCobranza } from '@/lib/bandejaCobranzas';
 import { comprometidasDeBandeja, DIAS_GRACIA_COMPROMISO } from '@/lib/comprometidas';
-import ReclamoManual from '@/components/ReclamoManual';
 import FacturasViejas from '@/components/FacturasViejas';
 import ResumenImpagas from '@/components/ResumenImpagas';
 import { leerSaldadas, numerosSaldados, type FacturaSaldada } from '@/lib/facturasSaldadas';
@@ -637,18 +636,6 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
           </div>
         </details>
 
-        <details style={tarjeta('#6d28d9')}>
-          <summary style={encabezado('#6d28d9')}>Reclamar facturas a un cliente</summary>
-          <p style={bajada}>
-            Un reclamo puntual, sin tocar la configuración del recordatorio automático. Elegís el cliente,
-            marcás desde qué fecha (o tildás las facturas una por una) y se manda.
-            {' '}También se puede reclamar <strong>desde "Facturas impagas por cliente"</strong>, abriendo el cliente:
-            ahí ya está la deuda a la vista y es el mismo reclamo.
-          </p>
-          <div style={{ marginTop: '10px' }}>
-            <ReclamoManual clientes={filas.map((f) => ({ id_control: f.id_control, nombre: f.nombre }))} />
-          </div>
-        </details>
 
         </div>
 
