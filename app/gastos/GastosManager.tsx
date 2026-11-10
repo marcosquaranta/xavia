@@ -1,5 +1,5 @@
 'use client';
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { CATEGORIAS_GASTO, MEDIOS_PAGO, admiteMontoNegativo, type Gasto, type CategoriaGasto, type Articulo } from '@/lib/types';
 import NumberInput from '@/components/NumberInput';
@@ -7,6 +7,7 @@ import NumberInput from '@/components/NumberInput';
 import { estaPagado } from '@/lib/proveedores';
 import { planDeCuotas, motivoSinCuotas, MAX_CUOTAS } from '@/lib/gastoCuotas';
 import { avisoMontoSospechoso } from '@/lib/montoSospechoso';
+import { categoriaLocal } from '@/lib/categoriaDeDescripcion';
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const MEDIOS = MEDIOS_PAGO;
 const LABEL_CAT: Record<string, string> = Object.fromEntries(CATEGORIAS_GASTO.map((c) => [c.value, c.label]));
@@ -97,6 +98,13 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
+  // La confirmación se va sola a los 8 segundos. Si quedara fija, la de hace tres gastos se
+  // leería como la del que se acaba de cargar — que es peor que no tener confirmación.
+  useEffect(() => {
+    if (!okMsg) return;
+    const t = setTimeout(() => setOkMsg(null), 8000);
+    return () => clearTimeout(t);
+  }, [okMsg]);
 
   const unidadArticulo = useMemo(
     () => String(articulos.find((a) => a.id_articulo === idArticulo)?.unidad_medida || '').trim(),
@@ -120,6 +128,42 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
   const [borrando, setBorrando] = useState<string | null>(null);
   const [exportando, setExportando] = useState(false);
   const [verResumen, setVerResumen] = useState(false);
+  // ── La categoría se pone sola ──────────────────────────────────────────────────────
+  //
+  // Primero por lo que ya se cargó antes: gratis, instantáneo, y refleja cómo clasifica
+  // Marcos —si él pone los peajes en Mantenimiento, el historial lo respeta y una regla
+  // general no—. Solo si el historial no sabe nada se le pregunta a la IA.
+  //
+  // `tocada` es lo que hace que esto no moleste: en cuanto alguien elige una categoría a
+  // mano, no se vuelve a pisar. Una sugerencia que sobrescribe lo que vos elegiste deja de
+  // ser una ayuda.
+  const [catTocada, setCatTocada] = useState(false);
+  const [catAuto, setCatAuto] = useState<'historial' | 'ia' | null>(null);
+  const [catBuscando, setCatBuscando] = useState(false);
+
+  const previosParaCat = useMemo(
+    () => gastos.slice(-1500).map((g) => ({ descripcion: String(g.descripcion || ''), categoria: String(g.categoria || '') })),
+    [gastos],
+  );
+
+  async function sugerirCategoria(desc: string) {
+    if (catTocada || !desc.trim()) return;
+    const local = categoriaLocal(desc, previosParaCat);
+    if (local) { setCategoria(local as CategoriaGasto); setCatAuto('historial'); return; }
+    // Solo lo que nunca se cargó llega hasta acá, que es una minoría: el costo es despreciable.
+    setCatBuscando(true);
+    try {
+      const r = await fetch('/api/gastos/categoria', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ descripcion: desc }),
+      });
+      const j = await r.json();
+      // Se vuelve a chequear `catTocada`: entre que salió el pedido y volvió, la persona
+      // pudo elegir una a mano, y pisarla sería lo contrario de ayudar.
+      if (j?.categoria && !catTocada) { setCategoria(j.categoria); setCatAuto('ia'); }
+    } catch { /* adivinar no puede romper la carga */ }
+    setCatBuscando(false);
+  }
   // El gasto escrito en una frase, y lo que la app entendió de él. `leido` queda en
   // pantalla después de completar el formulario: es lo que permite distinguir un dato que
   // estaba escrito de uno que el modelo dedujo, y sin esa diferencia los dos se ven igual
@@ -348,7 +392,13 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
       if (j.cuotas > 1) {
         setOkMsg(`Cargadas ${j.cuotas} cuotas de ${descripcion.trim()}, de ${fmtFechaAnio(j.desde)} a ${fmtFechaAnio(j.hasta)}, con ${medioPago}. Las de meses que vienen ya están contadas en el resultado y en el saldo de esa cuenta.`);
       } else {
-        setOkMsg(null);
+        // ── La confirmación de que el gasto entró ────────────────────────────────────
+        //
+        // Antes el formulario se vaciaba y nada más. Un formulario que se vacía se puede
+        // leer de dos maneras —se guardó, o se perdió lo que escribí— y las dos veces que
+        // pasa lo segundo nadie vuelve a confiar en la primera. Se dice qué se cargó, con
+        // el importe y la cuenta, que es lo que uno quiere verificar de un vistazo.
+        setOkMsg(`Cargado: ${descripcion.trim()} · ${fmtMoneda(Number(monto) || 0)} · ${LABEL_CAT[categoria] || categoria} · ${medioPago}`);
       }
       setCuotas(1);
       setDescripcion('');
@@ -517,8 +567,8 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
 
         {error && <div className="alert-box error" style={{ marginBottom: '10px' }}>{error}</div>}
         {okMsg && (
-          <div style={{ marginBottom: '10px', fontSize: '12px', color: '#065f46', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '6px', padding: '9px 11px', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
-            <span>✓</span><span>{okMsg}</span>
+          <div style={{ marginBottom: '10px', fontSize: '13.5px', fontWeight: 600, color: '#065f46', background: '#ecfdf5', border: '2px solid #6ee7b7', borderRadius: '8px', padding: '11px 13px', display: 'flex', gap: '9px', alignItems: 'flex-start' }}>
+            <span style={{ fontSize: '16px', lineHeight: 1 }}>✓</span><span>{okMsg}</span>
             <button onClick={() => setOkMsg(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#059669', cursor: 'pointer', fontSize: '13px' }}>×</button>
           </div>
         )}
@@ -529,13 +579,28 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
           </div>
           <div style={{ gridColumn: 'span 2' }}>
             <label>Descripción</label>
-            <input type="text" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Ej: Compra de cubos Oasis" disabled={guardando} />
+            <input type="text" value={descripcion}
+              onChange={(e) => setDescripcion(e.target.value)}
+              onBlur={(e) => sugerirCategoria(e.target.value)}
+              placeholder="Ej: Compra de cubos Oasis" disabled={guardando} />
           </div>
           <div>
             <label>Categoría</label>
-            <select value={categoria} onChange={(e) => setCategoria(e.target.value as CategoriaGasto)} disabled={guardando}>
+            <select value={categoria}
+              onChange={(e) => { setCategoria(e.target.value as CategoriaGasto); setCatTocada(true); setCatAuto(null); }}
+              disabled={guardando}
+              style={catAuto ? { borderColor: '#bfdbfe', background: '#f5f8ff' } : undefined}>
               {CATEGORIAS_GASTO.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
             </select>
+            {/* Decir que la puso la app, y de dónde la sacó. Una categoría que cambia sola
+                sin avisar se lee como un error de la pantalla; dicha, es una ayuda que se
+                puede aceptar o corregir. */}
+            {catBuscando && <p style={{ margin: '3px 0 0', fontSize: '10.5px', color: '#9ca3af' }}>buscando la categoría…</p>}
+            {!catBuscando && catAuto && (
+              <p style={{ margin: '3px 0 0', fontSize: '10.5px', color: '#1d4ed8' }}>
+                {catAuto === 'historial' ? 'puesta sola · así la cargaste antes' : 'puesta sola'} — cambiala si no va
+              </p>
+            )}
           </div>
           <div>
             <label>Monto</label>
