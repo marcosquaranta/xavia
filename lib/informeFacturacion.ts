@@ -14,7 +14,7 @@ import { compararFacturado, controlFacturacion, DIF_MINIMA_PESOS, DIAS_CORRIMIEN
 import { comprobantesParaMirar } from './xubioLectura';
 import { fechaArgentinaHoy } from './ocupacion';
 import { compararPorComprobante, type ComparacionPorComprobante } from './controlFacturacion';
-import { clavesDeArticulo } from './clavesVenta';
+import { clavesDeVenta } from './clavesVenta';
 import type { VentaDia, PrecioVenta, ClienteVenta } from './types';
 import { cobranzasParaMirar } from './xubioLectura';
 import { medirDependencia, type Dependencia } from './dependenciaXubio';
@@ -45,6 +45,7 @@ export async function obtenerDatosInformeFacturacion(): Promise<DatosInformeFact
   d.setDate(d.getDate() - (DIAS_VENTANA - 1));
   const desde = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
+  const claves = await clavesDeVenta();
   const [ventas, precios, clientes, comprobantes, cobranzas, cobros] = await Promise.all([
     readSheet<VentaDia>('Ventas'),
     readSheet<PrecioVenta>('Precios'),
@@ -56,9 +57,12 @@ export async function obtenerDatosInformeFacturacion(): Promise<DatosInformeFact
 
   return {
     desde, hasta,
-    comparacion: compararFacturado(ventas, precios, clientes, comprobantes, desde, hasta),
-    porComprobante: compararPorComprobante(ventas, precios, clientes, comprobantes, desde, hasta, await clavesDeArticulo()),
-    control: controlFacturacion(ventas, precios, clientes, hasta),
+    // clavesDeVenta y no clavesDeArticulo: las dos listas se diferencian en las columnas
+    // de kilo, y una venta por kilo valorizada en cero contra un comprobante de Xubio que
+    // vale lo que vale sale como una diferencia del total de la factura.
+    comparacion: compararFacturado(ventas, precios, clientes, comprobantes, desde, hasta, claves),
+    porComprobante: compararPorComprobante(ventas, precios, clientes, comprobantes, desde, hasta, claves),
+    control: controlFacturacion(ventas, precios, clientes, hasta, claves),
     dependencia: medirDependencia({
       comprobantes, cobranzas, desde, hasta,
       emitidosPorLaApp: ventas.map((v) => v.exportado).filter((x) => x && x !== 'PENDIENTE'),

@@ -40,6 +40,18 @@ export const DIAS_SIN_FACTURAR = 2;
 // todos los días.
 export const DIAS_MAX_AVISO_MAIL = 3;
 
+// ── Hasta cuántos días atrás avisa la PANTALLA ────────────────────────────────────
+//
+// Mismo razonamiento que el del mail, un poco más ancho. Una venta de hace tres meses
+// sin facturar ya no es una tarea de hoy: o se facturó por otro lado, o es una carga
+// repetida, o es algo que hay que ir a mirar con tiempo. Mezclada con la de anteayer,
+// lo único que hace es empujarla fuera de la lista — el bloque muestra seis— y volver
+// el aviso un paisaje que se deja de leer.
+//
+// Las viejas no desaparecen: el historial las sigue teniendo enteras, y la alerta dice
+// cuántas quedaron afuera para que nadie suponga que no hay más.
+export const DIAS_MAX_ALERTA = 7;
+
 // Las que entran en el mail: lo bastante viejas para que facturarlas ya debería haber
 // pasado, y lo bastante nuevas para que todavía se pueda hacer algo.
 export function paraElMail(
@@ -73,6 +85,10 @@ const tieneCantidad = (v: any) => PROD_KEYS.some((k) => (Number(v?.[k]) || 0) > 
 export function ventasSinFacturar(
   ventas: VentaDia[], clientes: ClienteVenta[], hoyStr: string,
   clavesExtra: string[] = [], diasMinimo = DIAS_SIN_FACTURAR,
+  // Sin tope por defecto: el cron arma la lista entera y después decide con `paraElMail`
+  // cuáles manda. Poner un tope acá por defecto le cambiaría el cálculo sin que nadie
+  // lo pida.
+  diasMaximo = Infinity,
 ): PendienteSinFacturar[] {
   const nombres = new Map(clientes.map((c) => [String(c.id_control), String(c.nombre_display || c.nombre_xubio || c.id_control)]));
   const conCantidad = (v: any) => tieneCantidad(v) || clavesExtra.some((k) => (Number(v?.[k]) || 0) > 0);
@@ -92,7 +108,7 @@ export function ventasSinFacturar(
     const fecha = soloDia(v.fecha);
     if (!fecha || fecha > hoyStr) continue;
     const dias = diasEntreISO(fecha, hoyStr);
-    if (dias < diasMinimo) continue;
+    if (dias < diasMinimo || dias > diasMaximo) continue;
     const key = `${fecha}__${v.id_control}`;
     if (porClienteFecha.has(key)) continue;
     porClienteFecha.set(key, {

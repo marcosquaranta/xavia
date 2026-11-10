@@ -14,7 +14,7 @@ import type { Articulo } from '@/lib/articulos';
 import AlertasVentas from './AlertasVentas';
 import { saldoPorCliente, alertasCajones, type AlertaCajon } from '@/lib/cajones';
 import { clientesSinPedir, DIAS_AVISO, DIAS_DESCARTE, type ClienteSinPedir } from '@/lib/clientesSinPedir';
-import { ventasSinFacturar, type PendienteSinFacturar } from '@/lib/alertasVentas';
+import { ventasSinFacturar, DIAS_MAX_ALERTA, type PendienteSinFacturar } from '@/lib/alertasVentas';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 import type { CajonMovimiento } from '@/lib/types';
 export const dynamic = 'force-dynamic';
@@ -108,10 +108,17 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
   const hoyISO = fechaArgentinaHoy();
   let alertaCajonesVentas: AlertaCajon[] = [];
   let alertaSinFacturar: PendienteSinFacturar[] = [];
+  // Cuántas quedaron afuera por viejas. Se cuenta para poder decirlo: un recorte
+  // silencioso se lee como que no hay nada más.
+  let sinFacturarViejas = 0;
   let alertaSinPedir: ClienteSinPedir[] = [];
   try {
     alertaCajonesVentas = alertasCajones(saldoPorCliente(movimientosCajones, clientes), 7);
-    alertaSinFacturar = ventasSinFacturar(ventas, clientes, hoyISO, articulosExtra.map((a) => a.key));
+    // La alerta muestra lo de la última semana. Lo más viejo sigue entero en el
+    // historial; acá solo se cuenta, para que el recorte no se lea como "no hay más".
+    const todasSinFacturar = ventasSinFacturar(ventas, clientes, hoyISO, articulosExtra.map((a) => a.key));
+    alertaSinFacturar = todasSinFacturar.filter((p) => p.dias <= DIAS_MAX_ALERTA);
+    sinFacturarViejas = todasSinFacturar.length - alertaSinFacturar.length;
     // Entre DIAS_AVISO y DIAS_DESCARTE: pasado ese tope ya no es \"dejó de pedir esta
     // semana\", es un cliente que no compra más, y mezclarlos hace que la lista no se mire.
     alertaSinPedir = clientesSinPedir(ventas, clientes, hoyISO)
@@ -147,7 +154,7 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
             </Link>
           </div>
         </div>
-        <AlertasVentas cajones={alertaCajonesVentas} sinFacturar={alertaSinFacturar} sinPedir={alertaSinPedir} />
+        <AlertasVentas cajones={alertaCajonesVentas} sinFacturar={alertaSinFacturar} sinFacturarViejas={sinFacturarViejas} sinPedir={alertaSinPedir} />
         <VentasEvolucionCharts articulo={evolArticulo} clienteSemanal={evolClienteSemanal} clienteMensual={evolClienteMensual} precio={evolPrecio} resumenMes={resumenMes} clientesPrecioVolumen={clientesPrecioVolumen} ultimaSuba={ultimaSuba} />
         <div className="card">
           <VentasManager articulosExtra={articulosExtra} clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} pedidosFijos={pedidosFijos.filter(p=>p.activo==='SI')} initialFecha={searchParams.fecha} />

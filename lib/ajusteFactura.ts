@@ -83,6 +83,10 @@ export function ajustesPorFactura(filas: AjusteFactura[]): Map<string, AjusteApl
 // dirían cosas distintas de la misma factura.
 export function valorDeFactura(
   numero: string, ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[],
+  // Las claves de mercadería, incluidas las de kilo y las de Admin. Tiene que ser la
+  // MISMA lista que usa el informe: si acá se valorizara distinto, cada factura corregida
+  // aparecería como una diferencia inventada en el control de los lunes.
+  claves?: string[],
 ): { monto: number; filas: number; id_control: string; cliente: string } {
   const k = claveComprobante(numero);
   let monto = 0, filas = 0, id_control = '', cliente = '';
@@ -91,7 +95,7 @@ export function valorDeFactura(
     filas++;
     if (!id_control) id_control = String(v.id_control || '');
     if (!cliente) cliente = String(v.nombre_cliente || '');
-    monto += valorDeVenta(v, precios, clientes);
+    monto += valorDeVenta(v, precios, clientes, claves);
   }
   return { monto: Math.round(monto), filas, id_control, cliente };
 }

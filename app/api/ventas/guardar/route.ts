@@ -13,6 +13,7 @@ import { valorDeFactura, guardarAjuste } from '@/lib/ajusteFactura';
 import { HOJA_COMPROBANTES, type ComprobanteCache } from '@/lib/xubioCache';
 import type { PrecioVenta, ClienteVenta } from '@/lib/types';
 import { leerArticulosExtra } from '@/lib/articulosVenta';
+import { clavesDeVenta } from '@/lib/clavesVenta';
 export async function POST(req: NextRequest) {
   // Las columnas de los artículos nuevos tienen que existir antes de escribir por nombre.
   await asegurarColumnasArticulos();
@@ -123,8 +124,11 @@ export async function POST(req: NextRequest) {
         readSheet<ClienteVenta>('Clientes').catch(() => [] as ClienteVenta[]),
         readSheet<ComprobanteCache>(HOJA_COMPROBANTES).catch(() => [] as ComprobanteCache[]),
       ]);
+      // Las mismas claves que usa el informe de facturacion. Con la lista fija del
+      // codigo, una factura de lechuga por kilo valia cero y el ajuste la dejaba en cero.
+      const clavesAjuste = await clavesDeVenta();
       for (const numero of numeros) {
-        const v = valorDeFactura(numero, ventasAhora, precios, clientes);
+        const v = valorDeFactura(numero, ventasAhora, precios, clientes, clavesAjuste);
         if (!v.filas) continue;
         const comp = cache.find((c) => claveComprobante(c.numero) === claveComprobante(numero));
         const importeXubio = Math.round(Number(comp?.importe) || 0);

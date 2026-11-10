@@ -619,7 +619,10 @@ export const HERRAMIENTAS: Herramienta[] = [
     ejecutar: async (a, { p }) => {
       const [ventas, precios, clientes] = await Promise.all([p.ventas(), p.precios(), p.clientes()]);
       const { valorDeVenta } = await import('../controlFacturacion');
-      const { PROD_KEYS } = await import('../articulos');
+      // Las claves completas: con PROD_KEYS sola, una venta por kilo valía cero y el
+      // asistente contestaba totales más chicos que los reales sin decir por qué.
+      const { clavesDeVenta } = await import('../clavesVenta');
+      const CLAVES = await clavesDeVenta();
       const norm = (x: any) => String(x || '').toLowerCase();
       const desde = String(a.desde), hasta = String(a.hasta);
       const porCliente = new Map<string, { monto: number; unidades: number }>();
@@ -631,9 +634,9 @@ export const HERRAMIENTAS: Herramienta[] = [
         const cli = clientes.find((c) => String(c.id_control) === String(v.id_control));
         const nombre = nombreClienteVisible(cli) || String(v.nombre_cliente || '');
         if (a?.cliente && !norm(nombre).includes(norm(a.cliente))) continue;
-        const monto = valorDeVenta(v, precios, clientes);
+        const monto = valorDeVenta(v, precios, clientes, CLAVES);
         let unidades = 0;
-        for (const k of PROD_KEYS) {
+        for (const k of CLAVES) {
           const q = num((v as any)[k]);
           if (q > 0) { unidades += q; porArticulo.set(k, (porArticulo.get(k) || 0) + q); }
         }

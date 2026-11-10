@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import type { AlertaCajon } from '@/lib/cajones';
 import type { ClienteSinPedir } from '@/lib/clientesSinPedir';
-import type { PendienteSinFacturar } from '@/lib/alertasVentas';
+import { DIAS_MAX_ALERTA, type PendienteSinFacturar } from '@/lib/alertasVentas';
 
 // ── Las alertas de Ventas, en un solo lugar ──────────────────────────────────────────
 //
@@ -14,9 +14,12 @@ const fmtFecha = (f: string) => {
   return d ? `${d}/${m}` : '—';
 };
 
-export default function AlertasVentas({ cajones, sinFacturar, sinPedir }: {
+export default function AlertasVentas({ cajones, sinFacturar, sinFacturarViejas = 0, sinPedir }: {
   cajones: AlertaCajon[];
   sinFacturar: PendienteSinFacturar[];
+  // Las que quedaron afuera por tener más de DIAS_MAX_ALERTA días. Se dicen: un recorte
+  // callado se lee como que no hay nada más, y son justamente las más fáciles de perder.
+  sinFacturarViejas?: number;
   sinPedir: ClienteSinPedir[];
 }) {
   const total = cajones.length + sinFacturar.length + sinPedir.length;
@@ -24,7 +27,13 @@ export default function AlertasVentas({ cajones, sinFacturar, sinPedir }: {
   if (total === 0) {
     return (
       <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '8px 13px', marginBottom: '14px', fontSize: '12.5px', color: '#166534', fontWeight: 600 }}>
-        ✓ Sin alertas: no hay cajones sin volver, nada sin facturar y ningún cliente que haya dejado de pedir.
+        ✓ Sin alertas: no hay cajones sin volver, nada sin facturar de los últimos {DIAS_MAX_ALERTA} días y ningún cliente que haya dejado de pedir.
+        {sinFacturarViejas > 0 && (
+          <div style={{ marginTop: '4px', fontWeight: 400, color: '#15803d' }}>
+            Quedan {sinFacturarViejas} venta(s) sin facturar de hace más de {DIAS_MAX_ALERTA} días, en{' '}
+            <Link href="/ventas/historial" style={{ color: '#15803d', textDecoration: 'underline' }}>el historial</Link>.
+          </div>
+        )}
       </div>
     );
   }
@@ -49,6 +58,10 @@ export default function AlertasVentas({ cajones, sinFacturar, sinPedir }: {
         grave: !p.huboFacturaEseDia,
       })),
       resto: Math.max(0, sinFacturar.length - 6),
+      // Lo viejo no entra en la alerta para no tapar lo de esta semana, pero se cuenta.
+      pie: sinFacturarViejas > 0
+        ? `Hay ${sinFacturarViejas} más de hace más de ${DIAS_MAX_ALERTA} días. No entran acá para que no tapen las de esta semana — están en el historial.`
+        : null,
     },
     cajones.length > 0 && {
       clave: 'cajones',
@@ -62,6 +75,7 @@ export default function AlertasVentas({ cajones, sinFacturar, sinPedir }: {
         grave: (c.diasSinMovimiento || 0) > 21,
       })),
       resto: Math.max(0, cajones.length - 6),
+      pie: null,
     },
     sinPedir.length > 0 && {
       clave: 'sinpedir',
@@ -78,12 +92,14 @@ export default function AlertasVentas({ cajones, sinFacturar, sinPedir }: {
         grave: c.vecesUltimas8Semanas >= 6,
       })),
       resto: Math.max(0, sinPedir.length - 6),
+      pie: null,
     },
   ].filter(Boolean) as {
     clave: string; color: string; fondo: string; borde: string; titulo: string;
     href: string; verTexto: string;
     filas: { clave: string; principal: string; secundario: string; grave: boolean }[];
     resto: number;
+    pie: string | null;
   }[];
 
   return (
@@ -111,6 +127,9 @@ export default function AlertasVentas({ cajones, sinFacturar, sinPedir }: {
               ))}
               {b.resto > 0 && (
                 <p style={{ margin: '2px 0 0', fontSize: '11.5px', color: '#9ca3af' }}>y {b.resto} más</p>
+              )}
+              {b.pie && (
+                <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#9ca3af' }}>{b.pie}</p>
               )}
             </div>
           </div>

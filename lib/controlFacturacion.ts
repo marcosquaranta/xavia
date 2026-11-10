@@ -16,6 +16,19 @@ import { nombreClienteVisible } from './clientes';
 
 import { PROD_KEYS } from './articulos';
 
+// ── Qué columnas se valorizan ────────────────────────────────────────────────────────
+//
+// PROD_KEYS son los artículos escritos en el código. NO incluye las ventas por kilo
+// —lechuga_kg_crespa y compañía, que viven en columnas propias— ni los artículos dados
+// de alta desde Admin. Recorrerla sola hacía que una venta por kilo valiera CERO de este
+// lado y el comprobante de Xubio valiera lo que vale: el control informaba la factura
+// entera como diferencia, todas las semanas, por una venta que estaba perfecta.
+//
+// Es el mismo error que ya hizo invisible al berro en la pantalla de carga. La lista de
+// artículos dejó de ser fija el día que se pudo crear uno desde Admin: todo lo que
+// recorra artículos tiene que recibir las claves, no escribirlas.
+const CLAVES_POR_DEFECTO: string[] = [...PROD_KEYS];
+
 // Desde cuántos días de atraso deja de ser "lo de hoy todavía sin facturar" y pasa a ser un
 // problema. Dos días cubre el fin de semana sin gritar por algo normal.
 export const DIAS_ATRASO_AVISO = 2;
@@ -54,6 +67,7 @@ function precioDe(precios: PrecioVenta[], idControl: string, sucursal: string, k
 
 function agrupar(
   filas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], hoy: string,
+  claves: string[] = CLAVES_POR_DEFECTO,
 ): ClienteSinFacturar[] {
   const mapa = new Map<string, ClienteSinFacturar & { fechas: Set<string> }>();
   for (const v of filas) {
@@ -69,7 +83,7 @@ function agrupar(
     const g = mapa.get(id)!;
     const f = soloFecha(v.fecha);
     let tieneAlgo = false;
-    for (const key of PROD_KEYS) {
+    for (const key of claves) {
       const qty = Number((v as any)[key]) || 0;
       if (qty <= 0) continue;
       tieneAlgo = true;
@@ -93,8 +107,9 @@ function agrupar(
 
 export function controlFacturacion(
   ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[], hoy: string,
+  claves: string[] = CLAVES_POR_DEFECTO,
 ): ControlFacturacion {
-  const pendientes = agrupar(ventas.filter(v => v.exportado === 'PENDIENTE'), precios, clientes, hoy);
+  const pendientes = agrupar(ventas.filter(v => v.exportado === 'PENDIENTE'), precios, clientes, hoy, claves);
   const montoPendiente = pendientes.reduce((a, g) => a + g.monto, 0);
   const atrasoMax = Math.max(0, ...pendientes.map(g => g.atraso));
   return {
@@ -160,6 +175,9 @@ export interface ComparacionFacturado {
   pct: number | null;
   porCliente: DiferenciaCliente[]; // solo los que se despegan, de mayor a menor
   disponible: boolean;             // false = no se pudo leer Xubio
+  // Clientes cuya unica diferencia era el IVA. No se listan, pero se cuentan: un filtro
+  // callado es otra forma de que el informe mienta, aunque mienta para bien.
+  conDiferenciaDeIva: number;
 }
 
 // Tolerancia: por debajo de esto no es un problema, es redondeo y corrimiento de fechas.
@@ -201,6 +219,24 @@ export const TOLERANCIA_IMPORTE = 100;
 // factura A. Lo segundo cubre al cliente con el tipo de factura mal cargado en la ficha: la
 // app valoriza neto, Xubio emite con IVA, y la diferencia es exactamente el 10,5% todos los
 // días del mes. Eso es un dato mal cargado, no plata que falte.
+// ¿La única diferencia entre los dos números es el IVA? La app valoriza NETO y Xubio
+// factura con el impuesto adentro, así que cuando el tipo de factura del cliente no se
+// pudo leer —ficha sin `tipo_factura`, o un comprobante cuyo nombre no matcheó con ninguna
+// ficha— el ajuste no se aplica y queda una diferencia del 10,5% exacto.
+//
+// Eso no es plata que falte: es la misma venta mirada de los dos lados con y sin impuesto.
+// Avisarlo entrena a ignorar el informe, que es la única forma de que una diferencia de
+// verdad pase desapercibida.
+//
+// El costo de esto es real y hay que decirlo: una diferencia que por casualidad dé exacto
+// el 10,5% tampoco se avisa. Es muchísimo menos probable que el artefacto, que aparece en
+// todos los clientes todas las semanas.
+export function soloDifiereElIva(app: number, xubio: number): boolean {
+  if (!app || !xubio) return false;
+  if (Math.sign(app) !== Math.sign(xubio)) return false;
+  return Math.abs(Math.abs(app) * (1 + IVA_FACTURA_A) - Math.abs(xubio)) <= TOLERANCIA_IMPORTE;
+}
+
 export function mismoImporte(a: number, b: number): boolean {
   const x = Math.abs(a), y = Math.abs(b);
   if (Math.abs(x - y) <= TOLERANCIA_IMPORTE) return true;
@@ -221,10 +257,15 @@ function llevaIva(cliente: ClienteVenta | undefined): boolean {
 // lib/ajusteFactura.ts). Tiene que ser EXACTAMENTE esta cuenta y no una parecida: si el
 // ajuste valorizara distinto que el informe de facturacion, cada factura corregida
 // aparecería como una diferencia inventada en el informe de los lunes.
-export function valorDeVenta(v: VentaDia, precios: PrecioVenta[], clientes: ClienteVenta[]): number {
+export function valorDeVenta(
+  v: VentaDia, precios: PrecioVenta[], clientes: ClienteVenta[],
+  // Todas las claves de mercadería, incluidas las de kilo y las de Admin. Ver
+  // CLAVES_POR_DEFECTO: sin esto una venta por kilo vale cero.
+  claves: string[] = CLAVES_POR_DEFECTO,
+): number {
   const cliente = clientes.find((c) => String(c.id_control) === String(v.id_control));
   let monto = 0;
-  for (const key of PROD_KEYS) {
+  for (const key of claves) {
     const qty = Number((v as any)[key]) || 0;
     if (qty <= 0) continue;
     monto += qty * precioDe(precios, String(v.id_control), v.sucursal, key, cliente?.sucursales);
@@ -258,9 +299,11 @@ function nombreDeComprobante(c: any): string {
 export function compararFacturado(
   ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[],
   comprobantes: any[] | null, desde: string, hasta: string,
+  claves: string[] = CLAVES_POR_DEFECTO,
 ): ComparacionFacturado {
   const vacio: ComparacionFacturado = {
     desde, hasta, totalApp: 0, totalXubio: 0, diferencia: 0, pct: null, porCliente: [], disponible: false,
+    conDiferenciaDeIva: 0,
   };
   if (!comprobantes) return vacio;
 
@@ -278,7 +321,7 @@ export function compararFacturado(
     const clave = norm(cliente?.nombre_xubio || v.nombre_cliente || v.id_control);
     if (!clave) continue;
     let monto = 0;
-    for (const key of PROD_KEYS) {
+    for (const key of claves) {
       const qty = Number((v as any)[key]) || 0;
       if (qty <= 0) continue;
       monto += qty * precioDe(precios, String(v.id_control), v.sucursal, key, cliente?.sucursales);
@@ -315,9 +358,12 @@ export function compararFacturado(
     porDiaXubio.set(kd, pd);
   }
 
-  const claves = new Set([...porClienteApp.keys(), ...porClienteXubio.keys()]);
+  const clavesClientes = new Set([...porClienteApp.keys(), ...porClienteXubio.keys()]);
   const porCliente: DiferenciaCliente[] = [];
-  for (const k of claves) {
+  // Cuántos quedaron afuera por ser solo el IVA. Se informa: un filtro callado es otra
+  // forma de que el informe mienta, aunque mienta para bien.
+  let conDiferenciaDeIva = 0;
+  for (const k of clavesClientes) {
     const app = Math.round(porClienteApp.get(k)?.monto || 0);
     const xubio = Math.round(porClienteXubio.get(k)?.monto || 0);
     const diferencia = app - xubio;
@@ -328,6 +374,9 @@ export function compararFacturado(
     // de $60.000 en un cliente que factura $8.000.000 no llega al 2% y se ignoraba, y son
     // $60.000 que igual hay que explicar. El porcentaje sigue calculado como dato.
     if (Math.abs(diferencia) < DIF_MINIMA_PESOS) continue;
+    // La app valoriza neto y Xubio factura con IVA. Si esa es toda la diferencia, no hay
+    // nada que revisar — ver soloDifiereElIva.
+    if (soloDifiereElIva(app, xubio)) { conDiferenciaDeIva++; continue; }
     // En qué días está: es lo que convierte el aviso en algo que se puede revisar.
     const dias: DiferenciaDia[] = [];
     const fechas = new Set<string>();
@@ -400,7 +449,7 @@ export function compararFacturado(
     desde, hasta, totalApp, totalXubio,
     diferencia: totalApp - totalXubio,
     pct: base > 0 ? Math.round(((totalApp - totalXubio) / base) * 1000) / 10 : null,
-    porCliente, disponible: true,
+    porCliente, disponible: true, conDiferenciaDeIva,
   };
 }
 
@@ -518,6 +567,10 @@ export function compararPorComprobante(
       continue;
     }
     if (Math.abs(dif) < DIF_MINIMA_PESOS) { coinciden++; continue; }
+    // La app valoriza neto y Xubio factura con el IVA adentro. Cuando el tipo de factura
+    // del cliente no se pudo leer, el ajuste no se aplica y queda un 10,5% exacto de
+    // diferencia en una factura que esta perfecta. Cuenta como coincidencia.
+    if (soloDifiereElIva(a, x)) { coinciden++; continue; }
     out.push({ numero, cliente: app.get(numero)!.cliente || xubio.get(numero)!.cliente, fechaXubio: xubio.get(numero)!.fecha, app: a, xubio: x, diferencia: dif, estado: 'difiere' });
   }
 
