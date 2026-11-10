@@ -1,7 +1,7 @@
 'use client';
 import { PCT_RETENCION_GANANCIAS } from '@/lib/retenciones';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { clientesDuplicados } from '@/lib/clientesDuplicados';
 import { useRouter } from 'next/navigation';
 import type { ClienteVenta, PrecioVenta } from '@/lib/types';
@@ -150,6 +150,7 @@ function ClienteRow({ c, precios, cambios, onSaved, extrasUnidad = [], extrasKg 
     facturar_por_sucursal: c.facturar_por_sucursal === 'SI' ? 'SI' : 'NO',
     // Datos de cobranza. Estaban solo en la pantalla de Cobranzas y acá es donde alguien va
     // a buscarlos cuando quiere saber "qué sé de este cliente".
+    cuit: String((c as any).cuit || ''),
     email: String((c as any).email || ''),
     email_cobranza: String((c as any).email_cobranza || ''),
     recordatorio_cobro: (c as any).recordatorio_cobro === 'SI' ? 'SI' : 'NO',
@@ -169,6 +170,22 @@ function ClienteRow({ c, precios, cambios, onSaved, extrasUnidad = [], extrasKg 
       if (!res.ok) { const j = await res.json(); throw new Error(j.error); }
       onSaved();
     } catch (e: any) { setErr(e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function borrarCliente() {
+    const nombre = String((c as any).alias || (c as any).nombre_display || c.nombre_xubio);
+    if (!window.confirm(`Se va a BORRAR la ficha de "${nombre}". No se puede deshacer.\n\nSi el cliente dejó de comprar, lo correcto es Desactivar: eso conserva su historia.\nBorrar es para sacar una ficha duplicada.\n\n¿Confirmás?`)) return;
+    setSaving(true); setErr(null);
+    try {
+      const r = await fetch('/api/admin/clientes-venta', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_control: c.id_control }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error || 'No se pudo borrar');
+      onSaved();
+    } catch (e: any) { setErr(e?.message || 'No se pudo borrar'); }
     finally { setSaving(false); }
   }
 
@@ -224,6 +241,19 @@ function ClienteRow({ c, precios, cambios, onSaved, extrasUnidad = [], extrasKg 
                 <div>
                   <label style={{ fontSize: '11px' }}>Alias</label>
                   <input type="text" value={fields.alias} onChange={e => setFields(f => ({ ...f, alias: e.target.value }))} disabled={saving} />
+                </div>
+                <div>
+                  {/* El CUIT es lo único que identifica a un cliente sin depender de cómo
+                      se le haya ocurrido escribir el nombre a quien cargó la ficha:
+                      "Forno Viena" y "Heroica Alto" son la misma empresa y no se parecen
+                      en nada. Con él cargado, la app no deja crear la ficha repetida. */}
+                  <label style={{ fontSize: '11px' }}>CUIT</label>
+                  <input type="text" inputMode="numeric" value={fields.cuit}
+                    onChange={e => setFields(f => ({ ...f, cuit: e.target.value }))}
+                    placeholder="30-71840929-9" disabled={saving} />
+                  <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#9ca3af' }}>
+                    Con el CUIT cargado, la app no deja crear otro cliente igual.
+                  </p>
                 </div>
                 <div>
                   <label style={{ fontSize: '11px' }}>Tipo factura</label>
@@ -307,6 +337,15 @@ function ClienteRow({ c, precios, cambios, onSaved, extrasUnidad = [], extrasKg 
                 <button className="btn" style={{ fontSize: '11px', padding: '5px 12px' }} onClick={guardarCliente} disabled={saving}>
                   {saving ? 'Guardando…' : 'Guardar datos'}
                 </button>
+                {/* Borrar de verdad. Es para sacar una ficha duplicada de en medio, no
+                    para dar de baja a un cliente que dejó de comprar —para eso está
+                    Desactivar, que conserva su historia—. El servidor frena si tiene
+                    ventas: borrarla dejaría esas ventas apuntando a un cliente que no
+                    existe, sumando al resultado sin saber de quién son. */}
+                <button className="btn secondary" style={{ fontSize: '11px', padding: '5px 12px', borderColor: '#fecaca', color: '#b91c1c' }}
+                  onClick={borrarCliente} disabled={saving}>
+                  Borrar ficha
+                </button>
                 <button className="btn secondary" style={{ fontSize: '11px', padding: '5px 12px' }} onClick={toggleActivo} disabled={saving}>
                   {c.activo === 'SI' ? 'Desactivar' : 'Activar'}
                 </button>
@@ -348,7 +387,23 @@ export default function ClientesVentaManager({ clientes, precios, cambios, extra
   // Lo que rompen es todo lo que agrupa por cliente —la deuda aparece partida, el
   // recordatorio sale dos veces o ninguna, el ranking miente—. Números que se leen bien y
   // están mal, que es la clase de problema que no se encuentra mirando.
-  const duplicados = clientesDuplicados(clientes as any);
+  // Los pares ya descartados viven en el navegador: es una preferencia de quien mira, no
+  // un dato de la empresa, y guardarla en la planilla sería una escritura por cada "ya sé".
+  const [dupOcultos, setDupOcultos] = useState<string[]>([]);
+  useEffect(() => {
+    try { setDupOcultos(JSON.parse(localStorage.getItem('dupClientesOcultos') || '[]')); } catch { /* sin localStorage se muestran todos */ }
+  }, []);
+  function ocultarDup(clave: string) {
+    setDupOcultos((prev) => {
+      const next = [...prev, clave];
+      try { localStorage.setItem('dupClientesOcultos', JSON.stringify(next)); } catch { /* idem */ }
+      return next;
+    });
+  }
+
+  const claveDup = (d: { a: { id_control: string }; b: { id_control: string } }) =>
+    [d.a.id_control, d.b.id_control].sort().join('__');
+  const duplicados = clientesDuplicados(clientes as any).filter((d) => !dupOcultos.includes(claveDup(d)));
   const [nombreXubio, setNombreXubio] = useState('');
   const [alias, setAlias] = useState('');
   const [tipoFactura, setTipoFactura] = useState('A');
@@ -439,11 +494,19 @@ export default function ClientesVentaManager({ clientes, precios, cambios, extra
           <strong>{duplicados.length} par(es) de clientes se parecen</strong> — puede que sean el mismo cargado dos veces.
           <ul style={{ margin: '5px 0 0', paddingLeft: '18px' }}>
             {duplicados.slice(0, 8).map((d, i) => (
-              <li key={i} style={{ marginBottom: '2px' }}>
+              <li key={i} style={{ marginBottom: '3px' }}>
                 <strong>{d.a.nombre}</strong>{!d.a.activo && <span style={{ color: '#991b1b' }}> (dado de baja)</span>}
                 {' y '}
                 <strong>{d.b.nombre}</strong>{!d.b.activo && <span style={{ color: '#991b1b' }}> (dado de baja)</span>}
                 <span style={{ color: '#9ca3af' }}> — comparten “{d.comun}”</span>
+                {/* Descartar el par. Un aviso que no se puede sacar deja de ser un aviso y
+                    pasa a ser parte del fondo de la pantalla: cuando aparezca uno nuevo,
+                    nadie lo va a ver entre los viejos. */}
+                <button type="button" onClick={() => ocultarDup(claveDup(d))}
+                  title="Ya lo revisé — no son el mismo"
+                  style={{ marginLeft: '6px', background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', fontSize: '11px', fontWeight: 600, padding: 0 }}>
+                  ya lo revisé
+                </button>
               </li>
             ))}
           </ul>
