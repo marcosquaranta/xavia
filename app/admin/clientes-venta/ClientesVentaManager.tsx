@@ -194,8 +194,23 @@ function ClienteRow({ c, precios, cambios, onSaved, todos = [], extrasUnidad = [
       const texto = `Se van a pasar ${pj.ventas} venta(s)`
         + (pj.facturadas ? ` (${pj.facturadas} ya facturadas)` : '')
         + ` de "${pj.desde.nombre}" a "${pj.hacia.nombre}", y después se borra la ficha vieja.`
-        + (pj.desde.sucursales ? `\n\nOjo: la ficha vieja tiene cargadas estas sucursales: ${pj.desde.sucursales}. No se copian solas — si hacen falta, agregalas a mano en la que queda.` : '')
-        + `\n\nEsto NO se puede deshacer. ¿Confirmás?`;
+        // Se dice explícitamente qué se conserva. "Fusionar" puede entenderse como
+        // "juntar todo de las dos", y no es eso: la ficha que queda no cambia en nada,
+        // solo recibe las ventas de la otra.
+        + `
+
+"${pj.hacia.nombre}" NO cambia: conserva sus sucursales, precios, alias y mail. Lo único que recibe son las ventas.`
+        + ((pj.desde.ultimaFactura || pj.hacia.ultimaFactura)
+            ? `
+
+Última factura — ${pj.desde.nombre}: ${pj.desde.ultimaFactura || 'nunca'} · ${pj.hacia.nombre}: ${pj.hacia.ultimaFactura || 'nunca'}.`
+            : '')
+        + (pj.desde.sucursales ? `
+
+Ojo: la ficha vieja tiene cargadas estas sucursales: ${pj.desde.sucursales}. No se copian solas — si alguna sigue comprando, agregala a mano en la que queda.` : '')
+        + `
+
+Esto NO se puede deshacer. ¿Confirmás?`;
       if (!window.confirm(texto)) { setSaving(false); return; }
 
       const r = await fetch('/api/admin/clientes-venta/fusionar', {

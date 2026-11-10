@@ -61,13 +61,43 @@ export async function POST(req: NextRequest) {
     const suyas = ventas.filter((v) => String(v.id_control) === idDesde);
     const facturadas = suyas.filter((v) => String(v.exportado || '').trim()).length;
 
+    // ── La dirección de la fusión no es indistinta ──────────────────────────────────
+    //
+    // La ficha que QUEDA conserva todo lo suyo: sucursales, precios, mail, alias. La que se
+    // va aporta solo sus ventas. Entonces fusionar al revés —mudar hacia la ficha vieja— se
+    // queda con una configuración desactualizada: sucursales que ya no existen, precios de
+    // hace un año, y el mail que nadie lee.
+    //
+    // Cuál es la vigente no es una opinión: es la que facturó más recientemente. Se calcula
+    // y se frena si la dirección está invertida, porque esto no se deshace.
+    const ultimaFactura = (id: string) => ventas
+      .filter((v) => String(v.id_control) === id && String(v.exportado || '').trim())
+      .map((v) => String(v.fecha || '').split(/[T ]/)[0])
+      .filter(Boolean)
+      .sort()
+      .pop() || '';
+
+    const ultDesde = ultimaFactura(idDesde);
+    const ultHacia = ultimaFactura(idHacia);
+    // Solo frena cuando hay con qué comparar: si una de las dos nunca facturó, no hay
+    // "más reciente" y la decisión es de quien mira.
+    const invertida = !!ultDesde && !!ultHacia && ultDesde > ultHacia;
+
     if (soloVer) {
       return NextResponse.json({
         ok: true, soloVer: true,
-        desde: { id: idDesde, nombre: a.alias || a.nombre_display || a.nombre_xubio, sucursales: a.sucursales || '' },
-        hacia: { id: idHacia, nombre: b.alias || b.nombre_display || b.nombre_xubio },
-        ventas: suyas.length, facturadas,
+        desde: { id: idDesde, nombre: a.alias || a.nombre_display || a.nombre_xubio, sucursales: a.sucursales || '', ultimaFactura: ultDesde },
+        hacia: { id: idHacia, nombre: b.alias || b.nombre_display || b.nombre_xubio, sucursales: b.sucursales || '', ultimaFactura: ultHacia },
+        ventas: suyas.length, facturadas, invertida,
       });
+    }
+
+    if (invertida) {
+      return NextResponse.json({
+        error: `La fusión está al revés. "${a.alias || a.nombre_xubio}" facturó más recientemente (${ultDesde}) que "${b.alias || b.nombre_xubio}" (${ultHacia}), `
+          + `así que la ficha vigente es la primera: sus sucursales, precios y mail son los que hay que conservar. `
+          + `Hacela desde "${b.alias || b.nombre_xubio}" hacia "${a.alias || a.nombre_xubio}".`,
+      }, { status: 409 });
     }
 
     // Se muda también `nombre_cliente`: queda escrito en cada fila de Ventas y varias
