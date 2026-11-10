@@ -115,11 +115,16 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
   // plata entra el mes que viene. Con la fecha del aviso la cuenta muestra plata que no está.
   const [fechaCobro, setFechaCobro] = useState(String(item.fecha || '').split(/[T ]/)[0]);
   // Y cuando entra en varias veces, una fila por fecha. Vacío = entra todo junto.
-  // Si el aviso trae un adjunto, el bloque arranca ABIERTO. Un adjunto en un aviso de pago
-  // es casi siempre el comprobante, o sea el único lugar donde está el dato: esconderlo
-  // detrás de un click es pedir un paso de más justo en el caso en que hace falta. Cuando
-  // el mail es solo texto queda plegado, porque ahí la descripción de arriba suele alcanzar.
-  const [verMail, setVerMail] = useState(() => !!String(item.adjuntos || '').trim());
+  // ── El cuerpo del mail arranca plegado, incluso con adjunto ──────────────────────
+  //
+  // Antes se abría solo cuando había adjunto, con el argumento de que el comprobante es
+  // donde está el dato. Era cierto y no alcanzaba: abierto, el mail reenviado ocupa media
+  // pantalla de encabezados de Gmail y empuja hacia abajo lo único que hay que tocar —el
+  // cliente, la cuenta y las facturas—. Lo que la fila necesita mostrar de entrada ya está
+  // arriba: importe, cliente y las facturas que el aviso nombra.
+  //
+  // Que haya adjunto se dice en el botón de abrirlo, que es más barato que abrirlo solo.
+  const [verMail, setVerMail] = useState(false);
   // Corregir el importe de una factura sin salir de acá. El caso es siempre el mismo: el
   // aviso dice $X, la factura figura por $Y y la diferencia es un error de carga. Había que
   // irse a la pantalla de comprobantes y volver, perdiendo todo lo ya tildado.
@@ -359,17 +364,19 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
         {/* Descartar sin abrir la fila. La mayoría de lo que entra de más —un resumen de
             banco que no es un cobro, un aviso repetido— se reconoce de un vistazo, y para
             sacarlo había que abrir la fila, bajar hasta el final y leer un confirm. */}
+        {/* Con la palabra, no solo la cruz. Una × gris clarita al final de una fila larga
+            no se lee como "descartar": se lee como decoración, y la función existía desde
+            hace rato sin que nadie la usara. */}
         <button
           onClick={(e) => { e.stopPropagation(); descartarRapido(); }}
           disabled={trabajando}
-          title="No es un cobro — descartar"
+          title="No es un cobro — descartar sin abrir"
           style={{
-            background: 'none', border: 'none', cursor: trabajando ? 'default' : 'pointer',
-            color: '#d1d5db', fontSize: '17px', lineHeight: 1, padding: '0 4px',
+            background: 'white', border: '1px solid #fecaca', borderRadius: '5px',
+            cursor: trabajando ? 'default' : 'pointer', color: '#b91c1c',
+            fontSize: '11px', fontWeight: 700, lineHeight: 1, padding: '4px 9px', whiteSpace: 'nowrap',
           }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#dc2626'; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#d1d5db'; }}
-        >×</button>
+        >× Descartar</button>
         <span style={{ fontSize: '11px', color: '#9ca3af' }}>{abierto ? '▲' : '▼'}</span>
       </div>
 
