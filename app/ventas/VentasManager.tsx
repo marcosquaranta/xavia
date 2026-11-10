@@ -178,6 +178,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   // Mostrar también los clientes sin precio de paquete. Apagado: son los que no compran así.
   const [mostrarSinPrecio,setMostrarSinPrecio]=useState(false);
   const [showPreExport,setShowPreExport]=useState(false);
+  // El paso intermedio antes de facturar. Lo que sale de aca se emite en AFIP y no se
+  // deshace: tiene que poder mirarse antes, no despues.
+  const [preCargar,setPreCargar]=useState<LineaCarga[]|null>(null);
   const [correlaA,setCorrelaA]=useState<string>('');
   const [correlaB,setCorrelaB]=useState<string>('');
   const [enviarEmail,setEnviarEmail]=useState(true);
@@ -404,21 +407,34 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       setMsg({t:'err',s:`Error al guardar KG de ${f.nombre_display}: ${err.message}`});
     }
   }
+  // ── Que se va a mandar ────────────────────────────────────────────────────────────
+  //
+  // Una sola definicion, usada por la vista previa Y por el envio. Si la pantalla de
+  // confirmacion armara su propia lista, podria mostrar una cosa y mandarse otra — y lo
+  // que se manda se factura en AFIP, que no se deshace.
+  function armarLineas(): LineaCarga[] {
+    // Un cliente que compra por cajon Y por unidad esta en las dos listas, y cada una arma
+    // su propia linea para el mismo cliente, el mismo dia y la misma sucursal: dos filas
+    // para una sola venta. La de cajones ya incluye las cantidades por unidad, asi que es
+    // la que vale — de las normales se saca a los que tambien estan alla.
+    const clavesKg = new Set(filasKg.map(f=>`${f.id_control}__${f.sucursal}`));
+    return [
+      ...filasNormales.filter(f=>!clavesKg.has(`${f.id_control}__${f.sucursal}`)).map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_ENVIO.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
+      ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_ENVIO.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:kgDeCajones('rucula_kg',Number(dr?.rucula_kg?.value)||0),lechuga_kg_crespa:kgDeCajones('lechuga_kg_crespa',Number(dr?.lechuga_kg_crespa?.value)||0),lechuga_kg_roble:kgDeCajones('lechuga_kg_roble',Number(dr?.lechuga_kg_roble?.value)||0)};}),
+    ].filter((l:LineaCarga)=>[...KEYS_ENVIO,...KEYS_KG].some(k=>Number(l[k])>0));
+  }
+
   async function cargarVentas(){
     setExp(true);setMsg(null);
     try{
-      setShowPreExport(false);
+      setShowPreExport(false);setPreCargar(null);
       Object.values(tmrs.current).forEach(t=>clearTimeout(t));
       // Flush de todas las cantidades cargadas (igual que en exportar)
       // Un cliente que compra por cajón Y por unidad está en las dos listas, y cada una
       // arma su propia línea para el mismo cliente, el mismo día y la misma sucursal: dos
       // filas para una sola venta. La de cajones ya incluye las cantidades por unidad, así
       // que es la que vale — de las normales se saca a los que también están allá.
-      const clavesKg = new Set(filasKg.map(f=>`${f.id_control}__${f.sucursal}`));
-      const todasLineas = [
-        ...filasNormales.filter(f=>!clavesKg.has(`${f.id_control}__${f.sucursal}`)).map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_ENVIO.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
-        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_ENVIO.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:kgDeCajones('rucula_kg',Number(dr?.rucula_kg?.value)||0),lechuga_kg_crespa:kgDeCajones('lechuga_kg_crespa',Number(dr?.lechuga_kg_crespa?.value)||0),lechuga_kg_roble:kgDeCajones('lechuga_kg_roble',Number(dr?.lechuga_kg_roble?.value)||0)};}),
-      ].filter((l:LineaCarga)=>[...KEYS_ENVIO,...KEYS_KG].some(k=>Number(l[k])>0));
+      const todasLineas = armarLineas();
       const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:todasLineas})});
       if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar ventas');}
       const r=await fetch('/api/ventas/cargar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha})});
@@ -449,12 +465,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       Object.values(tmrs.current).forEach(t=>clearTimeout(t));
       // Mismo cuidado que al cargar: el cliente que está en las dos listas se manda una
       // sola vez, desde la de cajones, que ya lleva también las cantidades por unidad.
-      const clavesKgExp = new Set(filasKg.map(f=>`${f.id_control}__${f.sucursal}`));
-      const todasLineas = [
-        ...filasNormales.filter(f=>!clavesKgExp.has(`${f.id_control}__${f.sucursal}`)).map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_ENVIO.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
-        ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_ENVIO.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:kgDeCajones('rucula_kg',Number(dr?.rucula_kg?.value)||0),lechuga_kg_crespa:kgDeCajones('lechuga_kg_crespa',Number(dr?.lechuga_kg_crespa?.value)||0),lechuga_kg_roble:kgDeCajones('lechuga_kg_roble',Number(dr?.lechuga_kg_roble?.value)||0)};}),
-      // Solo enviar líneas con al menos una cantidad > 0
-      ].filter((l:LineaCarga)=>[...KEYS_ENVIO,...KEYS_KG].some(k=>Number(l[k])>0));
+      const todasLineas = armarLineas();
       const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:todasLineas})});
       if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar ventas');}
       const r=await fetch('/api/ventas/exportar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,fechasCliente:fc,correlaA:Number(correlaA),correlaB:Number(correlaB),enviarEmail})});
@@ -837,7 +848,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
           style={{background:'white',color:hayV?'#6b7280':'#d1d5db',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'8px 12px',fontWeight:600,fontSize:'12px',cursor:hayV&&!exp?'pointer':'not-allowed',marginLeft:'auto',display:'flex',alignItems:'center',gap:'4px'}}>
           <span>⬇</span>Excel
         </button>
-        <button onClick={()=>{ if(hayV&&!exp) cargarVentas(); }} disabled={!hayV||exp}
+        <button onClick={()=>{ if(hayV&&!exp) setPreCargar(armarLineas()); }} disabled={!hayV||exp}
           style={{background:hayV&&!exp?'#1d4ed8':'#e5e7eb',color:hayV&&!exp?'white':'#9ca3af',border:'none',borderRadius:'8px',padding:'8px 18px',fontWeight:700,fontSize:'13px',cursor:hayV&&!exp?'pointer':'not-allowed',display:'flex',alignItems:'center',gap:'5px'}}>
           <span>📥</span>{exp?'Cargando…':'Cargar ventas'}
         </button>
@@ -849,6 +860,92 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
 
 
       {/* Panel pre-exportación */}
+      {/* ── Confirmar antes de facturar ──────────────────────────────────────────────
+          Lo que sale de acá se emite en AFIP y no se deshace: una nota de crédito no
+          borra la factura, la compensa. Antes el botón facturaba directo y la única
+          forma de ver qué se había mandado era el acuse, cuando ya estaba hecho.
+
+          Lista lo MISMO que se va a mandar — las dos cosas salen de armarLineas() —
+          valorizado con los precios vigentes, para que un precio que falta o una
+          cantidad de más se vean antes y no después. */}
+      {preCargar && (()=>{
+        const items = preCargar.map((l)=>{
+          const cli = clientes.find((c)=>String(c.id_control)===String(l.id_control));
+          const nombre = (filas.find((f)=>f.id_control===l.id_control&&f.sucursal===l.sucursal)?.nombre_display)
+            || String(l.nombre_cliente||l.id_control);
+          const detalle: {label:string;cant:number;monto:number;sinPrecio:boolean}[] = [];
+          let monto = 0, sinPrecio = 0;
+          for (const k of [...KEYS_ENVIO,...KEYS_KG]) {
+            const cant = Number((l as any)[k])||0;
+            if (cant<=0) continue;
+            const unit = precioFinal(precios, String(l.id_control), String(l.sucursal), String(k), cli);
+            const sub = cant*unit;
+            monto += sub;
+            if (unit<=0) sinPrecio++;
+            const art = [...ARTS_UNIDAD,...PE].find((a)=>a.key===k);
+            detalle.push({ label: art?.label || String(k).replace(/_/g,' '), cant, monto: sub, sinPrecio: unit<=0 });
+          }
+          return { nombre, sucursal: l.sucursal, tipo: String(cli?.tipo_factura||'?'), detalle, monto, sinPrecio };
+        }).sort((a,b)=>b.monto-a.monto);
+        const total = items.reduce((a,x)=>a+x.monto,0);
+        const conProblema = items.filter((x)=>x.sinPrecio>0);
+        const fmt=(n:number)=>'$'+Math.round(n).toLocaleString('es-AR');
+        return (
+          <div style={{background:'#fff',border:'2px solid #1d4ed8',borderRadius:'10px',padding:'16px',marginBottom:'12px'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',gap:'10px',flexWrap:'wrap',marginBottom:'4px'}}>
+              <p style={{margin:0,fontSize:'14px',fontWeight:800,color:'#1d4ed8'}}>Revisar antes de facturar — {fecha}</p>
+              <p style={{margin:0,fontSize:'12px',color:'#6b7280'}}>{items.length} factura(s) · <strong style={{color:'#111827'}}>{fmt(total)}</strong></p>
+            </div>
+            <p style={{margin:'0 0 10px',fontSize:'11.5px',color:'#6b7280'}}>
+              Esto se emite en AFIP y no se deshace: una nota de crédito no borra la factura, la compensa. Los importes son con el IVA de cada cliente, a los precios vigentes.
+            </p>
+
+            {conProblema.length>0 && (
+              <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'7px',padding:'8px 11px',marginBottom:'10px'}}>
+                <p style={{margin:0,fontSize:'12px',color:'#92400e'}}>
+                  <strong>{conProblema.length} cliente(s) tienen algún artículo sin precio cargado</strong> y esa línea iría en $0. Están marcados abajo.
+                </p>
+              </div>
+            )}
+
+            <div style={{maxHeight:'320px',overflowY:'auto',border:'1px solid #f3f4f6',borderRadius:'7px'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:'12px'}}>
+                <tbody>
+                  {items.map((x,i)=>(
+                    <tr key={`${x.nombre}__${x.sucursal}__${i}`} style={{borderTop:i?'1px solid #f3f4f6':'none'}}>
+                      <td style={{padding:'6px 9px',verticalAlign:'top'}}>
+                        <div style={{fontWeight:700,color:'#111827'}}>
+                          {x.nombre}
+                          {x.sucursal && <span style={{fontWeight:400,color:'#6b7280'}}> · {x.sucursal}</span>}
+                          <span style={{marginLeft:'6px',fontSize:'10px',fontWeight:700,color:x.tipo==='A'?'#1e40af':'#6b7280',background:x.tipo==='A'?'#dbeafe':'#f3f4f6',borderRadius:'4px',padding:'1px 6px'}}>{x.tipo}</span>
+                        </div>
+                        <div style={{fontSize:'11px',color:'#6b7280',marginTop:'2px'}}>
+                          {x.detalle.map((d)=>`${d.cant} ${d.label}${d.sinPrecio?' (sin precio)':''}`).join(' · ')}
+                        </div>
+                      </td>
+                      <td style={{padding:'6px 9px',textAlign:'right',fontWeight:700,whiteSpace:'nowrap',verticalAlign:'top',color:x.sinPrecio?'#b45309':'#111827'}}>
+                        {fmt(x.monto)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{display:'flex',gap:'8px',marginTop:'12px'}}>
+              <button onClick={cargarVentas} disabled={exp}
+                style={{background:'#1d4ed8',color:'white',border:'none',borderRadius:'8px',padding:'10px 20px',fontWeight:700,fontSize:'13px',cursor:exp?'wait':'pointer',flex:1}}>
+                {exp?'Facturando…':`✓ Facturar ${items.length} cliente(s) por ${fmt(total)}`}
+              </button>
+              <button onClick={()=>setPreCargar(null)} disabled={exp}
+                style={{background:'white',color:'#6b7280',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'10px 16px',fontSize:'13px',cursor:'pointer'}}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
       {showPreExport && (
         <div style={{background:'#eff6ff',border:'2px solid #3b82f6',borderRadius:'10px',padding:'16px',marginBottom:'12px'}}>
           <p style={{margin:'0 0 12px',fontSize:'13px',fontWeight:700,color:'#1d4ed8'}}>📋 Confirmar exportación — {fecha}</p>
@@ -1221,7 +1318,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
                 paquetes y kg—. Dos botones que cargaran cosas distintas serían una trampa:
                 el segundo parecería no hacer nada, o duplicaría. */}
             <div style={{padding:'8px 12px',background:'#f0fdfa',borderTop:'1px solid #99f6e4',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
-              <button onClick={()=>{ if(hayV&&!exp) cargarVentas(); }} disabled={!hayV||exp}
+              <button onClick={()=>{ if(hayV&&!exp) setPreCargar(armarLineas()); }} disabled={!hayV||exp}
                 style={{background:hayV&&!exp?'#0f766e':'#e5e7eb',color:hayV&&!exp?'white':'#9ca3af',border:'none',borderRadius:'8px',padding:'7px 16px',fontWeight:700,fontSize:'12.5px',cursor:hayV&&!exp?'pointer':'not-allowed',display:'flex',alignItems:'center',gap:'5px'}}>
                 <span>📥</span>{exp?'Cargando…':'Cargar ventas'}
               </button>
