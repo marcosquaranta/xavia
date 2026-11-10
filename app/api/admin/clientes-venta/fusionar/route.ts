@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin, getCurrentUser } from '@/lib/auth';
-import { readSheet, batchUpdateRows, deleteRow } from '@/lib/sheets';
-import type { ClienteVenta, VentaDia } from '@/lib/types';
+import { readSheet, batchUpdateRows, deleteRow, appendRowObj } from '@/lib/sheets';
+import type { ClienteVenta, VentaDia, PrecioVenta } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,15 +34,16 @@ export async function POST(req: NextRequest) {
   if (!(await isAdmin())) return NextResponse.json({ error: 'solo_admin' }, { status: 403 });
 
   try {
-    const { desde, hacia, soloVer, borrarDespues } = await req.json();
+    const { desde, hacia, soloVer, borrarDespues, forzar } = await req.json();
     const idDesde = String(desde || '').trim();
     const idHacia = String(hacia || '').trim();
     if (!idDesde || !idHacia) return NextResponse.json({ error: 'Faltan las dos fichas.' }, { status: 400 });
     if (idDesde === idHacia) return NextResponse.json({ error: 'Son la misma ficha.' }, { status: 400 });
 
-    const [clientes, ventas] = await Promise.all([
+    const [clientes, ventas, precios] = await Promise.all([
       readSheet<ClienteVenta>('Clientes'),
       readSheet<VentaDia>('Ventas'),
+      readSheet<PrecioVenta>('Precios').catch(() => [] as PrecioVenta[]),
     ]);
 
     const a = clientes.find((c) => String(c.id_control) === idDesde);
@@ -89,14 +90,32 @@ export async function POST(req: NextRequest) {
         desde: { id: idDesde, nombre: a.alias || a.nombre_display || a.nombre_xubio, sucursales: a.sucursales || '', ultimaFactura: ultDesde },
         hacia: { id: idHacia, nombre: b.alias || b.nombre_display || b.nombre_xubio, sucursales: b.sucursales || '', ultimaFactura: ultHacia },
         ventas: suyas.length, facturadas, invertida,
+        // Cuantas listas de precios tiene cada una: decide si la fusion las copia o no,
+        // y quien mira tiene que saberlo antes de confirmar.
+        preciosDesde: precios.filter((x) => String(x.id_control) === idDesde).length,
+        preciosHacia: precios.filter((x) => String(x.id_control) === idHacia).length,
       });
     }
 
-    if (invertida) {
+    // ── La vuelta atrás ────────────────────────────────────────────────────────────
+    //
+    // La guarda de dirección sirve para la primera fusión. Para DESHACER una que salió
+    // al revés está exactamente invertida: devolver las ventas a su ficha es, por
+    // definición, mudarlas hacia la que hoy no factura. Si la guarda también frena eso,
+    // el error queda sin arreglo posible desde la pantalla.
+    //
+    // Entonces se puede saltear, con una condición: sin borrar nada. Mudar ventas no
+    // destruye nada —se vuelve a mudar y listo—; borrar la ficha sí. La combinación
+    // "forzar la dirección Y borrar" es la que hizo el daño, y no se habilita.
+    const salteaGuarda = !!forzar && !borrarDespues;
+
+    if (invertida && !salteaGuarda) {
       return NextResponse.json({
+        invertida: true,
         error: `La fusión está al revés. "${a.alias || a.nombre_xubio}" facturó más recientemente (${ultDesde}) que "${b.alias || b.nombre_xubio}" (${ultHacia}), `
           + `así que la ficha vigente es la primera: sus sucursales, precios y mail son los que hay que conservar. `
-          + `Hacela desde "${b.alias || b.nombre_xubio}" hacia "${a.alias || a.nombre_xubio}".`,
+          + `Hacela desde "${b.alias || b.nombre_xubio}" hacia "${a.alias || a.nombre_xubio}". `
+          + `Si lo que querés es justamente devolver ventas que se mudaron mal, se puede mudarlas solas sin borrar ninguna ficha.`,
       }, { status: 409 });
     }
 
@@ -126,8 +145,33 @@ export async function POST(req: NextRequest) {
       }
     } catch { /* la bandeja es accesoria: que falle no puede dejar la fusión a medias */ }
 
+    // ── Los precios no se tiran ─────────────────────────────────────────────────────
+    //
+    // Esto ya costó una vez. La ficha que se va se borra junto con su fila de Precios, y
+    // si la que queda no tenía precios cargados, el cliente se queda sin lista: la
+    // pantalla de carga deja de ofrecerle artículos y la próxima factura sale en cero.
+    // No hay aviso — simplemente no aparece.
+    //
+    // Entonces antes de borrar: si la que queda no tiene precios y la que se va sí, se
+    // copian. Es el único dato de la ficha vieja que vale la pena conservar, porque sin
+    // él las ventas que acabamos de mudar no se pueden volver a facturar.
+    const preciosDesde = precios.filter((x) => String(x.id_control) === idDesde);
+    const preciosHacia = precios.filter((x) => String(x.id_control) === idHacia);
+    let preciosCopiados = 0;
+    if (preciosDesde.length && !preciosHacia.length) {
+      for (const fila of preciosDesde) {
+        const { id_control: _i, nombre_cliente: _n, ...resto } = fila as any;
+        await appendRowObj('Precios', {
+          ...resto,
+          id_control: idHacia,
+          nombre_cliente: b.nombre_xubio,
+        }).catch(() => null);
+        preciosCopiados++;
+      }
+    }
+
     let borrada = false;
-    if (borrarDespues) {
+    if (borrarDespues && !salteaGuarda) {
       borrada = await deleteRow('Clientes', 'id_control', idDesde);
       // La fila de Precios se va con ella: el id_control se reusa al crear el próximo
       // cliente, que heredaría los precios de ésta.
@@ -135,10 +179,11 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({
-      ok: true, ventas: suyas.length, facturadas, bandeja, borrada,
+      ok: true, ventas: suyas.length, facturadas, bandeja, borrada, preciosCopiados,
       mensaje: `Se pasaron ${suyas.length} venta(s) de "${a.alias || a.nombre_xubio}" a "${b.alias || b.nombre_xubio}"`
         + (bandeja ? ` y ${bandeja} aviso(s) de la bandeja` : '')
-        + (borrada ? '. La ficha vieja se borró.' : '.'),
+        + (borrada ? '. La ficha vieja se borró.' : '.')
+        + (preciosCopiados ? ` Se copiaron ${preciosCopiados} lista(s) de precios de la ficha vieja, porque la que queda no tenía cargada ninguna: revisalas antes de facturar.` : ''),
     });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || 'server_error' }, { status: 500 });

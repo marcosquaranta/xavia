@@ -42,11 +42,12 @@ const KG_LABELS = [
 const fmtDia = (f: string) => { const [y, m, d] = String(f || '').split('-'); return d ? `${d}/${m}/${y.slice(2)}` : f; };
 const fmtPesos = (n: number) => '$' + Math.round(Math.abs(n)).toLocaleString('es-AR');
 
-function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, esKg, onSaved, cambios, extrasUnidad = [], extrasKg = [] }: {
+function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, esKg, onSaved, cambios, extrasUnidad = [], extrasKg = [], fuentes = [] }: {
   idControl: string; nombreCliente: string; sucursalObs: string;
   precioActual: PrecioVenta | undefined; esKg: boolean; onSaved: () => void;
   cambios: Record<string, CambioPrecioUI>;
   extrasUnidad?: EtiquetaArticulo[]; extrasKg?: EtiquetaArticulo[];
+  fuentes?: { key: string; label: string; row: PrecioVenta }[];
 }) {
   // ── Los dos grupos, siempre ──────────────────────────────────────────────────────────
   //
@@ -123,10 +124,35 @@ function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, 
       </div>
       </div>
       ))}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         <button className="btn" style={{ fontSize: '11px', padding: '4px 10px' }} onClick={guardar} disabled={saving}>
           {saving ? 'Guardando…' : 'Guardar precios'}
         </button>
+        {/* ── Copiar la lista de otro cliente ────────────────────────────────────────
+            Dos clientes del mismo grupo suelen tener la misma lista, y cargarla a mano
+            son veinte casillas con veinte chances de equivocarse. También es la forma
+            de recuperar una lista que se perdió: se copia de la ficha hermana.
+
+            Llena las casillas y NO guarda. El precio es plata: se mira antes de
+            confirmar, y queda el botón de guardar como único punto de escritura. */}
+        {fuentes.length > 0 && (
+          <select
+            value=""
+            disabled={saving}
+            onChange={(e) => {
+              const f = fuentes.find((x) => x.key === e.target.value);
+              if (!f) return;
+              setVals(Object.fromEntries(campos.map((p) => {
+                const v = Number((f.row as any)[p.key]) || 0;
+                return [p.key, v ? String(v) : ''];
+              })));
+              setOk(false); setErr(null);
+            }}
+            style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e5e7eb', color: '#6b7280', maxWidth: '230px' }}>
+            <option value="">Copiar precios de…</option>
+            {fuentes.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+          </select>
+        )}
         {ok && <span style={{ fontSize: '11px', color: '#059669' }}>✓ Guardado</span>}
         {err && <span style={{ fontSize: '11px', color: '#dc2626' }}>{err}</span>}
       </div>
@@ -200,6 +226,11 @@ function ClienteRow({ c, precios, cambios, onSaved, todos = [], extrasUnidad = [
         + `
 
 "${pj.hacia.nombre}" NO cambia: conserva sus sucursales, precios, alias y mail. Lo único que recibe son las ventas.`
+        + (pj.preciosDesde && !pj.preciosHacia
+            ? `
+
+"${pj.hacia.nombre}" no tiene precios cargados, así que se le copian los de "${pj.desde.nombre}" (${pj.preciosDesde} lista/s). Sin precios el cliente no se puede facturar, por eso no se descartan — revisalos después.`
+            : '')
         + ((pj.desde.ultimaFactura || pj.hacia.ultimaFactura)
             ? `
 
@@ -217,8 +248,35 @@ Esto NO se puede deshacer. ¿Confirmás?`;
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ desde: c.id_control, hacia: idHacia, borrarDespues: true }),
       });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j?.error || 'No se pudo fusionar');
+      let j = await r.json().catch(() => ({}));
+
+      // ── La dirección está al revés ──────────────────────────────────────────────
+      //
+      // El servidor frena porque esta ficha es la vigente y perdería su configuración.
+      // Pero hay un caso en que mudar "hacia atrás" es exactamente lo correcto: devolver
+      // ventas que ya se mudaron mal. Para eso se ofrece la versión sin daño —mudar las
+      // ventas y no borrar nada— en lugar de dejarlo sin salida.
+      if (!r.ok && j?.invertida) {
+        if (!window.confirm(`${j.error}
+
+¿Mudo solo las ventas, sin borrar ninguna ficha?`)) { setSaving(false); return; }
+        const r2 = await fetch('/api/admin/clientes-venta/fusionar', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ desde: c.id_control, hacia: idHacia, forzar: true }),
+        });
+        j = await r2.json().catch(() => ({}));
+        if (!r2.ok) throw new Error(j?.error || 'No se pudo mudar las ventas');
+      } else if (!r.ok) throw new Error(j?.error || 'No se pudo fusionar');
+      // ── Decir qué pasó ────────────────────────────────────────────────────────────
+      //
+      // La fusión mueve ventas y borra una ficha, y no informaba nada: la pantalla se
+      // recargaba y había que deducir el resultado mirando la lista. Cuando el borrado no
+      // se concreta —la ficha queda vacía pero sigue ahí— eso es indistinguible de que
+      // todo salió bien, y es justo el caso en que falta hacer algo.
+      setErr(j?.borrada
+        ? null
+        : `${j?.mensaje || 'Se mudaron las ventas.'} La ficha vieja NO se borró: quedó vacía pero sigue en la lista. Ahora que no tiene ventas, "Borrar ficha" la saca.`);
+      if (j?.borrada) window.alert(j?.mensaje || 'Fusión hecha.');
       onSaved();
     } catch (e: any) { setErr(e?.message || 'No se pudo fusionar'); }
     finally { setSaving(false); }
@@ -261,6 +319,24 @@ Esto NO se puede deshacer. ¿Confirmás?`;
   }
 
   const pFirst = precios.find(p => String(p.id_control) === String(c.id_control));
+
+  // Las listas de precios de los OTROS clientes, para poder copiar una. Se ofrecen todas
+  // —no solo las de la misma razón social— porque el caso real es justamente copiar de
+  // otra empresa del mismo grupo, que factura aparte pero compra a la misma lista.
+  const fuentesPrecios = (todos || [])
+    .filter((x) => String(x.id_control) !== String(c.id_control))
+    .flatMap((x) => precios
+      .filter((pr) => String(pr.id_control) === String(x.id_control))
+      .map((pr) => {
+        const nom = String(x.alias || x.nombre_display || x.nombre_xubio);
+        const suc = String(pr.sucursal_obs || '');
+        return {
+          key: `${x.id_control}||${suc}`,
+          label: suc && suc !== x.nombre_xubio ? `${nom} · ${suc}` : nom,
+          row: pr,
+        };
+      }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'es'));
 
   return (
     <>
@@ -435,12 +511,14 @@ Esto NO se puede deshacer. ¿Confirmás?`;
                     <PreciosSucursal key={suc}
                       idControl={String(c.id_control)} nombreCliente={c.nombre_xubio} sucursalObs={suc}
                       precioActual={precios.find(p => String(p.id_control) === String(c.id_control) && p.sucursal_obs === suc)}
-                      esKg={c.unidad === 'kg'} onSaved={onSaved} cambios={cambios} extrasUnidad={extrasUnidad} extrasKg={extrasKg} />
+                      esKg={c.unidad === 'kg'} onSaved={onSaved} cambios={cambios} extrasUnidad={extrasUnidad} extrasKg={extrasKg}
+                      fuentes={fuentesPrecios} />
                   ))
                 : <PreciosSucursal
                     idControl={String(c.id_control)} nombreCliente={c.nombre_xubio} sucursalObs={c.nombre_xubio}
                     precioActual={precios.find(p => String(p.id_control) === String(c.id_control))}
-                    esKg={c.unidad === 'kg'} onSaved={onSaved} cambios={cambios} extrasUnidad={extrasUnidad} extrasKg={extrasKg} />
+                    esKg={c.unidad === 'kg'} onSaved={onSaved} cambios={cambios} extrasUnidad={extrasUnidad} extrasKg={extrasKg}
+                    fuentes={fuentesPrecios} />
               }
             </div>
           </td>
