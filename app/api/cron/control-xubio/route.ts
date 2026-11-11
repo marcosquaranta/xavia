@@ -57,6 +57,13 @@ export async function GET(req: NextRequest) {
       })),
       comprobantes, hoy, undefined, undefined,
       ventas.map((v) => String(v.exportado || '').trim()).filter((x) => x && x !== 'PENDIENTE'),
+      // Para poder decir si la factura huerfana se corresponde con una venta cargada a la
+      // que le falta el numero, que necesita algo muy distinto a una venta que no existe.
+      ventas.map((v) => ({
+        cliente: String(v.nombre_cliente || ''),
+        fecha: String(v.fecha || ''),
+        exportado: String(v.exportado || ''),
+      })),
     );
 
     if (soloVer) return NextResponse.json({ ...r, ok: true });
@@ -82,7 +89,11 @@ export async function GET(req: NextRequest) {
         </tr></thead>
         <tbody>${filas.map((f) => `<tr>
           <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;font-family:ui-monospace,monospace;font-size:11.5px">${f.numero}</td>
-          <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6">${f.cliente || '(sin cliente)'}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6">${f.cliente || '(sin cliente)'}${
+            f.ventaSinNumero
+              ? `<div style="font-size:11px;color:#6b7280">hay una venta cargada del ${fmtDia(f.ventaSinNumero.fecha)} sin número de factura</div>`
+              : ''
+          }</td>
           <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;color:#6b7280">${fmtDia(f.fechaEmision)}</td>
           <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;text-align:right;font-weight:700;color:${color}">
             ${conImporte ? fmt$(f.importeXubio || 0) : `${f.diasDesdeEmision} día${f.diasDesdeEmision === 1 ? '' : 's'}`}
@@ -102,8 +113,8 @@ export async function GET(req: NextRequest) {
           `La app las dio por emitidas hace más de ${DIAS_GRACIA_XUBIO} día y Xubio no las devuelve. Si no aparecen, hay mercadería entregada y sin facturar.`,
           r.faltantes)}
 
-        ${tabla('En Xubio y no salieron de la app', '#1d4ed8',
-          'Cargadas a mano allá. No es un error, pero la app no las tiene: no están en el resultado, ni en la deuda del cliente, ni en el reclamo del lunes.',
+        ${tabla('En Xubio y la app no las tiene', '#1d4ed8',
+          'Ese número no figura de este lado. Si abajo dice que hay una venta cargada sin número, la venta está y lo que falló fue escribir el número de vuelta — no falta plata, falta un dato, y mientras tanto esa venta figura "sin facturar". Si no dice nada, se facturó algo que la app nunca tuvo: no está en el resultado, ni en la deuda del cliente, ni en el reclamo del lunes.',
           r.soloEnXubio, true)}
 
         ${r.demoradas.length ? `

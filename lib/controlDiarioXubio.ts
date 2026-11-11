@@ -33,6 +33,20 @@ export interface FilaControlDiario {
   diasDesdeEmision: number;
   estado: EstadoControl;
   importeXubio?: number;
+  // ── Por qué la app no la tiene ──────────────────────────────────────────────────
+  //
+  // "Cargada a mano en Xubio" es una conclusión, no un hecho: lo único que se sabe es
+  // que ese número no figura de este lado. Hay dos situaciones muy distintas detrás y
+  // hacen falta cosas distintas:
+  //
+  //  - no hay ninguna venta de ese cliente por esos días: se facturó algo que la app
+  //    nunca tuvo. Hay que cargarlo acá o el resultado queda corto.
+  //  - hay una venta cargada, sin número de factura: la venta está, la factura existe,
+  //    y lo que falló fue escribir el número de vuelta. No falta plata: falta un dato,
+  //    y mientras tanto esa venta figura "sin facturar" en la otra alerta.
+  //
+  // Decir cuál de las dos es convierte un aviso que no se puede accionar en uno que sí.
+  ventaSinNumero?: { fecha: string; cliente: string };
 }
 
 export interface ResultadoControlDiario {
@@ -88,6 +102,9 @@ export function controlDiario(
   // de los controles. Con las dos fuentes, una factura tiene que fallar en las DOS para que
   // se la acuse de manual.
   numerosEnVentas: Iterable<any> = [],
+  // Las ventas de la app, para poder decir si la factura huérfana se corresponde con una
+  // venta cargada a la que le falta el número. Solo informativo: no cambia ningún estado.
+  ventasApp: { cliente: string; fecha: string; exportado: string }[] = [],
 ): ResultadoControlDiario {
   const desde = (() => {
     const d = new Date(Date.parse(`${hoy}T12:00:00Z`) - diasVentana * 86_400_000);
@@ -151,13 +168,15 @@ export function controlDiario(
     if (Number(c?.tipo) !== 1) continue;
     const n = clave(c?.numeroDocumento);
     if (!n || numerosDeLaApp.has(n)) continue;
+    const nombreCliente = String(c?.cliente?.nombre || c?.cliente || '').trim();
     soloEnXubio.push({
       numero: String(c?.numeroDocumento || ''),
-      cliente: String(c?.cliente?.nombre || c?.cliente || '').trim(),
+      cliente: nombreCliente,
       fechaEmision: f,
       diasDesdeEmision: diasEntre(f, hoy),
       estado: 'solo_en_xubio',
       importeXubio: Math.round(Number(c?.importetotal) || 0),
+      ventaSinNumero: ventaSinNumeroCerca(ventasApp, nombreCliente, f),
     });
   }
 
@@ -171,4 +190,37 @@ export function controlDiario(
     // aparezca una de verdad.
     hayProblema: faltantes.length > 0 || soloEnXubio.length > 0,
   };
+}
+
+
+// ── ¿Hay una venta cargada de ese cliente, sin número de factura, por esos días? ──────
+//
+// El nombre se compara normalizado porque de un lado viene la razón social de Xubio y del
+// otro lo que quedó escrito en la venta, y rara vez están escritos igual.
+//
+// La ventana de días es la misma que usa el control de facturación para el corrimiento de
+// fechas: lo entregado el viernes se factura el lunes, y exigir el mismo día no encontraría
+// casi nada.
+const DIAS_CERCA = 4;
+
+const normNombre = (x: any) => String(x || '')
+  .toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+
+function ventaSinNumeroCerca(
+  ventas: { cliente: string; fecha: string; exportado: string }[],
+  cliente: string,
+  fecha: string,
+): { fecha: string; cliente: string } | undefined {
+  const k = normNombre(cliente);
+  if (!k) return undefined;
+  for (const v of ventas || []) {
+    const exp = String(v.exportado || '').trim();
+    if (exp && exp !== 'PENDIENTE') continue;
+    const vk = normNombre(v.cliente);
+    if (!vk || (vk !== k && !vk.includes(k) && !k.includes(vk))) continue;
+    const f = soloDia(v.fecha);
+    if (!f || Math.abs(diasEntre(f, fecha)) > DIAS_CERCA) continue;
+    return { fecha: f, cliente: String(v.cliente || '') };
+  }
+  return undefined;
 }
