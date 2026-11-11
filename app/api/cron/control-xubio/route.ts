@@ -5,6 +5,7 @@ import { HOJA_CAE, type FacturaEmitida } from '@/lib/caePendientes';
 import { controlDiario, DIAS_VENTANA_CONTROL, DIAS_GRACIA_XUBIO } from '@/lib/controlDiarioXubio';
 import { destinatariosDe } from '@/lib/avisosConfig';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
+import type { VentaDia } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -32,10 +33,15 @@ export async function GET(req: NextRequest) {
     const desdeXubio = new Date(Date.parse(`${hoy}T12:00:00Z`) - (DIAS_VENTANA_CONTROL + 14) * 86_400_000)
       .toISOString().slice(0, 10);
 
-    const [emitidas, comprobantes, config] = await Promise.all([
+    const [emitidas, comprobantes, config, ventas] = await Promise.all([
       readSheet<FacturaEmitida>(HOJA_CAE).catch(() => [] as FacturaEmitida[]),
       getComprobantes(desdeXubio, hoy).catch(() => null),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
+      // La segunda prueba de que una factura salió de la app. FacturasEmitidas se escribe
+      // en un paso aparte que no rompe la carga si falla; `exportado` se escribe en el
+      // mismo movimiento que la emisión. Con las dos, una factura tiene que faltar en las
+      // DOS para que el control la trate como cargada a mano.
+      readSheet<VentaDia>('Ventas').catch(() => [] as VentaDia[]),
     ]);
 
     // Sin Xubio no se puede controlar nada, y decir "todo bien" sería peor que no correr.
@@ -49,7 +55,8 @@ export async function GET(req: NextRequest) {
         fecha_emision: String(e.fecha_emision || ''), fecha_venta: String(e.fecha_venta || ''),
         cae: String(e.cae || ''),
       })),
-      comprobantes, hoy,
+      comprobantes, hoy, undefined, undefined,
+      ventas.map((v) => String(v.exportado || '').trim()).filter((x) => x && x !== 'PENDIENTE'),
     );
 
     if (soloVer) return NextResponse.json({ ...r, ok: true });

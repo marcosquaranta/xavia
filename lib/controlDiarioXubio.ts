@@ -14,6 +14,8 @@
 // facturar. Mezclarlas convierte el aviso en ruido diario y el caso grave se pierde
 // adentro.
 
+import { claveComprobante } from './comprobantes';
+
 export interface EmitidaRegistrada {
   numero: string;
   cliente: string;
@@ -59,7 +61,14 @@ const diasEntre = (a: string, b: string) => {
   if (!Number.isFinite(x) || !Number.isFinite(y)) return 0;
   return Math.round((y - x) / 86_400_000);
 };
-const clave = (n: any) => String(n || '').trim().toUpperCase();
+// ── Comparar números de comprobante como en todo el resto ─────────────────────────
+//
+// Acá se comparaba con trim().toUpperCase(), o sea literal. Todo el resto de la app usa
+// claveComprobante, que ignora los ceros a la izquierda y los separadores: "A-00002-00000993"
+// y "A 2-993" son la misma factura. Con la comparación literal, una factura que SÍ salió
+// de la app aparecía como cargada a mano en Xubio solo porque el número estaba escrito de
+// otra forma de un lado que del otro.
+const clave = (n: any) => claveComprobante(n);
 
 export function controlDiario(
   emitidas: EmitidaRegistrada[],
@@ -67,6 +76,18 @@ export function controlDiario(
   hoy: string,
   diasVentana = DIAS_VENTANA_CONTROL,
   diasGracia = DIAS_GRACIA_XUBIO,
+  // ── La segunda prueba de que una factura salió de la app ────────────────────────
+  //
+  // Los números que quedaron escritos en la columna `exportado` de Ventas. FacturasEmitidas
+  // es el registro del aviso de CAE y se escribe en un paso aparte que no rompe la carga si
+  // falla — a propósito: la venta ya se facturó y no tiene sentido tirar todo abajo por el
+  // registro. Pero entonces, si ese paso falla, la factura queda sin rastro de haber salido
+  // de la app y el control la denuncia como cargada a mano.
+  //
+  // `exportado` se escribe en el mismo movimiento que la emisión y es lo que mira el resto
+  // de los controles. Con las dos fuentes, una factura tiene que fallar en las DOS para que
+  // se la acuse de manual.
+  numerosEnVentas: Iterable<any> = [],
 ): ResultadoControlDiario {
   const desde = (() => {
     const d = new Date(Date.parse(`${hoy}T12:00:00Z`) - diasVentana * 86_400_000);
@@ -82,14 +103,28 @@ export function controlDiario(
   const demoradas: FilaControlDiario[] = [];
   const faltantes: FilaControlDiario[] = [];
   let ok = 0, revisadas = 0;
+
+  // ── Qué números salió de la app, sin ventana ──────────────────────────────────────
+  //
+  // Antes este conjunto se llenaba SOLO con las emitidas dentro de la ventana, porque se
+  // armaba en el mismo bucle que las revisa. Entonces una factura emitida hace nueve días
+  // pero con fecha de comprobante de anteayer no figuraba como "de la app" y salía listada
+  // como cargada a mano. La ventana decide qué se revisa, no qué sabemos.
   const numerosDeLaApp = new Set<string>();
+  for (const e of emitidas || []) {
+    const n = clave(e.numero);
+    if (n) numerosDeLaApp.add(n);
+  }
+  for (const n of numerosEnVentas) {
+    const k = clave(n);
+    if (k) numerosDeLaApp.add(k);
+  }
 
   for (const e of emitidas || []) {
     const f = soloDia(e.fecha_emision);
     if (!f || f < desde || f > hoy) continue;
     const n = clave(e.numero);
     if (!n) continue;
-    numerosDeLaApp.add(n);
     revisadas++;
 
     const c = enXubio.get(n);
