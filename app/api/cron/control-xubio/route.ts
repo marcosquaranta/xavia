@@ -91,7 +91,7 @@ export async function GET(req: NextRequest) {
           <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;font-family:ui-monospace,monospace;font-size:11.5px">${f.numero}</td>
           <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6">${f.cliente || '(sin cliente)'}${
             f.ventaSinNumero
-              ? `<div style="font-size:11px;color:#6b7280">hay una venta cargada del ${fmtDia(f.ventaSinNumero.fecha)} sin número de factura</div>`
+              ? `<div style="font-size:11px;color:#6b7280">hay una venta cargada del ${fmtDia(f.ventaSinNumero.fecha)} sin número de factura${f.ventaSinNumero.dias > 7 ? ` (${f.ventaSinNumero.dias} días antes)` : ''}</div>`
               : ''
           }</td>
           <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;color:#6b7280">${fmtDia(f.fechaEmision)}</td>

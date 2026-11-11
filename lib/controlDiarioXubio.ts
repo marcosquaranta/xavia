@@ -46,7 +46,7 @@ export interface FilaControlDiario {
   //    y mientras tanto esa venta figura "sin facturar" en la otra alerta.
   //
   // Decir cuál de las dos es convierte un aviso que no se puede accionar en uno que sí.
-  ventaSinNumero?: { fecha: string; cliente: string };
+  ventaSinNumero?: { fecha: string; cliente: string; dias: number };
 }
 
 export interface ResultadoControlDiario {
@@ -198,10 +198,15 @@ export function controlDiario(
 // El nombre se compara normalizado porque de un lado viene la razón social de Xubio y del
 // otro lo que quedó escrito en la venta, y rara vez están escritos igual.
 //
-// La ventana de días es la misma que usa el control de facturación para el corrimiento de
-// fechas: lo entregado el viernes se factura el lunes, y exigir el mismo día no encontraría
-// casi nada.
-const DIAS_CERCA = 4;
+// Se busca la venta sin número MÁS CERCANA, sin exigir que sea de esos días.
+//
+// Al principio la ventana eran 4 días, por el corrimiento normal entre entrega y factura.
+// Pero el caso real que hizo falta explicar fue otro: una venta de agosto facturada en
+// noviembre. Con la ventana corta, esa factura aparecía como "la app nunca la tuvo" cuando
+// en realidad la tenía hace tres meses esperando. Se informa la distancia en días y que
+// decida quien lee: una de ayer y una de hace tres meses significan cosas distintas, pero
+// las dos son una pista y ninguna es una conclusión.
+const DIAS_CERCA = 400;
 
 const normNombre = (x: any) => String(x || '')
   .toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
@@ -210,17 +215,20 @@ function ventaSinNumeroCerca(
   ventas: { cliente: string; fecha: string; exportado: string }[],
   cliente: string,
   fecha: string,
-): { fecha: string; cliente: string } | undefined {
+): { fecha: string; cliente: string; dias: number } | undefined {
   const k = normNombre(cliente);
   if (!k) return undefined;
+  let mejor: { fecha: string; cliente: string; dias: number } | undefined;
   for (const v of ventas || []) {
     const exp = String(v.exportado || '').trim();
     if (exp && exp !== 'PENDIENTE') continue;
     const vk = normNombre(v.cliente);
     if (!vk || (vk !== k && !vk.includes(k) && !k.includes(vk))) continue;
     const f = soloDia(v.fecha);
-    if (!f || Math.abs(diasEntre(f, fecha)) > DIAS_CERCA) continue;
-    return { fecha: f, cliente: String(v.cliente || '') };
+    if (!f) continue;
+    const dias = Math.abs(diasEntre(f, fecha));
+    if (dias > DIAS_CERCA) continue;
+    if (!mejor || dias < mejor.dias) mejor = { fecha: f, cliente: String(v.cliente || ''), dias };
   }
-  return undefined;
+  return mejor;
 }
