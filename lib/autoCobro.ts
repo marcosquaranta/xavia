@@ -3,6 +3,7 @@ import { HOJA_BANDEJA, type ItemBandeja } from './bandejaCobranzas';
 import { HOJA_COBROS, registrarCobro, type CobroRegistrado } from './cobros';
 import { HOJA_COMPROBANTES, type ComprobanteCache, comprobantesDesdeCache } from './xubioCache';
 import { claveComprobante } from './comprobantes';
+import { imputacionExacta } from './imputacionExacta';
 import { getCuentas, getCobranzas } from './xubio';
 import { nombreClienteVisible } from './clientes';
 import { numerosSaldados, leerSaldadas } from './facturasSaldadas';
@@ -57,7 +58,21 @@ export const CONFIG_CUENTA_RETENCION = 'auto_cobro_cuenta_retencion';
 // redondeo, es otra factura.
 export const TOLERANCIA = 2;
 
+// Cómo se dedujo qué facturas paga un aviso que no las nombraba. Se escribe en el recibo
+// y en la bandeja: un cobro imputado sin que el cliente dijera a qué tiene que poder
+// explicarse después, o la próxima vez que alguien lo mire va a desconfiar de todo.
+const TEXTO_DEDUCCION: Record<string, string> = {
+  unica: 'tenía una sola factura abierta por ese importe exacto',
+  todas: 'pagó exactamente todas sus facturas abiertas',
+  mas_viejas: 'sus facturas más viejas suman exactamente ese importe',
+  combinacion: 'hay una sola combinación de sus facturas abiertas que suma ese importe',
+};
+
 export interface Candidato {
+  // Como se supo que facturas paga. null = el aviso las nombraba. Si no, de que forma se
+  // dedujeron del importe (ver lib/imputacionExacta.ts): una sola factura por ese monto,
+  // todas las abiertas, las mas viejas, o una combinacion unica.
+  deducidas?: string | null;
   idItem: string;
   cliente: string;
   idControl: string;
@@ -188,11 +203,18 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
 
   // Las facturas del último año, por clave, con su cliente y su importe.
   const comprobantes = comprobantesDesdeCache(cacheComp, sumarDias(hoy, -365), hoy);
-  const facturas = new Map<string, { cliente: string; importe: number }>();
+  const facturas = new Map<string, { cliente: string; importe: number; numero: string; fecha: string }>();
   for (const c of comprobantes) {
     if (Number(c?.tipo) !== 1) continue;
     const k = claveComprobante(c?.numeroDocumento);
-    if (k) facturas.set(k, { cliente: String(c?.cliente?.nombre || ''), importe: num(c?.importetotal) });
+    if (k) {
+      facturas.set(k, {
+        cliente: String(c?.cliente?.nombre || ''),
+        importe: num(c?.importetotal),
+        numero: String(c?.numeroDocumento || ''),
+        fecha: String(c?.fecha || '').split(/[T ]/)[0],
+      });
+    }
   }
 
   // Lo ya imputado desde la app y lo dado por saldado: una factura que ya está cobrada no
@@ -261,8 +283,40 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
       rechazar(`supera el tope de $${tope.toLocaleString('es-AR')} para registrarse solo`); continue;
     }
 
-    const nums = String(it.comprobantes || '').split(',').map((x) => x.trim()).filter(Boolean);
-    if (!nums.length) { rechazar('el aviso no nombra las facturas que paga'); continue; }
+    let nums = String(it.comprobantes || '').split(',').map((x) => x.trim()).filter(Boolean);
+    let deducidas: string | null = null;
+
+    // ── El aviso no dice qué paga, pero las cuentas lo dicen ──────────────────────────
+    //
+    // Muchos avisos no nombran las facturas: llega una transferencia por un importe y nada
+    // más. Hasta acá eso bastaba para mandarlo a la bandeja, aunque el cliente tuviera UNA
+    // sola factura abierta por exactamente ese importe — el caso más claro que existe.
+    //
+    // Se busca qué combinación de sus facturas abiertas suma exacto. Si hay una sola, la
+    // respuesta es tan verificable como la del aviso que las nombra: es una identidad
+    // aritmética, no una interpretación. Si hay más de una, NO se elige — se dice cuáles
+    // son, para que una persona resuelva en un clic en vez de armar la cuenta de cero.
+    if (!nums.length) {
+      const cliDeducir = clientes.find((c) => String(c.id_control) === String(it.id_control));
+      const nomCli = norm(cliDeducir?.nombre_xubio || cliDeducir?.nombre_display);
+      const abiertas = nomCli
+        ? [...facturas.entries()]
+            .filter(([k, f]) => norm(f.cliente) === nomCli && !yaCobradas.has(k) && f.importe > 0)
+            .map(([, f]) => ({ numero: f.numero, fecha: f.fecha, importe: f.importe }))
+        : [];
+      const r = imputacionExacta(abiertas, importe + retencion);
+      if (r.ok) {
+        nums = r.imputacion.numeros;
+        deducidas = r.imputacion.via;
+      } else {
+        const opciones = (r as any).opciones as string[][] | undefined;
+        rechazar(
+          `el aviso no nombra las facturas que paga y ${r.motivo}`
+          + (opciones?.length ? ` — podría ser: ${opciones.map((o) => o.join(' + ')).join(' / ')}` : ''),
+        );
+        continue;
+      }
+    }
 
     // ── La verificación que habilita todo esto ────────────────────────────────────────
     //
@@ -309,6 +363,10 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
       fecha: String(it.fecha).split(/[T ]/)[0], importe, retencion, programado,
       comprobantes: nums, cuentaId: cuenta.id, cuentaNombre: cuenta.nombre,
       sumaFacturas: Math.round(suma),
+      // Si las facturas no venían en el aviso sino que se dedujeron del importe, se dice
+      // cómo: quien lea el cobro después tiene que poder distinguir "el cliente dijo qué
+      // paga" de "las cuentas solo cierran de una manera".
+      deducidas,
     });
   }
 
@@ -324,7 +382,12 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
       const pedido = {
         idControl: c.idControl, fecha: c.fecha, importe: c.importe, cuentaId: c.cuentaId,
         comprobantes: c.comprobantes, retencion: c.retencion,
-        observacion: `Registrado solo desde el aviso de pago (${c.comprobantes.join(', ')})`,
+        // Si las facturas se dedujeron, el recibo lo dice. Dentro de seis meses, "Cancela:
+        // 0849, 0851" sobre un aviso que no nombraba ninguna factura tiene que poder
+        // explicarse sin reconstruir la cuenta.
+        observacion: c.deducidas
+          ? `Registrado solo: el aviso no nombraba facturas, pero ${TEXTO_DEDUCCION[c.deducidas] || 'las cuentas cierran de una sola manera'} (${c.comprobantes.join(', ')})`
+          : `Registrado solo desde el aviso de pago (${c.comprobantes.join(', ')})`,
         usuario: 'automático',
       };
       const r = await registrarCobro(pedido);
@@ -332,9 +395,11 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
       if (!r.ok) { out.errores.push({ idItem: c.idItem, cliente: c.cliente, error: r.error || 'Xubio lo rechazó' }); continue; }
       await updateRow(HOJA_BANDEJA, 'id_item', c.idItem, {
         estado: 'confirmado', id_cobro: r.idCobro || '', usuario: 'automático',
-        nota: c.programado
-          ? `registrado solo con la fecha programada del aviso (${c.fecha}): las facturas suman exactamente lo que dice`
-          : 'registrado solo: las facturas suman exactamente lo que dice el aviso',
+        nota: c.deducidas
+          ? `registrado solo: el aviso no nombraba facturas y ${TEXTO_DEDUCCION[c.deducidas] || 'las cuentas cierran de una sola manera'} (${c.comprobantes.join(', ')})`
+          : c.programado
+            ? `registrado solo con la fecha programada del aviso (${c.fecha}): las facturas suman exactamente lo que dice`
+            : 'registrado solo: las facturas suman exactamente lo que dice el aviso',
       });
       out.registrados.push({
         idItem: c.idItem, idCobro: r.idCobro || '', cliente: c.cliente, importe: c.importe,
