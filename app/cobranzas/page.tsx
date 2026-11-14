@@ -27,6 +27,7 @@ import { leerEdiciones, indiceEdiciones, aplicarEdicion, imputacionesManuales } 
 import BandejaCobranzas from '@/components/BandejaCobranzas';
 import { HOJA_BANDEJA, HOJA_ALIAS, type ItemBandeja, type AliasCobranza } from '@/lib/bandejaCobranzas';
 import { comprometidasDeBandeja, DIAS_GRACIA_COMPROMISO } from '@/lib/comprometidas';
+import { cobrosEsperando, resumenEspera } from '@/lib/cobrosDiferidos';
 import FacturasViejas from '@/components/FacturasViejas';
 import ResumenImpagas from '@/components/ResumenImpagas';
 import { leerSaldadas, numerosSaldados, type FacturaSaldada } from '@/lib/facturasSaldadas';
@@ -111,6 +112,10 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   // Las facturas que estos avisos ya cubren. Misma función que usan los recordatorios, así
   // que lo que la pantalla dice que no se reclama es exactamente lo que no se reclama.
   const comprometidas = comprometidasDeBandeja(bandeja, hoyF, claveComprobante);
+  // Los cobros registrados en la app que todavía no llegaron a Xubio. La factura ya figura
+  // cobrada; lo que falta es el comprobante del otro lado, y eso tiene que verse: un
+  // pendiente que nadie mira es plata cobrada que no llega a la contabilidad.
+  const esperandoXubio = resumenEspera(cobrosEsperando(cobros as any, hoyF));
 
   const itemsBandeja = bandeja
     .filter((i) => String(i.estado || '').trim() === 'pendiente')
@@ -487,6 +492,18 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
               Lo segundo es el caso de La Esperanza: paga en persona a la caja de alguno de
               los socios. La factura está cobrada; lo que no se sabe es dónde quedó la
               plata, y ese es un problema propio que merece su propio renglón. */}
+          {esperandoXubio.cantidad > 0 && (
+            <p style={{ margin: '8px 0 0', fontSize: '11.5px', color: esperandoXubio.demorados || esperandoXubio.conError ? '#991b1b' : '#374151', background: esperandoXubio.demorados || esperandoXubio.conError ? '#fef2f2' : '#f9fafb', border: `1px solid ${esperandoXubio.demorados || esperandoXubio.conError ? '#fecaca' : '#e5e7eb'}`, borderRadius: '6px', padding: '7px 10px', lineHeight: 1.55 }}>
+              <strong>{esperandoXubio.cantidad} cobro(s)</strong> por ${Math.round(esperandoXubio.monto).toLocaleString('es-AR')} están registrados acá y todavía no en Xubio.
+              {' '}Las facturas ya figuran cobradas; el comprobante sale en la tanda de la noche.
+              {esperandoXubio.demorados > 0 && (
+                <> <strong>{esperandoXubio.demorados} lleva(n) más de un día esperando</strong>, así que o el envío no corrió o Xubio los rechaza.</>
+              )}
+              {esperandoXubio.conError > 0 && (
+                <> {esperandoXubio.conError} tiene(n) un error guardado de Xubio.</>
+              )}
+            </p>
+          )}
           {comprometidas.aDepositar.length > 0 && (
             <p style={{ margin: '8px 0 0', fontSize: '11.5px', color: '#3730a3', background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: '6px', padding: '7px 10px', lineHeight: 1.55 }}>
               <strong>{comprometidas.aDepositar.length} cheque(s) sin depositar</strong> — {comprometidas.aDepositar.map((c) => c.cliente).join(', ')}.

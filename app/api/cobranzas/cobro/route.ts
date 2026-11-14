@@ -42,6 +42,15 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // ── Se registra acá y se manda a Xubio de noche ────────────────────────────────
+    //
+    // Por defecto diferido: lo que hacía esperar no era escribir en Xubio sino las tres o
+    // cuatro lecturas que hay que hacerle antes para armar la cobranza (ver
+    // lib/cobrosDiferidos.ts). La factura se da por cobrada igual — eso sale de la hoja de
+    // la app — y el comprobante sale en la tanda de la noche.
+    //
+    // `ahora: true` fuerza el camino completo contra Xubio, para cuando hace falta el
+    // recibo en el momento.
     const r = await registrarCobro({
       idControl: String(body.id_control || ''),
       fecha: String(body.fecha || ''),
@@ -51,9 +60,14 @@ export async function POST(req: NextRequest) {
       comprobantes: Array.isArray(body.comprobantes) ? body.comprobantes : [],
       retencion: Number(body.retencion) || 0,
       usuario: user.email,
+      diferido: body.ahora !== true,
     });
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status || 500 });
-    return NextResponse.json({ ok: true, id_cobro: r.idCobro, transaccionid: r.transaccionid, numeroRecibo: r.numeroRecibo, circuito: r.circuito });
+    return NextResponse.json({
+      ok: true, id_cobro: r.idCobro, transaccionid: r.transaccionid,
+      numeroRecibo: r.numeroRecibo, circuito: r.circuito,
+      pendienteXubio: r.pendienteXubio || false, mensaje: r.mensaje || '',
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'server_error' }, { status: 500 });
   }

@@ -45,6 +45,7 @@ export interface CobroRegistrado {
 // fila mintiendo que se registró; si falla el registro local, el cobro igual está en Xubio
 // y se ve allá (mucho menos malo que al revés).
 
+import { ESTADO_PENDIENTE } from './cobrosDiferidos';
 import { appendRowObj, asegurarHoja, asegurarColumna, asegurarColumnas, readSheet } from './sheets';
 import { crearCobranza, getClientesXubio, matchClienteXubio, getCircuitosContables, circuitoPorDefecto, getCobranzas, getCuentas, diagnosticoCircuitos, datosMonedaDeCobranzas, plantillaInstrumento, type DatosMoneda } from './xubio';
 import { fechaArgentinaHoy } from './ocupacion';
@@ -66,6 +67,9 @@ export interface PedidoCobro {
   observacion?: string;
   comprobantes?: string[];
   usuario: string;
+  // Registrar en la app y mandar a Xubio en la tanda diaria. Ver lib/cobrosDiferidos.ts:
+  // lo lento no es escribir en Xubio, son las lecturas que hacen falta antes.
+  diferido?: boolean;
   // ── Lo que el cliente retuvo ──────────────────────────────────────────────────────
   //
   // `importe` es lo que ENTRÓ a la cuenta; la factura se cancela por la suma de los dos.
@@ -90,6 +94,9 @@ export interface PedidoCobro {
 export interface ResultadoCobro {
   ok: boolean;
   idCobro?: string;
+  // El cobro quedo registrado en la app y todavia no esta en Xubio: va en la tanda diaria.
+  pendienteXubio?: boolean;
+  mensaje?: string;
   // El gasto que se cargó por la retención, si hubo.
   idGastoRetencion?: string;
   transaccionid?: number;
@@ -112,6 +119,55 @@ export function explicarErrorXubio(err: string): string {
   return e;
 }
 
+// ── El camino corto ──────────────────────────────────────────────────────────────────
+//
+// Todo lo que sigue a esta función —buscar el cliente en Xubio, deducir el circuito
+// contable de 180 días de cobranzas, la moneda, el instrumento, las cuentas— son tres o
+// cuatro consultas pesadas para poder hacer UNA escritura. Con `diferido`, nada de eso pasa
+// ahora: el cobro se escribe en la hoja de la app y se manda a Xubio en la tanda diaria
+// (ver /api/cron/cobros-a-xubio y lib/cobrosDiferidos.ts).
+//
+// Lo que NO cambia: la factura se da por cobrada igual, porque eso sale de la hoja de
+// cobros de la app y no de Xubio. Lo único que espera es el comprobante.
+async function registrarSoloEnLaApp(p: PedidoCobro, cli: ClienteVenta): Promise<ResultadoCobro> {
+  const comprobantes = (p.comprobantes || []).map((x) => String(x).trim()).filter(Boolean);
+  const retencion = Math.round(Number(p.retencion) || 0);
+
+  await asegurarHoja(HOJA_COBROS, HEADERS_COBROS);
+  await asegurarColumnas(HOJA_COBROS, ['comprobantes', 'retencion', 'error_xubio']);
+  const previos = await readSheet<CobroRegistrado>(HOJA_COBROS).catch(() => []);
+  const seq = previos.reduce((a, c) => Math.max(a, parseInt(String(c.id_cobro).replace(/\D/g, ''), 10) || 0), 0) + 1;
+  const idCobro = `CO-${String(seq).padStart(5, '0')}`;
+
+  await appendRowObj(HOJA_COBROS, {
+    id_cobro: idCobro,
+    fecha_registro: new Date().toISOString(),
+    id_control: String(p.idControl || '').trim(),
+    cliente: cli.nombre_display || cli.nombre_xubio,
+    fecha: String(p.fecha || '').trim(),
+    importe: Math.round(Number(p.importe)),
+    cuenta_id: Number(p.cuentaId),
+    // Sin transaccionid ni recibo: todavía no existe del otro lado. Dejarlos vacíos es lo
+    // que permite distinguir después qué falta mandar.
+    transaccionid: '',
+    numero_recibo: '',
+    comprobantes: comprobantes.join(', '),
+    retencion,
+    observacion: String(p.observacion || '').trim(),
+    estado: ESTADO_PENDIENTE,
+    usuario: p.usuario,
+  });
+
+  return {
+    ok: true,
+    idCobro,
+    numeroRecibo: '',
+    transaccionid: undefined,
+    pendienteXubio: true,
+    mensaje: 'Cobro registrado. Se manda a Xubio en la tanda de hoy.',
+  } as ResultadoCobro;
+}
+
 export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
   const idControl = String(p.idControl || '').trim();
   const fecha = String(p.fecha || '').trim();
@@ -131,6 +187,9 @@ export async function registrarCobro(p: PedidoCobro): Promise<ResultadoCobro> {
   const clientes = await readSheet<ClienteVenta>('Clientes');
   const cli = clientes.find((c) => String(c.id_control) === idControl);
   if (!cli) return { ok: false, error: 'No se encontró el cliente.', status: 404 };
+
+  // Con `diferido` se corta acá: lo de abajo es todo Xubio y va en la tanda diaria.
+  if (p.diferido) return registrarSoloEnLaApp(p, cli);
 
   const clientesXubio = await getClientesXubio();
   const clienteId = matchClienteXubio(cli.nombre_xubio || cli.nombre_display, clientesXubio);
