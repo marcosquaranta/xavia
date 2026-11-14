@@ -11,6 +11,7 @@
 // darse cuenta había que ir a mirar el historial.
 
 import type { VentaDia } from './types';
+import { soloDifiereElIva } from './controlFacturacion';
 
 export interface ItemAcuse { producto: string; cantidad: number; sucursal?: string }
 
@@ -62,6 +63,18 @@ export function verificarEnXubio(
     const c = porNumero.get(String(f.numero).trim());
     if (!c) return { ...base, enXubio: 'no_encontrada' as const };
     const totalXubio = Math.round(num(c.importetotal));
+    // ── El IVA no es una diferencia ───────────────────────────────────────────────
+    //
+    // La app valoriza NETO: el total de acá sale de precio por cantidad, sin impuesto.
+    // Xubio factura con el IVA adentro. Compararlos crudos daba "Xubio tiene otro total"
+    // en TODAS las facturas A, todas las veces — y un cartel de alerta que aparece
+    // siempre deja de leerse justo cuando avisa algo real.
+    //
+    // Si la única diferencia es el impuesto, está confirmada. Se guarda igual el total de
+    // Xubio para poder verlo al lado.
+    if (soloDifiereElIva(f.total, totalXubio)) {
+      return { ...base, enXubio: 'confirmada' as const, totalXubio };
+    }
     // Un peso de diferencia es redondeo, no un error de carga.
     if (Math.abs(totalXubio - Math.round(f.total)) > 1) {
       return { ...base, enXubio: 'difiere' as const, totalXubio };

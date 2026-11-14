@@ -173,6 +173,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   // El acuse de la última carga. Se muestra como pantalla completa: confirma lo que Xubio
   // tiene de verdad, no solo que el pedido salió.
   const [acuse,setAcuse]=useState<Acuse|null>(null);
+  // El resumen de la ultima carga, para mostrarlo DENTRO del acuse.
+  const [resumenCargaTxt,setResumenCarga]=useState<string>('');
 
   const [showP,setShowP]=useState(false);
   // Mostrar también los clientes sin precio de paquete. Apagado: son los que no compran así.
@@ -437,7 +439,14 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       const todasLineas = armarLineas();
       const flushR = await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:todasLineas})});
       if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar ventas');}
-      const r=await fetch('/api/ventas/cargar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha})});
+      // ── Facturar exactamente lo que se revisó ──────────────────────────────────
+      //
+      // La pantalla de confirmación muestra una lista, pero lo que se factura sale de la
+      // planilla, no de esa lista. Si las dos no coinciden —una fila de otro cliente que
+      // quedó de antes, una cantidad que no llegó a guardarse— se emitía en AFIP algo que
+      // nadie había visto. Mandando lo revisado, el servidor compara antes de emitir y no
+      // factura nada si difiere.
+      const r=await fetch('/api/ventas/cargar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,esperado:todasLineas})});
       const j=await r.json();if(!r.ok)throw new Error(j.error);
       // El acuse ocupa la pantalla: lo que informa es irreversible del lado de AFIP y un
       // renglón al pie no se mira. El mensaje de siempre queda abajo como respaldo, para
@@ -451,7 +460,12 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       const txt = nEmit>0
         ? `✓ Facturas cargadas OK\n${resumenCarga(todasLineas, ARTS_UNIDAD)}${nErr>0?`\n\n⚠ ${nErr} con error:\n${detalleErrores}`:''}`
         : nErr>0 ? `No se pudo emitir ninguna (${nErr} con error):\n${detalleErrores}` : `${j.clientes} cliente(s) cargados.`;
-      setMsg({t: nErr>0 && nEmit===0 ? 'err' : 'ok', s: txt});
+      // Con el acuse en pantalla, el renglon al pie sobra: el resumen va adentro del
+      // acuse. Dos lugares diciendo lo mismo es como uno de los dos no se lee, y el que
+      // se pierde es siempre el de abajo de todo.
+      setResumenCarga(txt);
+      if (!j.acuse) setMsg({t: nErr>0 && nEmit===0 ? 'err' : 'ok', s: txt});
+      else setMsg(null);
       setCtds({});setEsts({});setCtdsKg({});ctdsKgLive.current={};setFc({});
       cargarVentasSemana();
     }catch(err:any){setMsg({t:'err',s:err.message});}
@@ -695,7 +709,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
 
   return (
     <div>
-      {acuse && <AcuseFacturacion acuse={acuse} onCerrar={() => setAcuse(null)} />}
+      {acuse && <AcuseFacturacion acuse={acuse} resumen={resumenCargaTxt} onCerrar={() => setAcuse(null)} />}
       {/* Stock disponible — cerca de donde se carga, para chequear de un vistazo antes de cargar */}
       <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'8px',padding:'8px 14px',marginBottom:'12px'}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'8px',flexWrap:'wrap',gap:'6px'}}>

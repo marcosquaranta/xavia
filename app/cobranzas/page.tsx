@@ -478,6 +478,27 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
               que no se ve desde ninguna otra pantalla. Dicho acá, la fila deja de ser "una
               cosa pendiente" y pasa a ser "la razón por la que no le estamos reclamando a
               este cliente", que es lo que hace que alguien la cierre. */}
+          {/* ── Cheques y efectivo: cobrado, pero falta otra cosa ──────────────────────
+              Un cheque en la mano y la plata en efectivo ya son cobros: esas facturas no
+              vuelven al reclamo aunque pase la fecha prometida. Pero cada uno deja algo
+              abierto que no es el cobro, y que antes no existía en ninguna pantalla:
+              depositar el cheque, y decir a qué caja entró el efectivo.
+
+              Lo segundo es el caso de La Esperanza: paga en persona a la caja de alguno de
+              los socios. La factura está cobrada; lo que no se sabe es dónde quedó la
+              plata, y ese es un problema propio que merece su propio renglón. */}
+          {comprometidas.aDepositar.length > 0 && (
+            <p style={{ margin: '8px 0 0', fontSize: '11.5px', color: '#3730a3', background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: '6px', padding: '7px 10px', lineHeight: 1.55 }}>
+              <strong>{comprometidas.aDepositar.length} cheque(s) sin depositar</strong> — {comprometidas.aDepositar.map((c) => c.cliente).join(', ')}.
+              {' '}Esas facturas ya están cobradas y no se reclaman. Lo que falta es llevarlos al banco.
+            </p>
+          )}
+          {comprometidas.sinDestino.length > 0 && (
+            <p style={{ margin: '8px 0 0', fontSize: '11.5px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '7px 10px', lineHeight: 1.55 }}>
+              <strong>{comprometidas.sinDestino.length} cobro(s) en efectivo sin imputar</strong> — {comprometidas.sinDestino.map((c) => `${c.cliente} ($${Math.round(c.importe).toLocaleString('es-AR')})`).join(', ')}.
+              {' '}El cliente pagó y la factura no se reclama, pero <strong>no está dicho a qué caja entró esa plata</strong>. Abrí el aviso en la bandeja y poné la cuenta.
+            </p>
+          )}
           {comprometidas.sinImputar.length > 0 && (
             <p style={{ margin: '8px 0 0', fontSize: '11.5px', color: '#1e3a8a', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', padding: '7px 10px', lineHeight: 1.55 }}>
               <strong>{comprometidas.sinImputar.length} factura(s)</strong> que estos avisos mencionan no se están reclamando,

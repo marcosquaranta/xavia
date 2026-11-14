@@ -37,8 +37,18 @@ const ESTADO: Record<FacturaAcuse['enXubio'], { txt: string; color: string; fond
   sin_verificar:  { txt: '· sin verificar',          color: '#6b7280', fondo: '#fafafa', borde: '#e5e7eb' },
 };
 
-export default function AcuseFacturacion({ acuse, onCerrar }: { acuse: Acuse; onCerrar: () => void }) {
+export default function AcuseFacturacion({ acuse, onCerrar, resumen }: {
+  acuse: Acuse;
+  onCerrar: () => void;
+  // El resumen de la carga que antes quedaba en un renglón al pie de la pantalla. Va
+  // adentro: dos lugares distintos diciendo lo mismo es como uno de los dos no se lee.
+  resumen?: string;
+}) {
   // Escape cierra. Es un modal de confirmación, no una trampa.
+  //
+  // Lo que SÍ se saca es cerrar haciendo clic afuera: un clic al pasar borraba de la
+  // pantalla el único resumen de una operación que ya se emitió en AFIP, y no hay forma
+  // de volver a verlo. Para salir hay que decirlo.
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onCerrar(); };
     window.addEventListener('keydown', h);
@@ -60,10 +70,10 @@ export default function AcuseFacturacion({ acuse, onCerrar }: { acuse: Acuse; on
   );
 
   return (
-    <div onClick={onCerrar}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(17,24,39,0.55)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '18px', overflowY: 'auto' }}>
-      <div onClick={(e) => e.stopPropagation()}
-        style={{ background: 'white', borderRadius: '12px', maxWidth: '680px', width: '100%', padding: '18px 20px', boxShadow: '0 20px 50px rgba(0,0,0,0.3)' }}>
+    <div
+      style={{ position: 'fixed', inset: 0, background: '#f3f4f6', zIndex: 1000, overflowY: 'auto', padding: '0 0 40px' }}>
+      <div
+        style={{ background: 'white', maxWidth: '820px', width: '100%', margin: '0 auto', minHeight: '100%', padding: '22px 24px 32px', boxShadow: '0 0 40px rgba(0,0,0,0.08)' }}>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', flexWrap: 'wrap' }}>
           <div>
@@ -77,8 +87,15 @@ export default function AcuseFacturacion({ acuse, onCerrar }: { acuse: Acuse; on
             </p>
           </div>
           <button type="button" onClick={onCerrar}
-            style={{ background: 'none', border: 'none', fontSize: '20px', color: '#9ca3af', cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>×</button>
+            style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', fontSize: '13px', fontWeight: 700, color: '#374151', cursor: 'pointer', padding: '8px 16px', whiteSpace: 'nowrap' }}>
+            Volver a ventas
+          </button>
         </div>
+
+        {/* El resumen de la carga, acá adentro y no al pie de la pantalla de atrás. */}
+        {resumen && (
+          <pre style={{ margin: '12px 0 0', padding: '10px 12px', background: '#f9fafb', border: '1px solid #f3f4f6', borderRadius: '8px', fontSize: '12px', color: '#374151', whiteSpace: 'pre-wrap', fontFamily: 'inherit', lineHeight: 1.5 }}>{resumen}</pre>
+        )}
 
         {/* ── Lo que se acaba de mandar ── */}
         <p style={{ margin: '16px 0 6px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
@@ -107,7 +124,7 @@ export default function AcuseFacturacion({ acuse, onCerrar }: { acuse: Acuse; on
                   hay que ir a buscarla a la otra pantalla. */}
               {f.enXubio === 'difiere' && (
                 <p style={{ margin: '5px 0 0', fontSize: '11.5px', color: '#92400e' }}>
-                  Nosotros mandamos {$(f.total)} y Xubio guardó {$(f.totalXubio || 0)}. Revisá la factura allá antes de entregarla.
+                  Nosotros mandamos {$(f.total)} y Xubio guardó {$(f.totalXubio || 0)}. No es el IVA — esa diferencia ya está contemplada. Revisá la factura allá antes de entregarla.
                 </p>
               )}
               {f.enXubio === 'no_encontrada' && (

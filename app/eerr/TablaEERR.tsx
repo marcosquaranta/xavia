@@ -104,9 +104,18 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev, detalle = {}, 
   desglose?: { porArticulo: { label: string; unidades: number; monto: number }[]; porCliente: { label: string; unidades: number; monto: number }[] };
 }) {
   const [abierto, setAbierto] = useState<Record<string, boolean>>({ variable: true, fijos: true, ventas: false });
-  // Qué línea tiene el detalle abierto. Una sola a la vez: abrir varias convierte la tabla
-  // en una lista larga y se pierde la comparación entre líneas, que es para lo que sirve.
-  const [lineaAbierta, setLineaAbierta] = useState<string | null>(null);
+  // Qué líneas tienen el detalle abierto. Pueden ser varias.
+  //
+  // Antes era una sola: abrir un rubro cerraba el anterior. La idea era que la tabla no se
+  // volviera una lista larga, pero el uso real es comparar dos rubros — abrir Sueldos,
+  // abrir Servicios, mirar los dos— y cerrar el primero al abrir el segundo obliga a ir y
+  // volver sin poder verlos juntos nunca.
+  const [lineasAbiertas, setLineasAbiertas] = useState<Set<string>>(new Set());
+  const alternarLinea = (label: string) => setLineasAbiertas((p) => {
+    const n = new Set(p);
+    if (n.has(label)) n.delete(label); else n.add(label);
+    return n;
+  });
   const toggle = (k: string) => setAbierto((p) => ({ ...p, [k]: !p[k] }));
 
   const montoAnt = (label: string, lineas: { label: string; monto: number }[]) =>
@@ -188,7 +197,7 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev, detalle = {}, 
                   {label}
                   {cantidad && <span style={{ color: '#9ca3af', fontSize: '11.5px' }}> · {cantidad}</span>}
                   {hayDetalle && (
-                    <span style={{ color: '#9ca3af', fontSize: '10px' }}> {lineaAbierta === label ? '▾' : '▸'} {det.items.length}</span>
+                    <span style={{ color: '#9ca3af', fontSize: '10px' }}> {lineasAbiertas.has(label) ? '▾' : '▸'} {det.items.length}</span>
                   )}
                 </>
               );
@@ -198,7 +207,7 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev, detalle = {}, 
                 );
               }
               return (
-                <button onClick={() => setLineaAbierta((p) => (p === label ? null : label))}
+                <button onClick={() => alternarLinea(label)}
                   title="Ver los movimientos de esta línea"
                   style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', color: '#1d4ed8', textAlign: 'left' }}>
                   {contenido}
@@ -240,7 +249,7 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev, detalle = {}, 
   }
 
   function DetalleDe({ label }: { label: string }) {
-    if (lineaAbierta !== label) return null;
+    if (!lineasAbiertas.has(label)) return null;
     const det = detalle[label];
     const prev = detallePrev[label];
     if (!det || (!det.items.length && !prev?.items.length)) return null;
@@ -250,7 +259,18 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev, detalle = {}, 
     // La lista cruda de movimientos servía para auditar, no para la pregunta que uno trae
     // al abrir una línea: "¿por qué subió?". Agrupado y ordenado por cuánto se movió, lo
     // que explica el cambio queda arriba de todo.
-    const grupos = agruparGastos(det.items, prev?.items || []);
+    const todos = agruparGastos(det.items, prev?.items || []);
+    // ── Lo que no se repitió no ocupa un renglón ──────────────────────────────────
+    //
+    // Un concepto en cero este mes es algo que estuvo el mes pasado y ya no está. Aparecía
+    // mezclado con los que sí se gastaron, y en un rubro con varios conceptos viejos la
+    // mitad de la lista eran ceros: lo que uno vino a mirar queda enterrado.
+    //
+    // No se tiran: se cuentan al pie con su total. Un costo que desapareció también
+    // explica una variación, y esconderlo del todo sería cambiar un problema por otro.
+    const grupos = todos.filter((g) => g.monto !== 0);
+    const noRepetidos = todos.filter((g) => g.monto === 0);
+    const montoNoRepetido = noRepetidos.reduce((a, g) => a + (g.montoPrev || 0), 0);
     return (
       <tr>
         <td colSpan={8} style={{ padding: '0 10px 10px 30px', background: '#fafaf9' }}>
@@ -294,6 +314,12 @@ export default function TablaEERR({ act, ant, nombre, nombrePrev, detalle = {}, 
               ))}
             </tbody>
           </table>
+          {noRepetidos.length > 0 && (
+            <p style={{ margin: '6px 0 0', fontSize: '10.5px', color: '#9ca3af' }}>
+              {noRepetidos.length} concepto(s) de {nombrePrev} no se repitieron este mes ({$(montoNoRepetido)}):{' '}
+              {noRepetidos.map((g) => g.label).join(', ')}
+            </p>
+          )}
         </td>
       </tr>
     );

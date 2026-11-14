@@ -190,6 +190,20 @@ export default function ResumenImpagas({
   }, [clientes, facturasPorCliente, prendidos, revisiones]);
 
   const totalGeneral = filas.reduce((a, f) => a + f.total, 0);
+
+  // ── Los cinco que importan, y el resto a pedido ──────────────────────────────────
+  //
+  // La tabla lista a TODOS los clientes con algo abierto, y ordenada por plata los
+  // primeros cinco suelen ser casi toda la deuda. El resto es una cola larga de saldos
+  // chicos que empuja hacia abajo lo único que hay que mirar hoy.
+  //
+  // El total de abajo sigue siendo el de TODOS, se vean o no: un total que cambiara según
+  // cuántas filas están desplegadas no sería la deuda, sería otra cosa.
+  const TOPE = 5;
+  const [verTodos, setVerTodos] = useState(false);
+  const visibles = verTodos ? filas : filas.slice(0, TOPE);
+  const ocultas = filas.length - visibles.length;
+  const montoOculto = filas.slice(visibles.length).reduce((a, f) => a + f.total, 0);
   const sinReclamo = filas.filter((f) => !f.reclama);
   const totalSinReclamo = sinReclamo.reduce((a, f) => a + f.total, 0);
 
@@ -211,7 +225,7 @@ export default function ResumenImpagas({
             </tr>
           </thead>
           <tbody>
-            {filas.map((f) => {
+            {visibles.map((f) => {
               const dias = diasDesde(f.masVieja);
               const esta = abierto === f.id_control;
               return (
@@ -256,6 +270,26 @@ export default function ResumenImpagas({
                 </tr>
               );
             })}
+            {ocultas > 0 && (
+              <tr>
+                <td colSpan={5} style={{ padding: '7px 8px' }}>
+                  <button type="button" onClick={() => setVerTodos(true)}
+                    style={{ background: 'none', border: 'none', padding: 0, fontSize: '12px', color: '#2563eb', cursor: 'pointer', fontWeight: 600 }}>
+                    Ver los otros {ocultas} cliente(s) — {fmt(montoOculto)}
+                  </button>
+                </td>
+              </tr>
+            )}
+            {verTodos && filas.length > TOPE && (
+              <tr>
+                <td colSpan={5} style={{ padding: '7px 8px' }}>
+                  <button type="button" onClick={() => setVerTodos(false)}
+                    style={{ background: 'none', border: 'none', padding: 0, fontSize: '12px', color: '#6b7280', cursor: 'pointer' }}>
+                    Mostrar solo los {TOPE} más grandes
+                  </button>
+                </td>
+              </tr>
+            )}
             <tr style={{ borderTop: '2px solid #e5e7eb' }}>
               <td style={{ padding: '8px', fontWeight: 800 }}>Total</td>
               <td style={{ padding: '8px', textAlign: 'right', color: '#6b7280' }}>

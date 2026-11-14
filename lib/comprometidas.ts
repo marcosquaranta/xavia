@@ -24,6 +24,7 @@
 // de más el cliente la contesta y la otra no la ve nadie.
 
 import type { ItemBandeja } from './bandejaCobranzas';
+import { medioDeCobro, pendenciaDe, type MedioCobro } from './medioDeCobro';
 
 // Cuántos días después de la fecha prometida se la sigue considerando cubierta. El aviso
 // dice "pago el 15"; el 15 la plata puede tardar en acreditar, o el cheque en depositarse,
@@ -39,6 +40,12 @@ export interface FacturaComprometida {
   importe: number;       // el del aviso completo, no el de esta factura sola
   dias: number;          // cuántos pasaron desde esa fecha (negativo = todavía no llegó)
   vencida: boolean;      // se pasó de la gracia: deja de cubrir y hay que mirarla
+  // Cómo nos pagan. Un cheque y el efectivo ya son plata cobrada aunque la fecha pase
+  // (ver medioDeCobro.ts): lo que queda pendiente no es el cobro, es otra cosa.
+  medio: MedioCobro;
+  // Qué falta hacer, que no es cobrar: depositar el cheque, o decir a qué caja entró la
+  // plata del efectivo.
+  pendiente: 'depositar' | 'imputar_destino' | null;
 }
 
 const diasEntre = (desde: string, hasta: string) => {
@@ -55,10 +62,24 @@ export function comprometidasDeBandeja(
   hoy: string,
   clave: (numero: string) => string,
   graciaDias = DIAS_GRACIA_COMPROMISO,
-): { cubiertas: Map<string, FacturaComprometida>; vencidas: FacturaComprometida[]; sinImputar: FacturaComprometida[] } {
+): {
+  cubiertas: Map<string, FacturaComprometida>;
+  vencidas: FacturaComprometida[];
+  sinImputar: FacturaComprometida[];
+  // Cheques recibidos que todavía no se depositaron.
+  aDepositar: FacturaComprometida[];
+  // Cobrado en efectivo y sin decir a qué caja entró. La factura está cobrada; lo que no
+  // está es la plata en ningún lado identificable, que es un problema distinto y propio.
+  sinDestino: FacturaComprometida[];
+} {
   const cubiertas = new Map<string, FacturaComprometida>();
   const vencidas: FacturaComprometida[] = [];
   const sinImputar: FacturaComprometida[] = [];
+  const aDepositar: FacturaComprometida[] = [];
+  const sinDestino: FacturaComprometida[] = [];
+  // Una factura puede venir nombrada en varios avisos; cada pendencia se cuenta una vez por
+  // aviso, no una por factura, o un aviso con seis facturas aparecería seis veces.
+  const itemsVistos = new Set<string>();
 
   for (const it of items || []) {
     // Solo lo que sigue esperando. Confirmado ya es un cobro de verdad y descartado es una
@@ -72,17 +93,37 @@ export function comprometidasDeBandeja(
 
     const fechaAviso = String(it?.fecha || '').split(/[T ]/)[0];
     const dias = fechaAviso ? diasEntre(fechaAviso, hoy) : 0;
-    const vencida = dias > graciaDias;
+    // ── El medio decide si la fecha importa ───────────────────────────────────────
+    //
+    // Con un cheque o con efectivo, la plata del cliente ya salió: la factura está
+    // cobrada y no vuelve al reclamo aunque pase la fecha. Con una transferencia
+    // anunciada, la fecha es todo lo que hay — si no llegó, no llegó.
+    const medio = medioDeCobro(it as any);
+    const pend = pendenciaDe(medio, (it as any)?.cuenta_destino);
+    const vencida = !pend.cubreSiempre && dias > graciaDias;
 
     for (const numero of numeros) {
       const f: FacturaComprometida = {
         numero, idItem: String(it?.id_item || ''), cliente: String(it?.cliente || '').trim() || 'sin reconocer',
         fechaAviso, importe: Number(it?.importe) || 0, dias, vencida,
+        medio, pendiente: pend.pendiente,
       };
       sinImputar.push(f);
       if (vencida) vencidas.push(f);
       else cubiertas.set(numero, f);
     }
+
+    // Las pendencias van por AVISO, no por factura.
+    const idItem = String(it?.id_item || '');
+    if (pend.pendiente && !itemsVistos.has(idItem)) {
+      itemsVistos.add(idItem);
+      const f: FacturaComprometida = {
+        numero: numeros[0], idItem, cliente: String(it?.cliente || '').trim() || 'sin reconocer',
+        fechaAviso, importe: Number(it?.importe) || 0, dias, vencida,
+        medio, pendiente: pend.pendiente,
+      };
+      (pend.pendiente === 'depositar' ? aDepositar : sinDestino).push(f);
+    }
   }
-  return { cubiertas, vencidas, sinImputar };
+  return { cubiertas, vencidas, sinImputar, aDepositar, sinDestino };
 }
