@@ -36,6 +36,9 @@ export interface EntradaPend {
   // quedó suelto es una fila cargada dos veces. Sin este dato hay que ir a buscarlo a la
   // otra tabla y cruzarlo a ojo.
   facturadoMismoDia: { id_exportacion: string; fecha_exportacion: string }[];
+  // Se marcó para facturar (exportado = PENDIENTE) pero Xubio no llegó a emitirla. No está
+  // facturada: se reintenta desde Facturación.
+  marcada?: boolean;
 }
 
 // Suma al acumulador lo cargado en los artículos que no son de las cuatro columnas fijas.

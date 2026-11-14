@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { readSheet, updateRow, batchUpdateRows } from '@/lib/sheets';
+import { readSheet, updateRow, batchUpdateRows, filaDe } from '@/lib/sheets';
 import type { ClienteVenta, PrecioVenta, VentaDia, ConfigItem, Lote } from '@/lib/types';
 import { nombreClienteVisible } from '@/lib/clientes';
 import * as XLSX from 'xlsx';
@@ -235,7 +235,7 @@ export async function POST(req: NextRequest) {
     // Marcar filas con el ID de exportación (conserva valores para historial)
     const resetFecha = new Date().toISOString().split('T')[0];
     await batchUpdateRows('Ventas', 'id_venta', ventasFecha.map(v => ({
-      keyValue: v.id_venta,
+      keyValue: v.id_venta, fila: filaDe(v),
       updates: { exportado: id_exportacion, fecha_carga: resetFecha },
     })));
 

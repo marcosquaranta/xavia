@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { readSheet, batchUpdateRows } from '@/lib/sheets';
+import { readSheet, batchUpdateRows, filaDe } from '@/lib/sheets';
+import { leerVentasConIdsUnicos } from '@/lib/ventasIds';
 import { emitirPendientes } from '@/lib/facturacionEmitir';
 import { avisarEntregasNuevas } from '@/lib/avisoCobroEntrega';
 import type { VentaDia, ClienteVenta } from '@/lib/types';
@@ -24,10 +25,11 @@ export async function POST(req: NextRequest) {
     // no cierra nada: la pantalla es una cortina, la API es la puerta.
   if (user.rol !== 'admin') return NextResponse.json({ error: 'Solo un administrador puede ver o cambiar esto.' }, { status: 403 });
   try {
-    const { fecha } = await req.json();
+    const { fecha, esperado } = await req.json();
     if (!fecha) return NextResponse.json({ error: 'fecha requerida' }, { status: 400 });
 
-    const ventas = await readSheet<VentaDia>('Ventas');
+    const ventas = await leerVentasConIdsUnicos();
+    const soloDia = (v: any) => String(v || '').split(/[T ]/)[0];
     // ── Las claves salen de la hoja, no del código ──────────────────────────────────
     //
     // Esto miraba solo PROD_KEYS. Una venta de un artículo dado de alta en Admin —el berro
@@ -36,14 +38,14 @@ export async function POST(req: NextRequest) {
     // venta cargada y a la vista. Las ventas por kilo caían en lo mismo.
     const claves = await clavesDeVenta();
     const aCargar = ventas.filter(v =>
-      v.fecha === fecha &&
+      soloDia(v.fecha) === fecha &&
       (!v.exportado || v.exportado === '') &&
       tieneCantidad(v, claves)
     );
     if (!aCargar.length) {
       // El motivo, no solo el hecho. Son tres situaciones distintas —no hay nada cargado,
       // ya se facturó todo, o hay filas pero vacías— y las tres se leían igual.
-      const delDia = ventas.filter(v => v.fecha === fecha);
+      const delDia = ventas.filter(v => soloDia(v.fecha) === fecha);
       const yaExportadas = delDia.filter(v => v.exportado && v.exportado !== '').length;
       const motivo = !delDia.length
         ? 'No hay ninguna venta cargada en esa fecha.'
@@ -53,8 +55,60 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: motivo }, { status: 400 });
     }
 
+    // ── Lo que se va a facturar tiene que ser lo que se revisó ──────────────────────
+    //
+    // La pantalla muestra una lista —cliente por cliente, con cantidades— y pide confirmar.
+    // Pero lo que se factura no sale de esa lista: sale de la planilla. Si las dos cosas no
+    // coinciden (una fila de otro cliente que quedó de antes, una cantidad que no llegó a
+    // guardarse), se emitía en AFIP algo que nadie había visto.
+    //
+    // Por eso la pantalla manda lo que mostró y acá se compara contra la planilla ANTES de
+    // marcar nada. Si difieren, no se factura nada y se dice exactamente qué difiere.
+    if (Array.isArray(esperado)) {
+      const nombreDe = new Map(
+        (await readSheet<ClienteVenta>('Clientes')).map((c) => [String(c.id_control), c.nombre_display || c.nombre_xubio || String(c.id_control)]),
+      );
+      const sumar = (filas: any[]) => {
+        const m = new Map<string, Record<string, number>>();
+        for (const f of filas) {
+          const k = `${String(f.id_control)}||${String(f.sucursal || '')}`;
+          const acc = m.get(k) || {};
+          for (const c of claves) { const n = Number(f?.[c]) || 0; if (n) acc[c] = (acc[c] || 0) + n; }
+          m.set(k, acc);
+        }
+        return m;
+      };
+      const enPlanilla = sumar(aCargar);
+      const revisado = sumar(esperado);
+      const diferencias: string[] = [];
+      const etiqueta = (k: string) => {
+        const [id, suc] = k.split('||');
+        const n = nombreDe.get(id) || id;
+        return suc && suc !== n ? `${n} (${suc})` : n;
+      };
+      for (const k of new Set([...enPlanilla.keys(), ...revisado.keys()])) {
+        const a = enPlanilla.get(k) || {}, b = revisado.get(k) || {};
+        const tieneA = Object.values(a).some((n) => n > 0), tieneB = Object.values(b).some((n) => n > 0);
+        if (tieneA && !tieneB) { diferencias.push(`${etiqueta(k)}: está en la planilla sin facturar pero NO estaba en lo que revisaste`); continue; }
+        if (!tieneA && tieneB) { diferencias.push(`${etiqueta(k)}: lo revisaste pero no quedó guardado en la planilla`); continue; }
+        for (const c of new Set([...Object.keys(a), ...Object.keys(b)])) {
+          if (Math.abs((a[c] || 0) - (b[c] || 0)) > 0.001) {
+            diferencias.push(`${etiqueta(k)}: ${c.replace(/_/g, ' ')} — revisaste ${b[c] || 0} y en la planilla hay ${a[c] || 0}`);
+          }
+        }
+      }
+      if (diferencias.length) {
+        return NextResponse.json({
+          error: 'No se facturó nada: lo guardado en la planilla no coincide con lo que revisaste.\n'
+            + diferencias.map((d) => `• ${d}`).join('\n')
+            + '\nRecargá la página y revisá de nuevo. Si sobra una venta vieja, borrala desde Historial → No facturado.',
+          diferencias,
+        }, { status: 409 });
+      }
+    }
+
     await batchUpdateRows('Ventas', 'id_venta', aCargar.map(v => ({
-      keyValue: v.id_venta,
+      keyValue: v.id_venta, fila: filaDe(v),
       updates: { exportado: 'PENDIENTE' },
     })));
 
@@ -68,7 +122,10 @@ export async function POST(req: NextRequest) {
     let emitidas: any[] = [];
     let errores: any[] = [];
     try {
-      const r = await emitirPendientes(idControls);
+      // Solo ESTE día de estos clientes. Sin los pares, también salían las ventas que
+      // hubieran quedado PENDIENTE de otras fechas: facturas de días que nadie había
+      // revisado en esta carga. Esas se reintentan desde Facturación, a la vista.
+      const r = await emitirPendientes(idControls, { pares: idControls.map((id) => ({ id_control: id, fecha })) });
       emitidas = r.emitidas; errores = r.errores;
       if (errores.length) console.error('[ventas/cargar] errores al emitir a Xubio:', JSON.stringify(errores));
       // El aviso de CAEs pendientes ya NO sale acá: un día con tres cargas mandaba tres

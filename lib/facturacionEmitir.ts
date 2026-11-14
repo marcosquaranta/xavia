@@ -1,7 +1,8 @@
-import { readSheet, batchUpdateRows } from './sheets';
+import { readSheet, batchUpdateRows, filaDe } from './sheets';
 import { letraYPuntoDeVenta } from './controlLetra';
 import { registrarEmitidas } from './caePendientes';
 import { nombreClienteVisible } from './clientes';
+import { idsRepetidos, revisarIdentidad } from './identidadCliente';
 import type { ClienteVenta, PrecioVenta, VentaDia } from './types';
 import { getClientesXubio, matchClienteXubio, emitirFactura, ultimaFechaPorLetra, PRODUCTO_CODIGO } from './xubio';
 
@@ -327,6 +328,12 @@ export async function emitirPendientes(
 
   const clientesXubio = await getClientesXubio();
   const clientesMap = new Map(clientes.map(c => [c.id_control, c]));
+  // ── Dos fichas con el mismo código ────────────────────────────────────────────────
+  //
+  // El Map de arriba se queda con la última y no avisa. La venta dice "cliente 7" y el
+  // que factura es el OTRO cliente 7 — que es exactamente el síntoma de "cargo ventas a
+  // La Gallega y me factura Rosental". Se calcula una vez y se consulta por venta.
+  const repetidos = idsRepetidos(clientes);
   // Una sola consulta para todo el lote: la fecha del último comprobante de cada letra.
   // Si falla, se sigue igual con la fecha de la venta — que es el comportamiento de antes.
   const ultimaFecha = await ultimaFechaPorLetra().catch((e) => {
@@ -374,6 +381,15 @@ export async function emitirPendientes(
       sucursal: sucursal || undefined, fechaVenta: fechaLinea, items: [], total: 0,
     };
     if (!cliente) { errores.push({ ...datos, error: 'cliente no encontrado en la base local' }); continue; }
+
+    // ── Los dos testigos tienen que coincidir ───────────────────────────────────────
+    //
+    // La venta guarda el código del cliente Y su nombre. Si apuntan a fichas distintas, la
+    // factura saldría a nombre de una empresa a la que no se le vendió nada. Eso no se
+    // resuelve eligiendo uno: se frena y se dice qué pasó. Una factura emitida mal en AFIP
+    // no se borra, se compensa con una nota de crédito.
+    const problema = revisarIdentidad(idControl, String(lineas[0]?.nombre_cliente || ''), clientes, repetidos);
+    if (problema) { errores.push({ ...datos, error: problema.mensaje }); continue; }
 
 
     // Se calcula antes de armar los renglones porque la descripción de cada uno lleva la
@@ -474,7 +490,7 @@ export async function emitirPendientes(
       emitidas.push(emitida);
       paraRegistrar.push({ cliente: nombre, numero: res.numeroDocumento, cae: res.cae, fechaVenta });
       await batchUpdateRows('Ventas', 'id_venta', lineas.map(l => ({
-        keyValue: l.id_venta,
+        keyValue: l.id_venta, fila: filaDe(l),
         updates: { exportado: res.numeroDocumento || 'FACTURADO' },
       })));
     } else {

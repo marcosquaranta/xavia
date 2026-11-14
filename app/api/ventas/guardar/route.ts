@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { appendRowObj, batchUpdateRows, readSheet } from '@/lib/sheets';
+import { appendRowsObj, batchUpdateRows, readSheet, filaDe } from '@/lib/sheets';
+import { nuevoIdVenta, leerVentasConIdsUnicos } from '@/lib/ventasIds';
 import type { VentaDia } from '@/lib/types';
 import { KEYS_UNIDAD } from '@/lib/articulos';
 
@@ -31,67 +32,83 @@ export async function POST(req: NextRequest) {
   if (user.rol !== 'admin') return NextResponse.json({ error: 'Solo un administrador puede ver o cambiar esto.' }, { status: 403 });
   try {
     const { fecha, lineas, id_exportacion, importeManual } = await req.json();
-    const ventas = await readSheet<VentaDia>('Ventas');
+    // Con ids únicos garantizados: si quedaron repetidos de antes, se corrigen acá.
+    const ventas = await leerVentasConIdsUnicos();
     const fechaCarga = new Date().toISOString().split('T')[0];
+    const soloDia = (v: any) => String(v || '').split(/[T ]/)[0];
+    const sinExportar = (v: VentaDia) => !v.exportado || v.exportado === '';
+    const KG = ['rucula_kg', 'lechuga_kg_crespa', 'lechuga_kg_roble'] as const;
 
-    let nextId = ventas
-      .map(v => parseInt(v.id_venta?.replace('V-', '') || '0'))
-      .filter(n => !isNaN(n))
-      .reduce((m, n) => Math.max(m, n), 0) + 1;
-
-    const toUpdate: Array<{ keyValue: string; updates: Record<string, any> }> = [];
+    const toUpdate: Array<{ keyValue: string; fila?: number; updates: Record<string, any> }> = [];
+    const nuevas: Record<string, any>[] = [];
 
     for (const l of lineas) {
       // Si la línea trae id_venta (edición puntual desde el historial de facturación),
-      // apuntar directo a esa fila — necesario porque puede haber filas duplicadas con
-      // la misma (fecha, cliente, sucursal), y buscar por esos campos sería ambiguo.
-      // Si no, el flujo normal: con id_exportacion buscar esa fila puntual, sin
-      // id_exportacion (sesión nueva) solo buscar filas no exportadas.
-      const existente = l.id_venta
-        ? ventas.find(v => v.id_venta === l.id_venta)
-        : ventas.find(v =>
-            v.fecha === fecha &&
+      // apuntar directo a esa fila. Si no, el flujo normal: con id_exportacion buscar esa
+      // tanda, sin id_exportacion (sesión nueva) solo filas no exportadas.
+      const candidatas = l.id_venta
+        ? ventas.filter(v => v.id_venta === l.id_venta).slice(0, 1)
+        : ventas.filter(v =>
+            soloDia(v.fecha) === fecha &&
             String(v.id_control) === String(l.id_control) &&
-            v.sucursal === l.sucursal &&
-            (id_exportacion ? v.exportado === id_exportacion : (!v.exportado || v.exportado === ''))
+            String(v.sucursal || '') === String(l.sucursal || '') &&
+            (id_exportacion ? v.exportado === id_exportacion : sinExportar(v))
           );
+      const existente = candidatas[0];
+
+      // ── Lo que no viene no se toca ────────────────────────────────────────────────
+      //
+      // La pantalla guarda de a una sección: las unidades por un lado y los cajones por
+      // otro. Antes lo que no venía se guardaba en 0, así que al guardar una celda de
+      // paquetes se borraban los kilos de ese cliente, y al revés. Ahora una clave ausente
+      // conserva lo que había.
+      const valor = (k: string, previo: any) =>
+        (l as any)[k] !== undefined ? (Number((l as any)[k]) || 0) : (Number(previo) || 0);
+
       if (existente) {
         toUpdate.push({
-          keyValue: existente.id_venta,
+          keyValue: existente.id_venta, fila: filaDe(existente),
           updates: {
-            // Por clave de artículo: agregar un producto no obliga a tocar este objeto, que
-            // es justamente el lugar donde olvidarse hace que la venta se guarde sin él.
-            ...Object.fromEntries(clavesUnidad.map((k) => [k, (l as any)[k] || 0])),
-            // La bandeja de rúcula ya no se carga, pero si la fila vieja la tiene no se pisa
-            // con 0: sería borrar una venta real al re-guardar cualquier otro campo.
-            bandeja_rucula: (l as any).bandeja_rucula !== undefined
-              ? (l as any).bandeja_rucula || 0
-              : (Number((existente as any).bandeja_rucula) || 0),
-            rucula_kg: l.rucula_kg || 0,
-            // lechuga_kg (legacy) ya no lo manda la pantalla de Ventas — si no viene en el
-            // request se preserva lo que ya estaba, para no pisar con 0 una venta por kg
-            // cargada antes del split crespa/roble al re-guardar cualquier otro campo de la fila.
-            lechuga_kg: l.lechuga_kg !== undefined ? l.lechuga_kg : (Number(existente.lechuga_kg) || 0),
-            lechuga_kg_crespa: l.lechuga_kg_crespa || 0, lechuga_kg_roble: l.lechuga_kg_roble || 0,
+            ...Object.fromEntries(clavesUnidad.map((k) => [k, valor(k, (existente as any)[k])])),
+            bandeja_rucula: valor('bandeja_rucula', (existente as any).bandeja_rucula),
+            lechuga_kg: valor('lechuga_kg', existente.lechuga_kg),
+            ...Object.fromEntries(KG.map((k) => [k, valor(k, (existente as any)[k])])),
             usuario: user.email, fecha_carga: fechaCarga,
           },
         });
+        // ── Una sola fila por cliente, sucursal y día ───────────────────────────────
+        //
+        // Si quedaron dos filas sin facturar para el mismo cliente, la misma sucursal y el
+        // mismo día, son la misma venta guardada dos veces. La línea que llega es lo que
+        // vale: va a la primera y las demás quedan en cero. Si no, las dos se facturaban.
+        if (!l.id_venta && !id_exportacion) {
+          for (const dup of candidatas.slice(1)) {
+            toUpdate.push({
+              keyValue: dup.id_venta, fila: filaDe(dup),
+              updates: {
+                ...Object.fromEntries(clavesUnidad.map((k) => [k, 0])),
+                bandeja_rucula: 0, lechuga_kg: 0, ...Object.fromEntries(KG.map((k) => [k, 0])),
+              },
+            });
+          }
+        }
       } else {
-        // appendRowObj (por nombre de columna) en vez de appendRow posicional: evita tener
-        // que llevar la cuenta exacta de la posición de cada columna en la planilla —
-        // importante acá porque lechuga_kg_crespa/lechuga_kg_roble son columnas nuevas.
-        await appendRowObj('Ventas', {
-          id_venta: `V-${String(nextId++).padStart(5, '0')}`, fecha,
+        const fila = {
+          id_venta: nuevoIdVenta(), fecha,
           id_control: l.id_control, nombre_cliente: l.nombre_cliente, sucursal: l.sucursal,
-          ...Object.fromEntries(clavesUnidad.map((k) => [k, (l as any)[k] || 0])),
-          bandeja_rucula: (l as any).bandeja_rucula || 0,
-          rucula_kg: l.rucula_kg || 0, lechuga_kg: l.lechuga_kg || 0,
-          lechuga_kg_crespa: l.lechuga_kg_crespa || 0, lechuga_kg_roble: l.lechuga_kg_roble || 0,
+          ...Object.fromEntries(clavesUnidad.map((k) => [k, valor(k, 0)])),
+          bandeja_rucula: valor('bandeja_rucula', 0),
+          lechuga_kg: valor('lechuga_kg', 0),
+          ...Object.fromEntries(KG.map((k) => [k, valor(k, 0)])),
           exportado: '', usuario: user.email, fecha_carga: fechaCarga,
-        });
+        };
+        // Una fila toda en cero no es una venta: no se crea.
+        const tieneAlgo = [...clavesUnidad, 'bandeja_rucula', 'lechuga_kg', ...KG].some((k) => Number((fila as any)[k]) > 0);
+        if (tieneAlgo) nuevas.push(fila);
       }
     }
 
+    if (nuevas.length) await appendRowsObj('Ventas', nuevas);
     if (toUpdate.length) {
       await batchUpdateRows('Ventas', 'id_venta', toUpdate);
     }

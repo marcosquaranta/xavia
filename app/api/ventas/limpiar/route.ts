@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { readSheet, batchUpdateRows } from '@/lib/sheets';
+import { readSheet, batchUpdateRows, filaDe } from '@/lib/sheets';
+import { leerVentasConIdsUnicos } from '@/lib/ventasIds';
 import type { VentaDia } from '@/lib/types';
 import { clavesDeVenta, tieneCantidad } from '@/lib/clavesVenta';
 
@@ -11,8 +12,9 @@ export async function POST(req: NextRequest) {
     // no cierra nada: la pantalla es una cortina, la API es la puerta.
   if (user.rol !== 'admin') return NextResponse.json({ error: 'Solo un administrador puede ver o cambiar esto.' }, { status: 403 });
   try {
-    const { fecha, limpiarTodo, soloPendientes, id_exportacion, id_control, id_venta, soloPendientesDelDia } = await req.json();
-    const ventas = await readSheet<VentaDia>('Ventas');
+    const { fecha, limpiarTodo, soloPendientes, id_exportacion, id_control, id_venta, soloPendientesDelDia, soloRepetidas } = await req.json();
+    const ventas = await leerVentasConIdsUnicos();
+    const soloDia = (v: any) => String(v || '').split(/[T ]/)[0];
     const noExportado = (v: VentaDia) => !v.exportado || v.exportado === '';
 
     let aLimpiar: VentaDia[];
@@ -30,14 +32,23 @@ export async function POST(req: NextRequest) {
       // Lo NO facturado de un cliente en un día puntual. Existe porque la lista de
       // pendientes ahora es una fila por (fecha, cliente): borrar todo el día desde una de
       // esas filas tiraría también la venta pendiente de los demás clientes de esa fecha.
-      aLimpiar = ventas.filter(v => v.fecha === fecha && String(v.id_control) === String(id_control) && noExportado(v));
+      aLimpiar = ventas.filter(v => soloDia(v.fecha) === fecha && String(v.id_control) === String(id_control) && noExportado(v));
+    } else if (soloRepetidas) {
+      // Lo que quedó sin facturar de un cliente al que ESE MISMO DÍA sí se le emitió una
+      // factura: es la misma venta guardada dos veces. Solo cuenta una factura de verdad
+      // —con número—, no una marcada PENDIENTE.
+      const facturado = new Set(
+        ventas.filter((v) => { const e = String(v.exportado || '').trim(); return e && e !== 'PENDIENTE'; })
+          .map((v) => `${soloDia(v.fecha)}__${String(v.id_control)}`),
+      );
+      aLimpiar = ventas.filter((v) => noExportado(v) && facturado.has(`${soloDia(v.fecha)}__${String(v.id_control)}`));
     } else if (soloPendientes) {
       // Todo lo NO facturado, de cualquier fecha.
       aLimpiar = ventas.filter(noExportado);
     } else {
       // Un día puntual, solo lo NO facturado — nunca tocar una fila ya exportada, aunque
       // comparta la misma fecha calendario con ventas todavía pendientes.
-      aLimpiar = ventas.filter(v => v.fecha === fecha && noExportado(v));
+      aLimpiar = ventas.filter(v => soloDia(v.fecha) === fecha && noExportado(v));
     }
     // ── También los artículos dados de alta en Admin ────────────────────────────────
     //
@@ -59,7 +70,7 @@ export async function POST(req: NextRequest) {
     // a la mitad, las primeras filas quedan borradas y el resto no, y desde la pantalla se
     // ve como que "no borra".
     await batchUpdateRows('Ventas', 'id_venta', aLimpiar.map((v) => ({
-      keyValue: v.id_venta,
+      keyValue: v.id_venta, fila: filaDe(v),
       updates: { ...enCero, rucula_kg: 0, lechuga_kg: 0, lechuga_kg_crespa: 0, lechuga_kg_roble: 0 },
     })));
 

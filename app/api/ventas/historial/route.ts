@@ -47,7 +47,12 @@ export async function GET() {
       const nombre = clienteMap.get(String(v.id_control)) || String(v.id_control);
       const suc = String(v.sucursal || '').trim();
 
-      if (expId && expId !== '') {
+      // PENDIENTE no es "facturado": es una venta que se marcó para facturar y Xubio todavía
+      // no emitió (falló, o quedó a mitad). Mostrarla entre lo facturado decía "ya enviado a
+      // Xubio" de algo que Xubio no tiene, y además juntaba en una sola línea ventas de días
+      // distintos. Va con lo no facturado, marcada aparte.
+      const marcada = expId.trim() === 'PENDIENTE';
+      if (expId && expId !== '' && !marcada) {
         const key = `${expId}__${v.id_control}`;
         const ex = porExpCliente.get(key) || {
           id_exportacion: expId, fecha, fecha_exportacion: String(v.fecha_carga || fecha), cliente: nombre, id_control: String(v.id_control),
@@ -71,11 +76,11 @@ export async function GET() {
         }
         facturadoPorClienteFecha.set(kcf, lista);
       } else {
-        const key = `${fecha}__${v.id_control}`;
+        const key = `${fecha}__${v.id_control}__${marcada ? 'M' : ''}`;
         const p = pendientes.get(key) || {
           fecha, id_control: String(v.id_control), cliente: nombre, filas: 0, sucursales: [],
           rucula: 0, lechuga: 0, rucula_kg: 0, lechuga_kg: 0, otros: {},
-          facturadoMismoDia: [],
+          facturadoMismoDia: [], marcada,
         };
         p.filas++;
         if (suc && !p.sucursales.includes(suc)) p.sucursales.push(suc);

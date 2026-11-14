@@ -19,6 +19,8 @@ interface EntradaPend {
   // Lo que SÍ se facturó a ese cliente ese mismo día. Casi siempre explica el pendiente:
   // el cliente se facturó en otra tanda y lo que quedó suelto es una fila repetida.
   facturadoMismoDia?: { id_exportacion: string; fecha_exportacion: string }[];
+  // Marcada para facturar pero Xubio no la emitió.
+  marcada?: boolean;
 }
 interface ArticuloCol { key: string; label: string }
 
@@ -354,6 +356,11 @@ export default function HistorialManager() {
   const [eliminando, setEliminando] = useState<string | null>(null);
   const [editando, setEditando] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  // Las que quedaron sueltas de un cliente que ese mismo día SÍ se facturó. No se muestran
+  // en la lista: casi siempre son la misma venta guardada dos veces, y tenerlas mezcladas con
+  // lo que de verdad falta facturar es lo que hacía que la lista no sirviera.
+  const [verRepetidas, setVerRepetidas] = useState(false);
+  const [borrandoRepetidas, setBorrandoRepetidas] = useState(false);
 
   function cargar() {
     setLoading(true);
@@ -380,7 +387,7 @@ export default function HistorialManager() {
   // más sería tirar la venta de otro.
   async function eliminarPendiente(fecha: string, idControl: string, cliente: string) {
     if (!confirm(`¿Eliminar las ventas no facturadas de ${cliente} del ${fecha}? Esto no se puede deshacer.`)) return;
-    setEliminando(`${fecha}__${idControl}`); setMsg(null);
+    setEliminando(`${fecha}__${idControl}__`); setMsg(null);
     try {
       const j = await limpiar({ fecha, id_control: idControl, soloPendientesDelDia: true });
       setMsg(j.sinBorrar ? `Quedaron ${j.sinBorrar} sin borrar — probá de nuevo.` : `✓ Borrado (${j.limpiados ?? 0}).`);
@@ -402,6 +409,20 @@ export default function HistorialManager() {
     }
     catch (e: any) { setMsg(e.message); }
     setEliminandoTodosPend(false);
+  }
+
+  async function eliminarRepetidas() {
+    if (!confirm('¿Borrar las cargas repetidas? Son ventas sin facturar de clientes a los que ese mismo día ya se les emitió la factura. Lo facturado no se toca.')) return;
+    setBorrandoRepetidas(true); setMsg(null);
+    try {
+      const j = await limpiar({ soloRepetidas: true });
+      setMsg(j.sinBorrar
+        ? `Se borraron ${j.limpiados} de ${j.intentados}. ${j.sinBorrar} no se pudieron borrar — probá de nuevo.`
+        : `✓ Se borraron ${j.limpiados ?? 0} carga(s) repetida(s).`);
+      cargar();
+    }
+    catch (e: any) { setMsg(e.message); }
+    setBorrandoRepetidas(false);
   }
 
   async function eliminarFacturado(id_exportacion: string, id_control: string, cliente: string) {
@@ -455,7 +476,10 @@ export default function HistorialManager() {
   // Cada tabla dibuja solo los artículos que aparecen en SUS filas: lo facturado y lo
   // pendiente casi nunca tienen los mismos, y compartir columnas dejaba la mitad vacías.
   const colsExp = colsCon(expFiltradas);
-  const colsPend = colsCon(pendientes);
+  const esRepetida = (p: EntradaPend) => !p.marcada && (p.facturadoMismoDia || []).length > 0;
+  const repetidas = pendientes.filter(esRepetida);
+  const pendVisibles = verRepetidas ? pendientes : pendientes.filter((p) => !esRepetida(p));
+  const colsPend = colsCon(pendVisibles);
 
   if (loading) return <p style={{ color: '#9ca3af', fontSize: '13px' }}>Cargando…</p>;
 
@@ -473,7 +497,29 @@ export default function HistorialManager() {
           )}
         </div>
         <p className="card-sub">Cargado en Ventas pero todavía sin enviar a Xubio</p>
-        {pendientes.length === 0 ? (
+        {/* El resultado de borrar va ACÁ, al lado del botón. Antes salía al pie de la página,
+            debajo de cientos de líneas facturadas: se apretaba "Eliminar todos" y no se veía
+            que hubiera pasado nada. */}
+        {msg && (
+          <p style={{ fontSize: '12.5px', color: '#374151', margin: '0 0 8px', padding: '7px 10px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px' }}>{msg}</p>
+        )}
+        {repetidas.length > 0 && (
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', margin: '0 0 8px', padding: '7px 10px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', fontSize: '12px', color: '#1e40af' }}>
+            <span style={{ flex: 1, minWidth: '220px' }}>
+              {verRepetidas ? 'Se están mostrando' : 'No se muestran'} <strong>{repetidas.length}</strong> carga(s) de clientes que ese mismo día ya
+              tienen factura emitida: casi siempre es la misma venta guardada dos veces.
+            </span>
+            <button onClick={() => setVerRepetidas((v) => !v)}
+              style={{ background: 'white', border: '1px solid #bfdbfe', borderRadius: '6px', padding: '4px 10px', fontSize: '11px', cursor: 'pointer', color: '#1e40af' }}>
+              {verRepetidas ? 'Ocultar' : 'Ver'}
+            </button>
+            <button onClick={eliminarRepetidas} disabled={borrandoRepetidas}
+              style={{ background: 'white', border: '1px solid #fca5a5', borderRadius: '6px', padding: '4px 10px', fontSize: '11px', cursor: 'pointer', color: '#dc2626' }}>
+              {borrandoRepetidas ? 'Borrando…' : '🗑 Borrar repetidas'}
+            </button>
+          </div>
+        )}
+        {pendVisibles.length === 0 ? (
           <p style={{ color: '#9ca3af', fontSize: '13px' }}>No hay nada pendiente de facturar.</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -490,8 +536,8 @@ export default function HistorialManager() {
                 <th style={{ padding: '6px 10px' }}></th>
               </tr></thead>
               <tbody>
-                {pendientes.map(h => {
-                  const kp = `${h.fecha}__${h.id_control}`;
+                {pendVisibles.map(h => {
+                  const kp = `${h.fecha}__${h.id_control}__${h.marcada ? 'M' : ''}`;
                   return (
                   <tr key={kp} style={{ borderBottom: '1px solid #f3f4f6' }}>
                     <td style={{ padding: '7px 10px', fontWeight: 600, whiteSpace: 'nowrap' }}>{h.fecha}</td>
@@ -513,7 +559,11 @@ export default function HistorialManager() {
                         es que esta fila sea una carga repetida y haya que borrarla, no
                         facturarla de nuevo. */}
                     <td style={{ padding: '7px 10px', fontSize: '11.5px' }}>
-                      {(h.facturadoMismoDia || []).length === 0 ? (
+                      {h.marcada ? (
+                        <span style={{ color: '#b91c1c', fontWeight: 600 }}>
+                          No — se mandó a facturar y Xubio no la emitió
+                        </span>
+                      ) : (h.facturadoMismoDia || []).length === 0 ? (
                         <span style={{ color: '#b45309', fontWeight: 600 }}>No — falta facturar</span>
                       ) : (
                         <span style={{ color: '#1e40af' }}>
@@ -525,11 +575,15 @@ export default function HistorialManager() {
                       )}
                     </td>
                     <td style={{ padding: '7px 10px', textAlign: 'right', display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                      {h.marcada ? (
+                        <Link href="/facturacion" className="btn secondary small">Reintentar en Facturación →</Link>
+                      ) : (<>
                       <Link href={`/ventas?fecha=${h.fecha}`} className="btn secondary small">Ir a cargar →</Link>
                       <button onClick={() => eliminarPendiente(h.fecha, h.id_control, h.cliente)} disabled={eliminando === kp}
                         style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: '6px', padding: '5px 10px', fontSize: '11px', cursor: 'pointer', color: '#dc2626' }}>
                         {eliminando === kp ? 'Eliminando…' : '🗑 Eliminar'}
                       </button>
+                      </>)}
                     </td>
                   </tr>
                   );
@@ -640,7 +694,6 @@ export default function HistorialManager() {
 
       {/* ── Zona de riesgo ── */}
       <div style={{ marginTop: '28px', borderTop: '1px solid #f3f4f6', paddingTop: '14px', textAlign: 'right' }}>
-        {msg && <p style={{ fontSize: '12px', color: '#374151', margin: '0 0 6px' }}>{msg}</p>}
         <button onClick={limpiarTodo} disabled={limpiando}
           style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: '6px', padding: '5px 12px', fontSize: '11px', cursor: 'pointer', color: '#dc2626' }}>
           🗑 Limpiar toda la hoja de Ventas

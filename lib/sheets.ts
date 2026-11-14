@@ -111,6 +111,22 @@ function fraccionDiaAHora(fraccion: number): string {
   return `${hh}:${mm}`;
 }
 
+// ── En qué fila de la hoja está cada objeto leído ───────────────────────────────────
+//
+// Las escrituras ubican la fila por una columna clave (id_venta, id_item…) y se quedan con
+// la PRIMERA que coincide. Eso es correcto mientras la clave sea única, y la clave deja de
+// ser única el día que dos pedidos simultáneos calculan el mismo "próximo id": desde ahí,
+// todo lo que se escribe para la segunda fila cae en la primera. Pasó en Ventas — se le
+// cargaba a un cliente y se facturaba a otro.
+//
+// Cada objeto que devuelve readSheet recuerda su número de fila acá, por fuera del objeto
+// (no aparece al serializarlo ni al copiarlo). Quien escribe puede pasarlo como `fila` y la
+// escritura va a ESA fila, siempre que la clave que hay ahí siga siendo la esperada.
+const FILA_DE = new WeakMap<object, number>();
+export function filaDe(obj: any): number | undefined {
+  return obj && typeof obj === 'object' ? FILA_DE.get(obj) : undefined;
+}
+
 export async function readSheet<T = Record<string, any>>(sheetName: string): Promise<T[]> {
   const sheets = getClient();
   // valueRenderOption: 'UNFORMATTED_VALUE' — sin esto, Sheets devuelve el valor
@@ -124,8 +140,9 @@ export async function readSheet<T = Record<string, any>>(sheetName: string): Pro
   const rows = response.data.values;
   if (!rows || rows.length < 2) return [];
   const headers = rows[0];
-  return rows.slice(1).map((row) => {
+  return rows.slice(1).map((row, i) => {
     const obj: Record<string, any> = {};
+    FILA_DE.set(obj, i + 2);
     headers.forEach((header, idx) => {
       const raw = row[idx];
       const esFecha = /fecha/i.test(header);
@@ -259,7 +276,9 @@ export async function updateRowDonde(
 export async function batchUpdateRows(
   sheetName: string,
   keyColumn: string,
-  updates: Array<{ keyValue: string; updates: Record<string, any> }>,
+  // `fila` (número de fila de la hoja, ver filaDe) es opcional: si viene y en esa fila
+  // sigue estando esa clave, se escribe ahí. Si no, se busca por clave como siempre.
+  updates: Array<{ keyValue: string; updates: Record<string, any>; fila?: number }>,
   // Filas ya leídas, para no releer la hoja entera en cada llamada cuando se hacen varias
   // seguidas (facturar emite de a una y marca de a una). Solo se usa para ubicar filas
   // existentes por clave: como acá nunca se insertan ni se borran filas, los índices de
@@ -277,8 +296,12 @@ export async function batchUpdateRows(
   if (keyIndex === -1) throw new Error(`Columna ${keyColumn} no encontrada en ${sheetName}`);
 
   const data: { range: string; values: any[][] }[] = [];
-  for (const { keyValue, updates: upd } of updates) {
-    const rowIndex = rows.findIndex((r, idx) => idx > 0 && String(r[keyIndex]) === String(keyValue));
+  for (const { keyValue, updates: upd, fila } of updates) {
+    const porFila = fila && fila > 1 && rows[fila - 1] && String(rows[fila - 1][keyIndex]) === String(keyValue)
+      ? fila - 1 : -1;
+    const rowIndex = porFila !== -1
+      ? porFila
+      : rows.findIndex((r, idx) => idx > 0 && String(r[keyIndex]) === String(keyValue));
     if (rowIndex === -1) continue;
     const newRow = [...rows[rowIndex]];
     for (const [col, val] of Object.entries(upd)) {

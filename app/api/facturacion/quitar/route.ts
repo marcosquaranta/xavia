@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { readSheet, batchUpdateRows } from '@/lib/sheets';
+import { readSheet, batchUpdateRows, filaDe } from '@/lib/sheets';
 import type { VentaDia } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     if (!aQuitar.length) return NextResponse.json({ error: 'No hay ventas pendientes de ese cliente' }, { status: 400 });
 
     await batchUpdateRows('Ventas', 'id_venta', aQuitar.map(v => ({
-      keyValue: v.id_venta,
+      keyValue: v.id_venta, fila: filaDe(v),
       updates: { exportado: '' },
     })));
     return NextResponse.json({ ok: true, lineas: aQuitar.length });
