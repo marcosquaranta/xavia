@@ -59,6 +59,8 @@ export interface UltimaSuba {
   fecha: string;        // YYYY-MM-DD del último AUMENTO
   diasDesde: number;
   variacionPct: number; // cuánto subió esa vez
+  // Para desempatar dos subas de la misma fecha. No se muestra.
+  orden?: number;
 }
 
 const soloFecha = (v: any) => String(v || '').split(/[T ]/)[0];
@@ -76,11 +78,15 @@ export function ultimaSubaPorCliente(historial: CambioPrecio[], hoy: string): Ma
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) continue;
     const id = String(c.id_control).trim();
     const prev = out.get(id);
-    if (prev && prev.fecha >= fecha) continue;
+    // Mismo criterio que ultimoCambioPorProducto: con dos subas en la misma fecha gana la
+    // ultima, no la primera. Con `>=` quedaba la de la manana y la de la tarde no existia.
+    const o = (() => { const n = parseInt(String(c.id_cambio || '').replace(/\D/g, ''), 10); return Number.isFinite(n) ? n : 0; })();
+    if (prev && (prev.fecha > fecha || (prev.fecha === fecha && (prev.orden ?? 0) > o))) continue;
     out.set(id, {
       fecha,
       diasDesde: Math.round((new Date(hoy + 'T12:00:00').getTime() - new Date(fecha + 'T12:00:00').getTime()) / 86400000),
       variacionPct: Number(c.variacion_pct) || 0,
+      orden: o,
     });
   }
   return out;
@@ -99,20 +105,59 @@ export interface UltimoCambioProducto {
 // "id_control||sucursal_obs||producto": un cliente con sucursales puede tener precios
 // distintos por sucursal, y mezclarlos mostraría un aumento que a esa sucursal no le pasó.
 export function ultimoCambioPorProducto(historial: CambioPrecio[], hoy: string): Map<string, UltimoCambioProducto> {
-  const out = new Map<string, UltimoCambioProducto>();
+  // ── Dos cambios el mismo día ──────────────────────────────────────────────────────
+  //
+  // Esto decía `if (prev && prev.fecha >= fecha) continue`, o sea que con dos cambios en la
+  // misma fecha ganaba el PRIMERO y el segundo se descartaba. Si alguien corregía un
+  // precio y volvía a tocarlo un rato después, la pantalla seguía mostrando el primer
+  // movimiento: un aumento que ya no era el vigente, al lado del precio nuevo. Dos números
+  // que no se corresponden y ninguna forma de saber cuál mirar.
+  //
+  // Y mostrar solo el último paso tampoco sirve: si el precio fue 12.100 → 14.500 →
+  // 14.000 en el mismo día, "bajó 500" es cierto y no es lo que pasó. Lo que pasó es que
+  // subió de 12.100 a 14.000.
+  //
+  // Entonces, para el último día en que el precio se movió: el `nuevo` es el del último
+  // cambio y el `anterior` es el del primero de ese día. El movimiento del día, completo.
+  // El porcentaje se recalcula de esos dos — el guardado describe un solo paso.
+  const orden = (c: CambioPrecio) => {
+    const n = parseInt(String(c.id_cambio || '').replace(/\D/g, ''), 10);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const acum = new Map<string, { fecha: string; anterior: number; nuevo: number; ordenMin: number; ordenMax: number }>();
+
   for (const c of historial) {
     const fecha = soloFecha(c.fecha);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) continue;
     const clave = `${String(c.id_control).trim()}||${String(c.sucursal_obs || '').trim()}||${String(c.producto || '').trim()}`;
-    const prev = out.get(clave);
-    if (prev && prev.fecha >= fecha) continue;
     const anterior = Number(c.precio_anterior) || 0;
     const nuevo = Number(c.precio_nuevo) || 0;
+    const o = orden(c);
+    const prev = acum.get(clave);
+
+    // Un día más nuevo reemplaza todo lo anterior.
+    if (!prev || fecha > prev.fecha) {
+      acum.set(clave, { fecha, anterior, nuevo, ordenMin: o, ordenMax: o });
+      continue;
+    }
+    if (fecha < prev.fecha) continue;
+
+    // Mismo día: se estira el tramo. El `anterior` del cambio más temprano y el `nuevo`
+    // del más tardío. El orden sale del id (PH-00001, PH-00002…), que es el único dato
+    // que distingue dos cambios de la misma fecha.
+    if (o <= prev.ordenMin) { prev.anterior = anterior; prev.ordenMin = o; }
+    if (o >= prev.ordenMax) { prev.nuevo = nuevo; prev.ordenMax = o; }
+  }
+
+  const out = new Map<string, UltimoCambioProducto>();
+  for (const [clave, v] of acum) {
     out.set(clave, {
-      fecha, anterior, nuevo,
-      diferencia: Math.round((nuevo - anterior) * 100) / 100,
-      variacionPct: Number(c.variacion_pct) || 0,
-      diasDesde: Math.round((new Date(hoy + 'T12:00:00').getTime() - new Date(fecha + 'T12:00:00').getTime()) / 86400000),
+      fecha: v.fecha,
+      anterior: v.anterior,
+      nuevo: v.nuevo,
+      diferencia: Math.round((v.nuevo - v.anterior) * 100) / 100,
+      variacionPct: v.anterior > 0 ? Math.round(((v.nuevo - v.anterior) / v.anterior) * 1000) / 10 : 0,
+      diasDesde: Math.round((new Date(hoy + 'T12:00:00').getTime() - new Date(v.fecha + 'T12:00:00').getTime()) / 86400000),
     });
   }
   return out;
