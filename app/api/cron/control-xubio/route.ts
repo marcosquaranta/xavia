@@ -68,7 +68,13 @@ export async function GET(req: NextRequest) {
 
     if (soloVer) return NextResponse.json({ ...r, ok: true });
     if (!r.hayProblema) {
-      return NextResponse.json({ ok: true, enviado: false, motivo: 'todo coincide', revisadas: r.revisadas, demoradas: r.demoradas.length });
+      return NextResponse.json({
+        ok: true, enviado: false,
+        motivo: r.soloEnXubio.length
+          ? 'no hay facturas emitidas que Xubio no tenga; lo de Xubio sin numero en la app no manda mail'
+          : 'todo coincide',
+        revisadas: r.revisadas, demoradas: r.demoradas.length, soloEnXubio: r.soloEnXubio.length,
+      });
     }
     if (!process.env.RESEND_API_KEY) return NextResponse.json({ ok: false, error: 'RESEND_API_KEY no configurada' }, { status: 500 });
     const destinatarios = destinatariosDe(CLAVE_CONFIG, config);
@@ -139,7 +145,7 @@ export async function GET(req: NextRequest) {
       body: JSON.stringify({
         from: 'Xavia App <ventas@xavia.com.ar>',
         to: destinatarios,
-        subject: `Control app ↔ Xubio: ${r.faltantes.length ? `${r.faltantes.length} factura(s) que Xubio no tiene` : `${r.soloEnXubio.length} cargada(s) a mano en Xubio`}`,
+        subject: `Control app ↔ Xubio: ${r.faltantes.length} factura(s) que Xubio no tiene`,
         html,
       }),
     });

@@ -15,6 +15,7 @@ import { HOJA_COMPROBANTES, type ComprobanteCache } from '@/lib/xubioCache';
 import type { PrecioVenta, ClienteVenta } from '@/lib/types';
 import { leerArticulosExtra } from '@/lib/articulosVenta';
 import { clavesDeVenta } from '@/lib/clavesVenta';
+import { emitirNCPorCorreccion } from '@/lib/notaCredito';
 export async function POST(req: NextRequest) {
   // Las columnas de los artículos nuevos tienen que existir antes de escribir por nombre.
   await asegurarColumnasArticulos();
@@ -131,7 +132,10 @@ export async function POST(req: NextRequest) {
       if (exp && exp !== 'PENDIENTE' && claveComprobante(exp)) numeros.add(exp);
     }
 
-    const ajustes: { numero: string; de: number; a: number; manual?: boolean }[] = [];
+    const ajustes: { numero: string; de: number; a: number; manual?: boolean; notaCredito?: string; importeNC?: number }[] = [];
+    // Las NC que no se pudieron emitir. Se informan a la pantalla: la corrección quedó
+    // guardada igual, pero quien la hizo tiene que saber que la factura no se cerró.
+    const notasFallidas: { numero: string; error: string }[] = [];
     if (numeros.size) {
       // Se relee: los montos tienen que salir de lo que quedó guardado, no de lo que se
       // mandó. Si una línea no entró, el ajuste tiene que reflejar eso y no lo que se quiso.
@@ -144,6 +148,31 @@ export async function POST(req: NextRequest) {
       // Las mismas claves que usa el informe de facturacion. Con la lista fija del
       // codigo, una factura de lechuga por kilo valia cero y el ajuste la dejaba en cero.
       const clavesAjuste = await clavesDeVenta();
+
+      // ── Qué se dio de baja de cada factura ─────────────────────────────────────
+      //
+      // `ventas` es la foto de ANTES de guardar y `ventasAhora` la de después: la
+      // diferencia por artículo es exactamente lo que hay que acreditar. Se calcula acá,
+      // con las dos fotos a mano, porque después ya no hay forma de saber qué había.
+      //
+      // Solo las BAJAS. Si una cantidad subió, no entra: una nota de crédito no puede
+      // cobrar de más, eso necesita otro comprobante y no se decide solo.
+      const antesPorVenta = new Map(ventas.map((v) => [String(v.id_venta), v]));
+      const bajasPorFactura = new Map<string, { id_venta: string; key: string; cantidad: number }[]>();
+      for (const vAhora of ventasAhora) {
+        const exp = String(vAhora.exportado || '').trim();
+        if (!exp || exp === 'PENDIENTE' || !numeros.has(exp)) continue;
+        const vAntes = antesPorVenta.get(String(vAhora.id_venta));
+        if (!vAntes) continue;
+        for (const k of clavesAjuste) {
+          const baja = (Number((vAntes as any)[k]) || 0) - (Number((vAhora as any)[k]) || 0);
+          if (baja <= 0) continue;
+          const lista = bajasPorFactura.get(exp) || [];
+          lista.push({ id_venta: String(vAhora.id_venta), key: k, cantidad: baja });
+          bajasPorFactura.set(exp, lista);
+        }
+      }
+
       for (const numero of numeros) {
         const v = valorDeFactura(numero, ventasAhora, precios, clientes, clavesAjuste);
         if (!v.filas) continue;
@@ -168,6 +197,29 @@ export async function POST(req: NextRequest) {
         const monto = manual > 0 ? manual : v.monto;
         if (monto <= 0) continue;
         if (Math.abs(monto - importeXubio) < 1) continue;
+
+        // ── La nota de crédito, en el acto ─────────────────────────────────────────
+        //
+        // Decisión de Marcos: corregir una factura ya emitida emite la NC en Xubio sola.
+        // Antes quedaba un ajuste y la factura seguía diciendo el importe viejo hasta que
+        // alguien se acordara de cerrarla a mano; en el primer control eran 12 facturas y
+        // $1.326.755 sin cerrar.
+        //
+        // Va ANTES de anotar el ajuste: si la NC sale, no hace falta ajuste — la deuda ya
+        // bajó en Xubio y anotar las dos cosas la bajaría dos veces. Si la NC no sale
+        // —Xubio caído, un artículo sin producto equivalente, el importe puesto a mano sin
+        // cantidades que lo expliquen— se anota el ajuste igual y sale en el aviso diario.
+        // Nunca se pierde la corrección por no poder emitir el comprobante.
+        const bajas = bajasPorFactura.get(numero) || [];
+        if (manual <= 0 && bajas.length && monto < importeXubio) {
+          const nc = await emitirNCPorCorreccion({ numeroFactura: numero, bajas, usuario: user.email })
+            .catch((e: any) => ({ ok: false, error: e?.message || 'error' } as any));
+          if (nc.ok) {
+            ajustes.push({ numero, de: importeXubio, a: monto, notaCredito: nc.numeroNC, importeNC: nc.importe });
+            continue;
+          }
+          notasFallidas.push({ numero, error: String((nc as any).error || 'no se pudo emitir') });
+        }
         await guardarAjuste({
           numero, id_control: v.id_control, cliente: v.cliente,
           importeXubio, importeApp: monto,
@@ -198,6 +250,6 @@ export async function POST(req: NextRequest) {
       console.error('[ventas/guardar] no se pudo mandar el aviso de cobro en entrega:', e);
     }
 
-    return NextResponse.json({ ok: true, ajustes, avisoCobro });
+    return NextResponse.json({ ok: true, ajustes, notasFallidas, avisoCobro });
   } catch (err: any) { return NextResponse.json({ error: err.message }, { status: 500 }); }
 }

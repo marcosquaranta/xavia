@@ -187,3 +187,111 @@ export async function emitirNCDeFactura(args: {
 
   return { ok: true, numeroNC: r.numeroDocumento, cae: r.cae, importe: Math.round(importe) };
 }
+
+// ── La nota de crédito que sale sola al corregir una factura ─────────────────────────
+//
+// Decisión de Marcos: cuando se corrige una venta ya facturada, la nota de crédito se
+// emite en Xubio en el acto. Antes solo se anotaba un ajuste —la app cobraba el importe
+// corregido y el comprobante seguía diciendo el original— y eso dejaba una diferencia
+// abierta que había que acordarse de cerrar a mano. En el primer control fueron 12
+// facturas y $1.326.755.
+//
+// Por qué esto NO puede ser `emitirNCDeFactura`: esa función recibe las cantidades a
+// acreditar y DESPUÉS se las resta a las ventas. Acá la venta ya se corrigió —ese fue el
+// disparador— así que restarlas otra vez descontaría el doble. Lo que se recibe acá es lo
+// que ya se dio de baja, y las filas de Ventas no se tocan.
+//
+// Lo que esta función no hace, a propósito: si la corrección AUMENTÓ el importe, no emite
+// nada. Una nota de crédito no puede cobrar de más; eso necesita otro comprobante y es una
+// decisión que no se toma sola. El ajuste queda anotado y sale en el aviso diario.
+export async function emitirNCPorCorreccion(args: {
+  numeroFactura: string;
+  // Lo que se dio de baja de la factura, por venta y artículo. Positivo = se acredita.
+  bajas: LineaNC[];
+  usuario: string;
+}): Promise<ResultadoNC> {
+  const numeroFactura = String(args.numeroFactura || '').trim();
+  if (!numeroFactura) return { ok: false, error: 'Falta el número de factura.' };
+  const bajas = (args.bajas || []).filter((l) => num(l.cantidad) > 0);
+  if (!bajas.length) return { ok: false, error: 'No hay nada que acreditar.' };
+
+  const [ventas, precios, clientes] = await Promise.all([
+    readSheet<VentaDia>('Ventas'),
+    readSheet<PrecioVenta>('Precios').catch(() => [] as PrecioVenta[]),
+    readSheet<ClienteVenta>('Clientes').catch(() => [] as ClienteVenta[]),
+  ]);
+
+  // La venta tiene que seguir siendo de esta factura. Si no, se estaría acreditando contra
+  // un comprobante que no es, y eso en AFIP no se deshace.
+  const porVenta = new Map<string, VentaDia>();
+  for (const l of bajas) {
+    const v = ventas.find((x) => String(x.id_venta) === String(l.id_venta));
+    if (!v) return { ok: false, error: `No se encontró la venta ${l.id_venta}.` };
+    if (claveComprobante(v.exportado) !== claveComprobante(numeroFactura)) {
+      return { ok: false, error: `La venta ${l.id_venta} no pertenece a la factura ${numeroFactura}.` };
+    }
+    porVenta.set(String(v.id_venta), v);
+  }
+
+  const primera = porVenta.values().next().value as VentaDia | undefined;
+  if (!primera) return { ok: false, error: 'No se encontraron las ventas de esa factura.' };
+  const cli = clientes.find((c) => String(c.id_control) === String(primera.id_control));
+  if (!cli) return { ok: false, error: 'No se encontró el cliente de esa factura.' };
+
+  // El punto de venta sale de la letra de la factura original, igual que en la NC manual.
+  const esA = /^A/i.test(numeroFactura.trim());
+
+  const items: { codigo: string; cantidad: number; precio: number; descripcion?: string }[] = [];
+  let importe = 0;
+  for (const l of bajas) {
+    const v = porVenta.get(String(l.id_venta))!;
+    const codigo = (PRODUCTO_XUBIO as any)[l.key];
+    if (!codigo) return { ok: false, error: `El artículo ${l.key} no tiene producto equivalente en Xubio.` };
+    const precio = precioFinal(precios, String(v.id_control), v.sucursal, l.key, cli);
+    if (!(precio > 0)) return { ok: false, error: `No hay precio cargado de ${l.key} para ${cli.nombre_display || cli.nombre_xubio}.` };
+    const cant = num(l.cantidad);
+    const ya = items.find((x) => x.codigo === codigo && x.precio === precio);
+    if (ya) ya.cantidad += cant;
+    else items.push({ codigo, cantidad: cant, precio, descripcion: v.sucursal ? String(v.sucursal) : '' });
+    importe += cant * precio;
+  }
+
+  const clientesXubio = await getClientesXubio().catch(() => []);
+  const clienteId = matchClienteXubio(String(cli.nombre_xubio || cli.nombre_display), clientesXubio);
+  if (!clienteId) return { ok: false, error: `No se encontró "${cli.nombre_xubio}" en los clientes de Xubio.` };
+
+  const hoy = fechaArgentinaHoy();
+  const r = await emitirNotaCredito({ clienteId, esA, fecha: hoy, items, facturaOriginal: numeroFactura });
+  if (!r.ok) return { ok: false, error: r.error || 'Xubio rechazó la nota de crédito.' };
+
+  // Las filas de Ventas NO se tocan: ya están corregidas, ese fue el disparador.
+  await asegurarHoja(HOJA_NOTAS, HEADERS_NOTAS);
+  await appendRowObj(HOJA_NOTAS, {
+    numero_nc: r.numeroDocumento || '',
+    numero_factura: numeroFactura,
+    id_control: String(cli.id_control),
+    cliente: String(cli.nombre_display || cli.nombre_xubio || ''),
+    fecha: hoy,
+    importe: Math.round(importe),
+    cae: r.cae || '',
+    transaccionid: r.transaccionid || '',
+    detalle: items.map((i) => `${i.cantidad} ${i.codigo}`).join(' · '),
+    usuario: args.usuario,
+    fecha_carga: new Date().toISOString(),
+    estado: 'emitida',
+  });
+
+  // El ajuste de esa factura se anula: con la NC emitida la deuda ya bajó en Xubio, y
+  // dejarlo la bajaría de nuevo. Es la misma regla que en la NC manual.
+  const ajustes = await readSheet<AjusteFactura>(HOJA_AJUSTES).catch(() => []);
+  const tiene = ajustes.some((a) => claveComprobante(a.numero) === claveComprobante(numeroFactura) && String(a.estado) !== 'revertido');
+  if (tiene) {
+    await updateRow(HOJA_AJUSTES, 'numero', numeroFactura, {
+      estado: 'revertido',
+      motivo: `Reemplazado por la nota de crédito ${r.numeroDocumento || ''} (automática al corregir la venta)`,
+      usuario: args.usuario,
+    }).catch(() => false);
+  }
+
+  return { ok: true, numeroNC: r.numeroDocumento, cae: r.cae, importe: Math.round(importe) };
+}

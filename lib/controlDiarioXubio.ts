@@ -185,10 +185,21 @@ export function controlDiario(
 
   return {
     desde, hasta: hoy, revisadas, ok, demoradas, faltantes, soloEnXubio,
-    // Las demoradas solas NO son un problema: es el comportamiento normal de Xubio. Si
-    // dispararan el mail, llegaría uno todos los días y dejaría de leerse justo cuando
-    // aparezca una de verdad.
-    hayProblema: faltantes.length > 0 || soloEnXubio.length > 0,
+    // ── Qué merece un mail ────────────────────────────────────────────────────────
+    //
+    // Solo las faltantes: una factura que la app emitió y Xubio no tiene es mercadería
+    // entregada que puede terminar sin facturar, y nadie se iba a enterar. Ese es el caso
+    // caro y el único que justifica interrumpir.
+    //
+    // Lo de Xubio que la app no tiene NO dispara el mail. Casi siempre es una venta vieja
+    // que se facturó sin el número escrito de vuelta — un dato que falta, no plata— y
+    // mientras fue motivo de aviso llegó un mail por día con las mismas cuatro filas. Un
+    // mail que llega siempre deja de abrirse, y el día que aparezca una faltante de verdad
+    // va a estar adentro de ese mismo mail que ya nadie mira. Se siguen listando cuando el
+    // mail sale por otra cosa, y están siempre en la pantalla.
+    //
+    // Las demoradas tampoco: que Xubio tarde un día es su comportamiento normal.
+    hayProblema: faltantes.length > 0,
   };
 }
 

@@ -63,7 +63,11 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
   const [guardando, setGuardando] = useState(false);
   const [eliminandoFila, setEliminandoFila] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [ajustes, setAjustes] = useState<{ numero: string; de: number; a: number; manual?: boolean }[]>([]);
+  const [ajustes, setAjustes] = useState<{ numero: string; de: number; a: number; manual?: boolean; notaCredito?: string; importeNC?: number }[]>([]);
+  // Las notas de crédito que no se pudieron emitir. La corrección quedó guardada igual,
+  // pero la factura no se cerró y quien la hizo tiene que enterarse ahora, no en el mail
+  // de mañana.
+  const [notasFallidas, setNotasFallidas] = useState<{ numero: string; error: string }[]>([]);
   // Importe a cobrar puesto a mano. Vacío = se calcula de las cantidades, que es lo normal.
   const [importeManual, setImporteManual] = useState('');
   // ── Cómo se corrige esta factura ────────────────────────────────────────────────
@@ -117,6 +121,7 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
       // descubra en Cobranzas: corregir una venta ya facturada mueve la deuda del cliente, y
       // eso tiene que verse en el momento en que se decide, no tres pantallas después.
       setAjustes(Array.isArray(j.ajustes) ? j.ajustes : []);
+      setNotasFallidas(Array.isArray(j.notasFallidas) ? j.notasFallidas : []);
       onGuardado();
     } catch (e: any) { setError(e.message); }
     setGuardando(false);
@@ -212,14 +217,40 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
       )}
 
       {ajustes.length > 0 && (
-        <div style={{ margin: '0 0 8px', padding: '8px 10px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', fontSize: '12px', color: '#92400e' }}>
-          <strong>Cambió lo que hay que cobrar.</strong> La factura en Xubio no se toca —para eso haría falta una nota de
-          crédito— pero la app ya reclama el importe corregido:
+        <div style={{ margin: '0 0 8px', padding: '8px 10px', background: ajustes.every((a) => a.notaCredito) ? '#f0fdf4' : '#fffbeb', border: `1px solid ${ajustes.every((a) => a.notaCredito) ? '#bbf7d0' : '#fde68a'}`, borderRadius: '6px', fontSize: '12px', color: ajustes.every((a) => a.notaCredito) ? '#166534' : '#92400e' }}>
+          <strong>Cambió lo que hay que cobrar.</strong>{' '}
+          {/* Con la NC emitida la factura quedó corregida en Xubio también. Sin ella, solo
+              cambia lo que la app reclama y el comprobante sigue diciendo lo de antes: son
+              dos situaciones distintas y el cartel tiene que decir cuál es. */}
+          {ajustes.every((a) => a.notaCredito)
+            ? 'Se emitió la nota de crédito en Xubio, así que la factura quedó corregida de los dos lados.'
+            : 'Donde no salió la nota de crédito, la factura en Xubio sigue diciendo el importe original y la app reclama el corregido.'}
           <ul style={{ margin: '5px 0 0', paddingLeft: '18px' }}>
             {ajustes.map((a) => (
               <li key={a.numero}>
                 <span style={{ fontFamily: 'ui-monospace, monospace' }}>{a.numero}</span>: ${Math.round(a.de).toLocaleString('es-AR')} → <strong>${Math.round(a.a).toLocaleString('es-AR')}</strong>
                 {a.manual && <span style={{ color: '#92400e' }}> (importe puesto a mano)</span>}
+                {a.notaCredito && (
+                  <span style={{ color: '#166534' }}>
+                    {' '}— NC <span style={{ fontFamily: 'ui-monospace, monospace' }}>{a.notaCredito}</span>
+                    {a.importeNC ? ` por $${Math.round(a.importeNC).toLocaleString('es-AR')}` : ''}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {notasFallidas.length > 0 && (
+        <div style={{ margin: '0 0 8px', padding: '8px 10px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', fontSize: '12px', color: '#7f1d1d' }}>
+          <strong>La corrección se guardó, pero la nota de crédito no se pudo emitir.</strong> La factura en Xubio sigue
+          diciendo el importe original. Se puede emitir a mano desde acá mismo, o va a salir en el aviso diario de facturas
+          corregidas hasta que se cierre.
+          <ul style={{ margin: '5px 0 0', paddingLeft: '18px' }}>
+            {notasFallidas.map((n) => (
+              <li key={n.numero}>
+                <span style={{ fontFamily: 'ui-monospace, monospace' }}>{n.numero}</span>: {n.error}
               </li>
             ))}
           </ul>
