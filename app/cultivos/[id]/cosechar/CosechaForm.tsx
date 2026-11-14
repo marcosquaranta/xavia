@@ -37,21 +37,39 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
   // con una alerta roja — por una cosecha perfecta. (El servidor siempre calculó bien el
   // descarte de una parcial; el que estaba mal era este número en pantalla, así que no hay
   // ningún dato guardado mal.)
-  const descarteAuto = useMemo(
-    () => !esPorPaquete ? Math.max(0, plantasDeEstaTanda - plantas) : 0,
-    [esPorPaquete, plantasDeEstaTanda, plantas],
-  );
+  // ── Lo que sale en cajones no es descarte ────────────────────────────────────────
+  //
+  // En lechuga el descarte se deduce: lo que había en la mesada menos lo cosechado. Esa
+  // cuenta daba por descartada toda planta que no saliera en paquete, incluidas las que se
+  // usaron para armar cajones a granel — que es mercadería vendida, no pérdida. Cargar 63
+  // en paquete y el resto en cajones mostraba "descarte 93 plantas, 59,6%".
+  //
+  // Los cajones se convierten a paquetes-equivalente por peso, y en lechuga un paquete es
+  // una planta: ese equivalente son plantas cosechadas y se restan del descarte.
+  // (se define más abajo, después de eqCajones: necesita la equivalencia de los cajones)
   const esRucula = lote.variedad.toLowerCase().includes('rucula') || lote.variedad.toLowerCase().includes('rúcula');
 
   // Para rúcula: paquetes estimados = plantas / plantasPorPaqueteManual
   const paquetesEstimados = esRucula && plantasDeEstaTanda > 0 ? Math.round(plantasDeEstaTanda / plantasPorPaqueteManual) : 0;
   // Los cajones, convertidos a paquetes-equivalente por peso. Ver lib/cosechaCajones.ts.
+  // En lechuga el paquete ES la planta, así que el pesaje testigo de la cosecha por
+  // planta sirve igual para convertir los cajones. Sin esto, la conversión en lechuga
+  // usaría el peso de referencia del cultivo teniendo el de hoy a mano.
+  const pesoTestigoGr = esPorPaquete ? pesoPaqGr : pesoGr;
   const eqCajones = useMemo(
-    () => equivalenciaDeCajones({ variedad: lote.variedad, cajones, kgPorCajon, pesoPaqueteGr: pesoPaqGr }),
-    [lote.variedad, cajones, kgPorCajon, pesoPaqGr],
+    () => equivalenciaDeCajones({ variedad: lote.variedad, cajones, kgPorCajon, pesoPaqueteGr: pesoTestigoGr }),
+    [lote.variedad, cajones, kgPorCajon, pesoTestigoGr],
   );
   // Lo que de verdad salió del lote, en una sola unidad.
   const unidadesTotales = paquetes + eqCajones.paquetesEquivalentes;
+
+  // En lechuga un paquete es una planta, así que el equivalente de los cajones son
+  // plantas cosechadas: se restan del descarte en vez de contarse como pérdida.
+  const plantasEnCajones = !esPorPaquete ? eqCajones.paquetesEquivalentes : 0;
+  const descarteAuto = useMemo(
+    () => !esPorPaquete ? Math.max(0, plantasDeEstaTanda - plantas - plantasEnCajones) : 0,
+    [esPorPaquete, plantasDeEstaTanda, plantas, plantasEnCajones],
+  );
 
   // Plantas/paquete sobre el TOTAL, no solo sobre los paquetes armados.
   //
@@ -72,7 +90,7 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault(); setLoading(true); setError(null);
-    if (!esPorPaquete && plantas <= 0) { setError('Ingresá la cantidad de plantas cosechadas'); setLoading(false); return; }
+    if (!esPorPaquete && plantas <= 0 && cajones <= 0) { setError('Ingresá las plantas cosechadas, los cajones, o las dos cosas'); setLoading(false); return; }
     if (!esPorPaquete && pesoGr <= 0) { setError('Ingresá el pesaje testigo (peso del paquete en gramos)'); setLoading(false); return; }
     if (esPorPaquete && paquetes <= 0 && cajones <= 0) { setError('Ingresá los paquetes armados, los cajones, o las dos cosas'); setLoading(false); return; }
     if (esPorPaquete && pesoPaqGr <= 0) { setError('Ingresá el pesaje testigo (peso del paquete en gramos)'); setLoading(false); return; }
@@ -136,7 +154,7 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
             <div><label style={{ color: '#dc2626' }}>Pesaje testigo — peso del paquete en gramos *</label><NumberInput value={pesoGr} onChange={setPesoGr} min={0} required disabled={loading} placeholder="Ej: 82" /></div>
           </div>
           <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#6b7280' }}>En lechuga, el paquete es 1 planta — pesá el paquete directamente, no se multiplica por nada.</p>
-          {plantas > 0 && (
+          {(plantas > 0 || cajones > 0) && (
             <div style={{ marginTop: '12px', padding: '10px 12px', background: '#f9fafb', borderRadius: '6px', fontSize: '12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#6b7280' }}>Plantas estimadas</span><span>{plantasEst}</span></div>
               {parcialValida && (
@@ -148,8 +166,51 @@ export default function CosechaForm({ lote, variedad, esPorPaquete, usuario }: {
               <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 500, paddingTop: '6px', borderTop: '1px solid #e5e7eb', marginTop: '6px', color: descarteAuto > 0 ? '#dc2626' : '#059669' }}>
                 <span>Descarte automático{parcialValida ? ' (sobre esta tanda)' : ''}</span><span>{descarteAuto}</span>
               </div>
+              {/* Se dice por qué el descarte bajó. Sin esto, el número cambia al cargar
+                  cajones y no hay forma de saber si eso estuvo bien. */}
+              {plantasEnCajones > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#92400e', fontSize: '11.5px' }}>
+                  <span>A cajones a granel (no es descarte)</span><span>{plantasEnCajones}</span>
+                </div>
+              )}
             </div>
           )}
+          {/* ── Cajones a granel, también en lechuga ──────────────────────────────────
+              Este bloque existía solo para rúcula. En lechuga, lo que se usaba para armar
+              cajones había que cargarlo como plantas cosechadas —y entonces el peso y los
+              paquetes quedaban mal— o no cargarlo, y entonces figuraba como descarte.
+              Leo lo describió exacto: 63 en paquete, el resto a cajones, "descarte 93
+              plantas, 59,6%". Cargándolos acá salen del descarte y entran al stock. */}
+          <div style={{ marginTop: '14px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '12px 14px' }}>
+            <p style={{ margin: '0 0 8px', fontSize: '12px', fontWeight: 700, color: '#92400e' }}>
+              ¿Salió algo en cajones a granel?
+              <span style={{ fontWeight: 400, color: '#b45309' }}> — dejalo en cero si todo fue a paquete</span>
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px' }}>
+              <div><label>Cajones armados</label><NumberInput value={cajones} onChange={setCajones} min={0} disabled={loading} /></div>
+              <div><label>Kg por cajón</label><NumberInput value={kgPorCajon} onChange={setKgPorCajon} min={0} disabled={loading} /></div>
+            </div>
+            {cajones > 0 && (
+              <div style={{ marginTop: '10px', fontSize: '12px', color: '#92400e' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{cajones} cajón(es) × {kgPorCajon} kg</span>
+                  <strong>{eqCajones.kgTotales.toLocaleString('es-AR')} kg</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '5px', borderTop: '1px solid #fde68a', marginTop: '5px' }}>
+                  <span>Equivalen a</span>
+                  <strong>{eqCajones.paquetesEquivalentes.toLocaleString('es-AR')} plantas</strong>
+                </div>
+                <p style={{ margin: '6px 0 0', fontSize: '10.5px', lineHeight: 1.45 }}>
+                  Calculado con {eqCajones.gramosPorPaquete} g por planta ({eqCajones.origenPeso}).
+                  {eqCajones.origenPeso === 'referencia del cultivo'
+                    ? ' Cargá el pesaje testigo de arriba y el número se ajusta al peso de hoy.'
+                    : ''}
+                  {' '}Esas plantas salen del descarte y entran al stock de cámara.
+                </p>
+              </div>
+            )}
+          </div>
+
           {descarteAlto && (
             <div style={{ marginTop: '10px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '10px 12px', fontSize: '12px', color: '#7f1d1d', fontWeight: 600 }}>
               ⚠️ Descarte alto: {descarteAuto} plantas, {descartePct}% de la cosecha (más de 5%) — va a quedar marcado en Alertas del panel.

@@ -65,10 +65,34 @@ export async function POST(req: NextRequest) {
 
     let unidades: number, plantasUsadas: number, pesoKg: number, descarteEf: number;
     if (modoFinal === 'planta') {
-      unidades = Number(plantas_cosechadas) || 0;
+      // ── Lechuga que sale en cajones a granel ──────────────────────────────────────
+      //
+      // En lechuga el descarte se deduce: lo que estaba en la mesada menos lo cosechado.
+      // Esa cuenta daba por descartada TODA planta que no saliera en paquete — incluidas
+      // las que se usaron para armar cajones a granel, que es producto vendido, no
+      // pérdida. Leo lo describió exacto: carga 63 plantas en paquete, usa el resto para
+      // cajones, y la pantalla le dice "descarte 93 plantas, 59,6%".
+      //
+      // Un descarte inventado no es solo un número feo: dispara la alerta del panel, ensucia
+      // el rendimiento del lote y hace que la mercadería que SÍ se cosechó no entre al stock
+      // de cámara. Tenía que llevar a cargar mal a propósito para que las cuentas cerraran.
+      //
+      // Los cajones se convierten a paquetes-equivalente por peso, igual que en rúcula (ver
+      // lib/cosechaCajones.ts). En lechuga un paquete es una planta, así que ese equivalente
+      // son plantas: se suman a lo cosechado y dejan de restar como descarte.
+      const eqPlanta = equivalenciaDeCajones({
+        variedad: String(lote.variedad || ''),
+        cajones: Number(cajones_armados) || 0,
+        kgPorCajon: Number(kg_por_cajon) || 0,
+        // El pesaje testigo de la cosecha por planta es el peso del paquete: en lechuga el
+        // paquete ES la planta, así que sirve igual para convertir los cajones.
+        pesoPaqueteGr: Number(peso_muestra_gr) || Number(peso_muestra_paquete_gr) || 0,
+      });
+      unidades = (Number(plantas_cosechadas) || 0) + eqPlanta.paquetesEquivalentes;
       descarteEf = Math.max(0, plantasEst - unidades);
       plantasUsadas = unidades + descarteEf;
-      pesoKg = (Number(peso_muestra_gr) || 0) > 0 ? (unidades * Number(peso_muestra_gr)) / 1000 : 0;
+      pesoKg = ((Number(peso_muestra_gr) || 0) > 0 ? ((Number(plantas_cosechadas) || 0) * Number(peso_muestra_gr)) / 1000 : 0)
+        + eqPlanta.kgTotales;
     } else if (modoFinal === 'cajon') {
       unidades = Number(cajones_armados) || 0;
       plantasUsadas = plantasEst;
@@ -218,7 +242,11 @@ export async function POST(req: NextRequest) {
       descarte_reportado: descarteEf,
       peso_muestra_kg: pesoMuestra,
       peso_total_estimado_kg: pesoKg > 0 ? pesoKg.toFixed(3) : '',
-      cajones_armados: modoFinal === 'cajon' ? (Number(cajones_armados) || 0) : '',
+      // Los cajones se anotan SIEMPRE que se hayan armado, no solo en modo cajon. Una
+      // cosecha mixta —parte en paquete o en planta, parte en cajones— los perdia: el
+      // stock de camara los lee de aca (ver lib/camara.ts) y quedaban fuera, aunque el
+      // peso y las unidades ya los contaban. Dos numeros del mismo hecho, distintos.
+      cajones_armados: (Number(cajones_armados) || 0) > 0 ? (Number(cajones_armados) || 0) : '',
       peso_muestra_paquete_gr: modoFinal === 'planta' ? '' : (Number(peso_muestra_paquete_gr) || ''),
       destino_cosecha: destino,
       estado: 'cosechado',

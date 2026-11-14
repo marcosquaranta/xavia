@@ -21,6 +21,7 @@ export default function AccionesLote({
   const router = useRouter();
   const [loadingDeshacer, setLoadingDeshacer] = useState(false);
   const [loadingBorrar, setLoadingBorrar] = useState(false);
+  const [loadingDescartar, setLoadingDescartar] = useState(false);
 
   const activo = estado === 'activo';
   const esBorrado = estado === 'borrado';
@@ -42,6 +43,35 @@ export default function AccionesLote({
       alert('Error al deshacer. Intentá de nuevo.');
     } finally {
       setLoadingDeshacer(false);
+    }
+  }
+
+  // Se pide el motivo en el mismo paso: un lote descartado sin explicación es un agujero
+  // en las estadísticas que nadie va a poder interpretar dentro de tres meses.
+  async function handleDescartar() {
+    const motivo = window.prompt(
+      `Descartar el lote ${idLote} entero.\n\n`
+      + 'Las plantas que quedan se registran como descarte y la mesada queda libre. '
+      + 'No es lo mismo que "Borrar lote": esto es una pérdida real y se ve en las estadísticas.\n\n'
+      + '¿Por qué se descarta?',
+    );
+    if (motivo === null) return;
+    if (!motivo.trim()) { alert('Hace falta el motivo para descartar el lote.'); return; }
+    setLoadingDescartar(true);
+    try {
+      const res = await fetch('/api/lotes/descartar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_lote: idLote, motivo: motivo.trim() }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.error || 'No se pudo descartar');
+      alert(j?.mensaje || 'Lote descartado.');
+      router.push('/cultivos');
+      router.refresh();
+    } catch (err: any) {
+      alert(err?.message || 'Error al descartar. Intentá de nuevo.');
+    } finally {
+      setLoadingDescartar(false);
     }
   }
 
@@ -92,6 +122,18 @@ export default function AccionesLote({
         <Link href={`/cultivos/${encodeURIComponent(idLote)}/editar`} className="btn secondary">
           Editar lote
         </Link>
+        {/* ── Descartar el lote entero ──────────────────────────────────────────────
+            No es "Borrar lote": borrar es para una carga equivocada y saca al lote de
+            todos los cálculos. Esto es para una pérdida real —se pasó de ciclo, se
+            enfermó— y tiene que verse en las estadísticas. Libera la mesada y deja el
+            descarte registrado, que son las dos cosas que antes había que hacer por
+            separado y terminaban a medias: el lote seguía figurando en la mesada. */}
+        {activo && (
+          <button className="btn secondary" style={{ borderColor: '#fecaca', color: '#b91c1c' }}
+            onClick={handleDescartar} disabled={loadingDescartar}>
+            {loadingDescartar ? 'Descartando…' : '🗑 Descartar lote'}
+          </button>
+        )}
         {puedeDeshacer && (
           <button
             className="btn secondary"
