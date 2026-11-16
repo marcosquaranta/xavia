@@ -20,17 +20,19 @@ const fmtISO = (d: Date) => {
 //
 // Como no hay que sacarlo hasta que se cargue, sigue apuntando al mismo jueves —o al que
 // venga después, si pasan varias semanas sin cargarlo— hasta que haya una lectura posterior.
-const DOW_PEDIDO = 4; // 0=domingo … 4=jueves
-function juevesDeReferencia(hoy: Date): Date {
+// Viernes. Era jueves (con el viernes de segunda chance); lo cambió Marcos a viernes y
+// sábado, que es cuando la chata está parada y alguien puede mirar el odómetro.
+const DOW_PEDIDO = 5; // 0=domingo … 5=viernes
+function viernesDeReferencia(hoy: Date): Date {
   const d = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
-  const diff = (d.getDay() - DOW_PEDIDO + 7) % 7; // días desde el último jueves
+  const diff = (d.getDay() - DOW_PEDIDO + 7) % 7; // días desde el último viernes
   d.setDate(d.getDate() - diff);
   return d;
 }
 
-// El recordatorio sale SOLO jueves y viernes: la carga se puede hacer cualquier día y a
-// cualquier hora, pero el aviso que aparece todos los días deja de leerse. El viernes queda
-// como segunda oportunidad —si el jueves no se cargó, el reporte sale sin el dato—. El día
+// El recordatorio sale SOLO viernes y sábado: la carga se puede hacer cualquier día y a
+// cualquier hora, pero el aviso que aparece todos los días deja de leerse. El sábado queda
+// como segunda oportunidad —si el viernes no se cargó, el reporte sale sin el dato—. El día
 // se calcula en huso de Argentina: con el del servidor (UTC) el aviso aparecería y
 // desaparecería tres horas antes de tiempo.
 export function esDiaDeAvisoKm(hoy: Date = new Date()): boolean {
@@ -38,14 +40,12 @@ export function esDiaDeAvisoKm(hoy: Date = new Date()): boolean {
     timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(hoy);
   const dow = new Date(fechaArg + 'T12:00:00').getDay(); // 0=dom … 4=jue, 5=vie
-  return dow === DOW_PEDIDO || dow === DOW_PEDIDO + 1;
+  return dow === DOW_PEDIDO || dow === DOW_PEDIDO + 1; // viernes o sábado
 }
 
-// True si todavía no se cargó ninguna lectura desde el último viernes — el recordatorio en
-// el Panel se muestra mientras esto sea true, cualquier día de la semana, no solo viernes,
-// y deja de mostrarse apenas se carga una lectura (activo solo si falta cargar).
+// True si todavía no se cargó ninguna lectura desde el último viernes.
 export function faltaCargarEstaSemana(registros: KilometrajeVehiculo[], vehiculo: string, hoy: Date = new Date()): boolean {
-  const refStr = fmtISO(juevesDeReferencia(hoy));
+  const refStr = fmtISO(viernesDeReferencia(hoy));
   return !registros.some((r) => r.vehiculo === vehiculo && String(r.fecha || '').slice(0, 10) >= refStr);
 }
 
@@ -54,7 +54,7 @@ export function faltaCargarEstaSemana(registros: KilometrajeVehiculo[], vehiculo
 // Dos reglas en una sola función, porque si la condición se arma en la página termina
 // habiendo una versión por pantalla y el aviso aparece en una y no en otra.
 //
-// Regla normal: solo el día que toca cargar (jueves, con el viernes de segunda chance). Un
+// Regla normal: solo el día que toca cargar (viernes, con el sábado de segunda chance). Un
 // aviso que aparece todos los días se vuelve parte del fondo y deja de leerse.
 //
 // Excepción: si ya pasaron más de dos semanas sin cargar nada, deja de ser un recordatorio

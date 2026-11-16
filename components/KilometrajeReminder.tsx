@@ -1,12 +1,14 @@
 'use client';
 import { useState } from 'react';
 
-export default function KilometrajeReminder({ ultimoKm, ultimaFecha, ultimoIdKm, faltaCargar, diasSinCargar = null, umbralAtraso = 14 }: {
+export default function KilometrajeReminder({ ultimoKm, ultimaFecha, ultimoIdKm, faltaCargar, diasSinCargar = null, umbralAtraso = 14, esDiaDeAviso = true }: {
   ultimoKm: number | null; ultimaFecha: string | null; ultimoIdKm: string | null; faltaCargar: boolean;
   // Cuántos días hace de la última carga, para poder decirlo cuando el atraso ya es grande.
   // El aviso normal sale el día que toca; este caso sale cualquier día y conviene que
   // explique por qué está apareciendo un martes (ver lib/kilometraje.ts).
   diasSinCargar?: number | null; umbralAtraso?: number;
+  // Si hoy es uno de los días en que se pide la carga (viernes o sábado).
+  esDiaDeAviso?: boolean;
 }) {
   const atrasado = diasSinCargar === null || diasSinCargar > umbralAtraso;
   const [abierto, setAbierto] = useState(false);
@@ -77,9 +79,21 @@ export default function KilometrajeReminder({ ultimoKm, ultimaFecha, ultimoIdKm,
     </div>
   );
 
-  // Fuera de los días de aviso (o ya cargado): línea chica, pero SIEMPRE con la opción de
-  // cargar. Antes acá solo se podía "corregir" borrando la última carga, así que cargar un
-  // km un martes era imposible.
+  // ── Los otros cinco días: nada ─────────────────────────────────────────────────────
+  //
+  // El banner grande salía solo el día que toca, pero esta línea chica salía TODOS los
+  // días —"Última carga de km del Partner: 122.728 km"— y eso es lo que Marcos veía cada
+  // mañana. Una línea que aparece siempre y que casi nunca pide nada es ruido con forma de
+  // información: ocupa el lugar de arriba del panel y entrena a saltear esa zona, que es
+  // justo donde aparecen las alertas que sí importan.
+  //
+  // Así que fuera del viernes y el sábado no se muestra nada. La carga sigue estando
+  // disponible esos dos días, y si pasan más de dos semanas sin cargar, `faltaCargar` se
+  // prende cualquier día y el banner vuelve solo.
+  if (!faltaCargar && !esDiaDeAviso) return null;
+
+  // Día de aviso con la carga ya hecha: línea chica, con la opción de volver a cargar o de
+  // corregir si se tipeó mal.
   if (!faltaCargar) {
     return (
       <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 14px', marginBottom: '14px', fontSize: '12px', color: '#6b7280' }}>
