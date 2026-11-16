@@ -76,6 +76,15 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
   // crédito la deuda baja en Xubio; con el ajuste baja solo del lado de la app. Hacer las
   // dos sobre la misma factura la bajaría dos veces, y ese error es silencioso.
   const [modo, setModo] = useState<'app' | 'nc'>('app');
+  // ── Qué va a pasar en Xubio si guardo esto ──────────────────────────────────────
+  //
+  // Corregir cantidades de una factura emitida dispara un comprobante — nota de crédito
+  // si baja, factura nueva si sube — y eso se emite en AFIP y no se deshace. No puede ser
+  // una sorpresa al apretar Guardar: se calcula mientras se tipea y se muestra antes.
+  const [previa, setPrevia] = useState<any[] | null>(null);
+  const [calculando, setCalculando] = useState(false);
+  // La excepción: corregir solo lo que la app reclama y no tocar Xubio.
+  const [sinXubio, setSinXubio] = useState(false);
   // Cuánto acreditar de cada (fila, artículo).
   const [aAcreditar, setAAcreditar] = useState<Record<string, string>>({});
   const [emitiendo, setEmitiendo] = useState(false);
@@ -98,6 +107,38 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
     setValores(prev => ({ ...prev, [id_venta]: { ...prev[id_venta], [key]: val } }));
   }
 
+  // Las líneas tal como quedarían, que es lo que se manda tanto a la previa como al
+  // guardado. Una sola definición: si la previa armara su propia lista, podría mostrar
+  // una cosa y guardarse otra.
+  function armarLineas() {
+    return filas.map(f => {
+      const v = valores[f.id_venta] || {};
+      const g = (k: string) => Number(v[k]) || 0;
+      return {
+        id_venta: f.id_venta, id_control: idControl, nombre_cliente: f.nombre_cliente, sucursal: f.sucursal,
+        ...Object.fromEntries(campos.map((c) => [c.key, g(c.key)])),
+      };
+    });
+  }
+
+  // Se recalcula sola, con una espera corta para no pedirla en cada tecla.
+  useEffect(() => {
+    if (modo !== 'app') { setPrevia(null); return; }
+    const t = setTimeout(async () => {
+      setCalculando(true);
+      try {
+        const r = await fetch('/api/ventas/correccion-preview', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lineas: armarLineas(), importeManual: Number(importeManual) || 0 }),
+        });
+        const j = await r.json().catch(() => ({}));
+        setPrevia(r.ok && Array.isArray(j.facturas) ? j.facturas.filter((x: any) => x.bajas.length || x.altas.length) : null);
+      } catch { setPrevia(null); }
+      setCalculando(false);
+    }, 600);
+    return () => clearTimeout(t);
+  }, [valores, importeManual, modo]);
+
   async function guardar() {
     setGuardando(true); setError(null);
     try {
@@ -113,7 +154,7 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
       });
       const r = await fetch('/api/ventas/guardar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fecha, id_exportacion: idExportacion, lineas, importeManual: Number(importeManual) || 0 }),
+        body: JSON.stringify({ fecha, id_exportacion: idExportacion, lineas, importeManual: Number(importeManual) || 0, sinXubio }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'Error');
@@ -353,6 +394,53 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
           precio —una bonificación, un precio pactado por única vez— el catálogo no lo sabe.
           Acá se escribe directamente lo que hay que cobrar: es un número decidido por una
           persona y le gana a cualquier cálculo. */}
+      {/* ── Lo que va a pasar en Xubio ────────────────────────────────────────────────
+          Corregir cantidades de una factura emitida dispara un comprobante, y eso se emite
+          en AFIP y no se deshace. Se calcula mientras se tipea y se dice acá, ANTES de
+          guardar: qué baja, qué sube, cuánto da y qué comprobante sale. */}
+      {modo === 'app' && previa && previa.length > 0 && (
+        <div style={{ margin: '10px 0', padding: '10px 12px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', fontSize: '12.5px', color: '#1e3a8a' }}>
+          <p style={{ margin: '0 0 6px', fontWeight: 800 }}>Si guardás así{calculando ? '…' : ':'}</p>
+          {previa.map((f: any) => (
+            <div key={f.numero} style={{ marginBottom: '7px', paddingBottom: '7px', borderBottom: '1px solid #dbeafe' }}>
+              <p style={{ margin: 0 }}>
+                <span style={{ fontFamily: 'ui-monospace, monospace' }}>{f.numero}</span>
+                {' · $'}{Math.round(f.montoXubio).toLocaleString('es-AR')} → <strong>${Math.round(f.montoNuevo).toLocaleString('es-AR')}</strong>
+              </p>
+              {f.bajas.length > 0 && (
+                <p style={{ margin: '2px 0 0', color: '#92400e' }}>
+                  Baja: {f.bajas.map((x: any) => `${x.cantidad} ${x.label}${x.sinPrecio ? ' (sin precio)' : ` = $${x.importe.toLocaleString('es-AR')}`}`).join(' · ')}
+                </p>
+              )}
+              {f.altas.length > 0 && (
+                <p style={{ margin: '2px 0 0', color: '#15803d' }}>
+                  Sube: {f.altas.map((x: any) => `${x.cantidad} ${x.label}${x.sinPrecio ? ' (sin precio)' : ` = $${x.importe.toLocaleString('es-AR')}`}`).join(' · ')}
+                </p>
+              )}
+              <p style={{ margin: '3px 0 0', fontWeight: 700 }}>
+                {sinXubio
+                  ? '→ No se toca Xubio: solo cambia lo que la app reclama.'
+                  : f.accion === 'nota_credito'
+                    ? `→ Se emite una NOTA DE CRÉDITO en Xubio por $${Math.round(f.importeComprobante).toLocaleString('es-AR')}`
+                    : f.accion === 'factura_extra'
+                      ? `→ Se emite una FACTURA NUEVA por la diferencia: $${Math.round(f.importeComprobante).toLocaleString('es-AR')}`
+                      : `→ No sale ningún comprobante. ${f.motivo}`}
+              </p>
+              {f.sinPrecio && (
+                <p style={{ margin: '3px 0 0', color: '#b45309' }}>
+                  Hay un artículo sin precio cargado: ese renglón iría en $0.
+                </p>
+              )}
+            </div>
+          ))}
+          {/* La excepción va acá y no como un modo aparte: es lo raro, no lo normal. */}
+          <label style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', cursor: 'pointer', marginTop: '4px' }}>
+            <input type="checkbox" checked={sinXubio} onChange={(e) => setSinXubio(e.target.checked)} />
+            No tocar Xubio — corregir solo lo que la app reclama
+          </label>
+        </div>
+      )}
+
       <div style={{ marginTop: '10px', padding: '8px 10px', background: '#fafaf9', border: '1px solid #e5e7eb', borderRadius: '6px' }}>
         <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#374151', marginBottom: '3px' }}>
           Importe a cobrar, si no es el que sale de las cantidades

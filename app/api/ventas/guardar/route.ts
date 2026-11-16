@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
     // no cierra nada: la pantalla es una cortina, la API es la puerta.
   if (user.rol !== 'admin') return NextResponse.json({ error: 'Solo un administrador puede ver o cambiar esto.' }, { status: 403 });
   try {
-    const { fecha, lineas, id_exportacion, importeManual } = await req.json();
+    const { fecha, lineas, id_exportacion, importeManual, sinXubio} = await req.json();
     // Con ids únicos garantizados: si quedaron repetidos de antes, se corrigen acá.
     const ventas = await leerVentasConIdsUnicos();
     const fechaCarga = new Date().toISOString().split('T')[0];
@@ -236,7 +236,10 @@ export async function POST(req: NextRequest) {
         const altas = altasPorFactura.get(numero) || [];
 
         // Baja el importe -> nota de credito por la diferencia.
-        if (manual <= 0 && bajas.length && !altas.length && monto < importeXubio) {
+        // `sinXubio` es la excepcion explicita: corregir lo que la app reclama y dejar el
+        // comprobante como esta. Antes era el unico comportamiento; ahora hay que pedirlo,
+        // porque el caso normal —la correccion de verdad— es cerrarla en Xubio.
+        if (!sinXubio && manual <= 0 && bajas.length && !altas.length && monto < importeXubio) {
           const nc = await emitirNCPorCorreccion({ numeroFactura: numero, bajas, usuario: user.email })
             .catch((e: any) => ({ ok: false, error: e?.message || 'error' } as any));
           if (nc.ok) {
@@ -257,7 +260,7 @@ export async function POST(req: NextRequest) {
         // Si la correccion sube Y baja a la vez (se cambio un articulo por otro) no se
         // emite nada solo: no es una diferencia, son dos movimientos, y partirlos en una
         // NC mas una factura es una decision contable que no se toma sin mirar.
-        if (manual <= 0 && altas.length && !bajas.length && monto > importeXubio) {
+        if (!sinXubio && manual <= 0 && altas.length && !bajas.length && monto > importeXubio) {
           const f = await emitirFacturaPorCorreccion({ numeroOriginal: numero, altas, usuario: user.email })
             .catch((e: any) => ({ ok: false, error: e?.message || 'error' } as any));
           if (f.ok) {
