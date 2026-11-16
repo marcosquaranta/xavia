@@ -16,6 +16,7 @@ import type { PrecioVenta, ClienteVenta } from '@/lib/types';
 import { leerArticulosExtra } from '@/lib/articulosVenta';
 import { clavesDeVenta } from '@/lib/clavesVenta';
 import { emitirNCPorCorreccion } from '@/lib/notaCredito';
+import { emitirFacturaPorCorreccion } from '@/lib/facturaCorreccion';
 export async function POST(req: NextRequest) {
   // Las columnas de los artículos nuevos tienen que existir antes de escribir por nombre.
   await asegurarColumnasArticulos();
@@ -132,7 +133,7 @@ export async function POST(req: NextRequest) {
       if (exp && exp !== 'PENDIENTE' && claveComprobante(exp)) numeros.add(exp);
     }
 
-    const ajustes: { numero: string; de: number; a: number; manual?: boolean; notaCredito?: string; importeNC?: number }[] = [];
+    const ajustes: { numero: string; de: number; a: number; manual?: boolean; notaCredito?: string; importeNC?: number; facturaExtra?: string; importeExtra?: number }[] = [];
     // Las NC que no se pudieron emitir. Se informan a la pantalla: la corrección quedó
     // guardada igual, pero quien la hizo tiene que saber que la factura no se cerró.
     const notasFallidas: { numero: string; error: string }[] = [];
@@ -159,17 +160,21 @@ export async function POST(req: NextRequest) {
       // cobrar de más, eso necesita otro comprobante y no se decide solo.
       const antesPorVenta = new Map(ventas.map((v) => [String(v.id_venta), v]));
       const bajasPorFactura = new Map<string, { id_venta: string; key: string; cantidad: number }[]>();
+      // Y lo que SUBIO. Si la correccion agrega mercaderia, no va una nota de debito: va
+      // otra factura por la diferencia (decision de Marcos, ver lib/facturaCorreccion.ts).
+      const altasPorFactura = new Map<string, { id_venta: string; key: string; cantidad: number }[]>();
       for (const vAhora of ventasAhora) {
         const exp = String(vAhora.exportado || '').trim();
         if (!exp || exp === 'PENDIENTE' || !numeros.has(exp)) continue;
         const vAntes = antesPorVenta.get(String(vAhora.id_venta));
         if (!vAntes) continue;
         for (const k of clavesAjuste) {
-          const baja = (Number((vAntes as any)[k]) || 0) - (Number((vAhora as any)[k]) || 0);
-          if (baja <= 0) continue;
-          const lista = bajasPorFactura.get(exp) || [];
-          lista.push({ id_venta: String(vAhora.id_venta), key: k, cantidad: baja });
-          bajasPorFactura.set(exp, lista);
+          const delta = (Number((vAhora as any)[k]) || 0) - (Number((vAntes as any)[k]) || 0);
+          if (delta === 0) continue;
+          const mapa = delta < 0 ? bajasPorFactura : altasPorFactura;
+          const lista = mapa.get(exp) || [];
+          lista.push({ id_venta: String(vAhora.id_venta), key: k, cantidad: Math.abs(delta) });
+          mapa.set(exp, lista);
         }
       }
 
@@ -178,9 +183,26 @@ export async function POST(req: NextRequest) {
         if (!v.filas) continue;
         const comp = cache.find((c) => claveComprobante(c.numero) === claveComprobante(numero));
         const importeXubio = Math.round(Number(comp?.importe) || 0);
+        // ── Si la factura todavía no está en Xubio, no se corrige nada allá ─────────
+        //
         // Sin el comprobante en la copia local no hay contra qué comparar: anotar un ajuste
         // con "antes = 0" diría que la factura entera cambió, que es peor que no anotar nada.
-        if (importeXubio <= 0) continue;
+        // Y sin eso tampoco se emite nota de crédito ni factura por la diferencia: no se
+        // puede corregir en Xubio algo que Xubio todavía no tiene.
+        //
+        // Pasa en dos situaciones distintas y conviene distinguirlas: una venta marcada
+        // PENDIENTE (ya filtrada arriba, nunca llega acá) y una factura emitida hace un rato
+        // que la copia local de Xubio todavía no trajo. En la segunda, la corrección quedó
+        // bien guardada en la app pero el comprobante sigue diciendo lo viejo, y eso hay que
+        // decirlo: antes se salteaba sin una palabra y nadie se enteraba de que faltaba algo.
+        if (importeXubio <= 0) {
+          notasFallidas.push({
+            numero,
+            error: 'esa factura todavía no figura en la copia local de Xubio, así que no se pudo corregir allá. '
+              + 'Si se emitió recién, va a aparecer en la próxima sincronización y queda para resolver a mano.',
+          });
+          continue;
+        }
 
         // ── El importe puesto a mano gana ───────────────────────────────────────────
         //
@@ -211,7 +233,10 @@ export async function POST(req: NextRequest) {
         // cantidades que lo expliquen— se anota el ajuste igual y sale en el aviso diario.
         // Nunca se pierde la corrección por no poder emitir el comprobante.
         const bajas = bajasPorFactura.get(numero) || [];
-        if (manual <= 0 && bajas.length && monto < importeXubio) {
+        const altas = altasPorFactura.get(numero) || [];
+
+        // Baja el importe -> nota de credito por la diferencia.
+        if (manual <= 0 && bajas.length && !altas.length && monto < importeXubio) {
           const nc = await emitirNCPorCorreccion({ numeroFactura: numero, bajas, usuario: user.email })
             .catch((e: any) => ({ ok: false, error: e?.message || 'error' } as any));
           if (nc.ok) {
@@ -219,6 +244,27 @@ export async function POST(req: NextRequest) {
             continue;
           }
           notasFallidas.push({ numero, error: String((nc as any).error || 'no se pudo emitir') });
+        }
+
+        // ── Sube el importe: otra factura, no una nota de debito ────────────────────
+        //
+        // Es mercaderia que se entrego y no estaba facturada, asi que facturarla es
+        // exactamente lo que paso. Y ademas entra sola a todo lo que ya funciona: aparece
+        // en los comprobantes de Xubio como una factura mas, suma a la deuda del cliente,
+        // y entra en el reclamo del lunes y en el control de facturacion. Una nota de
+        // debito no la mira ninguno de esos caminos.
+        //
+        // Si la correccion sube Y baja a la vez (se cambio un articulo por otro) no se
+        // emite nada solo: no es una diferencia, son dos movimientos, y partirlos en una
+        // NC mas una factura es una decision contable que no se toma sin mirar.
+        if (manual <= 0 && altas.length && !bajas.length && monto > importeXubio) {
+          const f = await emitirFacturaPorCorreccion({ numeroOriginal: numero, altas, usuario: user.email })
+            .catch((e: any) => ({ ok: false, error: e?.message || 'error' } as any));
+          if (f.ok) {
+            ajustes.push({ numero, de: importeXubio, a: monto, facturaExtra: f.numero, importeExtra: f.importe });
+            continue;
+          }
+          notasFallidas.push({ numero, error: `no se pudo facturar la diferencia: ${String((f as any).error || '')}` });
         }
         await guardarAjuste({
           numero, id_control: v.id_control, cliente: v.cliente,

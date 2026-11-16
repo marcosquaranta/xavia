@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readSheet, updateRow, asegurarColumnas } from '@/lib/sheets';
 import { HOJA_AJUSTES, type AjusteFactura } from '@/lib/ajusteFactura';
 import { HOJA_NOTAS, type NotaCreditoRegistrada } from '@/lib/notaCredito';
+import { HOJA_FACT_CORRECCION, type FacturaPorCorreccion } from '@/lib/facturaCorreccion';
 import { destinatariosDe } from '@/lib/avisosConfig';
 
 export const dynamic = 'force-dynamic';
@@ -33,12 +34,17 @@ export async function GET(req: NextRequest) {
   try {
     await asegurarColumnas(HOJA_AJUSTES, ['avisado']).catch(() => null);
     await asegurarColumnas(HOJA_NOTAS, ['avisado']).catch(() => null);
+    await asegurarColumnas(HOJA_FACT_CORRECCION, ['avisado']).catch(() => null);
 
     const [ajustes, notas, config] = await Promise.all([
       readSheet<AjusteFactura & { avisado?: string }>(HOJA_AJUSTES).catch(() => []),
       readSheet<NotaCreditoRegistrada & { avisado?: string }>(HOJA_NOTAS).catch(() => []),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
     ]);
+    // Las facturas que se emitieron por una correccion que SUMO. Van en el mismo mail: son
+    // la otra mitad de la misma pregunta —que se hizo con las facturas corregidas— y
+    // separarlas en dos avisos obligaria a cruzar dos mails para contestarla.
+    const extras = await readSheet<FacturaPorCorreccion>(HOJA_FACT_CORRECCION).catch(() => []);
 
     const sinAvisar = <T extends { avisado?: string }>(filas: T[]) =>
       filas.filter((f) => String(f?.avisado || '').trim().toUpperCase() !== 'SI');
@@ -46,6 +52,7 @@ export async function GET(req: NextRequest) {
     // Un ajuste revertido ya no dice nada: alguien lo deshizo antes de que saliera el aviso.
     const nuevosAjustes = sinAvisar(ajustes).filter((a) => String(a.estado || 'activo') !== 'revertido');
     const nuevasNotas = sinAvisar(notas).filter((n) => String(n.estado || '') !== 'anulada');
+    const nuevasExtras = sinAvisar(extras as any).filter((f: any) => String(f.estado || '') !== 'anulada') as FacturaPorCorreccion[];
 
     const resumen = {
       ajustes: nuevosAjustes.length,
@@ -53,8 +60,8 @@ export async function GET(req: NextRequest) {
       diferencia: nuevosAjustes.reduce((a, x) => a + (Number(x.importe_xubio) || 0) - (Number(x.importe_app) || 0), 0),
     };
 
-    if (soloVer) return NextResponse.json({ ok: true, ...resumen, nuevosAjustes, nuevasNotas });
-    if (!nuevosAjustes.length && !nuevasNotas.length) {
+    if (soloVer) return NextResponse.json({ ok: true, ...resumen, extras: nuevasExtras.length, nuevosAjustes, nuevasNotas, nuevasExtras });
+    if (!nuevosAjustes.length && !nuevasNotas.length && !nuevasExtras.length) {
       return NextResponse.json({ ok: true, enviado: false, motivo: 'no hay facturas corregidas sin avisar' });
     }
     if (!process.env.RESEND_API_KEY) return NextResponse.json({ ok: false, error: 'RESEND_API_KEY no configurada' }, { status: 500 });
@@ -119,6 +126,24 @@ export async function GET(req: NextRequest) {
             </tr>`).join('')}</tbody>
           </table>` : ''}
 
+        ${nuevasExtras.length ? `
+          <p style="margin:18px 0 6px;font-size:13px;font-weight:800;color:#1e40af">Facturas emitidas por una corrección que sumó</p>
+          <p style="margin:0 0 6px;font-size:12px;color:#6b7280">La corrección agregó mercadería, así que la diferencia salió en una factura nueva en vez de una nota de débito.</p>
+          <table style="border-collapse:collapse;width:100%;font-size:12.5px">
+            <thead><tr style="background:#f5f5f5">
+              <th style="padding:5px 8px;text-align:left">Factura nueva</th>
+              <th style="padding:5px 8px;text-align:left">Corrige a</th>
+              <th style="padding:5px 8px;text-align:left">Cliente</th>
+              <th style="padding:5px 8px;text-align:right">Importe</th>
+            </tr></thead>
+            <tbody>${nuevasExtras.map((f) => `<tr>
+              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;font-family:ui-monospace,monospace;font-size:11.5px">${f.numero_nuevo}</td>
+              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;font-family:ui-monospace,monospace;font-size:11.5px">${f.numero_original}</td>
+              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6">${f.cliente || ''}</td>
+              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;text-align:right;font-weight:700">${$(f.importe)}</td>
+            </tr>`).join('')}</tbody>
+          </table>` : ''}
+
         <p style="margin:18px 0 0">
           <a href="${BASE}/ventas/historial" style="background:#92400e;color:white;text-decoration:none;padding:9px 16px;border-radius:6px;font-weight:700;display:inline-block">
             Ver el historial de facturación
@@ -150,6 +175,7 @@ export async function GET(req: NextRequest) {
     // facturas marcadas como avisadas sin que nadie se haya enterado nunca.
     for (const a of nuevosAjustes) await updateRow(HOJA_AJUSTES, 'numero', String(a.numero), { avisado: 'SI' }).catch(() => null);
     for (const n of nuevasNotas) await updateRow(HOJA_NOTAS, 'numero_nc', String(n.numero_nc), { avisado: 'SI' }).catch(() => null);
+    for (const f of nuevasExtras) await updateRow(HOJA_FACT_CORRECCION, 'numero_nuevo', String(f.numero_nuevo), { avisado: 'SI' }).catch(() => null);
 
     return NextResponse.json({ ok: true, enviado: true, ...resumen });
   } catch (e: any) {

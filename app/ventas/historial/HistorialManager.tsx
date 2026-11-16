@@ -63,7 +63,7 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
   const [guardando, setGuardando] = useState(false);
   const [eliminandoFila, setEliminandoFila] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [ajustes, setAjustes] = useState<{ numero: string; de: number; a: number; manual?: boolean; notaCredito?: string; importeNC?: number }[]>([]);
+  const [ajustes, setAjustes] = useState<{ numero: string; de: number; a: number; manual?: boolean; notaCredito?: string; importeNC?: number; facturaExtra?: string; importeExtra?: number }[]>([]);
   // Las notas de crédito que no se pudieron emitir. La corrección quedó guardada igual,
   // pero la factura no se cerró y quien la hizo tiene que enterarse ahora, no en el mail
   // de mañana.
@@ -217,14 +217,14 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
       )}
 
       {ajustes.length > 0 && (
-        <div style={{ margin: '0 0 8px', padding: '8px 10px', background: ajustes.every((a) => a.notaCredito) ? '#f0fdf4' : '#fffbeb', border: `1px solid ${ajustes.every((a) => a.notaCredito) ? '#bbf7d0' : '#fde68a'}`, borderRadius: '6px', fontSize: '12px', color: ajustes.every((a) => a.notaCredito) ? '#166534' : '#92400e' }}>
+        <div style={{ margin: '0 0 8px', padding: '8px 10px', background: ajustes.every((a) => a.notaCredito || a.facturaExtra) ? '#f0fdf4' : '#fffbeb', border: `1px solid ${ajustes.every((a) => a.notaCredito || a.facturaExtra) ? '#bbf7d0' : '#fde68a'}`, borderRadius: '6px', fontSize: '12px', color: ajustes.every((a) => a.notaCredito || a.facturaExtra) ? '#166534' : '#92400e' }}>
           <strong>Cambió lo que hay que cobrar.</strong>{' '}
           {/* Con la NC emitida la factura quedó corregida en Xubio también. Sin ella, solo
               cambia lo que la app reclama y el comprobante sigue diciendo lo de antes: son
               dos situaciones distintas y el cartel tiene que decir cuál es. */}
-          {ajustes.every((a) => a.notaCredito)
-            ? 'Se emitió la nota de crédito en Xubio, así que la factura quedó corregida de los dos lados.'
-            : 'Donde no salió la nota de crédito, la factura en Xubio sigue diciendo el importe original y la app reclama el corregido.'}
+          {ajustes.every((a) => a.notaCredito || a.facturaExtra)
+            ? 'Xubio quedó corregido: lo que bajó salió por nota de crédito y lo que subió por una factura nueva.'
+            : 'Donde no salió el comprobante, la factura en Xubio sigue diciendo el importe original y la app reclama el corregido.'}
           <ul style={{ margin: '5px 0 0', paddingLeft: '18px' }}>
             {ajustes.map((a) => (
               <li key={a.numero}>
@@ -234,6 +234,14 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
                   <span style={{ color: '#166534' }}>
                     {' '}— NC <span style={{ fontFamily: 'ui-monospace, monospace' }}>{a.notaCredito}</span>
                     {a.importeNC ? ` por $${Math.round(a.importeNC).toLocaleString('es-AR')}` : ''}
+                  </span>
+                )}
+                {/* La corrección sumó: la diferencia salió en una factura nueva, no en una
+                    nota de débito. Se nombra el comprobante para poder ubicarlo en Xubio. */}
+                {a.facturaExtra && (
+                  <span style={{ color: '#1e40af' }}>
+                    {' '}— se facturó la diferencia aparte en <span style={{ fontFamily: 'ui-monospace, monospace' }}>{a.facturaExtra}</span>
+                    {a.importeExtra ? ` por $${Math.round(a.importeExtra).toLocaleString('es-AR')}` : ''}
                   </span>
                 )}
               </li>

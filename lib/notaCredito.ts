@@ -185,6 +185,15 @@ export async function emitirNCDeFactura(args: {
     }).catch(() => false);
   }
 
+  await avisarNotaCredito({
+    numeroNC: String(r.numeroDocumento || ''),
+    numeroFactura,
+    cliente: String(cli.nombre_display || cli.nombre_xubio || ''),
+    importe: Math.round(importe),
+    detalle: items.map((i) => `${i.cantidad} ${i.codigo}`).join(' · '),
+    automatica: false,
+  });
+
   return { ok: true, numeroNC: r.numeroDocumento, cae: r.cae, importe: Math.round(importe) };
 }
 
@@ -293,5 +302,79 @@ export async function emitirNCPorCorreccion(args: {
     }).catch(() => false);
   }
 
+  await avisarNotaCredito({
+    numeroNC: String(r.numeroDocumento || ''),
+    numeroFactura,
+    cliente: String(cli.nombre_display || cli.nombre_xubio || ''),
+    importe: Math.round(importe),
+    detalle: items.map((i) => `${i.cantidad} ${i.codigo}`).join(' · '),
+    automatica: true,
+    motivo: 'Se corrigieron las cantidades de la venta después de facturar',
+  });
+
   return { ok: true, numeroNC: r.numeroDocumento, cae: r.cae, importe: Math.round(importe) };
+}
+
+// ── El mail de la nota de crédito ────────────────────────────────────────────────────
+//
+// Pedido de Marcos: avisar cuando se emite una NC, en el momento y no en el resumen del
+// día siguiente. Una nota de crédito baja plata facturada y ahora puede salir sola al
+// corregir una venta — enterarse al otro día es enterarse tarde.
+//
+// No tira error hacia afuera ni bloquea: la NC ya está emitida en AFIP cuando esto corre.
+// Si el mail falla, lo peor que pasa es que la NC aparezca recién en el resumen diario;
+// romper la operación por no poder avisar sería mucho peor.
+export async function avisarNotaCredito(d: {
+  numeroNC: string;
+  numeroFactura: string;
+  cliente: string;
+  importe: number;
+  detalle: string;
+  automatica: boolean;
+  motivo?: string;
+}): Promise<void> {
+  try {
+    if (!process.env.RESEND_API_KEY) return;
+    const { destinatariosDe } = await import('./avisosConfig');
+    const config = await readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []);
+    const destinatarios = destinatariosDe('email_alertas_plata', config);
+    if (!destinatarios.length) return;
+
+    const plata = '$' + Math.round(d.importe || 0).toLocaleString('es-AR');
+    const html = `
+      <div style="font-family:system-ui,Arial,sans-serif;color:#111;max-width:620px;line-height:1.6">
+        <h2 style="margin:0 0 4px;font-size:18px;color:#166534">Nota de crédito emitida</h2>
+        <p style="margin:0 0 14px;font-size:12.5px;color:#6b7280">
+          ${d.automatica
+            ? 'Salió sola al corregir una venta ya facturada: la factura quedó corregida en Xubio también.'
+            : 'Emitida a mano desde el historial de facturación.'}
+        </p>
+        <table style="border-collapse:collapse;font-size:13px">
+          <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Nota de crédito</td><td style="padding:3px 0;font-family:ui-monospace,monospace"><strong>${d.numeroNC || '(sin número)'}</strong></td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Sobre la factura</td><td style="padding:3px 0;font-family:ui-monospace,monospace">${d.numeroFactura}</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Cliente</td><td style="padding:3px 0">${d.cliente}</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Importe</td><td style="padding:3px 0;font-weight:700;font-size:15px">${plata}</td></tr>
+          ${d.detalle ? `<tr><td style="padding:3px 12px 3px 0;color:#6b7280;vertical-align:top">Qué se acreditó</td><td style="padding:3px 0">${d.detalle}</td></tr>` : ''}
+          ${d.motivo ? `<tr><td style="padding:3px 12px 3px 0;color:#6b7280;vertical-align:top">Motivo</td><td style="padding:3px 0">${d.motivo}</td></tr>` : ''}
+        </table>
+        <p style="margin:16px 0 0">
+          <a href="https://xavia-self.vercel.app/ventas/historial" style="background:#166534;color:white;text-decoration:none;padding:9px 16px;border-radius:6px;font-weight:700;display:inline-block">
+            Ver el historial de facturación
+          </a>
+        </p>
+      </div>`;
+
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'Xavia App <ventas@xavia.com.ar>',
+        to: destinatarios,
+        subject: `Nota de crédito ${d.numeroNC || ''} — ${d.cliente} — ${plata}`,
+        html,
+      }),
+    });
+  } catch (e) {
+    console.error('[notaCredito] no se pudo avisar la NC:', e);
+  }
 }
