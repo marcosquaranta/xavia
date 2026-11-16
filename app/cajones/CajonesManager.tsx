@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import type { CajonMovimiento, ClienteVenta } from '@/lib/types';
 import type { SaldoCajonCliente, AlertaCajon } from '@/lib/cajones';
 import { nombreClienteVisible } from '@/lib/clientes';
+import { saldoPorSucursal } from '@/lib/cajones';
 import NumberInput from '@/components/NumberInput';
 
 const HOY = new Date().toISOString().split('T')[0];
@@ -21,6 +22,12 @@ export default function CajonesManager({ saldos, alertas, clientes, movimientos,
 }) {
   const router = useRouter();
   const [idControl, setIdControl] = useState('');
+  // ── A qué sucursal ──────────────────────────────────────────────────────────────
+  //
+  // Los cajones se llevan a una sucursal, no a una razón social. Sin esto, registrar una
+  // entrega a Mamina no decía si era Newbery o Roldán, y después el saldo del cliente no
+  // servía para ir a buscarlos: "La Reina debe 14" con tres locales no dice nada.
+  const [sucursal, setSucursal] = useState('');
   const [tipo, setTipo] = useState<CajonMovimiento['tipo']>('entrega');
   const [cantidad, setCantidad] = useState(0);
   const [fecha, setFecha] = useState(HOY);
@@ -49,6 +56,17 @@ export default function CajonesManager({ saldos, alertas, clientes, movimientos,
   // nombre_cliente vacío/con el id pelado, en vez del nombre real del cliente.
   const nombreCliente = (id: string) => nombreClienteVisible(clientes.find(c => String(c.id_control) === id)) || id;
 
+  // Las sucursales del cliente elegido, de su ficha.
+  const sucursalesDelCliente = (() => {
+    const c = clientes.find(x => String(x.id_control) === idControl);
+    return String(c?.sucursales || '').split('|').map(x => x.trim()).filter(Boolean);
+  })();
+
+  // Cuántos cajones hay en cada sucursal, para el cliente elegido. Es el dato que falta
+  // para ir a buscarlos.
+  const porSucursalDelCliente = saldoPorSucursal(movimientos, clientes)
+    .filter(x => x.id_control === idControl && x.saldo !== 0);
+
   // Info del cliente elegido en el formulario — aparece apenas se selecciona, para poder
   // chequear el saldo actual antes de confirmar (y, en un ajuste, ver la diferencia al toque).
   const infoCliente = useMemo(() => {
@@ -66,7 +84,7 @@ export default function CajonesManager({ saldos, alertas, clientes, movimientos,
     try {
       const res = await fetch('/api/cajones/movimiento', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fecha, id_control: idControl, nombre_cliente: nombreCliente(idControl), tipo, cantidad, notas }),
+        body: JSON.stringify({ fecha, id_control: idControl, nombre_cliente: nombreCliente(idControl), sucursal, tipo, cantidad, notas }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || 'Error al guardar');
@@ -206,11 +224,22 @@ export default function CajonesManager({ saldos, alertas, clientes, movimientos,
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: '12px', marginBottom: tipo === 'ajuste' ? '10px' : '12px' }}>
           <div>
             <label style={{ fontSize: '11px', color: '#6b7280' }}>Cliente</label>
-            <select value={idControl} onChange={e => setIdControl(e.target.value)} disabled={guardando}>
+            <select value={idControl} onChange={e => { setIdControl(e.target.value); setSucursal(''); }} disabled={guardando}>
               <option value="">Elegir cliente...</option>
               {clientes.map(c => <option key={c.id_control} value={c.id_control}>{nombreClienteVisible(c)}</option>)}
             </select>
           </div>
+          {/* La sucursal, solo cuando el cliente tiene más de una. A un cliente de una
+              sola dirección preguntarle la sucursal es una pregunta sin respuesta. */}
+          {sucursalesDelCliente.length > 0 && (
+            <div>
+              <label style={{ fontSize: '11px', color: '#6b7280' }}>Sucursal</label>
+              <select value={sucursal} onChange={e => setSucursal(e.target.value)} disabled={guardando}>
+                <option value="">Elegir sucursal...</option>
+                {sucursalesDelCliente.map(x => <option key={x} value={x}>{x}</option>)}
+              </select>
+            </div>
+          )}
           {tipo !== 'ajuste' && (
             <div>
               <label style={{ fontSize: '11px', color: '#6b7280' }}>Cantidad</label>
@@ -274,6 +303,15 @@ export default function CajonesManager({ saldos, alertas, clientes, movimientos,
             <span style={{ color: '#6b7280' }}>
               Último movimiento: {infoCliente.ultimoMovimiento ? `${infoCliente.ultimoMovimiento} (hace ${infoCliente.diasSinMovimiento}d)` : 'nunca'}
             </span>
+            {/* En qué sucursal están. El saldo del cliente dice cuántos hay afuera; esto
+                dice dónde, que es lo único que sirve para ir a buscarlos. Los movimientos
+                cargados antes de que existiera la columna caen en "sin sucursal": de esos
+                no se sabe, y decirlo es mejor que repartirlos por adivinanza. */}
+            {porSucursalDelCliente.length > 0 && (
+              <span style={{ flexBasis: '100%', color: '#1e3a8a', paddingTop: '6px', borderTop: '1px solid #bfdbfe' }}>
+                Dónde están: {porSucursalDelCliente.map((x) => `${x.sucursal || 'sin sucursal'} ${fmt(x.saldo)}`).join(' · ')}
+              </span>
+            )}
           </div>
         )}
 

@@ -137,6 +137,58 @@ export function teoricoPorCliente(ventas: VentaDia[], unidadesPorCajonRucula: nu
   return out;
 }
 
+// ── Cuántos cajones hay en cada sucursal ──────────────────────────────────────────
+//
+// El saldo por cliente dice cuántos cajones hay afuera; éste dice DÓNDE. Es lo que hace
+// falta para ir a buscarlos: "La Reina debe 14" no sirve si tiene tres locales.
+//
+// Mismo replay que saldoPorCliente, pero por cliente+sucursal. Los movimientos viejos no
+// tienen sucursal cargada y caen todos juntos en "(sin sucursal)", que es honesto: de esos
+// no se sabe, y decirlo es mejor que repartirlos por adivinanza.
+export interface SaldoCajonSucursal {
+  id_control: string;
+  nombre: string;
+  sucursal: string;       // '' = sin sucursal cargada
+  saldo: number;
+  ultimoMovimiento: string | null;
+}
+
+export function saldoPorSucursal(movimientos: CajonMovimiento[], clientes: ClienteVenta[]): SaldoCajonSucursal[] {
+  const nombreMap = mapaNombresClientes(clientes);
+  const porClave = new Map<string, CajonMovimiento[]>();
+  for (const m of movimientos) {
+    const id = String(m.id_control || '');
+    if (!id) continue;
+    const clave = `${id}||${String((m as any).sucursal || '').trim()}`;
+    if (!porClave.has(clave)) porClave.set(clave, []);
+    porClave.get(clave)!.push(m);
+  }
+
+  const out: SaldoCajonSucursal[] = [];
+  for (const [clave, movs] of porClave) {
+    const [id_control, sucursal] = clave.split('||');
+    const ordenados = [...movs].sort((a, b) => {
+      const [fa, na] = ordenMovimiento(a), [fb, nb] = ordenMovimiento(b);
+      return fa === fb ? na - nb : fa.localeCompare(fb);
+    });
+    let saldo = 0;
+    for (const m of ordenados) {
+      const cant = Number(m.cantidad) || 0;
+      if (m.tipo === 'ajuste') saldo = cant;
+      else if (m.tipo === 'entrega') saldo += cant;
+      else if (m.tipo === 'devolucion') saldo -= cant;
+    }
+    out.push({
+      id_control,
+      nombre: nombreMap.get(id_control) || id_control,
+      sucursal,
+      saldo,
+      ultimoMovimiento: ordenados.length ? String(ordenados[ordenados.length - 1].fecha || '') : null,
+    });
+  }
+  return out.sort((a, b) => b.saldo - a.saldo || a.nombre.localeCompare(b.nombre));
+}
+
 export interface AlertaCajon { id_control: string; nombre: string; saldo: number; diasSinMovimiento: number | null }
 
 // Clientes que deben cajones (saldo > 0) y no tuvieron NINGÚN movimiento (ni entrega ni

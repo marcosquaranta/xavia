@@ -42,8 +42,18 @@ const KG_LABELS = [
 const fmtDia = (f: string) => { const [y, m, d] = String(f || '').split('-'); return d ? `${d}/${m}/${y.slice(2)}` : f; };
 const fmtPesos = (n: number) => '$' + Math.round(Math.abs(n)).toLocaleString('es-AR');
 
-function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, esKg, onSaved, cambios, extrasUnidad = [], extrasKg = [], fuentes = [] }: {
+function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, esKg, onSaved, cambios, extrasUnidad = [], extrasKg = [], fuentes = [], tambienPara = [] }: {
   idControl: string; nombreCliente: string; sucursalObs: string;
+  // ── Un precio por cliente, no por sucursal ──────────────────────────────────────
+  //
+  // La hoja de Precios guarda una fila por cliente Y sucursal, y la pantalla mostraba un
+  // bloque por cada una. Pero el precio es el MISMO para todas: en la práctica eran tres
+  // copias del mismo número, con tres chances de que una quedara desactualizada o vacía —
+  // y una sucursal sin precio factura en $0 sin avisar.
+  //
+  // Ahora se edita una sola lista y se guarda en todas. La forma de la hoja no cambia:
+  // cambiar su estructura obligaría a tocar todo lo que la lee.
+  tambienPara?: string[];
   precioActual: PrecioVenta | undefined; esKg: boolean; onSaved: () => void;
   cambios: Record<string, CambioPrecioUI>;
   extrasUnidad?: EtiquetaArticulo[]; extrasKg?: EtiquetaArticulo[];
@@ -75,12 +85,17 @@ function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, 
   async function guardar() {
     setSaving(true); setOk(false); setErr(null);
     try {
-      const res = await fetch('/api/admin/precios', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_control: idControl, nombre_cliente: nombreCliente, sucursal_obs: sucursalObs,
-          ...Object.fromEntries(campos.map(p => [p.key, Number(vals[p.key]) || 0])) }),
-      });
-      if (!res.ok) { const j = await res.json(); throw new Error(j.error); }
+      // El mismo precio a todas las sucursales del cliente. Se guardan de a una porque la
+      // hoja tiene una fila por sucursal; lo que no puede pasar es que queden distintas.
+      const destinos = [sucursalObs, ...tambienPara];
+      for (const suc of destinos) {
+        const res = await fetch('/api/admin/precios', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id_control: idControl, nombre_cliente: nombreCliente, sucursal_obs: suc,
+            ...Object.fromEntries(campos.map(p => [p.key, Number(vals[p.key]) || 0])) }),
+        });
+        if (!res.ok) { const j = await res.json(); throw new Error(`${suc}: ${j.error}`); }
+      }
       setOk(true); setTimeout(() => setOk(false), 2000);
       onSaved();
     } catch (e: any) { setErr(e.message); }
@@ -90,7 +105,13 @@ function PreciosSucursal({ idControl, nombreCliente, sucursalObs, precioActual, 
   return (
     <div style={{ background: esKg ? '#fffbeb' : '#f9fafb', border: `1px solid ${esKg ? '#fde68a' : '#f3f4f6'}`, borderRadius: '6px', padding: '10px 12px', marginBottom: '8px' }}>
       <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: esKg ? '#92400e' : '#374151' }}>
-        {sucursalObs}{esKg && <span style={{ marginLeft: '6px', fontWeight: 400, fontSize: '10px' }}>· compra por cajón</span>}
+        {tambienPara.length > 0 ? 'Precios del cliente' : sucursalObs}
+        {esKg && <span style={{ marginLeft: '6px', fontWeight: 400, fontSize: '10px' }}>· compra por cajón</span>}
+        {tambienPara.length > 0 && (
+          <span style={{ marginLeft: '6px', fontWeight: 400, fontSize: '10px', color: '#6b7280' }}>
+            · se guardan igual para {[sucursalObs, ...tambienPara].join(', ')}
+          </span>
+        )}
       </p>
       {grupos.filter((g) => g.campos.length > 0).map((g) => (
       <div key={g.titulo} style={{ marginBottom: '10px' }}>
@@ -506,20 +527,19 @@ Esto NO se puede deshacer. ¿Confirmás?`;
 
               {/* Precios por sucursal */}
               <p style={{ margin: '0 0 10px', fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Precios</p>
-              {sucursalesArr.length > 0
-                ? sucursalesArr.map(suc => (
-                    <PreciosSucursal key={suc}
-                      idControl={String(c.id_control)} nombreCliente={c.nombre_xubio} sucursalObs={suc}
-                      precioActual={precios.find(p => String(p.id_control) === String(c.id_control) && p.sucursal_obs === suc)}
-                      esKg={c.unidad === 'kg'} onSaved={onSaved} cambios={cambios} extrasUnidad={extrasUnidad} extrasKg={extrasKg}
-                      fuentes={fuentesPrecios} />
-                  ))
-                : <PreciosSucursal
-                    idControl={String(c.id_control)} nombreCliente={c.nombre_xubio} sucursalObs={c.nombre_xubio}
-                    precioActual={precios.find(p => String(p.id_control) === String(c.id_control))}
-                    esKg={c.unidad === 'kg'} onSaved={onSaved} cambios={cambios} extrasUnidad={extrasUnidad} extrasKg={extrasKg}
-                    fuentes={fuentesPrecios} />
-              }
+              {/* UNA lista de precios por cliente. Antes había un bloque por sucursal con
+                  los mismos números repetidos: tres copias para mantener sincronizadas, y
+                  una sucursal que quedaba sin precio factura en $0 sin avisar. */}
+              <PreciosSucursal
+                idControl={String(c.id_control)} nombreCliente={c.nombre_xubio}
+                sucursalObs={sucursalesArr[0] || c.nombre_xubio}
+                tambienPara={sucursalesArr.slice(1)}
+                precioActual={
+                  precios.find(p => String(p.id_control) === String(c.id_control) && p.sucursal_obs === (sucursalesArr[0] || c.nombre_xubio))
+                  || precios.find(p => String(p.id_control) === String(c.id_control))
+                }
+                esKg={c.unidad === 'kg'} onSaved={onSaved} cambios={cambios} extrasUnidad={extrasUnidad} extrasKg={extrasKg}
+                fuentes={fuentesPrecios} />
             </div>
           </td>
         </tr>

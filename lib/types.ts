@@ -311,6 +311,16 @@ export interface CajonMovimiento {
   fecha: string;
   id_control: string;
   nombre_cliente: string;
+  // ── A qué sucursal ────────────────────────────────────────────────────────────────
+  //
+  // Los cajones se llevan a una sucursal, no a una razón social. Sin esto, Marcelo
+  // registraba una entrega a "Mamina" sin poder decir si era Newbery o Roldán, y el
+  // saldo del cliente no decía en cuál de las tres están los cajones — que es el
+  // único dato que sirve para ir a buscarlos.
+  //
+  // Vacío en los movimientos viejos y en los clientes de una sola dirección: ahí el
+  // saldo del cliente YA dice dónde están.
+  sucursal?: string;
   // 'ajuste' = corrección manual del saldo en la calle a partir de un conteo físico —
   // a diferencia de 'entrega'/'devolucion' (que suman/restan), acá `cantidad` es el
   // saldo TOTAL contado (absoluto, mismo criterio que StockCamara.cantidad_paq), no un

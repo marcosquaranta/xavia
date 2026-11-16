@@ -4,14 +4,14 @@ import { appendRowObj, asegurarColumna, asegurarHoja, deleteRow, readSheet } fro
 import { saldoPorCliente } from '@/lib/cajones';
 import type { CajonMovimiento, ClienteVenta } from '@/lib/types';
 
-const HEADERS = ['id_movimiento', 'fecha', 'id_control', 'nombre_cliente', 'tipo', 'cantidad', 'usuario', 'notas', 'diferencia_paq'];
+const HEADERS = ['id_movimiento', 'fecha', 'id_control', 'nombre_cliente', 'sucursal', 'tipo', 'cantidad', 'usuario', 'notas', 'diferencia_paq'];
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
   try {
     const body = await req.json();
-    const { fecha, id_control, nombre_cliente, tipo, cantidad, notas } = body;
+    const { fecha, id_control, nombre_cliente, sucursal, tipo, cantidad, notas } = body;
     if (!fecha || !id_control || !tipo || cantidad === undefined || cantidad === null) {
       return NextResponse.json({ error: 'datos_incompletos' }, { status: 400 });
     }
@@ -27,6 +27,9 @@ export async function POST(req: NextRequest) {
 
     await asegurarHoja('CajonesMovimientos', HEADERS);
     await asegurarColumna('CajonesMovimientos', 'diferencia_paq');
+    // Los cajones se llevan a una sucursal, no a una razon social. La columna es nueva: en
+    // los movimientos viejos queda vacia, que es honesto (de esos no se sabe).
+    await asegurarColumna('CajonesMovimientos', 'sucursal');
     const [movimientos, clientes] = await Promise.all([
       readSheet<CajonMovimiento>('CajonesMovimientos'),
       readSheet<ClienteVenta>('Clientes').catch(() => []),
@@ -44,6 +47,7 @@ export async function POST(req: NextRequest) {
     const idNuevo = `CJ-${String(maxId + 1).padStart(4, '0')}`;
     await appendRowObj('CajonesMovimientos', {
       id_movimiento: idNuevo, fecha, id_control, nombre_cliente: nombre_cliente || '',
+      sucursal: String(sucursal || '').trim(),
       tipo, cantidad: cantidadNum, usuario: user.email, notas: notas || '', diferencia_paq,
     });
     return NextResponse.json({ ok: true, id_movimiento: idNuevo, diferencia_paq });
