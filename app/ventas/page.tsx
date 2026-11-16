@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import type { ClienteVenta, PrecioVenta, VentaDia, VentaHistorica, PedidoFijo, Lote } from '@/lib/types';
 import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionVentaPorClienteSemanal, evolucionPrecioPromedio, resumenMesActual, clientesPrecioVsVolumen } from '@/lib/estadisticasVentas';
+import { evolucionEnsaladas, tiposDeEnsalada } from '@/lib/ensaladas';
 import Header from '@/components/Header';
 import VentasManager from './VentasManager';
 import XubioResumen from './XubioResumen';
@@ -92,6 +93,10 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
   for (const v of ventas) frecuencias[v.id_control] = (frecuencias[v.id_control]||0) + 1;
 
   const evolArticulo = evolucionVentaPorArticulo(ventas, 12, historicas, undefined, lotes);
+  // Ensaladas vendidas por mes, con la serie completa. Lo pidio Fran para seguir la
+  // metrica y poder empujar a Produccion y a Ventas.
+  const evolEnsaladas = evolucionEnsaladas(ventas, 12);
+  const tiposEnsaladaVentas = tiposDeEnsalada();
   const evolClienteSemanal = evolucionVentaPorClienteSemanal(ventas, clientes, 6, 5, lotes);
   const evolClienteMensual = evolucionVentaPorCliente(ventas, clientes, 6, 5, lotes);
   const evolPrecio = evolucionPrecioPromedio(ventas, precios, clientes, 12, lotes);
@@ -155,7 +160,7 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
           </div>
         </div>
         <AlertasVentas cajones={alertaCajonesVentas} sinFacturar={alertaSinFacturar} sinFacturarViejas={sinFacturarViejas} sinPedir={alertaSinPedir} />
-        <VentasEvolucionCharts articulo={evolArticulo} clienteSemanal={evolClienteSemanal} clienteMensual={evolClienteMensual} precio={evolPrecio} resumenMes={resumenMes} clientesPrecioVolumen={clientesPrecioVolumen} ultimaSuba={ultimaSuba} />
+        <VentasEvolucionCharts articulo={evolArticulo} clienteSemanal={evolClienteSemanal} clienteMensual={evolClienteMensual} precio={evolPrecio} resumenMes={resumenMes} clientesPrecioVolumen={clientesPrecioVolumen} ultimaSuba={ultimaSuba} ensaladas={evolEnsaladas} tiposEnsalada={tiposEnsaladaVentas} />
         <div className="card">
           <VentasManager articulosExtra={articulosExtra} clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} pedidosFijos={pedidosFijos.filter(p=>p.activo==='SI')} initialFecha={searchParams.fecha} />
           <XubioResumen />

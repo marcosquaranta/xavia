@@ -36,6 +36,8 @@ import AjusteStockCard from '@/components/AjusteStockCard';
 import KilometrajeReminder from '@/components/KilometrajeReminder';
 import TardanzasHoyBanner from '@/components/TardanzasHoyBanner';
 import { GraficoVentaPorArticulo } from '@/app/ventas/VentasEvolucionCharts';
+import EnsaladasMes from '@/components/EnsaladasMes';
+import { evolucionEnsaladas, tiposDeEnsalada } from '@/lib/ensaladas';
 import TareasProtocolo from '@/components/TareasProtocolo';
 import { leerConfigProtocolo, tareasDelDia as tareasProtocoloDelDia, tareasVencidas as tareasProtocoloVencidas, alertasProtocolo } from '@/lib/protocoloTareas';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
@@ -196,6 +198,10 @@ export default async function PanelPage() {
 
   // ── Evolución de venta por artículo + indicadores del mes (mismo cálculo que Ventas) ──
   const evolArticuloPanel = evolucionVentaPorArticulo(ventasPanel, 12, historicasPanel, undefined, lotes);
+  // Ensaladas vendidas por mes. Lo pidió Fran para poder presionar a Producción y a
+  // Ventas: el número tiene que estar donde se entra todos los días, no en un informe.
+  const ensaladasPanel = evolucionEnsaladas(ventasPanel, 12);
+  const tiposEnsalada = tiposDeEnsalada();
   const ahora = new Date();
   const mesPasadoRef = mesAnteriorClamp(ahora);
   const clavesExtraVenta = (await leerArticulosExtra()).map((a) => a.key);
@@ -759,6 +765,13 @@ export default async function PanelPage() {
         {/* ══ FILA 2: LOS DOS GRÁFICOS, uno al lado del otro ══
             Sin alignItems:'start' a propósito: las dos tarjetas se estiran a la misma
             altura (grid stretch) y la fila queda derecha en vez de escalonada. */}
+        {/* El número de ensaladas del mes, arriba de los gráficos: es un indicador que se
+            mira para empujar, no para analizar, así que va en grande y sin serie. La
+            evolución completa está en Ventas. */}
+        <div style={{ marginBottom: '14px' }}>
+          <EnsaladasMes datos={ensaladasPanel} tipos={tiposEnsalada} compacto />
+        </div>
+
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))', gap:'12px', marginBottom:'14px' }}>
             <GraficoVentaPorArticulo datos={evolArticuloPanel} />
             <div className="card" style={{ margin:0 }}>

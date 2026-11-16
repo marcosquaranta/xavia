@@ -7,6 +7,8 @@ import {
 import type { PuntoArticulo, EvolucionClientes, PuntoPrecio, ResumenMesActual, ClientePrecioVolumen } from '@/lib/estadisticasVentas';
 import { GR_PAQ_RUCULA, GR_PAQ_LECHUGA } from '@/lib/estadisticasVentas';
 import GraficoValorComercial from './GraficoValorComercial';
+import EnsaladasMes from '@/components/EnsaladasMes';
+import type { PuntoEnsaladas, TipoEnsalada } from '@/lib/ensaladas';
 
 // Paleta categórica (orden fijo, validada — ver skill de dataviz). Los slots aqua/
 // amarillo/magenta quedan bajo 3:1 de contraste sobre blanco, por eso cada gráfico
@@ -379,14 +381,21 @@ export function TarjetaIndicadores({ datos }: { datos: ResumenMesActual }) {
   );
 }
 
-export default function VentasEvolucionCharts({ articulo, clienteSemanal, clienteMensual, precio, resumenMes, clientesPrecioVolumen, ultimaSuba = {} }: {
+export default function VentasEvolucionCharts({ articulo, clienteSemanal, clienteMensual, precio, resumenMes, clientesPrecioVolumen, ultimaSuba = {}, ensaladas = [], tiposEnsalada = [] }: {
   articulo: PuntoArticulo[]; clienteSemanal: EvolucionClientes; clienteMensual: EvolucionClientes; precio: PuntoPrecio[]; resumenMes: ResumenMesActual;
   clientesPrecioVolumen: ClientePrecioVolumen[];
   ultimaSuba?: Record<string, { fecha: string; diasDesde: number }>;
+  // Ensaladas vendidas por mes. Acá va con la serie completa; en el panel va solo el
+  // número del mes.
+  ensaladas?: PuntoEnsaladas[];
+  tiposEnsalada?: TipoEnsalada[];
 }) {
   if (!articulo.length && !clienteSemanal.meses.length && !precio.length) return null;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '16px' }}>
+      {ensaladas.length > 0 && tiposEnsalada.length > 0 && (
+        <EnsaladasMes datos={ensaladas} tipos={tiposEnsalada} />
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: '14px' }}>
         <GraficoVentaPorArticulo datos={articulo} />
         <GraficoVentaPorCliente semanal={clienteSemanal} mensual={clienteMensual} />
