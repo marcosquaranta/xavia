@@ -33,6 +33,9 @@ export async function POST(req: NextRequest) {
         comprobantes: Array.isArray(body.comprobantes) ? body.comprobantes : [],
         retencion: Number(body.retencion) || 0,
         usuario: user.email,
+        // Un cobro en partes son varias cobranzas, así que era el caso que MÁS esperaba:
+        // tres o cuatro lecturas a Xubio por cada parte. Va diferido como el resto.
+        diferido: body.ahora !== true,
       }, partes);
       if (!rp.ok) return NextResponse.json({ error: rp.error, partesHechas: rp.partes.filter((x) => x.ok).length }, { status: rp.status || 500 });
       return NextResponse.json({

@@ -172,6 +172,17 @@ export async function PATCH(req: NextRequest) {
       // Lo que el cliente retuvo. El importe del movimiento bancario es lo que ENTRÓ: la
       // factura se cancela por la suma de los dos.
       retencion: Number(body.retencion) || 0,
+      // ── Se registra acá y se manda a Xubio de noche ─────────────────────────────────
+      //
+      // Esto le faltaba a la bandeja, que es por donde se confirman los cobros todos los
+      // días: el camino diferido se había puesto solo en /api/cobranzas/cobro (la carga a
+      // mano), así que confirmar desde la bandeja seguía esperando las tres o cuatro
+      // lecturas que Xubio exige antes de dejar escribir una cobranza. Mismo botón, misma
+      // demora de antes. Ver lib/cobrosDiferidos.ts.
+      //
+      // La factura se da por cobrada igual —eso sale de la hoja de la app— y el
+      // comprobante sale en la tanda de la noche. `ahora: true` fuerza el camino completo.
+      diferido: body.ahora !== true,
     };
 
     // Cobro que entra en varias fechas (cheques, pago en dos veces). La suma se valida acá
@@ -227,11 +238,18 @@ export async function PATCH(req: NextRequest) {
         }
       }
     } catch (e) {
-      // Que no se pueda guardar el alias no invalida el cobro, que ya está en Xubio.
+      // Que no se pueda guardar el alias no invalida el cobro, que ya está registrado.
       console.error('[bandeja] no se pudo aprender el alias:', e);
     }
 
-    return NextResponse.json({ ok: true, estado: 'confirmado', id_cobro: r.idCobro, numeroRecibo: r.numeroRecibo, aliasAprendido });
+    return NextResponse.json({
+      ok: true, estado: 'confirmado', id_cobro: r.idCobro, numeroRecibo: r.numeroRecibo,
+      // Sin esto la pantalla decía "Cobro registrado" sin más y nadie se enteraba de que el
+      // comprobante en Xubio todavía no existe. El cobro vale igual, pero el que lo cargó
+      // tiene que poder saber en qué estado quedó.
+      pendienteXubio: r.pendienteXubio || false, mensaje: r.mensaje || '',
+      aliasAprendido,
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'server_error' }, { status: 500 });
   }

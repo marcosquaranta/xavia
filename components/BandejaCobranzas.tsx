@@ -254,7 +254,8 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
       const detalleFechas = chk
         ? `\n\nEntra en ${chk.lista.length} veces: ${chk.lista.map((x) => `${fmtDia(x.fecha)} ${fmt$(x.importe)}`).join(' · ')}.`
         : `\n\nCon fecha ${fmtDia(fechaCobro)}.`;
-      if (!window.confirm(`Se va a registrar en Xubio un cobro de ${fmt$(importeNum)} de ${nombre}.${detalleFechas}${avisoImporte}${avisoRet}\n\nEsto impacta en la contabilidad. ¿Confirmás?`)) return;
+      // Lo que pasa de verdad: se registra ya y el comprobante en Xubio sale de noche.
+      if (!window.confirm(`Se va a registrar un cobro de ${fmt$(importeNum)} de ${nombre}.${detalleFechas}${avisoImporte}${avisoRet}\n\nLa factura queda cobrada ya. El comprobante en Xubio sale en la tanda de esta noche.\n\nEsto impacta en la contabilidad. ¿Confirmás?`)) return;
     } else {
       if (!window.confirm('Se va a descartar este movimiento: no se registra ningún cobro y no vuelve a aparecer en la bandeja. ¿Confirmás?')) return;
     }
@@ -281,7 +282,7 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
       }
       if (!r.ok) throw new Error(j.error || 'Error');
       onListo(accion === 'confirmar'
-        ? `✓ Cobro registrado${j.numeroRecibo ? ` — recibo ${j.numeroRecibo}` : ''}${j.aliasAprendido ? `. Aprendí que "${j.aliasAprendido}" es ese cliente.` : ''}`
+        ? `✓ Cobro registrado${j.pendienteXubio ? ' — el comprobante sale a Xubio esta noche' : j.numeroRecibo ? ` — recibo ${j.numeroRecibo}` : ''}${j.aliasAprendido ? `. Aprendí que "${j.aliasAprendido}" es ese cliente.` : ''}`
         : '✓ Movimiento descartado.');
       router.refresh();
     } catch (e: any) {

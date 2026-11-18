@@ -224,7 +224,10 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
     const cuandoTxt = chk
       ? `que entra en ${chk.lista.length} veces: ${chk.lista.map((x) => `${fmtDia(x.fecha)} $${x.importe.toLocaleString('es-AR')}`).join(' · ')}`
       : `con fecha ${fmtDia(fecha)}`;
-    if (!confirm(`Se va a registrar en Xubio un cobro de $${Number(importe).toLocaleString('es-AR')} de ${nombre}, en ${cuentaNom}, ${cuandoTxt}.${retTxt}\n\nEsto impacta en la contabilidad. ¿Confirmás?`)) return;
+    // Dice lo que de verdad pasa: el cobro queda registrado ya y el comprobante en Xubio
+    // sale en la tanda de la noche. Decía "se va a registrar en Xubio" cuando el camino
+    // diferido ya era el normal, y eso hacía buscar en Xubio un recibo que no estaba.
+    if (!confirm(`Se va a registrar un cobro de $${Number(importe).toLocaleString('es-AR')} de ${nombre}, en ${cuentaNom}, ${cuandoTxt}.${retTxt}\n\nLa factura queda cobrada ya. El comprobante en Xubio sale en la tanda de esta noche.\n\nEsto impacta en la contabilidad. ¿Confirmás?`)) return;
 
     setLoading(true); setMsg(null);
     try {
@@ -239,11 +242,18 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'Error al registrar');
-      setMsg({ t: 'ok', s: `✓ Registrado en Xubio${j.partes > 1 ? ` en ${j.partes} partes` : ''}${j.numeroRecibo ? ` — recibo ${j.numeroRecibo}` : ''}. Recargando…` });
+      setMsg({
+        t: 'ok',
+        s: j.pendienteXubio
+          ? `✓ Cobro registrado${j.partes > 1 ? ` en ${j.partes} partes` : ''}. La factura ya figura cobrada; el comprobante sale a Xubio esta noche. Recargando…`
+          : `✓ Registrado en Xubio${j.partes > 1 ? ` en ${j.partes} partes` : ''}${j.numeroRecibo ? ` — recibo ${j.numeroRecibo}` : ''}. Recargando…`,
+      });
       setFilas((p) => [{
         id_cobro: j.id_cobro, cliente: nombre, fecha, importe: Number(importe),
         numero_recibo: j.numeroRecibo || '', transaccionid: String(j.transaccionid || ''),
-        estado: 'registrado', observacion,
+        // El estado que devolvió el servidor, no uno fijo: marcar 'registrado' un cobro que
+        // todavía no llegó a Xubio es justo la confusión que el estado existe para evitar.
+        estado: j.pendienteXubio ? 'pendiente_xubio' : 'registrado', observacion,
       }, ...p]);
       setTimeout(() => window.location.reload(), 1800);
     } catch (e: any) {
@@ -556,7 +566,7 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
           <div style={{ display: 'flex', gap: '8px', marginTop: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button onClick={registrar} disabled={loading}
               style={{ fontSize: '11.5px', padding: '6px 14px', background: '#166534', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 700, opacity: loading ? 0.6 : 1 }}>
-              {loading ? 'Registrando…' : 'Registrar cobro en Xubio'}
+              {loading ? 'Registrando…' : 'Registrar cobro'}
             </button>
             {msg && <span style={{ fontSize: '11.5px', fontWeight: 600, color: msg.t === 'ok' ? '#059669' : '#dc2626' }}>{msg.s}</span>}
           </div>
