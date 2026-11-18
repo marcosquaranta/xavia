@@ -464,6 +464,9 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       // acuse. Dos lugares diciendo lo mismo es como uno de los dos no se lee, y el que
       // se pierde es siempre el de abajo de todo.
       setResumenCarga(txt);
+      // El servidor ahora manda el acuse SIEMPRE, asi que esto es el ultimo recurso: un
+      // bundle viejo en cache, o una respuesta sin acuse. La misma operacion tiene que
+      // terminar siempre en la misma pantalla.
       if (!j.acuse) setMsg({t: nErr>0 && nEmit===0 ? 'err' : 'ok', s: txt});
       else setMsg(null);
       setCtds({});setEsts({});setCtdsKg({});ctdsKgLive.current={};setFc({});

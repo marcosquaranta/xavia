@@ -22,6 +22,9 @@ export interface FacturaAcuse {
 export interface GrupoAntes { cliente: string; comprobantes: string[]; items: ItemAcuse[] }
 export interface Acuse {
   fecha: string;
+  // false = no se pudo preguntarle a Xubio (no contesto, o fallo la lectura). Las facturas
+  // se emitieron igual; lo que falta es la confirmacion del otro lado.
+  verificado?: boolean;
   emitidas: FacturaAcuse[];
   errores: { cliente: string; error: string; items?: ItemAcuse[]; total?: number }[];
   antes: GrupoAntes[];
@@ -55,7 +58,11 @@ export default function AcuseFacturacion({ acuse, onCerrar, resumen }: {
     return () => window.removeEventListener('keydown', h);
   }, [onCerrar]);
 
-  const problemas = acuse.emitidas.filter((f) => f.enXubio !== 'confirmada').length + acuse.errores.length;
+  // Con la verificacion caida, "sin verificar" no es un problema: es un dato que falta.
+  // Contarlo como problema pintaba de alerta una carga que salio bien.
+  const problemas = acuse.verificado === false
+    ? acuse.errores.length
+    : acuse.emitidas.filter((f) => f.enXubio !== 'confirmada').length + acuse.errores.length;
   const totalEmitido = acuse.emitidas.reduce((a, f) => a + (f.total || 0), 0);
 
   const listaItems = (items: ItemAcuse[]) => (
@@ -85,6 +92,14 @@ export default function AcuseFacturacion({ acuse, onCerrar, resumen }: {
             <p style={{ margin: '3px 0 0', fontSize: '12.5px', color: '#6b7280' }}>
               Entrega del {fmtDia(acuse.fecha)} · {acuse.emitidas.length} factura(s) · {$(totalEmitido)}
             </p>
+            {/* Sin esto, "sin verificar" en cada factura no tiene explicacion y se lee como
+                si algo hubiera salido mal. Salio bien: lo que no se pudo es confirmarlo. */}
+            {acuse.verificado === false && acuse.emitidas.length > 0 && (
+              <p style={{ margin: '5px 0 0', fontSize: '12px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '6px 9px', lineHeight: 1.5 }}>
+                No se pudo preguntarle a Xubio si las tiene — no contestó en este momento. Las facturas se emitieron
+                igual y tienen su número; el control diario las vuelve a chequear y avisa si alguna no llegó.
+              </p>
+            )}
           </div>
           <button type="button" onClick={onCerrar}
             style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', fontSize: '13px', fontWeight: 700, color: '#374151', cursor: 'pointer', padding: '8px 16px', whiteSpace: 'nowrap' }}>

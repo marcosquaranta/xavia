@@ -159,7 +159,25 @@ export async function POST(req: NextRequest) {
     //
     // Todo adentro de su propio try: la carga YA se hizo y las facturas YA se emitieron.
     // Que falle la verificación no puede convertir eso en un error en pantalla.
-    let acuse: any = null;
+    // ── El acuse SIEMPRE existe ─────────────────────────────────────────────────────
+    //
+    // Arrancaba en null y se llenaba adentro del try. Si algo de la verificación fallaba
+    // —Xubio sin responder, una hoja que no se pudo leer— el acuse quedaba en null y la
+    // pantalla caía a un renglón verde al pie. Entonces la misma operación terminaba a
+    // veces en una pantalla completa y a veces en un cartelito, sin que nadie entendiera
+    // por qué: justo cuando la verificación falla es cuando más hace falta ver el detalle
+    // de lo que se emitió.
+    //
+    // Ahora se arma primero con lo que YA se sabe — qué se emitió y qué falló, que es
+    // información de esta misma request y no depende de nadie más — y la verificación
+    // contra Xubio lo mejora si sale bien. `verificado` dice cuál de las dos cosas es.
+    let acuse: any = {
+      fecha,
+      emitidas: (emitidas || []).map((f: any) => ({ ...f, items: f.items || [], enXubio: 'sin_verificar' })),
+      errores,
+      antes: [],
+      verificado: false,
+    };
     try {
       const nombrePorId = new Map(
         (await readSheet<ClienteVenta>('Clientes')).map((c) => [String(c.id_control), c.nombre_display || c.nombre_xubio || String(c.id_control)]),
@@ -190,6 +208,9 @@ export async function POST(req: NextRequest) {
           (id) => nombrePorId.get(String(id)) || String(id),
           etiquetas,
         ),
+        // Solo cuando Xubio contestó de verdad. Sin comprobantes no hay con qué comparar,
+        // y decir "verificado" sin haber verificado es peor que no decir nada.
+        verificado: comprobantes.length > 0,
       };
     } catch (e) {
       console.error('[ventas/cargar] no se pudo armar el acuse:', e);
