@@ -123,6 +123,28 @@ export async function GET(req: NextRequest) {
           'Ese número no figura de este lado. Si abajo dice que hay una venta cargada sin número, la venta está y lo que falló fue escribir el número de vuelta — no falta plata, falta un dato, y mientras tanto esa venta figura "sin facturar". Si no dice nada, se facturó algo que la app nunca tuvo: no está en el resultado, ni en la deuda del cliente, ni en el reclamo del lunes.',
           r.soloEnXubio, true)}
 
+        ${r.conOtraFecha.length ? `
+          <p style="margin:16px 0 4px;font-size:13px;font-weight:800;color:#1e40af">En Xubio con OTRA fecha</p>
+          <p style="margin:0 0 6px;font-size:12px;color:#6b7280">
+            Estas facturas están en Xubio, pero no con la fecha de la entrega: buscadas por ese día no aparecen.
+            Pasa cuando se factura atrasado — la numeración de un punto de venta es correlativa y AFIP no acepta un número
+            mayor con fecha anterior, así que el comprobante sale con la fecha que permite la correlatividad.
+          </p>
+          <table style="border-collapse:collapse;width:100%;font-size:12.5px">
+            <thead><tr style="background:#f5f5f5">
+              <th style="padding:5px 8px;text-align:left">Comprobante</th>
+              <th style="padding:5px 8px;text-align:left">Cliente</th>
+              <th style="padding:5px 8px;text-align:left">La venta es del</th>
+              <th style="padding:5px 8px;text-align:left">En Xubio figura</th>
+            </tr></thead>
+            <tbody>${r.conOtraFecha.map((f) => `<tr>
+              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;font-family:ui-monospace,monospace;font-size:11.5px">${f.numero}</td>
+              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6">${f.cliente || ''}</td>
+              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;color:#6b7280">${fmtDia(f.fechaEmision)}</td>
+              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;font-weight:700;color:#1e40af">${fmtDia(f.fechaEnXubio || '')}</td>
+            </tr>`).join('')}</tbody>
+          </table>` : ''}
+
         ${r.demoradas.length ? `
           <p style="margin:16px 0 0;font-size:12px;color:#6b7280;background:#fafafa;border:1px solid #e5e7eb;border-radius:6px;padding:8px 10px">
             ${r.demoradas.length} recién emitida(s) todavía no aparecen en Xubio. Es lo normal —suele tardar— y se vuelven

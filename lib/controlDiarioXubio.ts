@@ -47,6 +47,8 @@ export interface FilaControlDiario {
   //
   // Decir cuál de las dos es convierte un aviso que no se puede accionar en uno que sí.
   ventaSinNumero?: { fecha: string; cliente: string; dias: number };
+  // La fecha con la que el comprobante quedo en Xubio, cuando no es la de la venta.
+  fechaEnXubio?: string;
 }
 
 export interface ResultadoControlDiario {
@@ -57,6 +59,9 @@ export interface ResultadoControlDiario {
   demoradas: FilaControlDiario[];
   faltantes: FilaControlDiario[];
   soloEnXubio: FilaControlDiario[];
+  // Estan en Xubio, pero con otra fecha que la de la venta. No es un problema: es la
+  // explicacion de "la app dice facturada y en Xubio no la encuentro".
+  conOtraFecha: FilaControlDiario[];
   hayProblema: boolean;
 }
 
@@ -119,6 +124,8 @@ export function controlDiario(
 
   const demoradas: FilaControlDiario[] = [];
   const faltantes: FilaControlDiario[] = [];
+  // Las que SI estan en Xubio pero con otra fecha que la de la venta.
+  const conOtraFecha: FilaControlDiario[] = [];
   let ok = 0, revisadas = 0;
 
   // ── Qué números salió de la app, sin ventana ──────────────────────────────────────
@@ -145,7 +152,29 @@ export function controlDiario(
     revisadas++;
 
     const c = enXubio.get(n);
-    if (c) { ok++; continue; }
+    if (c) {
+      ok++;
+      // ── Con que fecha quedo en Xubio ──────────────────────────────────────────────
+      //
+      // "La app dice que esta facturada y en Xubio no la veo" casi siempre es esto: la
+      // factura ESTA, con otra fecha. La numeracion de un punto de venta es correlativa y
+      // AFIP no acepta un numero mayor con fecha anterior, asi que al facturar atrasado el
+      // comprobante sale con la fecha que permite la correlatividad, no con la de la
+      // entrega. Buscandola por el dia de la venta no aparece.
+      //
+      // Se informa siempre que las dos fechas difieran: es la respuesta a la pregunta, y
+      // sin esto hay que deducirla cada vez.
+      const fXubio = soloDia(c?.fecha);
+      if (fXubio && fXubio !== f) {
+        conOtraFecha.push({
+          numero: e.numero, cliente: e.cliente, fechaEmision: f,
+          diasDesdeEmision: diasEntre(f, hoy), estado: 'ok',
+          importeXubio: Math.round(Number(c?.importetotal) || 0),
+          fechaEnXubio: fXubio,
+        });
+      }
+      continue;
+    }
 
     const dias = diasEntre(f, hoy);
     const fila: FilaControlDiario = {
@@ -184,7 +213,7 @@ export function controlDiario(
   faltantes.sort(orden); demoradas.sort(orden); soloEnXubio.sort(orden);
 
   return {
-    desde, hasta: hoy, revisadas, ok, demoradas, faltantes, soloEnXubio,
+    desde, hasta: hoy, revisadas, ok, demoradas, faltantes, soloEnXubio, conOtraFecha,
     // ── Qué merece un mail ────────────────────────────────────────────────────────
     //
     // Solo las faltantes: una factura que la app emitió y Xubio no tiene es mercadería
