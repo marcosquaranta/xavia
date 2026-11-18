@@ -61,6 +61,12 @@ export const AVISOS: AvisoConfigurable[] = [
     porDefecto: ['marcos.quaranta@gmail.com'],
   },
   {
+    clave: 'email_pagos_pendientes',
+    titulo: 'Pagos pendientes',
+    descripcion: 'Todos los días a la mañana, solo si hay algo. Todas las compras cargadas con "todavía no lo pagué": qué vence primero, a qué alias transferir y cuánto se le debe a cada proveedor. Reemplaza las solicitudes de pago por mail.',
+    porDefecto: ['marcos.quaranta@gmail.com'],
+  },
+  {
     clave: 'email_cobro_automatico',
     titulo: 'Cobros que se registran solos',
     descripcion: 'En el momento en que pasa. Cuando llega un aviso de pago y las facturas que nombra suman exactamente lo que declara, la app registra la cobranza en Xubio sola y avisa al instante, con el detalle y el link para anularla.',

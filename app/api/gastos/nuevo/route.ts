@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
   if (!(await isAdmin())) return NextResponse.json({ error: 'solo_admin' }, { status: 403 });
 
   try {
-    const { fecha, descripcion, categoria, monto, medio_pago, medio_pago_destino, id_articulo, cantidad, empleado, pendiente, proveedor, vencimiento, cuotas } = await req.json();
+    const { fecha, descripcion, categoria, monto, medio_pago, medio_pago_destino, id_articulo, cantidad, empleado, pendiente, proveedor, vencimiento, alias_pago, cuotas } = await req.json();
     if (!fecha || !descripcion || !medio_pago || monto === undefined) {
       return NextResponse.json({ error: 'datos_incompletos' }, { status: 400 });
     }
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
 
     await asegurarColumna('Gastos', 'medio_pago_destino');
     await asegurarColumna('Gastos', 'empleado');
-    await asegurarColumnas('Gastos', ['estado_pago', 'proveedor', 'vencimiento']);
+    await asegurarColumnas('Gastos', ['estado_pago', 'proveedor', 'vencimiento', 'alias_pago']);
     if (nCuotas > 1) await asegurarColumnas('Gastos', ['cuota_grupo', 'cuota_nro', 'cuota_total', 'monto_compra_total']);
     const gastos = await readSheet<Gasto>('Gastos');
     const maxId = gastos
@@ -130,6 +130,9 @@ export async function POST(req: NextRequest) {
       estado_pago: pendiente ? 'pendiente' : '',
       proveedor: pendiente ? String(proveedor).trim() : '',
       vencimiento: pendiente ? String(vencimiento || '').trim() : '',
+      // A dónde transferir. Solo tiene sentido en lo pendiente: lo ya pagado no se paga de
+      // nuevo, y guardarlo ahí sería ruido en una columna que se mira para saber qué falta.
+      alias_pago: pendiente ? String(alias_pago || '').trim() : '',
       id_articulo: id_articulo || '',
       cantidad: cantidadNum > 0 ? cantidadNum : '',
     });

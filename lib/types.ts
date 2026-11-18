@@ -175,6 +175,11 @@ export interface Gasto {
   estado_pago: string;
   proveedor: string;
   vencimiento: string;
+  // A qué alias/CBU hay que transferirle para pagarla. Opcional: no toda compra pendiente
+  // se paga por transferencia, y obligarlo haría que se cargue cualquier cosa con tal de
+  // guardar. Cuando está, es el dato que falta para poder pagar sin preguntarle a nadie —
+  // que es el motivo por el que alguien manda una solicitud de pago por mail.
+  alias_pago: string;
   // Cuándo salió la plata. Distinta de `fecha`, que es cuándo se compró: el resultado del
   // mes usa la de compra y los saldos de caja usan esta. Vacío en las filas viejas, que se
   // cargaban recién al pagarse — para ellas vale `fecha`.

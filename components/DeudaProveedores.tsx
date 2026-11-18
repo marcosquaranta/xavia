@@ -30,8 +30,8 @@ export default function DeudaProveedores({ deuda, medios }: { deuda: DeudaProvee
   // pantalla es la que ordena por vencimiento y la que suma lo vencido, así que es la que
   // delata el dato mal cargado.
   const [editando, setEditando] = useState<string | null>(null);
-  const [ed, setEd] = useState<{ descripcion: string; monto: string; proveedor: string; vencimiento: string; fecha: string }>(
-    { descripcion: '', monto: '', proveedor: '', vencimiento: '', fecha: '' },
+  const [ed, setEd] = useState<{ descripcion: string; monto: string; proveedor: string; vencimiento: string; fecha: string; alias: string }>(
+    { descripcion: '', monto: '', proveedor: '', vencimiento: '', fecha: '', alias: '' },
   );
   const [fechaPago, setFechaPago] = useState(hoyISO());
   const [medio, setMedio] = useState(medios[0] || '');
@@ -41,7 +41,7 @@ export default function DeudaProveedores({ deuda, medios }: { deuda: DeudaProvee
   const total = deuda.reduce((a, d) => a + d.total, 0);
   const vencido = deuda.reduce((a, d) => a + d.vencido, 0);
 
-  function abrirEditor(i: DeudaProveedor['items'][number], proveedor: string) {
+  function abrirEditor(i: DeudaProveedor['items'][number], proveedor: string, aliasProveedor: string) {
     if (editando === i.id_gasto) { setEditando(null); return; }
     setEditando(i.id_gasto);
     setMsg(null);
@@ -53,6 +53,9 @@ export default function DeudaProveedores({ deuda, medios }: { deuda: DeudaProvee
       // un <input type="date" lo deja en blanco igual y hace creer que no había nada.
       vencimiento: i.vencimiento || '',
       fecha: i.fecha || '',
+      // El de esta compra, y si no tiene, el que tenga el proveedor: completar acá el alias
+      // que ya se sabe es más rápido que buscarlo de nuevo, y es el mismo dato.
+      alias: i.alias || aliasProveedor || '',
     });
   }
 
@@ -75,6 +78,7 @@ export default function DeudaProveedores({ deuda, medios }: { deuda: DeudaProvee
           cantidad,
           proveedor: ed.proveedor.trim(),
           vencimiento: ed.vencimiento,
+          alias_pago: ed.alias.trim(),
         }),
       });
       const j = await r.json().catch(() => ({}));
@@ -136,6 +140,14 @@ export default function DeudaProveedores({ deuda, medios }: { deuda: DeudaProvee
               {d.vencido > 0 && <span style={{ color: '#dc2626', fontWeight: 600, fontSize: '11.5px' }}> · {fmt$(d.vencido)} vencido</span>}
             </span>
           </div>
+          {/* A dónde transferirle. Al lado del total porque es ahí donde se decide pagar: el
+              alias guardado en una compra y no a la vista obliga a abrir renglones hasta
+              encontrarlo, que es el trabajo que el alias venía a ahorrar. */}
+          {d.alias && (
+            <p style={{ margin: '2px 0 0', fontSize: '11.5px', color: '#6b7280' }}>
+              Pagar a <strong style={{ fontFamily: 'ui-monospace, monospace', color: '#374151' }}>{d.alias}</strong>
+            </p>
+          )}
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', marginTop: '4px' }}>
             <tbody>
               {d.items.map((i) => {
@@ -179,7 +191,7 @@ export default function DeudaProveedores({ deuda, medios }: { deuda: DeudaProvee
                         </span>
                       ) : (
                         <span style={{ display: 'inline-flex', gap: '4px' }}>
-                          <button type="button" onClick={() => abrirEditor(i, d.proveedor)}
+                          <button type="button" onClick={() => abrirEditor(i, d.proveedor, d.alias)}
                             title="Corregir esta compra"
                             style={{ fontSize: '10.5px', background: 'white', border: '1px solid #e5e7eb', color: '#6b7280', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', fontWeight: 600 }}>
                             {editando === i.id_gasto ? '▲' : '✎'}
@@ -216,6 +228,13 @@ export default function DeudaProveedores({ deuda, medios }: { deuda: DeudaProvee
                             <label style={lbl}>Vence
                               <input type="date" value={ed.vencimiento} disabled={trabajando}
                                 onChange={(e) => setEd((p) => ({ ...p, vencimiento: e.target.value }))} style={inp} />
+                            </label>
+                            {/* A dónde transferirle. Se completa desde acá cuando la compra
+                                se cargó sin alias: el que carga no siempre lo tiene a mano, y
+                                el que paga sí. */}
+                            <label style={lbl}>Alias o CBU para pagar
+                              <input type="text" value={ed.alias} disabled={trabajando} placeholder="opcional"
+                                onChange={(e) => setEd((p) => ({ ...p, alias: e.target.value }))} style={inp} />
                             </label>
                             <label style={lbl}>Fecha de la compra
                               <input type="date" value={ed.fecha} disabled={trabajando}

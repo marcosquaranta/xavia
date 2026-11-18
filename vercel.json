@@ -61,6 +61,10 @@
       "schedule": "0 12 * * 1,4"
     },
     {
+      "path": "/api/cron/pagos-pendientes",
+      "schedule": "0 11 * * *"
+    },
+    {
       "path": "/api/cron/sin-facturar",
       "schedule": "0 11 * * *"
     },

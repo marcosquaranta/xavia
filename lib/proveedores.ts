@@ -59,6 +59,11 @@ export interface DeudaProveedor {
   proveedor: string;
   total: number;
   vencido: number;      // lo que ya pasó su fecha de vencimiento
+  // A dónde transferirle, si alguna de las compras lo trae. Va al nivel del proveedor
+  // además de al de cada item: el que paga paga por proveedor, no compra por compra, y
+  // tener que abrir cada renglón para encontrar el alias es justo el trabajo que el alias
+  // venía a ahorrar. Se toma el de la compra más reciente que lo tenga cargado.
+  alias: string;
   items: {
     id_gasto: string;
     fecha: string;        // cuándo se compró
@@ -74,6 +79,7 @@ export interface DeudaProveedor {
     categoria?: string;
     medioPago?: string;
     cantidad?: number;
+    alias?: string;
   }[];
 }
 
@@ -152,7 +158,8 @@ export function deudaProveedores(gastos: Gasto[], hoy: string): DeudaProveedor[]
     const vencimiento = soloFecha((g as any)?.vencimiento);
     const monto = Number(g?.monto) || 0;
     const dias = vencimiento ? diasEntre(hoy, vencimiento) : null;
-    const d = porProveedor.get(clave) || { proveedor, total: 0, vencido: 0, items: [] };
+    const alias = String((g as any)?.alias_pago || '').trim();
+    const d = porProveedor.get(clave) || { proveedor, total: 0, vencido: 0, alias: '', items: [] };
     d.total += monto;
     if (dias !== null && dias < 0) d.vencido += monto;
     d.items.push({
@@ -168,10 +175,17 @@ export function deudaProveedores(gastos: Gasto[], hoy: string): DeudaProveedor[]
       categoria: String((g as any)?.categoria || ''),
       medioPago: String((g as any)?.medio_pago || ''),
       cantidad: Number((g as any)?.cantidad) || 0,
+      ...(alias ? { alias } : {}),
     });
     porProveedor.set(clave, d);
   }
   for (const d of porProveedor.values()) {
+    // El alias de la compra más reciente que lo traiga. Un alias se puede cambiar, y el
+    // viejo manda la plata a una cuenta que el proveedor ya no usa.
+    d.alias = [...d.items]
+      .filter((i) => i.alias)
+      .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)))
+      .pop()?.alias || '';
     // Lo que vence antes, primero: es el orden en el que hay que pagar.
     d.items.sort((a, b) => {
       if (!a.vencimiento) return 1;

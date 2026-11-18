@@ -85,6 +85,8 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
   const [pendiente, setPendiente] = useState(false);
   const [proveedor, setProveedor] = useState('');
   const [vencimiento, setVencimiento] = useState('');
+  // A dónde transferirle. Opcional: no toda compra se paga por transferencia.
+  const [aliasPago, setAliasPago] = useState('');
   // Compra en cuotas: `monto` sigue siendo el precio de LA COMPRA y las cuotas se calculan
   // sobre eso. Pedir "el monto de la cuota" sería la otra opción, pero obliga a hacer la
   // división a mano en la cabeza y es donde se cuelan los errores — y en el ticket el número
@@ -145,6 +147,23 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
     () => gastos.slice(-1500).map((g) => ({ descripcion: String(g.descripcion || ''), categoria: String(g.categoria || '') })),
     [gastos],
   );
+
+  // El alias con el que se le pagó a ese proveedor la última vez.
+  //
+  // No se completa solo: el alias es a dónde se va la plata, y un campo que aparece lleno
+  // sin que nadie lo haya escrito se confirma sin mirarlo. Se ofrece con un click, que deja
+  // el acto de elegirlo del lado de la persona y le ahorra buscarlo igual.
+  const aliasSugerido = useMemo(() => {
+    const clave = proveedor.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
+    if (!clave) return '';
+    for (let i = gastos.length - 1; i >= 0; i--) {
+      const g: any = gastos[i];
+      const p = String(g?.proveedor || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
+      const a = String(g?.alias_pago || '').trim();
+      if (p === clave && a) return a;
+    }
+    return '';
+  }, [gastos, proveedor]);
 
   async function sugerirCategoria(desc: string) {
     if (catTocada || !desc.trim()) return;
@@ -381,7 +400,7 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
           fecha, descripcion, categoria, monto, medio_pago: medioPago,
           ...(esMovimiento ? { medio_pago_destino: medioDestino } : {}),
           ...(esAdelanto ? { empleado: empleadoAdelanto } : {}),
-          ...(pendiente ? { pendiente: true, proveedor: proveedor.trim(), vencimiento } : {}),
+          ...(pendiente ? { pendiente: true, proveedor: proveedor.trim(), vencimiento, alias_pago: aliasPago.trim() } : {}),
           ...(categoria === 'insumos' ? { id_articulo: idArticulo, cantidad } : {}),
           ...(cuotas > 1 ? { cuotas } : {}),
       });
@@ -403,7 +422,7 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
       setCuotas(1);
       setDescripcion('');
       setEmpleadoAdelanto('');
-      setPendiente(false); setProveedor(''); setVencimiento(''); setMonto(0); setFecha(hoyISO()); setCategoria('gastos_generales'); setMedioPago(MEDIOS[0]); setMedioDestino('');
+      setPendiente(false); setProveedor(''); setVencimiento(''); setAliasPago(''); setMonto(0); setFecha(hoyISO()); setCategoria('gastos_generales'); setMedioPago(MEDIOS[0]); setMedioDestino('');
       setIdArticulo(''); setCantidad('');
       router.refresh();
     } catch (err: any) {
@@ -655,7 +674,7 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
                 {/* Al pasar a cuotas se apaga "todavía no lo pagué": son dos formas de decir
                     lo mismo encima de la misma compra, y dejarlo prendido mandaría el total
                     como deuda Y repartido en cuotas. */}
-                <select value={cuotas} onChange={(e) => { const n = Number(e.target.value); setCuotas(n); if (n > 1) { setPendiente(false); setVencimiento(''); } }} disabled={guardando}
+                <select value={cuotas} onChange={(e) => { const n = Number(e.target.value); setCuotas(n); if (n > 1) { setPendiente(false); setVencimiento(''); setAliasPago(''); } }} disabled={guardando}
                   style={{ fontWeight: cuotas > 1 ? 700 : 400, borderColor: cuotas > 1 ? '#2563eb' : undefined, color: cuotas > 1 ? '#1e40af' : undefined }}>
                   <option value={1}>Un solo pago</option>
                   {[2, 3, 4, 6, 9, 10, 12, 18, 24].filter((n) => n <= MAX_CUOTAS).map((n) => (
@@ -726,10 +745,27 @@ export default function GastosManager({ gastos, articulos, usuario, empleados = 
                   <label>Vence el</label>
                   <input type="date" value={vencimiento} onChange={(e) => setVencimiento(e.target.value)} disabled={guardando} />
                 </div>
+                {/* A dónde transferir. Opcional a propósito: no toda compra se paga por
+                    transferencia, y obligarlo haría que se escriba cualquier cosa con tal de
+                    poder guardar. Cuando está, es justo el dato que falta para pagar sin
+                    tener que preguntar — que es el motivo por el que alguien manda una
+                    solicitud de pago por mail. */}
+                <div>
+                  <label>Alias o CBU para pagar <span style={{ color: '#9ca3af', fontWeight: 400 }}>(opcional)</span></label>
+                  <input type="text" value={aliasPago} onChange={(e) => setAliasPago(e.target.value)} disabled={guardando}
+                    placeholder="ej: orenmas.sa.arg" />
+                  {aliasSugerido && !aliasPago.trim() && (
+                    <button type="button" onClick={() => setAliasPago(aliasSugerido)} disabled={guardando}
+                      style={{ marginTop: '4px', fontSize: '11px', background: 'none', border: 'none', padding: 0, color: '#2563eb', cursor: 'pointer', fontWeight: 700, textDecoration: 'underline' }}>
+                      Usar el de la última vez: {aliasSugerido}
+                    </button>
+                  )}
+                </div>
               </div>
             )}
             {pendiente && (
               <p style={{ margin: '8px 0 0', fontSize: '11.5px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '8px 10px' }}>
+                Queda en la lista de <strong>pagos pendientes</strong>, que sale por mail todas las mañanas.
                 Esta compra NO va a contar como gasto hasta que la marques pagada en <strong>Deuda a proveedores</strong>.
                 Mientras tanto figura como deuda, y el medio de pago que elegiste arriba se va a poder cambiar al pagarla
                 —que es cuando se sabe de dónde salió la plata—.

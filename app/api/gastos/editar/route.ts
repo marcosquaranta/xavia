@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
   if (!(await isAdmin())) return NextResponse.json({ error: 'solo_admin' }, { status: 403 });
 
   try {
-    const { id_gasto, fecha, descripcion, categoria, monto, medio_pago, cantidad, proveedor, vencimiento, empleado } = await req.json();
+    const { id_gasto, fecha, descripcion, categoria, monto, medio_pago, cantidad, proveedor, vencimiento, alias_pago, empleado } = await req.json();
     if (!id_gasto) return NextResponse.json({ error: 'falta_id' }, { status: 400 });
     const montoNum = Number(monto);
     if (!isFinite(montoNum) || montoNum === 0 || (montoNum < 0 && !admiteMontoNegativo(categoria))) {
@@ -39,6 +39,10 @@ export async function POST(req: NextRequest) {
       // Se normaliza acá y no en la pantalla: la planilla ya tiene fechas escritas de cuatro
       // formas distintas y lo que se guarde de ahora en más tiene que ser una sola.
       ...(vencimiento !== undefined ? { vencimiento: fechaISO(vencimiento) } : {}),
+      // El alias a dónde pagar. Solo si vino, por lo mismo que los de arriba: una compra
+      // que Franco cargó sin alias se completa desde Deuda a proveedores, y una edición que
+      // no lo manda no tiene por qué borrarlo.
+      ...(alias_pago !== undefined ? { alias_pago: String(alias_pago || '').trim() } : {}),
       // A quién se le adelantó. Solo si viene, por lo mismo que los de arriba: la edición
       // desde Gastos no lo manda y borrarlo dejaría el adelanto sin dueño, o sea sin
       // descontarse de ningún sueldo.
