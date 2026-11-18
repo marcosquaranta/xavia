@@ -600,12 +600,12 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
         <div style={{ marginBottom: '12px' }}>
 
         <details style={tarjeta('#1d4ed8')}>
-          <summary style={encabezado('#1d4ed8')}>Registrar un cobro en Xubio</summary>
-          <p style={{ ...bajada, color: '#1e40af', fontWeight: 600 }}>Mueve la contabilidad: crea la cobranza en Xubio.</p>
+          <summary style={encabezado('#1d4ed8')}>Registrar un cobro</summary>
+          <p style={{ ...bajada, color: '#1e40af', fontWeight: 600 }}>Mueve la contabilidad: la cobranza se crea en Xubio en la tanda de la noche.</p>
           <p style={bajada}>
-            Entra a la cuenta corriente del cliente como cobro a cuenta: la API de Xubio no permite
-            imputarlo a una factura puntual, eso sigue siendo a mano si hace falta. Un cobro mal cargado
-            se puede anular desde acá.
+            La factura queda cobrada en el acto. La cobranza entra a la cuenta corriente del cliente
+            como cobro a cuenta: la API de Xubio no permite imputarlo a una factura puntual, eso sigue
+            siendo a mano si hace falta. Un cobro mal cargado se puede anular desde acá.
           </p>
           <div style={{ marginTop: '10px' }}>
             <RegistrarCobro
@@ -615,6 +615,9 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
               // dato y la misma fuente: si acá se dedujera de otro lado, la cuenta que
               // propone la carga a mano y la que propone la bandeja podrían diferir.
               ultimaCuentaPorCliente={ultimaCuentaPorCliente}
+              // La lista de facturas sale de la foto de Xubio, no de Xubio en vivo. Sin
+              // esta fecha a la vista, una factura emitida hoy parece perdida.
+              actualizadoXubio={actualizadoXubio}
               clientes={filas.map((f) => ({
                 id_control: f.id_control,
                 nombre: f.nombre,

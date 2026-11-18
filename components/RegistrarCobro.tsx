@@ -56,7 +56,7 @@ interface FacturaCliente {
 // Diagnóstico + carga de cobros. El diagnóstico va primero a propósito: hasta no verlo en
 // verde no se sabe si las credenciales y las cuentas están bien, y el primer cobro no es
 // el momento de descubrirlo.
-export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = [], errorCuentas = null, ultimaCuentaPorCliente = {} }: {
+export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = [], errorCuentas = null, ultimaCuentaPorCliente = {}, actualizadoXubio = '' }: {
   clientes: ClienteOpt[]; cobros: CobroFila[];
   cuentasIniciales?: { id: number; nombre: string }[];
   errorCuentas?: string | null;
@@ -65,6 +65,11 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
   // cobro, que es una decisión ya tomada y es justo el campo donde equivocarse manda la
   // plata a la cuenta que no es.
   ultimaCuentaPorCliente?: Record<string, string>;
+  // Hasta cuándo llegan los datos de Xubio que mira esta pantalla. La lista de facturas no
+  // sale de Xubio en vivo: sale de la foto que trae el cron todas las mañanas (ver
+  // lib/xubioCache.ts). Una factura emitida hoy no está en esa foto, y sin esta fecha a la
+  // vista la lista dice "últimos 365 días" y parece que la factura se perdió.
+  actualizadoXubio?: string;
 }) {
   const [diag, setDiag] = useState<any>(null);
   const [diagLoading, setDiagLoading] = useState(false);
@@ -134,6 +139,13 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
     // anterior es peor que dejarlo vacío.
     setRetencion('');
     if (!idControl) return;
+    await cargarFacturas(idControl);
+  }
+
+  // Separada de cambiarCliente porque también se llama después de refrescar la caché de
+  // Xubio: ahí el cliente es el mismo y lo único que cambió es lo que hay para mostrar.
+  async function cargarFacturas(idControl: string) {
+    setFacturasError(null);
     setFacturasLoading(true);
     try {
       const r = await fetch(`/api/cobranzas/facturas?id_control=${encodeURIComponent(idControl)}`);
@@ -143,11 +155,35 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
       setDiasVentana(Number(j.dias) || 365);
       // La ventana la decide la API (365 días). La pantalla decía 120 y era mentira: hacía
       // creer que faltaban facturas por estar fuera de rango cuando el rango era otro.
-      if (!(j.facturas || []).length) setFacturasError(`Este cliente no tiene facturas en los últimos ${Number(j.dias) || 365} días.`);
+      // Si no hay ninguna, decir también de cuándo son los datos: sin eso, el que acaba de
+      // facturarle a ese cliente concluye que la factura no se emitió.
+      if (!(j.facturas || []).length) {
+        setFacturasError(`Este cliente no tiene facturas en los últimos ${Number(j.dias) || 365} días`
+          + `${actualizadoXubio ? `, según los datos de Xubio al ${actualizadoXubio}` : ''}.`
+          + ' Si facturaste hoy, traé lo último de Xubio con el botón de arriba de Cobranzas.');
+      }
     } catch (e: any) {
       setFacturasError(e.message || 'No se pudieron traer las facturas');
     }
     setFacturasLoading(false);
+  }
+
+  // Traer lo último de Xubio sin salir de acá y volver a cargar las facturas del cliente.
+  //
+  // El botón ya existía, pero arriba de todo en Cobranzas, a varias pantallas de scroll de
+  // donde aparece el problema. El que acaba de facturar y no ve la factura está mirando
+  // ESTA lista: la salida tiene que estar acá.
+  const [refrescando, setRefrescando] = useState(false);
+  async function refrescarXubio() {
+    setRefrescando(true);
+    try {
+      const r = await fetch('/api/cron/xubio-diario');
+      if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || 'No se pudo traer de Xubio.');
+      if (cliente) await cargarFacturas(cliente);
+    } catch (e: any) {
+      setFacturasError(e?.message || 'No se pudo traer de Xubio.');
+    }
+    setRefrescando(false);
   }
 
   // Tildar facturas completa el importe solo (la suma de las elegidas), salvo que ya lo
@@ -427,6 +463,19 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap', marginBottom: '5px' }}>
                     <span style={{ fontSize: '11px', fontWeight: 700, color: '#374151' }}>Facturas del cliente</span>
                     <span style={{ fontSize: '10.5px', color: '#9ca3af' }}>últimos {diasVentana} días · tildá las que cubre este cobro</span>
+                    {/* De cuándo son los datos, y cómo traer los de hoy. Esta lista sale de
+                        la foto que el cron trae a la mañana, no de Xubio en vivo: una
+                        factura emitida hoy no está acá hasta mañana, y eso hay que decirlo
+                        donde se la busca y no en otra parte de la pantalla. */}
+                    <span style={{ fontSize: '10.5px', color: '#9ca3af' }}>
+                      · {actualizadoXubio ? `datos de Xubio al ${actualizadoXubio}` : 'datos de Xubio de la última actualización'}
+                      {' '}
+                      <button type="button" onClick={refrescarXubio} disabled={refrescando || facturasLoading}
+                        style={{ fontSize: '10.5px', background: 'none', border: 'none', padding: 0, color: '#2563eb', cursor: 'pointer', fontWeight: 700, textDecoration: 'underline' }}>
+                        {refrescando ? 'trayendo…' : '↻ traer lo de hoy'}
+                      </button>
+                      {refrescando && ' (puede tardar un minuto)'}
+                    </span>
                     {elegidas.length > 0 && (
                       <span style={{ marginLeft: 'auto', fontSize: '11.5px', fontWeight: 700, color: '#166534' }}>
                         {elegidas.length} tildada{elegidas.length > 1 ? 's' : ''} · {fmt$(totalElegido)}
