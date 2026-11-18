@@ -552,10 +552,46 @@ export default function RegistrarCobro({ clientes, cobros, cuentasIniciales = []
                             opacity: cerrada ? (soloDeducida ? 0.85 : 0.6) : 1,
                           }}>
                           <input type="checkbox" checked={tildada} disabled={loading || (cerrada && !soloDeducida)} onChange={() => toggleFactura(f.numero)} />
-                          <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#1d4ed8', minWidth: '132px' }}>{f.numero}</span>
+                          {/* El número lleva a corregir la factura de verdad —cantidades, y
+                              de ahí sale la nota de crédito o la factura extra—. El ✎ de al
+                              lado sigue siendo el ajuste a mano, que es otra cosa y se dice
+                              en su propio cartel. */}
+                          <a href={`/ventas/historial?factura=${encodeURIComponent(f.numero)}`}
+                            target="_blank" rel="noreferrer"
+                            title="Abrir esta factura en el historial para corregir las cantidades"
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ fontFamily: 'monospace', fontSize: '11px', color: '#1d4ed8', minWidth: '132px', textDecoration: 'underline' }}>
+                            {f.numero}
+                          </a>
                           <span style={{ color: '#6b7280', minWidth: '78px' }}>{fmtDia(f.fecha)}</span>
                           <span style={{ color: '#9ca3af', fontSize: '10.5px', minWidth: '52px' }}>{diasDesde(f.fecha)}d</span>
-                          <span style={{ marginLeft: 'auto', fontWeight: 600 }}>{fmt$(f.importe)}</span>
+                          {/* ── El importe, y de dónde salió ────────────────────────────
+                              Una factura corregida vale menos que lo que dice el comprobante.
+                              Mostrar solo el número nuevo hace dudar de si la pantalla se
+                              equivocó; mostrar solo el viejo es reclamar plata que ya se
+                              acreditó. Van los dos, y el motivo en el título. */}
+                          <span style={{ marginLeft: 'auto', fontWeight: 600, textAlign: 'right' }} title={(f as any).correccion || ''}>
+                            {(f as any).ajustada && (f as any).importeFactura !== undefined && (
+                              <span style={{ color: '#9ca3af', fontWeight: 400, textDecoration: 'line-through', marginRight: '5px' }}>
+                                {fmt$((f as any).importeFactura)}
+                              </span>
+                            )}
+                            {fmt$(f.importe)}
+                          </span>
+                          {/* La NC que la bajó, con su número: cuando alguien discute un
+                              importe, lo que necesita es el comprobante, no un adjetivo. */}
+                          {((f as any).notasCredito || []).length > 0 && (
+                            <span title={(f as any).correccion || ''}
+                              style={{ fontSize: '9.5px', background: '#eff6ff', color: '#1e40af', padding: '1px 6px', borderRadius: '8px', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                              NC {((f as any).notasCredito || []).map((n: any) => n.numero).filter(Boolean).join(', ') || 'emitida'}
+                            </span>
+                          )}
+                          {(f as any).ajustada && !((f as any).notasCredito || []).length && (
+                            <span title={(f as any).correccion || ''}
+                              style={{ fontSize: '9.5px', background: '#fffbeb', color: '#92400e', padding: '1px 6px', borderRadius: '8px', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                              corregida en la app
+                            </span>
+                          )}
                           {/* Corregir el importe sin salir de acá. Es el caso de la factura
                               mal cargada que el cliente pagó bien: mientras el importe esté
                               mal, lo tildado nunca va a coincidir con lo que entró. */}

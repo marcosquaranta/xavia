@@ -91,8 +91,18 @@ export default function AjustarFactura({
       {err && <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#dc2626', fontWeight: 600 }}>⚠ {err}</p>}
       <p style={{ margin: '6px 0 0', fontSize: '10.5px', color: '#b45309', lineHeight: 1.45 }}>
         Esto <strong>no cambia la factura en Xubio</strong>: queda registrado del lado de la app, con el motivo y tu
-        usuario, y es lo que se usa para la deuda del cliente. Si hay que corregirla de verdad, va una nota de crédito
-        desde Comprobantes.
+        usuario, y es lo que se usa para la deuda del cliente.
+      </p>
+      {/* El otro camino, nombrado. Este formulario sirve para el caso en que solo hay que
+          corregir el número; corregir las cantidades y cerrar la factura en Xubio es otra
+          cosa y se hace en el historial, donde sale sola la NC o la factura por la
+          diferencia. Decir solo "esto no toca Xubio" deja al que leyó sin saber qué sí. */}
+      <p style={{ margin: '4px 0 0', fontSize: '10.5px', color: '#6b7280', lineHeight: 1.45 }}>
+        Si lo que está mal son las cantidades y hay que cerrarla en Xubio,{' '}
+        <a href={`/ventas/historial?factura=${encodeURIComponent(numero)}`} target="_blank" rel="noreferrer"
+          style={{ color: '#1d4ed8', fontWeight: 700 }}>
+          corregila en el historial
+        </a>: ahí se emite sola la nota de crédito, o una factura por la diferencia si sube.
       </p>
     </div>
   );

@@ -18,6 +18,8 @@ import { cuentasFaltantes } from '@/lib/cuentasCobro';
 import { sugerirCombinaciones } from '@/lib/conciliacionCobro';
 import { claveComprobante } from '@/lib/comprobantes';
 import { leerAjustes, ajustesPorFactura } from '@/lib/ajusteFactura';
+import { correccionesPorFactura } from '@/lib/correccionesFactura';
+import { leerNotas } from '@/lib/notaCredito';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 import type { ClienteVenta } from '@/lib/types';
 import Header from '@/components/Header';
@@ -71,6 +73,10 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   let cobranzasCache: CobranzaCache[] = [];
   let edicionesRaw: Awaited<ReturnType<typeof leerEdiciones>> = [];
   let ajustesRaw: Awaited<ReturnType<typeof leerAjustes>> = [];
+  // Las notas de crédito emitidas desde la app. Bajan lo que hay que cobrar de la factura
+  // que acreditan, y salen de la hoja de la app y no de Xubio porque la NC de hoy no está
+  // en la foto de Xubio hasta mañana.
+  let notasParaDeuda: Awaited<ReturnType<typeof leerNotas>> = [];
   // Xubio arranca junto con las planillas, no después. Son las dos consultas más lentas de
   // la página y ninguna depende de la otra: esperarlas en serie hacía que entrar a
   // Cobranzas tardara la suma de las dos. Se lanzan acá y se esperan más abajo.
@@ -85,7 +91,7 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   ]).catch(() => [[], []] as [any[], any[]]);
 
   try {
-    [clientes, enviados, configRows, cobros, bandeja, aliasRows, saldadas, revisiones, cacheXubio, cobranzasCache, edicionesRaw, ajustesRaw] = await Promise.all([
+    [clientes, enviados, configRows, cobros, bandeja, aliasRows, saldadas, revisiones, cacheXubio, cobranzasCache, edicionesRaw, ajustesRaw, notasParaDeuda] = await Promise.all([
       readSheet<ClienteVenta>('Clientes').catch(() => []),
       readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => []),
       readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
@@ -105,6 +111,7 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
       // Las facturas corregidas después de emitidas: ahí lo que hay que cobrar no es lo que
       // dice el comprobante. La hoja no existe hasta la primera corrección.
       leerAjustes(),
+      leerNotas(),
     ]);
   } catch {}
 
@@ -152,7 +159,9 @@ export default async function CobranzasPage({ searchParams }: { searchParams: { 
   // Las imputaciones hechas a mano sobre los cobros de Xubio: qué factura paga cada uno.
   // Mandan sobre el reparto automático — ver lib/cobranzasEdit.ts.
   const imputadas = imputacionesManuales(edicionesRaw, claveComprobante);
-  const ajustes = ajustesPorFactura(ajustesRaw);
+  // Ajustes a mano Y notas de crédito emitidas. La NC es hoy el camino normal para
+  // corregir una factura, y hasta ahora no bajaba la deuda en ninguna pantalla.
+  const ajustes = correccionesPorFactura(ajustesPorFactura(ajustesRaw), notasParaDeuda);
 
   // ── Qué factura paga cada cobranza de Xubio ─────────────────────────────────────────
   //

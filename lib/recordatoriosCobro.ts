@@ -10,6 +10,8 @@ import { HOJA_COBROS } from './cobros';
 import { VENTANA_MINIMA_DIAS } from './cobranzasVentana';
 import { leerEdiciones, imputacionesManuales } from './cobranzasEdit';
 import { leerAjustes, ajustesPorFactura } from './ajusteFactura';
+import { correccionesPorFactura, importeAReclamar, type CorreccionFactura } from './correccionesFactura';
+import { leerNotas } from './notaCredito';
 import { HOJA_BANDEJA, type ItemBandeja } from './bandejaCobranzas';
 import { comprometidasDeBandeja } from './comprometidas';
 
@@ -202,7 +204,7 @@ export function calcularSaldos(
   // Facturas corregidas después de emitidas: la guarda de saldo tiene que mirar lo que hay
   // que cobrar, no lo que dice el comprobante. Si no, un cliente al que se le descontó
   // mercadería seguiría figurando en rojo por la diferencia y se le escribiría igual.
-  ajustes?: Map<string, { importeApp: number }>,
+  ajustes?: Map<string, CorreccionFactura>,
 ): Map<string, number> {
   const saldo = new Map<string, number>();
   for (const c of comprobantes) {
@@ -216,7 +218,7 @@ export function calcularSaldos(
     // factura figuraría debiendo algo que ya no debe.
     const signo = Number(c?.tipo) === 3 ? -1 : 1;
     const aj = Number(c?.tipo) === 1 ? ajustes?.get(claveComprobante(c?.numeroDocumento)) : undefined;
-    saldo.set(k, (saldo.get(k) || 0) + signo * (aj ? aj.importeApp : (Number(c?.importetotal) || 0)));
+    saldo.set(k, (saldo.get(k) || 0) + signo * importeAReclamar(Number(c?.importetotal) || 0, aj));
   }
   return saldo;
 }
@@ -259,7 +261,7 @@ export function calcularEnvios(
     // comprobante entrara en un solo recordatorio.
     cobradas?: Set<string>;
     // Facturas corregidas después de emitidas: ver lib/ajusteFactura.ts.
-    ajustes?: Map<string, { importeApp: number }>;
+    ajustes?: Map<string, CorreccionFactura>;
     // Facturas que el cliente avisó que paga y todavía están en la bandeja sin imputar.
     // No están cobradas —la plata puede no haber entrado, o haber entrado a una caja que
     // nadie registró— pero reclamarlas es reclamar algo que el cliente ya contestó.
@@ -320,7 +322,7 @@ export function calcularEnvios(
           // Lo que hay que cobrar, no lo que dice el comprobante: si la venta se corrigió
           // después de facturar, reclamar el importe de la factura es reclamarle al cliente
           // algo que los dos saben que no debe — y es el reclamo el que pierde autoridad.
-          importe: aj ? aj.importeApp : (Number(c?.importetotal) || 0),
+          importe: importeAReclamar(Number(c?.importetotal) || 0, aj),
         };
       })
       .filter((f) => {
@@ -644,7 +646,21 @@ export async function correrRecordatoriosCobro(
     // reclamarlo es reclamar algo que el cliente ya contestó. El compromiso caduca solo a
     // los DIAS_GRACIA_COMPROMISO, así que esto no puede tapar una factura para siempre.
     const { cubiertas } = comprometidasDeBandeja(bandeja, hoy, claveComprobante);
-    const ajustes = ajustesPorFactura(await leerAjustes());
+    // ── Las NC también bajan lo que se reclama ────────────────────────────────────
+    //
+    // Con el agregado de que acá hay que tener cuidado: `calcularSaldos` YA resta las notas
+    // de crédito que le llegan entre los comprobantes de Xubio (tipo 3). Restar además la
+    // misma NC desde la hoja de la app la restaría dos veces y dejaría al cliente figurando
+    // pagado de más — y a ese no se le reclama nada.
+    //
+    // Por eso se pasan como ya restadas las que están en los comprobantes: de la hoja de la
+    // app solo se toman las que todavía no entraron a la foto de Xubio, que son justo las
+    // de hoy. Al día siguiente entran a la foto y dejan de contarse por acá, solas.
+    const ncEnXubio = new Set<string>(
+      comprobantes.filter((c: any) => Number(c?.tipo) === 3)
+        .map((c: any) => claveComprobante(c?.numeroDocumento)).filter(Boolean),
+    );
+    const ajustes = correccionesPorFactura(ajustesPorFactura(await leerAjustes()), await leerNotas(), ncEnXubio);
     // Cerradas = todo lo que NOSOTROS decidimos: cobrado desde la app, imputado a mano o
     // dado por saldado. Es el mismo conjunto que decide a quién no se le reclama, así que
     // la guarda de saldo y el filtro de facturas no pueden contradecirse.

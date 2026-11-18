@@ -22,6 +22,8 @@ import { comprobantesParaMirar, cobranzasParaMirar } from './xubioLectura';
 import { leerSaldadas, numerosSaldados } from './facturasSaldadas';
 import { leerEdiciones, imputacionesManuales } from './cobranzasEdit';
 import { leerAjustes, ajustesPorFactura } from './ajusteFactura';
+import { correccionesPorFactura } from './correccionesFactura';
+import { leerNotas } from './notaCredito';
 import { claveComprobante } from './comprobantes';
 import { facturasPorCliente, type FacturaCliente } from './facturasCliente';
 import { estaImpaga } from './conciliacionCobro';
@@ -99,7 +101,8 @@ export async function facturasAntiguas(dias: number): Promise<ResultadoAntiguas>
 
   const todas = facturasPorCliente(
     comps, cobros, clientes, numerosSaldados(saldadasFilas), cobranzasX,
-    imputacionesManuales(edicionesRaw, claveComprobante), ajustesPorFactura(ajustesRaw),
+    imputacionesManuales(edicionesRaw, claveComprobante),
+    correccionesPorFactura(ajustesPorFactura(ajustesRaw), await leerNotas()),
   );
 
   const nombres = new Map(clientes.map((c) => [String(c.id_control), nombreClienteVisible(c)]));

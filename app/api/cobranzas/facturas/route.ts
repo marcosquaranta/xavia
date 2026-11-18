@@ -15,6 +15,8 @@ import { cubrirConCobrosDeXubio } from '@/lib/facturasCliente';
 import { comprobantesParaMirar, cobranzasParaMirar } from '@/lib/xubioLectura';
 import { leerEdiciones, imputacionesManuales } from '@/lib/cobranzasEdit';
 import { leerAjustes, ajustesPorFactura } from '@/lib/ajusteFactura';
+import { correccionesPorFactura, importeAReclamar, explicarCorreccion } from '@/lib/correccionesFactura';
+import { leerNotas } from '@/lib/notaCredito';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
@@ -44,7 +46,7 @@ export async function GET(req: NextRequest) {
 
     const hoy = fechaArgentinaHoy();
     const desde = sumarDias(hoy, -dias);
-    const [comps, cobros, reclamos, cobranzas, saldadasFilas, edicionesRaw, ajustesRaw] = await Promise.all([
+    const [comps, cobros, reclamos, cobranzas, saldadasFilas, edicionesRaw, ajustesRaw, notasRaw] = await Promise.all([
       comprobantesParaMirar(desde, hoy),
       readSheet<CobroRegistrado>(HOJA_COBROS).catch(() => [] as CobroRegistrado[]),
       readSheet<RecordatorioCobro>(HOJA_RECORDATORIOS).catch(() => [] as RecordatorioCobro[]),
@@ -52,6 +54,7 @@ export async function GET(req: NextRequest) {
       leerSaldadas(),
       leerEdiciones(),
       leerAjustes(),
+      leerNotas(),
     ]);
     const saldadas = numerosSaldados(saldadasFilas);
     // Las imputaciones hechas a mano. Van por el mismo camino que en la pantalla de
@@ -60,7 +63,12 @@ export async function GET(req: NextRequest) {
     const imputadas = imputacionesManuales(edicionesRaw, claveComprobante);
     // Las facturas corregidas después de emitidas: lo que hay que cobrar no es lo que dice
     // el comprobante. Mismo criterio que la pantalla de Cobranzas.
-    const ajustes = ajustesPorFactura(ajustesRaw);
+    // Ajustes a mano Y notas de crédito. Las NC no se restaban en ninguna pantalla: se
+    // corregía una factura en el historial, salía la NC, y acá seguía figurando el importe
+    // original. Se restan de la hoja de la app y no de la foto de Xubio porque la NC de hoy
+    // no está en esa foto hasta mañana, y esperar un día para ver el efecto de una
+    // corrección es exactamente lo que no puede pasar.
+    const correcciones = correccionesPorFactura(ajustesPorFactura(ajustesRaw), notasRaw);
 
     const k = norm(cli.nombre_xubio || cli.nombre_display);
     const facturas = comps
@@ -68,13 +76,16 @@ export async function GET(req: NextRequest) {
       .map((c: any) => {
         const numero = String(c?.numeroDocumento || '').trim();
         const importeXubio = Number(c?.importetotal) || 0;
-        const aj = ajustes.get(claveComprobante(numero));
+        const aj = correcciones.get(claveComprobante(numero));
+        const importe = importeAReclamar(importeXubio, aj);
         return {
           numero,
           fecha: soloFecha(c?.fecha),
-          importe: aj ? aj.importeApp : importeXubio,
+          importe,
           importeFactura: importeXubio,
-          ajustada: !!aj,
+          ajustada: !!aj && importe !== importeXubio,
+          correccion: aj ? explicarCorreccion(importeXubio, aj) : '',
+          notasCredito: aj?.notas || [],
         };
       })
       .filter((f) => f.numero)

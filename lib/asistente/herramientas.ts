@@ -15,6 +15,8 @@ import { facturasPorCliente, diagnosticoReparto } from '../facturasCliente';
 import { leerSaldadas, numerosSaldados } from '../facturasSaldadas';
 import { leerEdiciones, imputacionesManuales } from '../cobranzasEdit';
 import { leerAjustes, ajustesPorFactura } from '../ajusteFactura';
+import { correccionesPorFactura } from '../correccionesFactura';
+import { leerNotas } from '../notaCredito';
 import { claveComprobante } from '../comprobantes';
 import { nombreClienteVisible } from '../clientes';
 import { HOJA_COBROS, type CobroRegistrado } from '../cobros';
@@ -495,7 +497,8 @@ export const HERRAMIENTAS: Herramienta[] = [
       const diag: { cobradoSinImputar?: Map<string, number> } = {};
       const todas = facturasPorCliente(
         comprobantes, cobros, clientes, numerosSaldados(saldadasFilas), cobranzasXubio,
-        imputacionesManuales(edic, claveComprobante), ajustesPorFactura(ajustesRaw), diag,
+        imputacionesManuales(edic, claveComprobante),
+        correccionesPorFactura(ajustesPorFactura(ajustesRaw), await leerNotas()), diag,
       );
       const norm = (x: any) => String(x || '').toLowerCase();
       const filtro = norm(a?.cliente);

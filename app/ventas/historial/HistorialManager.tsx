@@ -1,5 +1,6 @@
 'use client';
 import { Fragment, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import type { VentaDia } from '@/lib/types';
 
@@ -489,6 +490,21 @@ export default function HistorialManager() {
   const [verRepetidas, setVerRepetidas] = useState(false);
   const [borrandoRepetidas, setBorrandoRepetidas] = useState(false);
 
+  // ── Llegar directo a una factura por su número ──────────────────────────────────────
+  //
+  // `?factura=B-00001-00000655` abre esa factura ya expandida y lista para corregir. Se
+  // entra así desde la lista de facturas de Cobranzas, que es donde se mira cuánto debe un
+  // cliente y donde aparece que una factura está mal: tener que anotarse el número, venir
+  // acá y buscarla a mano es el trabajo que esto saca.
+  //
+  // El editor se abre por (id_exportacion, id_control), no por número, así que el servidor
+  // traduce. Si no se puede, se dice por qué y la pantalla sigue siendo usable: una factura
+  // sin venta detrás no es un error, es un caso.
+  const params = useSearchParams();
+  const facturaPedida = String(params?.get('factura') || '').trim();
+  const [avisoFactura, setAvisoFactura] = useState<string | null>(null);
+  const [buscandoFactura, setBuscandoFactura] = useState(false);
+
   function cargar() {
     setLoading(true);
     fetch('/api/ventas/historial').then(r => r.json()).then(j => {
@@ -498,6 +514,26 @@ export default function HistorialManager() {
     }).catch(() => {}).finally(() => setLoading(false));
   }
   useEffect(() => { cargar(); }, []);
+
+  useEffect(() => {
+    if (!facturaPedida) return;
+    setBuscandoFactura(true);
+    setAvisoFactura(null);
+    fetch(`/api/ventas/por-numero?numero=${encodeURIComponent(facturaPedida)}`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (j?.encontrada) {
+          // Se filtra además de abrir: la tabla tiene cientos de filas y abrir una en el
+          // medio deja al que llegó buscándola igual que antes.
+          setFiltro(j.id_exportacion);
+          setEditando(`${j.id_exportacion}__${j.id_control}`);
+        } else {
+          setAvisoFactura(j?.motivo || j?.error || 'No se pudo encontrar esa factura.');
+        }
+      })
+      .catch(() => setAvisoFactura('No se pudo buscar esa factura.'))
+      .finally(() => setBuscandoFactura(false));
+  }, [facturaPedida]);
 
   // Devuelve lo que el servidor dice que hizo. Antes no se miraba: si borraba cero filas,
   // la pantalla recargaba igual y todo quedaba como estaba, sin una palabra. "No pasa nada
@@ -612,6 +648,20 @@ export default function HistorialManager() {
 
   return (
     <div>
+      {/* Se llegó buscando una factura puntual. Decirlo, y decir si se encontró: sin esto,
+          el que viene de Cobranzas no sabe si la pantalla le hizo caso o lo dejó en el
+          historial entero. */}
+      {facturaPedida && (buscandoFactura || avisoFactura) && (
+        <div style={{ margin: '0 0 14px', padding: '9px 12px', borderRadius: '7px', fontSize: '12.5px',
+          background: avisoFactura ? '#fffbeb' : '#eff6ff',
+          border: `1px solid ${avisoFactura ? '#fde68a' : '#bfdbfe'}`,
+          color: avisoFactura ? '#92400e' : '#1e40af' }}>
+          {buscandoFactura
+            ? <>Buscando la factura <span style={{ fontFamily: 'ui-monospace, monospace' }}>{facturaPedida}</span>…</>
+            : <><strong>{facturaPedida}</strong> — {avisoFactura}</>}
+        </div>
+      )}
+
       {/* ── No facturado ── */}
       <div style={{ marginBottom: '24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px', marginBottom: '2px' }}>

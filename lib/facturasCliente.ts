@@ -12,6 +12,7 @@ import { nombreClienteComprobante } from './recordatoriosCobro';
 import { importeCobranza } from './xubio';
 import type { ClienteVenta } from './types';
 import { claveComprobante } from './comprobantes';
+import { importeAReclamar, explicarCorreccion, type CorreccionFactura } from './correccionesFactura';
 import type { ImputacionesManuales } from './cobranzasEdit';
 
 export interface FacturaCliente {
@@ -34,6 +35,13 @@ export interface FacturaCliente {
   // cobra; esto queda al lado para poder ver de dónde salió.
   importeFactura?: number;
   ajustada?: boolean;
+  // Por qué `importe` no es `importeFactura`, en palabras. Puede ser un ajuste del lado de
+  // la app o una nota de crédito emitida en Xubio, y no da lo mismo: la primera no cambió
+  // nada allá y la segunda sí.
+  correccion?: string;
+  // Las notas de crédito que bajaron esta factura. Van enteras y no solo el total: cuando
+  // alguien discute un importe, lo que necesita es el número del comprobante.
+  notasCredito?: { numero: string; importe: number; fecha: string }[];
 }
 
 const norm = (s: any) => String(s || '')
@@ -216,7 +224,10 @@ export function facturasPorCliente(
   imputadas?: ImputacionesManuales,
   // Las facturas corregidas después de emitidas: ahí `importe` deja de ser el del
   // comprobante y pasa a ser lo que de verdad hay que cobrar (ver ajusteFactura.ts).
-  ajustes?: Map<string, { importeApp: number; importeXubio: number }>,
+  // Ahora son las correcciones completas: el ajuste a mano Y la nota de crédito emitida.
+  // Antes era solo el ajuste, así que una factura corregida con NC —que es el camino normal
+  // desde que la corrección emite sola— seguía figurando por el importe original.
+  ajustes?: Map<string, CorreccionFactura>,
   // Caja de salida opcional. Lo que decide qué figura cubierto es cuánto cobró el cliente
   // SIN imputar, y ese número no sale en el resultado: sin él, "esta factura está abierta"
   // es un veredicto que no se puede discutir. Va como parámetro de salida y no en el retorno
@@ -263,9 +274,13 @@ export function facturasPorCliente(
       // Lo que hay que cobrar. Si la venta se corrigió después de facturar, es el importe
       // corregido y no el del comprobante: reclamar el de la factura es reclamar algo que
       // las dos partes ya saben que no se debe.
-      importe: aj ? aj.importeApp : importeXubio,
+      importe: importeAReclamar(importeXubio, aj),
       importeFactura: importeXubio,
-      ajustada: !!aj,
+      ajustada: !!aj && importeAReclamar(importeXubio, aj) !== importeXubio,
+      // Qué le pasó a esta factura, en palabras. Un importe distinto del comprobante y sin
+      // explicación manda a buscar un error que no existe.
+      correccion: aj ? explicarCorreccion(importeXubio, aj) : '',
+      notasCredito: aj?.notas || [],
       yaCobrada: yaCobradas.has(claveComprobante(numero)),
       saldadaManual: !!saldadas?.has(claveComprobante(numero)),
       imputadaManual: !!imputadas?.porFactura.has(claveComprobante(numero)),

@@ -7,6 +7,8 @@ import { importeCobranza } from '@/lib/xubio';
 import { comprobantesParaMirar, cobranzasParaMirar } from '@/lib/xubioLectura';
 import { leerSaldadas, numerosSaldados } from '@/lib/facturasSaldadas';
 import { leerAjustes, ajustesPorFactura } from '@/lib/ajusteFactura';
+import { correccionesPorFactura, importeAReclamar } from '@/lib/correccionesFactura';
+import { leerNotas } from '@/lib/notaCredito';
 import { claveComprobante } from '@/lib/comprobantes';
 import { cuentaDeCobranza } from '@/lib/xubioCache';
 import { libroMayorCliente } from '@/lib/libroMayorCliente';
@@ -45,15 +47,18 @@ export async function GET(req: NextRequest) {
 
     const hoy = fechaArgentinaHoy();
     const desde = sumarDias(hoy, -dias);
-    const [comps, cobranzas, saldadasFilas, ajustesRaw] = await Promise.all([
+    const [comps, cobranzas, saldadasFilas, ajustesRaw, notasRaw] = await Promise.all([
       comprobantesParaMirar(desde, hoy),
       cobranzasParaMirar(desde, hoy),
       leerSaldadas(),
       leerAjustes(),
+      leerNotas(),
     ]);
 
     const saldadas = numerosSaldados(saldadasFilas);
-    const ajustes = ajustesPorFactura(ajustesRaw);
+    // Igual que la lista de facturas: la NC también baja lo que hay que cobrar. Si acá se
+    // contara distinto, el mayor y la lista dirían dos cosas de la misma factura.
+    const ajustes = correccionesPorFactura(ajustesPorFactura(ajustesRaw), notasRaw);
     const k = norm(cli.nombre_xubio || cli.nombre_display);
     const delCliente = (c: any) => norm(nombreClienteComprobante(c)) === k;
 
@@ -68,7 +73,7 @@ export async function GET(req: NextRequest) {
           fecha: soloFecha(c?.fecha),
           // Lo que hay que cobrar, no lo que dice el comprobante: si la venta se corrigió
           // después de emitir, el mayor tiene que mostrar la deuda real.
-          importe: aj ? aj.importeApp : importeXubio,
+          importe: importeAReclamar(importeXubio, aj),
           importeFactura: importeXubio,
           ajustada: !!aj,
           saldadaManual: saldadas.has(claveComprobante(numero)),
