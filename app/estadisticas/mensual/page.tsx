@@ -16,6 +16,8 @@ import { cicloMesPromedio } from '@/lib/estadisticas';
 import { evolucionVentaPorArticulo, evolucionVentaPorCliente, evolucionPrecioPromedio, clientesPrecioVsVolumen } from '@/lib/estadisticasVentas';
 import { nombreClienteVisible } from '@/lib/clientes';
 import type { Lote, Movimiento, Ubicacion, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, Articulo, StockMes, StockCamara, ProductividadDiaria } from '@/lib/types';
+import ProductividadTabla from '@/components/ProductividadTabla';
+import { tablaProductividad } from '@/lib/productividadTabla';
 import Header from '@/components/Header';
 import GraficoEvolucion from '../GraficoEvolucion';
 import GraficoPesaje from '../GraficoPesaje';
@@ -330,11 +332,15 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
     series: [{ nombre: 'Paquetes/hora-hombre', color: '#2563eb', puntos: productividadMensualRep.map((p, i) => [i, p.productividad ?? 0] as [number, number]).filter(p => p[1] > 0) }],
     labels: productividadMensualRep.map(p => p.label), hoyIdx: productividadMensualRep.length - 1,
   };
-  const evoProductividadPlantasRep = {
-    series: [{ nombre: 'Plantas/hora-persona', color: '#7c3aed', puntos: productividadPlantasMensualRep.map((p, i) => [i, p.productividad ?? 0] as [number, number]).filter(p => p[1] > 0) }],
-    labels: productividadPlantasMensualRep.map(p => p.label), hoyIdx: productividadPlantasMensualRep.length - 1,
-  };
-  const productividadPlantasUltimoMesRep = [...productividadPlantasMensualRep].reverse().find((p) => p.productividad !== null) ?? null;
+
+  // Tres meses cortados en el mismo día: cosecha (granel incluido), trasplante y horas.
+  // Misma función que la pantalla de estadísticas — si acá se contara distinto, el informe
+  // y la pantalla dirían números diferentes del mismo mes.
+  const tablaProdRep = tablaProductividad({
+    lotes: lotesRep, movimientos, horas: productividadCache,
+    hoy: `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`,
+    meses: 3,
+  });
 
   // ── KPI 1: Ocupación de posiciones — promedio mensual por cultivo, hasta el cierre del mes elegido ──
   const ocupacionMensualRep = ocupacionMensualPorCultivo(ocupHistRows, ubicaciones, 6, refDate);
@@ -635,15 +641,11 @@ export default async function AnalisisMensualPage({ searchParams }: { searchPara
 
             <div style={{ ...cardStyle, margin: 0, border: '1px solid #f3f4f6' }}>
               <p style={{ margin: '0 0 2px', fontSize: '12.5px', fontWeight: 700 }}>3. Productividad de empleados</p>
-              <p style={{ margin: '0 0 6px', fontSize: '11px', color: '#9ca3af' }}>Plantas cosechadas al mes por hora-persona total.</p>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '6px' }}>
-                <strong style={{ fontSize: '28px', color: '#111827' }}>{productividadPlantasUltimoMesRep ? productividadPlantasUltimoMesRep.productividad!.toLocaleString('es-AR') : '—'}</strong>
-                <span style={{ fontSize: '11px', color: '#9ca3af' }}>pl/h · {productividadPlantasUltimoMesRep?.label ?? 'sin datos'}</span>
+              <p style={{ margin: '0 0 8px', fontSize: '11px', color: '#9ca3af' }}>Cosecha y trasplante contra horas-hombre · últimos 3 meses.</p>
+              <CumplimientoObjetivo valor={tablaProdRep[tablaProdRep.length - 1]?.plantasPorHora ?? null} kpi={OBJETIVOS_MARCE.productividad} />
+              <div style={{ marginTop: '8px' }}>
+                <ProductividadTabla meses={tablaProdRep} compacto />
               </div>
-              <CumplimientoObjetivo valor={productividadPlantasUltimoMesRep?.productividad} kpi={OBJETIVOS_MARCE.productividad} />
-              {evoProductividadPlantasRep.series[0].puntos.length > 0
-                ? <GraficoEvolucion series={evoProductividadPlantasRep.series} labels={evoProductividadPlantasRep.labels} hoyIdx={evoProductividadPlantasRep.hoyIdx} unidad=" pl/h" />
-                : <p style={{ color: '#9ca3af', fontSize: '12px', textAlign: 'center', padding: '16px' }}>Sin datos de CrossChex disponibles.</p>}
               <a href="#productividad-paq" style={{ fontSize: '11px', color: '#2563eb', textDecoration: 'none', fontWeight: 600, display: 'inline-block', marginTop: '8px' }}>Ver evolución en paquetes/hora ↓</a>
             </div>
           </div>

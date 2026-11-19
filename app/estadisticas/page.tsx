@@ -16,6 +16,8 @@ import { cicloMesPromedio } from '@/lib/estadisticas';
 import { POSPAQ } from '@/lib/planificacion'; // 3 plantas por paquete de rúcula
 import type { OcupacionHistorialRow } from '@/lib/ocupacion';
 import type { Lote, Movimiento, Ubicacion, KilometrajeVehiculo, StockCamara, ProductividadDiaria, VentaDia } from '@/lib/types';
+import ProductividadTabla from '@/components/ProductividadTabla';
+import { tablaProductividad } from '@/lib/productividadTabla';
 import Header from '@/components/Header';
 import GraficoEvolucion from './GraficoEvolucion';
 import GraficoCiclosMesadas from './GraficoCiclosMesadas';
@@ -89,11 +91,14 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
     series: [{ nombre: 'Paquetes/hora-hombre', color: '#2563eb', puntos: productividadMensual.map((p, i) => [i, p.productividad ?? 0] as [number, number]).filter(p => p[1] > 0) }],
     labels: productividadMensual.map(p => p.label), hoyIdx: productividadMensual.length - 1,
   };
-  const evoProductividadPlantas = {
-    series: [{ nombre: 'Plantas/hora-persona', color: '#7c3aed', puntos: productividadPlantasMensual.map((p, i) => [i, p.productividad ?? 0] as [number, number]).filter(p => p[1] > 0) }],
-    labels: productividadPlantasMensual.map(p => p.label), hoyIdx: productividadPlantasMensual.length - 1,
-  };
-  const productividadPlantasUltimoMes = [...productividadPlantasMensual].reverse().find((p) => p.productividad !== null) ?? null;
+
+  // La tabla de productividad: tres meses cortados en el mismo día, con la cosecha (granel
+  // incluido), el trasplante y las horas. Ver lib/productividadTabla.ts.
+  const tablaProd = tablaProductividad({
+    lotes, movimientos, horas: productividadCache,
+    hoy: `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`,
+    meses: 3,
+  });
 
   // ── KPI 1: Ocupación de posiciones — promedio mensual, por cultivo (últimos 6 meses) ──
   const ocupacionMensual = ocupacionMensualPorCultivo(ocupacionHistorial, ubicaciones, 6);
@@ -705,24 +710,18 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
               <a href="#descarte-por-fase" style={{ fontSize:'10.5px', color:'#2563eb', textDecoration:'none', fontWeight:600, display:'inline-block', marginTop:'6px' }}>Ver desglose de descarte por fase ↓</a>
             </div>
 
-            {/* KPI 3 — Productividad (plantas cosechadas / hora-persona) */}
+            {/* ── KPI 3 — Productividad ────────────────────────────────────────────────
+                Era un gráfico de plantas cosechadas por hora, de doce meses. No servía:
+                ocho de esos meses estaban vacíos (la caché de fichajes arrancó en agosto),
+                el mes en curso se comparaba contra meses enteros —así que el número se
+                desplomaba todos los días 1— y contaba solo la cosecha, con lo cual un mes
+                de mucho trasplante aparecía como un mes flojo.
+                Ahora es una tabla de tres meses cortados en el mismo día, con la cosecha,
+                el trasplante y las horas a la vista. Ver lib/productividadTabla.ts. */}
             <div className="card" style={{ margin:0, padding:'11px 12px' }}>
               <p style={{ margin:'0 0 1px', fontSize:'11.5px', fontWeight:700 }}>3. Productividad de empleados</p>
-              <p style={{ margin:'0 0 6px', fontSize:'10px', color:'#9ca3af', lineHeight:1.35 }} title="En medición — el objetivo se fija con 6-8 mediciones contra el propio baseline.">Plantas cosechadas al mes por hora-persona · últimos {productividadPlantasMensual.length} meses</p>
-              <div style={{ display:'flex', alignItems:'baseline', gap:'6px', marginBottom:'6px' }}>
-                <strong style={{ fontSize:'22px', color:'#111827' }}>
-                  {productividadPlantasUltimoMes ? productividadPlantasUltimoMes.productividad!.toLocaleString('es-AR') : '—'}
-                </strong>
-                <span style={{ fontSize:'11px', color:'#9ca3af' }}>pl/h · {productividadPlantasUltimoMes?.label ?? 'sin datos aún'}</span>
-              </div>
-              {evoProductividadPlantas.series[0].puntos.length > 0 ? (
-                <>
-                  <GraficoEvolucion series={evoProductividadPlantas.series} labels={evoProductividadPlantas.labels} hoyIdx={evoProductividadPlantas.hoyIdx} unidad=" pl/h" />
-                  <p style={{ margin:'5px 0 0', fontSize:'10px', color:'#6b7280' }}>{detalleMinMaxProm(productividadPlantasMensual.map(m => m.productividad), ' pl/h')}</p>
-                </>
-              ) : (
-                <p style={{ color:'#9ca3af', fontSize:'12px', textAlign:'center', padding:'16px' }}>Sin datos de CrossChex disponibles.</p>
-              )}
+              <p style={{ margin:'0 0 8px', fontSize:'10px', color:'#9ca3af', lineHeight:1.35 }}>Cosecha y trasplante contra horas-hombre · últimos 3 meses</p>
+              <ProductividadTabla meses={tablaProd} compacto />
               <a href="#productividad" style={{ fontSize:'10.5px', color:'#2563eb', textDecoration:'none', fontWeight:600, display:'inline-block', marginTop:'6px' }}>Ver evolución en paquetes/hora →</a>
             </div>
           </div>
