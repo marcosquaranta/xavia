@@ -67,6 +67,12 @@ export const AVISOS: AvisoConfigurable[] = [
     porDefecto: ['marcos.quaranta@gmail.com'],
   },
   {
+    clave: 'email_reporte_precios',
+    titulo: 'Precios por cliente (mensual)',
+    descripcion: 'El 20 de cada mes. Qué precios le cobramos a cada cliente, cuándo fue su último aumento y de cuánto fue —en porcentaje y en plata por mes—, del que más compra al que menos. Destaca a los que llevan más de 90 días sin aumento.',
+    porDefecto: ['marcos.quaranta@gmail.com'],
+  },
+  {
     clave: 'email_cobro_automatico',
     titulo: 'Cobros que se registran solos',
     descripcion: 'En el momento en que pasa. Cuando llega un aviso de pago y las facturas que nombra suman exactamente lo que declara, la app registra la cobranza en Xubio sola y avisa al instante, con el detalle y el link para anularla.',
