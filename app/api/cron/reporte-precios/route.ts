@@ -8,7 +8,6 @@ import { HOJA_PRECIOS_HIST, CAMPOS_PRECIO, type CambioPrecio } from '@/lib/preci
 import { armarReporte, atrasados, pctPonderado, type FilaReportePrecios } from '@/lib/reportePrecios';
 import { destinatariosDe } from '@/lib/avisosConfig';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
-import { nombreClienteVisible } from '@/lib/clientes';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
