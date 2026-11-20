@@ -697,6 +697,21 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const ventasMesActual = resumenMesActual(ventas, precios, clientes, hoy, undefined, lotes, extrasVenta.map((a) => a.key));
   const diasEnMesPasado = new Date(mesPasadoRef.getFullYear(), mesPasadoRef.getMonth() + 1, 0).getDate();
   const resumenMesPasado = resumenMesActual(ventas, precios, clientes, mesPasadoRef, diasEnMesPasado, lotes, extrasVenta.map((a) => a.key));
+
+  // ── El mes pasado CORTADO EN EL MISMO DÍA ────────────────────────────────────────
+  //
+  // "Total mes al día" se comparaba contra el mes pasado entero: veinte días contra
+  // treinta. Ese −37% no decía que se vendiera menos, decía que falta un tercio del mes —
+  // y empeoraba a principio de mes para recuperarse sola el día 1 del siguiente.
+  //
+  // Es el mismo error que tenía el indicador de productividad y se arregla igual: lo
+  // parcial contra lo parcial. La proyección sigue comparándose contra el mes entero, que
+  // ahí sí corresponde: una proyección a fin de mes contra un mes cerrado.
+  const resumenMesPasadoAlDia = resumenMesActual(
+    ventas, precios, clientes, mesPasadoRef,
+    Math.min(hoy.getDate(), diasEnMesPasado),
+    lotes, extrasVenta.map((a) => a.key),
+  );
   const ventasMesAnteriorTotal = resumenMesPasado.unidadesMes;
   const ventasMesAnteriorMonto = resumenMesPasado.montoMes;
 
@@ -876,12 +891,38 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const pctT = (act: number | null, ant: number | null): number | null =>
     act === null || ant === null || !ant ? null : Math.round(((act - ant) / ant) * 100);
 
+  // ── El total de la semana ─────────────────────────────────────────────────────────
+  //
+  // Es el período DEL REPORTE y no estaba: el bloque de ventas empezaba por el mes, así que
+  // el reporte semanal no decía cuánto se vendió esa semana. Las dos puntas, unidades y
+  // plata: el mismo volumen a otro precio es otra semana, y con una sola de las dos no se
+  // distingue.
+  //
+  // Sale de `ventasSemana` / `ventasSemanaAnterior`, las mismas variables que ya alimentan
+  // el detalle por producto de más abajo. Si acá se recalculara con otro criterio, el total
+  // y la suma de sus productos no darían lo mismo en el mismo mail.
+  const unidadesDe = (r: typeof ventasSemana) =>
+    r.rucula.unidades + r.lechuga.unidades + r.albahaca.unidades + r.otros.unidades;
+  const montoDe = (r: typeof ventasSemana) =>
+    r.rucula.monto + r.lechuga.monto + r.albahaca.monto + r.otros.monto;
+
+  const uSem = unidadesDe(ventasSemana), uSemAnt = unidadesDe(ventasSemanaAnterior);
+  const mSem = montoDe(ventasSemana), mSemAnt = montoDe(ventasSemanaAnterior);
+
   const itemsVentas: ReporteSemanalData['indicadoresMes'] = [
+    { label: 'Esta semana', valor: `${fmtN(uSem)} u`,
+      pct: pctT(uSem, uSemAnt), mejorSiSube: true,
+      detalle: `contra ${fmtN(uSemAnt)} u de la semana anterior` },
+    { label: 'Esta semana en $', valor: `$${fmtN(mSem)}`,
+      pct: pctT(mSem, mSemAnt), mejorSiSube: true,
+      detalle: `contra $${fmtN(mSemAnt)} de la semana anterior` },
     { label: 'Total mes al día', valor: `${fmtN(ventasMesActual.unidadesMes)} u`,
-      pct: pctT(ventasMesActual.unidadesMes, resumenMesPasado.unidadesMes), mejorSiSube: true },
+      // Contra el mes pasado al MISMO día, no contra el mes entero.
+      pct: pctT(ventasMesActual.unidadesMes, resumenMesPasadoAlDia.unidadesMes), mejorSiSube: true,
+      detalle: `contra ${fmtN(resumenMesPasadoAlDia.unidadesMes)} u del mes pasado a esta altura (día ${Math.min(hoy.getDate(), diasEnMesPasado)})` },
     { label: 'Total mes proyectada', valor: `${fmtN(ventasMesActual.proyeccionMes)} u`,
       pct: pctT(ventasMesActual.proyeccionMes, ventasMesAnteriorTotal), mejorSiSube: true,
-      detalle: 'proyección del ritmo de lo que va del mes' },
+      detalle: `al ritmo de lo que va del mes, contra ${fmtN(ventasMesAnteriorTotal)} u del mes pasado completo` },
     { label: 'Precio promedio', valor: `$${fmtN(ventasMesActual.precioPromedioMes)}`,
       pct: pctT(ventasMesActual.precioPromedioMes, resumenMesPasado.precioPromedioMes), mejorSiSube: true },
   ];
