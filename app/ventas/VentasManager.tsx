@@ -920,7 +920,13 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
             {conProblema.length>0 && (
               <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'7px',padding:'8px 11px',marginBottom:'10px'}}>
                 <p style={{margin:0,fontSize:'12px',color:'#92400e'}}>
-                  <strong>{conProblema.length} cliente(s) tienen algún artículo sin precio cargado</strong> y esa línea iría en $0. Están marcados abajo.
+                  {/* Decía "esa línea iría en $0", y es peor que eso: Xubio rechaza la
+                      factura ENTERA. La venta queda sin facturar y el motivo solo se ve
+                      entrando a Facturación. Hoy la carga ya no deja poner cantidad sin
+                      precio, así que esto queda para las ventas cargadas de antes. */}
+                  <strong>{conProblema.length} cliente(s) tienen algún artículo sin precio cargado.</strong>{' '}
+                  Xubio <strong>rechaza la factura entera</strong> si un renglón va sin precio — no sale en $0, no sale.
+                  Cargá el precio en Admin → Clientes, o sacá esa cantidad. Están marcados abajo.
                 </p>
               </div>
             )}
@@ -1078,6 +1084,30 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
                       )}
                     </td>
                     {(prods as any[]).map((p:any)=>{
+                      // ── Sin precio no se carga la cantidad ─────────────────────────
+                      //
+                      // Xubio rechaza la factura ENTERA si un renglón va sin precio
+                      // ("Debe especificar el precio para el producto Albahaca
+                      // Hidroponica"). O sea: un artículo sin precio no sale en $0, hace
+                      // que no salga nada — y la venta queda tirada en Facturación sin que
+                      // se entienda por qué.
+                      //
+                      // Antes esto se avisaba recién en la pantalla de confirmación, y como
+                      // aviso: se podía apretar igual. Ahora no se deja cargar, que es lo
+                      // que pidió Marcos. El precio se carga en Admin → Clientes.
+                      //
+                      // Se mira con `precioFinal` y no con el precio exacto de la sucursal
+                      // por lo mismo que el resto de la pantalla: un cliente puede tener la
+                      // lista cargada en otra sucursal y ese precio vale igual.
+                      const cliP=clientes.find((c)=>String(c.id_control)===String(f.id_control));
+                      if(!(precioFinal(precios,String(f.id_control),f.sucursal,String(p.key),cliP)>0)){
+                        return(
+                          <td key={p.key} style={{padding:'3px 4px',textAlign:'center'}}>
+                            <span title={`${cliP?.nombre_display||f.id_control} no tiene precio cargado para ${p.label||p.key}. Sin precio, Xubio rechaza la factura entera — se carga en Admin → Clientes.`}
+                              style={{fontSize:'10px',color:'#d1d5db'}}>sin precio</span>
+                          </td>
+                        );
+                      }
                       const est=e(f.id_control,f.sucursal,p.key);const val=q(f.id_control,f.sucursal,p.key);
                       const esPrefijo=prefijo.has(`${f.id_control}__${f.sucursal}__${p.key}`);
                       return(
@@ -1193,6 +1223,17 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
                         <span style={{marginLeft:'4px',fontSize:'10px',background:f.tipo==='A'?'#dbeafe':'#fef9c3',color:f.tipo==='A'?'#1e40af':'#92400e',padding:'1px 4px',borderRadius:'3px',fontWeight:600}}>F{f.tipo}</span>
                       </td>
                       {KGK_ALL.map(k=>{
+                        // Mismo motivo que arriba: sin precio, Xubio rechaza la factura
+                        // entera, así que la cantidad no se deja cargar.
+                        const cliK=clientes.find((c)=>String(c.id_control)===String(f.id_control));
+                        if(!(precioFinal(precios,String(f.id_control),f.sucursal,String(k),cliK)>0)){
+                          return(
+                            <td key={k} style={{padding:'3px 8px',textAlign:'center'}}>
+                              <span title={`${cliK?.nombre_display||f.id_control} no tiene precio cargado para ese artículo por kilo. Sin precio, Xubio rechaza la factura entera — se carga en Admin → Clientes.`}
+                                style={{fontSize:'10px',color:'#d1d5db'}}>sin precio</span>
+                            </td>
+                          );
+                        }
                         const val=qKg(f.id_control,f.sucursal,k);
                         const estKg=estsKg[`${f.id_control}__${f.sucursal}`]?.[k]||'idle';
                         const bdrCol=estKg==='saved'?'#22c55e':estKg==='error'?'#ef4444':Number(val)>0?'#fbbf24':'#e5e7eb';

@@ -116,7 +116,11 @@ export default async function FacturacionPage() {
       <div className="container">
         <Link href="/ventas" style={{ fontSize: '13px', display: 'inline-block', marginBottom: '14px' }}>← Volver a Ventas</Link>
         <h1 className="page-title">Facturación</h1>
-        <p className="page-subtitle">Ventas cargadas pendientes de facturar en Xubio</p>
+        <p className="page-subtitle">
+          Acá se <strong>emiten</strong> las facturas: lo cargado que todavía no se mandó a Xubio.{' '}
+          <Link href="/ventas/historial" style={{ color: '#2563eb', fontWeight: 600 }}>Historial de facturación</Link>{' '}
+          es para mirar hacia atrás: corregir o anular lo que ya salió.
+        </p>
 
         {/* La letra del comprobante no la decide la app — ver lib/controlLetra.ts. Esto
             muestra los últimos 120 días de comprobantes que salieron con una letra distinta

@@ -73,6 +73,14 @@ export const AVISOS: AvisoConfigurable[] = [
     porDefecto: ['marcos.quaranta@gmail.com'],
   },
   {
+    clave: 'email_resumen_facturacion',
+    titulo: 'Facturado y sin facturar, por día (Juan Pablo)',
+    descripcion: 'Todos los días a la mañana, solo si hay algo. Qué se facturó y qué no cada día de los últimos 10, con las dos columnas juntas para poder ver si algo salió dos veces. Marca los clientes con dos comprobantes el mismo día y los que tienen una carga pendiente el día que ya se les facturó.',
+    // El mail del responsable se carga en Admin → Avisos por mail, no acá: una dirección
+    // personal de otra persona no tiene por qué quedar versionada en el repositorio.
+    porDefecto: ['marcos.quaranta@gmail.com'],
+  },
+  {
     clave: 'email_cobro_automatico',
     titulo: 'Cobros que se registran solos',
     descripcion: 'En el momento en que pasa. Cuando llega un aviso de pago y las facturas que nombra suman exactamente lo que declara, la app registra la cobranza en Xubio sola y avisa al instante, con el detalle y el link para anularla.',
