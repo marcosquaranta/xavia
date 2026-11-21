@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
+import VentasPorCliente from './VentasPorCliente';
 import Link from 'next/link';
 import type { ClienteVenta, PrecioVenta, VentaDia, PedidoFijo } from '@/lib/types';
 import { ventasCargadasSemana, precioFinal } from '@/lib/estadisticasVentas';
@@ -175,6 +176,24 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   const [acuse,setAcuse]=useState<Acuse|null>(null);
   // El resumen de la ultima carga, para mostrarlo DENTRO del acuse.
   const [resumenCargaTxt,setResumenCarga]=useState<string>('');
+
+  // ── Por cliente o por articulo ────────────────────────────────────────────────────
+  //
+  // La grilla esta organizada por ARTICULO: un mismo cliente aparece en tres tablas y hay
+  // que buscarlo en cada una. La vista por cliente lo da vuelta: se elige el cliente una
+  // vez y se carga todo lo suyo junto.
+  //
+  // Las dos conviven y no es indecision: cargar rucula a dieciseis clientes de corrido se
+  // hace mejor en una grilla, y eso lo dijo Juan Pablo antes de que esto existiera. La que
+  // se elige queda guardada en el navegador, asi que cada uno abre en la suya.
+  const [vista,setVista]=useState<'cliente'|'grilla'>('cliente');
+  useEffect(()=>{
+    try{ const v=localStorage.getItem('xavia_vista_ventas'); if(v==='grilla'||v==='cliente') setVista(v); }catch{}
+  },[]);
+  function cambiarVista(v:'cliente'|'grilla'){
+    setVista(v);
+    try{ localStorage.setItem('xavia_vista_ventas',v); }catch{}
+  }
 
   const [showP,setShowP]=useState(false);
   // Mostrar también los clientes sin precio de paquete. Apagado: son los que no compran así.
@@ -1050,8 +1069,65 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
         </p>
       )}
 
+      {/* Elegir como cargar. Las dos vistas guardan por el MISMO camino: lo que se tipea
+          en una aparece en la otra, porque es el mismo estado. */}
+      {!loading && (
+        <div style={{display:'flex',alignItems:'center',gap:'7px',marginBottom:'10px',flexWrap:'wrap'}}>
+          {([['cliente','Por cliente'],['grilla','Grilla por articulo']] as const).map(([v,label])=>(
+            <button key={v} type="button" onClick={()=>cambiarVista(v)}
+              style={{fontSize:'12px',fontWeight:700,padding:'6px 13px',borderRadius:'8px',cursor:'pointer',
+                border:`1px solid ${vista===v?'#1d4ed8':'#e5e7eb'}`,
+                background:vista===v?'#eff6ff':'white',
+                color:vista===v?'#1d4ed8':'#6b7280'}}>
+              {label}
+            </button>
+          ))}
+          <span style={{fontSize:'10.5px',color:'#9ca3af'}}>
+            {vista==='cliente'
+              ? 'Se elige el cliente y se carga todo lo suyo junto.'
+              : 'Un articulo por columna: conviene para cargar lo mismo a muchos clientes.'}
+          </span>
+        </div>
+      )}
+
+      {vista==='cliente' && !loading && (
+        <VentasPorCliente
+          filas={filas}
+          // El catalogo sale de la misma lista que la grilla: si esta vista tuviera la
+          // suya, un articulo dado de alta en Admin aparecia en una y no en la otra.
+          articulos={(prods as any[]).map((a:any)=>({key:String(a.key),label:String(a.label||a.key)}))}
+          ensaladas={APARTE.map((a:any)=>({key:String(a.key),label:String(a.label||a.key)}))}
+          keysKg={KGK_ALL as unknown as string[]}
+          labelKg={(k)=>k==='rucula_kg'?'Rucula':k==='lechuga_kg_crespa'?'Lechuga crespa':k==='lechuga_kg_roble'?'Lechuga roble':k}
+          // `precioFinal` y no el precio exacto de la sucursal, igual que la grilla: un
+          // cliente puede tener la lista cargada a nivel cliente o en otra sucursal, y ese
+          // precio vale igual.
+          precioDe={(id,suc,key)=>precioFinal(precios,String(id),suc,String(key),clientes.find((c)=>String(c.id_control)===String(id)))}
+          q={q as any}
+          onChange={onChange as any}
+          onBlur={onBlur as any}
+          qKg={qKg as any}
+          // El campo tiene CAJONES y el precio es por KILO: sin esto el importe de la
+          // vista saldria cinco veces mas chico que el de la factura.
+          kgDe={(k,c)=>kgDeCajones(k,c)}
+          onChangeKg={onChangeKg as any}
+          saveKg={saveKg as any}
+          // saveKg lee los inputs del DOM y no el estado. Sin registrar los de esta vista,
+          // guardar desde aca escribia CEROS y la venta por kilo se perdia sin un error.
+          // Solo una de las dos vistas existe a la vez, asi que no se pisan.
+          registrarRefKg={(f:any,k:any,el:any)=>{
+            const key=`${f.id_control}__${f.sucursal}`;
+            if(!kgInputRefs.current[key]) kgInputRefs.current[key]={rucula_kg:null,lechuga_kg_crespa:null,lechuga_kg_roble:null};
+            kgInputRefs.current[key][k as KGK]=el;
+          }}
+          facturadoDe={facturadoDe as any}
+          total7d={total7d}
+          fecha={fecha}
+        />
+      )}
+
       {/* Tabla */}
-      {loading?<div style={{textAlign:'center',padding:'24px',color:'#9ca3af'}}>Cargando…</div>:(
+      {vista==='cliente'?null:loading?<div style={{textAlign:'center',padding:'24px',color:'#9ca3af'}}>Cargando…</div>:(
         <div style={{overflowX:'auto',marginBottom:'4px'}}>
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
             <thead>
