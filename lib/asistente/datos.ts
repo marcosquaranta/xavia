@@ -1,7 +1,9 @@
 import { readSheet } from '../sheets';
 import type {
   Articulo, StockMes, Gasto, VentaDia, PrecioVenta, ClienteVenta, Lote, Movimiento, Ubicacion,
+  Empleado, ProductividadDiaria, StockCamara,
 } from '../types';
+import type { CambioPrecio } from '../preciosHistorico';
 
 // ── Las planillas, leídas una sola vez por consulta ───────────────────────────────────
 //
@@ -34,5 +36,12 @@ export class Planillas {
   movimientos() { return this.leer<Movimiento>('Movimientos'); }
   ubicaciones() { return this.leer<Ubicacion>('Ubicaciones'); }
   config() { return this.leer<{ clave: string; valor: any }>('Configuracion'); }
+  empleados() { return this.leer<Empleado>('Empleados'); }
+  // Las horas-hombre por día que deja el cron de CrossChex. Se lee de la caché y no de
+  // CrossChex en vivo por lo mismo que el resto de la app: pedirle un rango tarda una
+  // eternidad y acá hay alguien esperando una respuesta en un chat.
+  horas() { return this.leer<ProductividadDiaria>('ProductividadDiaria'); }
+  camara() { return this.leer<StockCamara>('StockCamara'); }
+  preciosHistorico() { return this.leer<CambioPrecio>('PreciosHistorico'); }
   hoja<T>(nombre: string) { return this.leer<T>(nombre); }
 }

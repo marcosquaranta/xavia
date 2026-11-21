@@ -746,6 +746,226 @@ export const HERRAMIENTAS: Herramienta[] = [
       };
     },
   },
+  // ── Lo que faltaba ───────────────────────────────────────────────────────────────
+  //
+  // El asistente contesta solo con lo que devuelven estas funciones, así que una pregunta
+  // sobre algo que ninguna cubre no da una respuesta mala: da un "no sé". Eso se leía como
+  // que el modelo no entendía, cuando lo que pasaba era que no tenía por dónde mirar.
+  //
+  // Estas seis cubren lo que quedaba afuera: sueldos, horas trabajadas, precios por
+  // cliente, facturación pendiente, pagos a proveedores y stock de cámara.
+  {
+    nombre: 'sueldos_y_horas',
+    descripcion: 'Qué cobra por hora cada empleado, cuántas horas teóricas hace por quincena y cuánto cuesta. Incluye el costo total por hora de toda la gente activa.',
+    schema: {
+      type: 'object',
+      properties: {
+        empleado: { type: 'string', description: 'Filtrar por nombre. Si no se dice, van todos los activos.' },
+        incluir_inactivos: { type: 'boolean', description: 'Incluir a los que ya no trabajan. Por defecto no.' },
+      },
+    },
+    soloAdmin: true,
+    ejecutar: async (a, { p }) => {
+      const empleados = await p.empleados();
+      const norm = (x: any) => String(x || '').toLowerCase();
+      const activos = empleados.filter((e) => {
+        if (!a?.incluir_inactivos && String(e.activo || '').toUpperCase() !== 'SI') return false;
+        if (a?.empleado && !norm(e.nombre).includes(norm(a.empleado))) return false;
+        return true;
+      });
+      // Las horas de la quincena: si está cargado el horario de lunes a viernes se calcula,
+      // y si no se usa el número puesto a mano. Mismo orden de preferencia que la pantalla
+      // de personal: si acá se decidiera al revés, el chat y la liquidación dirían cosas
+      // distintas sobre el mismo sueldo.
+      const horasQuincena = (e: any) => {
+        const lv = num(e.horas_lv), sab = num(e.horas_sabado);
+        if (lv > 0) return lv * 10 + sab * 2;   // 10 días hábiles y 2 sábados por quincena
+        return num(e.horas_teoricas_quincena);
+      };
+      const filas = activos.map((e) => {
+        const hq = horasQuincena(e);
+        const hora = num(e.sueldo_hora);
+        return {
+          nombre: String(e.nombre || ''),
+          sueldo_por_hora: $(hora),
+          horas_por_quincena: Math.round(hq * 10) / 10,
+          bruto_quincena: $(hora * hq),
+          presentismo: $(num(e.presentismo)),
+          activo: String(e.activo || '') === 'SI',
+        };
+      }).sort((x, y) => y.sueldo_por_hora - x.sueldo_por_hora);
+      return {
+        empleados: filas,
+        cuantos: filas.length,
+        costo_por_hora_todos: $(filas.reduce((t, f) => t + f.sueldo_por_hora, 0)),
+        nota: 'El sueldo por hora es el de la ficha del empleado. El bruto de la quincena no incluye presentismo ni descuentos: es horas teóricas por el valor hora.',
+      };
+    },
+  },
+  {
+    nombre: 'horas_trabajadas',
+    descripcion: 'Horas-hombre fichadas y qué se hizo con ellas: plantas cosechadas y trasplantadas por mes, y la productividad resultante.',
+    schema: {
+      type: 'object',
+      properties: { meses: { type: 'number', description: 'Cuántos meses hacia atrás. Por defecto 3.' } },
+    },
+    soloAdmin: true,
+    ejecutar: async (a, { p, hoy }) => {
+      const { tablaProductividad } = await import('../productividadTabla');
+      const [lotes, movimientos, horas] = await Promise.all([p.lotes(), p.movimientos(), p.horas()]);
+      const meses = tablaProductividad({ lotes, movimientos, horas, hoy, meses: Math.min(12, Math.max(1, Number(a?.meses) || 3)) });
+      return {
+        // Todos cortados en el mismo día del mes: comparar un mes a medias contra uno
+        // entero diría que la productividad bajó cuando lo que falta es calendario.
+        comparados_hasta_el_dia: meses[0]?.diaCorte ?? null,
+        meses: meses.map((m) => ({
+          mes: m.label,
+          plantas_cosechadas: m.plantasCosechadas,
+          de_esas_a_granel: m.plantasGranel,
+          plantas_trasplantadas: m.plantasTrasplantadas,
+          horas_hombre: m.horas,
+          plantas_movidas_por_hora: m.plantasPorHora,
+          solo_cosecha_por_hora: m.cosechaPorHora,
+          solo_trasplante_por_hora: m.trasplantePorHora,
+          dias_con_fichaje: `${m.diasConDatos} de ${m.diasDelRango}`,
+          incompleto: m.parcial,
+        })),
+        nota: 'Solo entran los días con fichaje cargado, y la cosecha y el trasplante se recortan a esos mismos días. Una planta trasplantada cuenta igual que una cosechada.',
+      };
+    },
+  },
+  {
+    nombre: 'precios_por_cliente',
+    descripcion: 'Qué precio se le cobra a cada cliente por artículo, cuándo fue su último aumento y de cuánto fue (en porcentaje y en pesos).',
+    schema: {
+      type: 'object',
+      properties: { cliente: { type: 'string', description: 'Filtrar por nombre de cliente.' } },
+    },
+    soloAdmin: true,
+    ejecutar: async (a, { p, hoy }) => {
+      const { ultimaTandaDeSuba, diasEntre } = await import('../reportePrecios');
+      const { CAMPOS_PRECIO } = await import('../preciosHistorico');
+      const [precios, clientes, historial] = await Promise.all([p.precios(), p.clientes(), p.preciosHistorico()]);
+      const norm = (x: any) => String(x || '').toLowerCase();
+      const vistos = new Set<string>();
+      const filas: any[] = [];
+      for (const pr of precios) {
+        const id = String(pr.id_control || '').trim();
+        if (!id || vistos.has(id)) continue;
+        const cli = clientes.find((c) => String(c.id_control) === id);
+        const nombre = nombreClienteVisible(cli) || String(pr.nombre_cliente || id);
+        if (a?.cliente && !norm(nombre).includes(norm(a.cliente))) continue;
+        vistos.add(id);
+        // Una sola lista por cliente: desde hace poco el precio es el mismo para todas sus
+        // sucursales, así que listar una por sucursal serían N copias de lo mismo.
+        const lista = CAMPOS_PRECIO
+          .map((c) => ({ articulo: c as string, precio: num((pr as any)[c]) }))
+          .filter((x) => x.precio > 0);
+        const tanda = ultimaTandaDeSuba(historial, id);
+        filas.push({
+          cliente: nombre,
+          precios: lista,
+          ultimo_aumento: tanda ? {
+            fecha: tanda.fecha,
+            hace_dias: diasEntre(tanda.fecha, hoy),
+            productos: tanda.productos.map((x) => ({
+              articulo: x.producto, antes: $(x.anterior), ahora: $(x.nuevo),
+              sube_pesos: $(x.diferencia), sube_pct: x.variacionPct,
+            })),
+          } : null,
+        });
+      }
+      return {
+        clientes: filas.sort((x, y) => String(x.cliente).localeCompare(String(y.cliente))),
+        nota: '"ultimo_aumento: null" puede ser un cliente nuevo o uno al que nunca se le subió: desde acá se ven igual, porque el historial de precios empezó a registrarse en algún momento y lo anterior no quedó asentado.',
+      };
+    },
+  },
+  {
+    nombre: 'facturacion_pendiente',
+    descripcion: 'Ventas cargadas que todavía no se facturaron en Xubio, y lo que sí se facturó cada día. Sirve para ver qué falta emitir y si algo salió dos veces.',
+    schema: {
+      type: 'object',
+      properties: { dias: { type: 'number', description: 'Cuántos días hacia atrás. Por defecto 10.' } },
+    },
+    soloAdmin: true,
+    ejecutar: async (a, { p, hoy }) => {
+      const { armarResumen } = await import('../resumenFacturacion');
+      const { clavesDeVenta } = await import('../clavesVenta');
+      const [ventas, clientes, claves] = await Promise.all([p.ventas(), p.clientes(), clavesDeVenta()]);
+      const r = armarResumen({
+        ventas, clientes, hoy,
+        dias: Math.min(90, Math.max(1, Number(a?.dias) || 10)),
+        clavesExtra: claves as string[],
+      });
+      return {
+        sin_facturar: r.totalPendientes,
+        facturados: r.totalFacturados,
+        por_dia: r.dias.map((d) => ({
+          fecha: d.fecha, hace_dias: d.dias,
+          sin_facturar: d.pendientes.map((x) => ({ cliente: x.cliente, ese_dia_ya_tiene_factura: x.tambienFacturado })),
+          facturado: d.facturados.map((x) => ({ cliente: x.cliente, comprobantes: x.numeros })),
+        })),
+        posibles_duplicados: {
+          dos_comprobantes_el_mismo_dia: r.sospechas.variosComprobantes,
+          carga_pendiente_con_factura_del_mismo_dia: r.sospechas.pendienteConFactura,
+        },
+        nota: 'Un posible duplicado no es un veredicto: puede ser una segunda entrega real. Si no lo es, la carga pendiente se borra en vez de facturarse.',
+      };
+    },
+  },
+  {
+    nombre: 'pagos_pendientes',
+    descripcion: 'Las compras cargadas como "todavía no lo pagué": a qué proveedor, cuánto, cuándo vence y a qué alias hay que transferir.',
+    schema: { type: 'object', properties: {} },
+    soloAdmin: true,
+    ejecutar: async (_a, { p, hoy }) => {
+      const { resumenPagosPendientes, porVencimiento } = await import('../pagosPendientes');
+      const gastos = await p.gastos();
+      const r = resumenPagosPendientes(gastos, hoy);
+      return {
+        total: $(r.total),
+        vencido: $(r.vencido),
+        cuantas: r.cuantas,
+        sin_alias_cargado: r.sinAlias,
+        por_vencimiento: porVencimiento(r.proveedores).map((x) => ({
+          proveedor: x.proveedor, descripcion: x.descripcion, monto: $(x.monto),
+          vence: x.vencimiento || 'sin fecha',
+          dias_para_vencer: x.diasParaVencer,
+          alias: x.alias || '',
+        })),
+        por_proveedor: r.proveedores.map((x) => ({
+          proveedor: x.proveedor, total: $(x.total), vencido: $(x.vencido), alias: x.alias || '',
+        })),
+      };
+    },
+  },
+  {
+    nombre: 'stock_de_camara',
+    descripcion: 'Producto terminado en cámara: cuántos paquetes hay de cada cultivo, y el faltante del último conteo.',
+    schema: { type: 'object', properties: {} },
+    soloAdmin: false,
+    ejecutar: async (_a, { p }) => {
+      const { calcularCamara } = await import('../camara');
+      const [registros, lotes, ventas] = await Promise.all([p.camara(), p.lotes(), p.ventas()]);
+      const cultivos = ['rucula', 'lechuga_crespa', 'lechuga_roble', 'albahaca'] as const;
+      return {
+        cultivos: cultivos.map((c) => {
+          const r = calcularCamara(c as any, registros, lotes, ventas);
+          return {
+            cultivo: c,
+            stock_actual_paq: Math.round(r.stockActual),
+            cajones: Math.round(r.cajones.stockActual),
+            // Lo más viejo, no el promedio: un cultivo con 500 paquetes de ayer y 40 de
+            // hace ocho días promedia día y medio, parece fresco, y hay 40 por tirarse.
+            dias_lo_mas_viejo: r.diasMasViejo,
+            cantidad_mas_vieja_paq: Math.round(r.cantidadMasVieja),
+            ultimo_conteo: String(r.base?.fecha || '').split(/[T ]/)[0],
+          };
+        }),
+      };
+    },
+  },
 ];
 
 // Las herramientas que puede usar este rol. Se filtran acá, antes de armar el pedido: el
