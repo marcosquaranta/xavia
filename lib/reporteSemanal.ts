@@ -579,6 +579,9 @@ export interface ReporteSemanalData {
   ventasMesActual: ResumenMesActual;
   ventasMesAnteriorTotal: number;
   ventasMesAnteriorMonto: number;
+  // El precio promedio del mes pasado, para poder comparar el de este. Estaba calculado
+  // pero no salia de la funcion, asi que el dato existia y no se podia mostrar.
+  precioPromedioMesAnterior: number;
   clientesVariacion: ClienteVariacionSemana[];
   // Las dos ventanas que compara el reporte, en dd/mm. Van en los datos y no se arman en el
   // HTML para que el mail diga exactamente el rango que se usó en la cuenta: "esta semana"
@@ -916,15 +919,12 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     { label: 'Esta semana en $', valor: `$${fmtN(mSem)}`,
       pct: pctT(mSem, mSemAnt), mejorSiSube: true,
       detalle: `contra $${fmtN(mSemAnt)} de la semana anterior` },
-    { label: 'Total mes al día', valor: `${fmtN(ventasMesActual.unidadesMes)} u`,
-      // Contra el mes pasado al MISMO día, no contra el mes entero.
-      pct: pctT(ventasMesActual.unidadesMes, resumenMesPasadoAlDia.unidadesMes), mejorSiSube: true,
-      detalle: `contra ${fmtN(resumenMesPasadoAlDia.unidadesMes)} u del mes pasado a esta altura (día ${Math.min(hoy.getDate(), diasEnMesPasado)})` },
-    { label: 'Total mes proyectada', valor: `${fmtN(ventasMesActual.proyeccionMes)} u`,
-      pct: pctT(ventasMesActual.proyeccionMes, ventasMesAnteriorTotal), mejorSiSube: true,
-      detalle: `al ritmo de lo que va del mes, contra ${fmtN(ventasMesAnteriorTotal)} u del mes pasado completo` },
-    { label: 'Precio promedio', valor: `$${fmtN(ventasMesActual.precioPromedioMes)}`,
-      pct: pctT(ventasMesActual.precioPromedioMes, resumenMesPasado.precioPromedioMes), mejorSiSube: true },
+    // El mes NO va acá. Estaba repetido: estos mismos números salen abajo en "Ventas —
+    // mes en curso", y ahí además están en plata y con la proyección. Dos lugares que
+    // dicen lo mismo obligan a compararlos para confirmar que dicen lo mismo.
+    { label: 'Precio promedio del mes', valor: `$${fmtN(ventasMesActual.precioPromedioMes)}`,
+      pct: pctT(ventasMesActual.precioPromedioMes, resumenMesPasado.precioPromedioMes), mejorSiSube: true,
+      detalle: 'el único dato del mes que no se repite abajo' },
   ];
   // ── La venta por producto, que era lo que no se veía ──────────────────────────────
   //
@@ -980,6 +980,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     ventasSemana, ventasSemanaAnterior, ventasMesActual, ventasMesAnteriorTotal, ventasMesAnteriorMonto, clientesVariacion,
     rangoSemana: { desde: fmtDiaCorto(desdeSemana), hasta: fmtDiaCorto(hastaHoy) },
     rangoSemanaAnterior: { desde: fmtDiaCorto(desdeAnt), hasta: fmtDiaCorto(hastaAnt) },
+    precioPromedioMesAnterior: resumenMesPasado.precioPromedioMes,
     proyeccionMesActual, cosechaRealMesAnterior,
     cicloSemana, cicloSemanaAnterior, cicloMesAnterior,
     pesoSemana, pesoMesAnterior,
@@ -1080,16 +1081,28 @@ function filaCliente(c: ClienteVariacionSemana): string {
 }
 
 export function construirHtml(d: ReporteSemanalData): string {
-  const totalActual = {
-    unidades: d.ventasSemana.rucula.unidades + d.ventasSemana.lechuga.unidades,
-    monto: d.ventasSemana.rucula.monto + d.ventasSemana.lechuga.monto,
-  };
-  const totalAnterior = {
-    unidades: d.ventasSemanaAnterior.rucula.unidades + d.ventasSemanaAnterior.lechuga.unidades,
-    monto: d.ventasSemanaAnterior.rucula.monto + d.ventasSemanaAnterior.lechuga.monto,
-  };
+  // ── El total sumaba solo rúcula y lechuga ──────────────────────────────────────
+  //
+  // La albahaca y los artículos dados de alta desde Admin quedaban afuera del total y
+  // tampoco tenían fila: su venta aparecía únicamente en las tarjetas de arriba. O sea que
+  // el "Total" de la semana no era el total, y nada lo decía — 195 u de albahaca se
+  // perdían entre una tabla y la otra.
+  const sumar = (r: VentasRango) => ({
+    unidades: r.rucula.unidades + r.lechuga.unidades + r.albahaca.unidades + r.otros.unidades,
+    monto: r.rucula.monto + r.lechuga.monto + r.albahaca.monto + r.otros.monto,
+  });
+  const totalActual = sumar(d.ventasSemana);
+  const totalAnterior = sumar(d.ventasSemanaAnterior);
+  // Los cajones de la semana: lo unico de las tarjetas viejas que ninguna tabla tenia.
+  const cajSem = d.ventasSemana.rucula.cajones + d.ventasSemana.lechuga.cajones;
+  const cajSemAnt = d.ventasSemanaAnterior.rucula.cajones + d.ventasSemanaAnterior.lechuga.cajones;
+  // Albahaca y "otros" solo si hubo algo: una fila en cero todas las semanas es ruido.
+  const hubo = (k: 'albahaca' | 'otros') =>
+    d.ventasSemana[k].unidades > 0 || d.ventasSemanaAnterior[k].unidades > 0;
   const ventasFilas = filaVentas('Rúcula', d.ventasSemana.rucula, d.ventasSemanaAnterior.rucula)
     + filaVentas('Lechuga', d.ventasSemana.lechuga, d.ventasSemanaAnterior.lechuga)
+    + (hubo('albahaca') ? filaVentas('Albahaca', d.ventasSemana.albahaca, d.ventasSemanaAnterior.albahaca) : '')
+    + (hubo('otros') ? filaVentas('Otros artículos', d.ventasSemana.otros, d.ventasSemanaAnterior.otros) : '')
     + `<tr style="background:#fafafa"><td style="padding:6px 10px;font-weight:800">Total</td>
         <td style="padding:6px 10px;text-align:right;font-weight:800">${fmtN(totalActual.unidades)} u</td>
         <td style="padding:6px 10px;text-align:right;font-weight:800">${fmtMoneda(totalActual.monto)}</td>
@@ -1440,37 +1453,36 @@ export function construirHtml(d: ReporteSemanalData): string {
   // Con tablas y no con flex/grid: Outlook y Gmail ignoran la mitad del CSS moderno, y un
   // resumen que se rompe en el cliente de mail donde se lee no sirve de nada. Dos columnas
   // fijas, que es lo que entra bien en un celular.
-  const tarjetasHtml = d.resumenTarjetas.length === 0 ? '' : `
-    <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;border-spacing:0 8px;margin-bottom:18px">
-      ${d.resumenTarjetas.map((g) => `
-        <tr><td style="background:#fafafa;border:1px solid #eee;border-radius:8px;padding:10px 12px">
-          <p style="margin:0 0 7px;font-size:12px;font-weight:800;color:#374151;text-transform:uppercase;letter-spacing:.5px">
-            ${g.icono} ${g.titulo}
-          </p>
-          <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;font-size:13px">
-            ${g.items.map((it) => `<tr>
-              <td style="padding:2px 0;color:#6b7280">${it.label}${it.detalle ? `<span style="display:block;font-size:10.5px;color:#9ca3af">${it.detalle}</span>` : ''}</td>
-              <td style="padding:2px 0;text-align:right;font-weight:800;white-space:nowrap">${it.valor}</td>
-              <td style="padding:2px 0 2px 10px;text-align:right;white-space:nowrap">${flechaHtml(it.pct, it.mejorSiSube)}</td>
-            </tr>`).join('')}
-          </table>
-        </td></tr>`).join('')}
-    </table>`;
+  // Las tarjetas de resumen salieron del mail: cada una repetía una tabla de más abajo
+  // —Producción era idéntica a "Indicadores del mes", Ciclos y Pesos a "Ciclos y peso de
+  // esta semana", Ocupación a su propia sección— y lo único que no estaba en ninguna tabla
+  // (los cajones de la semana y el precio promedio) se movió al bloque de Ventas.
+  //
+  // `resumenTarjetas` sigue en los datos porque la versión de texto (Telegram) la usa: ahí
+  // es el resumen y no hay tablas que duplicar.
 
   return `
   <div style="font-family:system-ui,Arial,sans-serif;color:#111;max-width:640px">
     <h2 style="margin:0 0 4px">Reporte semanal — Xavia</h2>
     <p style="margin:0 0 20px;color:#6b7280;font-size:13px">${d.fechaGenerado}</p>
 
-    ${tarjetasHtml}
-
     ${destacadosHtml}
 
-    <h3 style="margin:0 0 8px;font-size:14px">Ventas — últimos 7 días <span style="font-weight:400;color:#9ca3af">(vs. 7 días anteriores)</span></h3>
+    <h2 style="margin:26px 0 10px;font-size:17px;padding-bottom:5px;border-bottom:2px solid #e5e7eb">Ventas</h2>
+
+    <h3 style="margin:0 0 8px;font-size:14px">Últimos 7 días <span style="font-weight:400;color:#9ca3af">(vs. 7 días anteriores)</span></h3>
     <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
       <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Unidades</th><th style="padding:6px 10px;text-align:right">Total $</th><th style="padding:6px 10px;text-align:right">vs. semana ant.</th></tr></thead>
       <tbody>${ventasFilas}</tbody>
     </table>
+    <p style="margin:0 0 14px;font-size:11.5px;color:#6b7280;line-height:1.55">
+      ${cajSem > 0 || cajSemAnt > 0
+        ? `De eso, <strong>${fmtN(cajSem)} cajones</strong> ${flechaHtml(pct(cajSem, cajSemAnt), true)} — ${d.ventasMesActual.pctCajones}% del volumen del mes salió en cajón. `
+        : ''}
+      Precio promedio del mes: <strong>$${fmtN(d.ventasMesActual.precioPromedioMes)}</strong>
+      ${flechaHtml(pct(d.ventasMesActual.precioPromedioMes, d.precioPromedioMesAnterior), true)} contra el mes pasado.
+    </p>
+
     <p style="margin:0 0 8px;font-size:12px;color:#6b7280">Ventas por cultivo — últimas 4 semanas:</p>
     <div style="margin-bottom:20px">${ventasSemanasChart}</div>
 
@@ -1489,7 +1501,7 @@ export function construirHtml(d: ReporteSemanalData): string {
       semana con menos entregas, o una venta que quedó sin cargar. En unidades esa diferencia no se ve.
     </p>
 
-    <h3 style="margin:0 0 8px;font-size:14px">Ventas — mes en curso</h3>
+    <h3 style="margin:0 0 8px;font-size:14px">Mes en curso</h3>
     <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
       <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">&nbsp;</th><th style="padding:6px 10px;text-align:right">Unidades</th><th style="padding:6px 10px;text-align:right">vs. mes ant.</th></tr></thead>
       <tbody>
@@ -1500,6 +1512,8 @@ export function construirHtml(d: ReporteSemanalData): string {
         <tr><td style="padding:6px 10px;color:#9ca3af;font-size:11px" colspan="3">Mes pasado (total real): ${fmtN(d.ventasMesAnteriorTotal)} u · ${fmtMoneda(d.ventasMesAnteriorMonto)} — el $ se valoriza con el precio real de cada cliente (IVA incluido), no con un promedio.</td></tr>
       </tbody>
     </table>
+
+    <h2 style="margin:26px 0 10px;font-size:17px;padding-bottom:5px;border-bottom:2px solid #e5e7eb">Producción</h2>
 
     <h3 style="margin:0 0 8px;font-size:14px">Proyección de cosecha — este mes <span style="font-weight:400;color:#9ca3af">(vs. real cosechado mes pasado)</span></h3>
     <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:20px">
