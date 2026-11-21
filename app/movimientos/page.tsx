@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { tipoVisible, cantidadVisible, motivoDescarte } from '@/lib/movimientoEtiqueta';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import type { Movimiento, Lote } from '@/lib/types';
@@ -159,22 +160,19 @@ export default async function MovimientosPage({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {movs.map(m => {
                     const lote = lotesMap.get(String(m.id_lote || ''));
-                    const t = TIPO_LABEL[String(m.tipo || '')] || TIPO_LABEL.descarte;
+                    // Un lote descartado se guarda como cosecha con 0 unidades: mostrarlo
+                    // con la etiqueta verde de cosecha decia lo contrario de lo que paso.
+                    const t = TIPO_LABEL[tipoVisible(m as any)] || TIPO_LABEL.descarte;
                     const varNorm = String(lote?.variedad || '').toLowerCase();
                     const esRucula = varNorm.includes('rucula') || varNorm.includes('rúcula');
                     const colorVar = esRucula ? '#166534' : '#4d7c0f';
                     // Cosecha: la cantidad real cosechada va en unidades_cosechadas, NO en
                     // plantas_estimadas (esa es la estimación de siembra/trasplante — para
                     // cosecha queda vieja/desactualizada). Mismo criterio que ya usa el Panel.
-                    const cantCosechado = Number(m.unidades_cosechadas || 0);
-                    const cantEstimado = Number(m.plantas_estimadas || 0);
-                    const unidades = m.tipo === 'cosecha' && esRucula && cantCosechado > 0
-                      ? `${cantCosechado.toLocaleString('es-AR')} paq. (${cantEstimado.toLocaleString('es-AR')} pl)`
-                      : m.tipo === 'cosecha' && cantCosechado > 0
-                        ? `${cantCosechado.toLocaleString('es-AR')} pl`
-                        : m.tipo === 'division' && cantEstimado > 0
-                          ? `${cantEstimado.toLocaleString('es-AR')} quedan`
-                          : cantEstimado > 0 ? `${cantEstimado.toLocaleString('es-AR')} pl` : '';
+                    const unidades = cantidadVisible(m as any, esRucula);
+                    // El motivo del descarte, que se guarda en las notas. Sin el, una fila
+                    // gris que dice "1.127 pl perdidas" no se puede interpretar despues.
+                    const motivo = motivoDescarte(m as any);
                     const usuario = String(m.usuario || '').split('@')[0] || '—';
 
                     return (
@@ -184,6 +182,11 @@ export default async function MovimientosPage({
                         <span style={{ background: t.bg, color: t.color, padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, minWidth: '80px', textAlign: 'center' }}>
                           {t.label}
                         </span>
+                        {motivo && (
+                          <span title="Por que se descarto el lote" style={{ fontSize: '11px', color: '#6b7280', fontStyle: 'italic' }}>
+                            {motivo}
+                          </span>
+                        )}
 
                         {/* Lote + variedad */}
                         <div style={{ flex: 1, minWidth: '120px' }}>

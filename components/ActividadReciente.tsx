@@ -15,6 +15,9 @@ export interface MovResumen {
   variedad: string;
   esRucula: boolean;
   cantidad: string;
+  // Por qué se descartó el lote, cuando fue un descarte. Vacío en todo lo demás. Sin esto,
+  // una fila gris que dice "1.127 pl perdidas" no se puede interpretar en tres meses.
+  motivo?: string;
   usuario: string;
   ubicacion: string;
   fases: string;
@@ -119,6 +122,9 @@ export default function ActividadReciente({ movimientos, dias = 7 }: { movimient
                         <span style={{ marginLeft: 'auto', fontSize: '12px', fontWeight: 600, color: '#374151' }}>{m.cantidad}</span>
                       )}
                       <span style={{ fontSize: '10.5px', color: '#9ca3af', minWidth: '54px', textAlign: 'right' }}>{m.usuario}</span>
+                      {m.motivo && (
+                        <span style={{ flexBasis: '100%', fontSize: '10.5px', color: '#6b7280', fontStyle: 'italic' }}>Motivo: {m.motivo}</span>
+                      )}
                       {m.notas && (
                         <span style={{ flexBasis: '100%', fontSize: '10.5px', color: '#6b7280', fontStyle: 'italic' }}>{m.notas}</span>
                       )}

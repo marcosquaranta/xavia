@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { tipoVisible, cantidadVisible, motivoDescarte } from '@/lib/movimientoEtiqueta';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
@@ -68,16 +69,15 @@ export default async function CultivosPage({
       const esRucula = varNorm.includes('rucula') || varNorm.includes('rúcula');
       // Igual que en /movimientos: en una cosecha la cantidad real está en
       // unidades_cosechadas, no en plantas_estimadas (esa quedó de la siembra).
-      const cosechado = Number(m.unidades_cosechadas || 0);
+      // Un lote descartado se guarda como cosecha con CERO unidades (ver
+      // lib/movimientoEtiqueta.ts). Se mostraba "Cosecha - 1.127 pl" en verde cuando lo
+      // que habia pasado era que se perdieron esas 1.127 plantas.
       const estimado = Number(m.plantas_estimadas || 0);
-      const cantidad = m.tipo === 'cosecha' && esRucula && cosechado > 0
-        ? `${cosechado.toLocaleString('es-AR')} paq. (${estimado.toLocaleString('es-AR')} pl)`
-        : m.tipo === 'cosecha' && cosechado > 0 ? `${cosechado.toLocaleString('es-AR')} pl`
-        : m.tipo === 'division' && estimado > 0 ? `${estimado.toLocaleString('es-AR')} quedan`
-        : estimado > 0 ? `${estimado.toLocaleString('es-AR')} pl` : '';
+      const cantidad = cantidadVisible(m as any, esRucula);
       return {
         id: String(m.id_movimiento),
-        tipo: String(m.tipo || ''),
+        tipo: tipoVisible(m as any),
+        motivo: motivoDescarte(m as any),
         fecha: String(m.fecha || '').split(/[\sT]/)[0],
         lote: String(m.id_lote || ''),
         variedad: String(lote?.variedad || '').split(' ').slice(0, 2).join(' '),
