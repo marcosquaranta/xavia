@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
-import { enviarAvisoCaeAcumulado } from '@/lib/caePendientes';
+import { enviarAvisoCaeAcumulado, diagnosticoCae } from '@/lib/caePendientes';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -14,6 +14,11 @@ export async function GET(req: NextRequest) {
   const esCron = !cronSecret || authHeader === `Bearer ${cronSecret}`;
   if (!esCron && !(await isAdmin())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  // `?ver=1` muestra qué diría el aviso sin mandarlo. Es lo que permite confirmar que la
+  // verificación contra Xubio funciona, en vez de esperar al mail de mañana.
+  if (new URL(req.url).searchParams.get('ver') === '1') {
+    return NextResponse.json(await diagnosticoCae());
   }
   const r = await enviarAvisoCaeAcumulado();
   return NextResponse.json(r, { status: r.ok ? 200 : 500 });
