@@ -131,16 +131,42 @@ export default function Remitos({ onCerrar }: { onCerrar: () => void }) {
             </div>
           )}
 
-          <div style={{ margin: '12px 0 8px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <button type="button" onClick={() => setElegidas(conMail.map((f) => f.numeroFactura))} disabled={enviando}
-              style={{ fontSize: '11.5px', background: 'none', border: 'none', padding: 0, color: '#2563eb', cursor: 'pointer', fontWeight: 600 }}>
-              Tildar todas
-            </button>
-            <button type="button" onClick={() => setElegidas([])} disabled={enviando}
-              style={{ fontSize: '11.5px', background: 'none', border: 'none', padding: 0, color: '#6b7280', cursor: 'pointer', fontWeight: 600 }}>
-              Ninguna
-            </button>
-            <span style={{ fontSize: '11.5px', color: '#9ca3af' }}>{seleccion.length} de {conMail.length} tildadas</span>
+          {/* ── Están todas las que tienen mail, o faltan algunas ─────────────────────
+              Antes esto solo se decía abajo de la lista, y los que no tienen mail apenas
+              aparecían con la casilla deshabilitada: se leía como que la pantalla no
+              andaba, no como que falta un dato. La pregunta "¿hay alguno sin mail?" se
+              contesta arriba y en los dos sentidos — también cuando la respuesta es que no. */}
+          {sinMail.length > 0 ? (
+            <div style={{ margin: '12px 0 8px', padding: '9px 11px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '7px', fontSize: '12.5px', color: '#92400e', lineHeight: 1.55 }}>
+              <strong>{sinMail.length} {sinMail.length === 1 ? 'cliente no tiene' : 'clientes no tienen'} mail cargado</strong>, así que
+              no se les puede mandar: {sinMail.map((f) => f.cliente).join(', ')}.
+              <br />
+              Se carga en <strong>Admin → Clientes de venta</strong> (el general, o el de cobranzas). El PDF se puede ver
+              y bajar igual, para mandarlo a mano.
+            </div>
+          ) : (
+            <p style={{ margin: '12px 0 8px', fontSize: '12px', color: '#166534' }}>
+              ✓ {filas.length === 1 ? 'El cliente tiene' : `Los ${filas.length} clientes tienen`} mail cargado.
+            </p>
+          )}
+
+          <div style={{ margin: '0 0 8px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* Un solo botón que alterna. Dos ("Tildar todas" / "Ninguna") obligan a leer
+                cuál de los dos corresponde cada vez. */}
+            {(() => {
+              const todasTildadas = conMail.length > 0 && seleccion.length === conMail.length;
+              return (
+                <button type="button" disabled={enviando || !conMail.length}
+                  onClick={() => setElegidas(todasTildadas ? [] : conMail.map((f) => f.numeroFactura))}
+                  style={{ fontSize: '11.5px', fontWeight: 700, padding: '5px 12px', borderRadius: '7px', cursor: conMail.length ? 'pointer' : 'not-allowed', border: '1px solid #e5e7eb', background: 'white', color: conMail.length ? '#374151' : '#d1d5db' }}>
+                  {todasTildadas ? 'Deseleccionar todo' : 'Seleccionar todo'}
+                </button>
+              );
+            })()}
+            <span style={{ fontSize: '11.5px', color: '#9ca3af' }}>
+              {seleccion.length} de {conMail.length} tildadas
+              {sinMail.length > 0 && ` · ${sinMail.length} sin mail, no entran`}
+            </span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -194,13 +220,6 @@ export default function Remitos({ onCerrar }: { onCerrar: () => void }) {
               );
             })}
           </div>
-
-          {sinMail.length > 0 && (
-            <p style={{ margin: '9px 0 0', fontSize: '11.5px', color: '#b45309' }}>
-              {sinMail.length} cliente(s) no tienen mail cargado, así que no se les puede mandar: se carga en
-              Admin → Clientes de venta. El PDF se puede ver y bajar igual.
-            </p>
-          )}
 
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginTop: '12px' }}>
             <button type="button" onClick={enviar} disabled={enviando || !seleccion.length} className="btn"
