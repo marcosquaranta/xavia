@@ -146,6 +146,35 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
   // cancelan la misma— la única salida era marcar "a cuenta" y perder el detalle.
   const [verTodas, setVerTodas] = useState(false);
   const [trabajando, setTrabajando] = useState(false);
+  // El resultado de volver a probar el automático, para contestar ahí mismo.
+  const [reintento, setReintento] = useState<string | null>(null);
+  const [reintentando, setReintentando] = useState(false);
+
+  // ── Por qué este aviso no se registró solo ────────────────────────────────────────
+  //
+  // El automático ya anota el motivo en la fila cuando rechaza un aviso ("no se registró
+  // solo: ..."), justamente para que la pregunta se conteste donde se hace. Pero la
+  // pantalla nunca lo mostraba: el dato estaba en la planilla y el que miraba la bandeja
+  // veía un aviso con las cuentas cerrando y sin ninguna explicación de por qué seguía ahí.
+  const motivoAuto = (() => {
+    const n = String((item as any).nota || '').trim();
+    const m = n.match(/^no se registr[óo] solo:\s*(.+)$/i);
+    return m ? m[1] : '';
+  })();
+
+  async function reintentarAuto() {
+    setReintentando(true); setReintento(null);
+    try {
+      const r = await fetch('/api/cobranzas/reintentar-auto', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_item: item.id_item }),
+      });
+      const j = await r.json();
+      if (j?.registrado) { onListo('✓ Se registró solo. Lo saco de la bandeja.'); router.refresh(); return; }
+      setReintento(j?.motivo || j?.error || 'Sigue sin poder registrarse solo.');
+    } catch { setReintento('No se pudo probar de nuevo.'); }
+    setReintentando(false);
+  }
   const [err, setErr] = useState<string | null>(null);
   // Cuando Xubio rechaza la cuenta de la retención, se ofrece registrar igual dejando la
   // retención anotada solo acá. No se hace solo: cambia lo que va a quedar en la
@@ -551,6 +580,23 @@ function Fila({ item, clientes, cuentas, onListo, facturasPrecargadas, sugeridas
             <p style={{ margin: '0 0 6px', fontSize: '11px', color: '#155e75', background: '#ecfeff', border: '1px solid #cffafe', borderRadius: '5px', padding: '4px 7px' }}>
               El aviso dice que paga: <strong style={{ fontFamily: 'monospace' }}>{item.comprobantes}</strong>
             </p>
+          )}
+
+          {/* Por qué sigue acá. Es la primera pregunta que se hace el que ve un aviso con
+              las cuentas cerrando y el botón de confirmar todavía sin apretar. */}
+          {(motivoAuto || reintento) && (
+            <div style={{ margin: '0 0 6px', fontSize: '11px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '5px', padding: '5px 8px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ flex: 1, minWidth: '200px' }}>
+                <strong>No se registró solo:</strong> {reintento || motivoAuto}
+              </span>
+              {/* El motivo puede haber dejado de ser cierto: la factura que no estaba en la
+                  foto de Xubio puede estar ahora. Probar de nuevo no fuerza nada, pasa por
+                  las mismas verificaciones. */}
+              <button type="button" onClick={reintentarAuto} disabled={reintentando || trabajando}
+                style={{ fontSize: '10.5px', fontWeight: 700, padding: '3px 9px', borderRadius: '5px', border: '1px solid #fcd34d', background: 'white', color: '#92400e', cursor: 'pointer' }}>
+                {reintentando ? 'Probando…' : '↻ Probar de nuevo'}
+              </button>
+            </div>
           )}
 
           {sugerencias.length > 0 && (
