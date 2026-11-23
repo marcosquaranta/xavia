@@ -412,12 +412,14 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
     seKg(f.id_control,f.sucursal,k,'idle');
   }
   async function saveKg(f:Fila){
-    const domRefs=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];
-    // Leer del DOM directamente — es la fuente más confiable (sin closures ni batching de React)
+    // El input del DOM cuando está dibujado —es más fresco que el estado mientras se
+    // tipea— y el estado cuando no. Ver cajonesDe: en la vista por cliente hay una sola
+    // tarjeta abierta y los inputs de las demás no existen.
     // El input tiene CAJONES; a la hoja van KILOS.
-    const rkg=kgDeCajones('rucula_kg',Number(domRefs?.rucula_kg?.value)||0);
-    const lkgC=kgDeCajones('lechuga_kg_crespa',Number(domRefs?.lechuga_kg_crespa?.value)||0);
-    const lkgR=kgDeCajones('lechuga_kg_roble',Number(domRefs?.lechuga_kg_roble?.value)||0);
+    const cj=cajonesDe(f.id_control,f.sucursal);
+    const rkg=kgDeCajones('rucula_kg',cj.rucula_kg);
+    const lkgC=kgDeCajones('lechuga_kg_crespa',cj.lechuga_kg_crespa);
+    const lkgR=kgDeCajones('lechuga_kg_roble',cj.lechuga_kg_roble);
     KGK_ALL.forEach(k=>seKg(f.id_control,f.sucursal,k,'saving'));
     try{
       const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...vacio(0),rucula_kg:rkg,lechuga_kg_crespa:lkgC,lechuga_kg_roble:lkgR}]})});
@@ -434,6 +436,32 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   // Una sola definicion, usada por la vista previa Y por el envio. Si la pantalla de
   // confirmacion armara su propia lista, podria mostrar una cosa y mandarse otra — y lo
   // que se manda se factura en AFIP, que no se deshace.
+  // ── Los cajones de una fila, sin depender de que su input exista ──────────────────
+  //
+  // Esto leía SOLO los inputs del DOM. En la grilla funciona —están todos dibujados— pero
+  // en la vista por cliente hay una sola tarjeta abierta a la vez: las sucursales cerradas
+  // no tienen input, el valor salía 0, la línea se filtraba por "sin cantidad" y no entraba
+  // en lo que se manda a facturar.
+  //
+  // El síntoma era el de Juan Pablo: confirmaba Mamina Newbery y el servidor contestaba
+  // "Roldan y Newbery están en la planilla sin facturar pero NO estaban en lo que
+  // revisaste", y no facturaba nada. Correcto de parte del servidor —esa comparación existe
+  // para no emitir lo que nadie vio— sobre una lista que la pantalla armó mal.
+  //
+  // Ahora manda el estado, que existe esté o no dibujada la fila, y el input del DOM solo
+  // pisa cuando está presente: ahí es más fresco que el estado, que puede venir un render
+  // atrasado mientras se tipea.
+  function cajonesDe(id:string,suc:string){
+    const dom=kgInputRefs.current[`${id}__${suc}`];
+    const est=(ctdsKgLive.current[`${id}__${suc}`]||{}) as Record<string,any>;
+    const leer=(k:KGK)=>{
+      const el=dom?.[k];
+      if(el && el.isConnected) return Number(el.value)||0;
+      return Number(est[k])||0;
+    };
+    return {rucula_kg:leer('rucula_kg'),lechuga_kg_crespa:leer('lechuga_kg_crespa'),lechuga_kg_roble:leer('lechuga_kg_roble')};
+  }
+
   function armarLineas(): LineaCarga[] {
     // Un cliente que compra por cajon Y por unidad esta en las dos listas, y cada una arma
     // su propia linea para el mismo cliente, el mismo dia y la misma sucursal: dos filas
@@ -442,7 +470,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
     const clavesKg = new Set(filasKg.map(f=>`${f.id_control}__${f.sucursal}`));
     return [
       ...filasNormales.filter(f=>!clavesKg.has(`${f.id_control}__${f.sucursal}`)).map(f=>({id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_ENVIO.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:0,lechuga_kg_crespa:0,lechuga_kg_roble:0})),
-      ...filasKg.map(f=>{const dr=kgInputRefs.current[`${f.id_control}__${f.sucursal}`];return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_ENVIO.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:kgDeCajones('rucula_kg',Number(dr?.rucula_kg?.value)||0),lechuga_kg_crespa:kgDeCajones('lechuga_kg_crespa',Number(dr?.lechuga_kg_crespa?.value)||0),lechuga_kg_roble:kgDeCajones('lechuga_kg_roble',Number(dr?.lechuga_kg_roble?.value)||0)};}),
+      ...filasKg.map(f=>{const cj=cajonesDe(f.id_control,f.sucursal);return{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_ENVIO.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0])),rucula_kg:kgDeCajones('rucula_kg',cj.rucula_kg),lechuga_kg_crespa:kgDeCajones('lechuga_kg_crespa',cj.lechuga_kg_crespa),lechuga_kg_roble:kgDeCajones('lechuga_kg_roble',cj.lechuga_kg_roble)};}),
     ].filter((l:LineaCarga)=>[...KEYS_ENVIO,...KEYS_KG].some(k=>Number(l[k])>0));
   }
 
