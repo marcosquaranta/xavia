@@ -493,6 +493,48 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
     }catch(err:any){setMsg({t:'err',s:err.message});}
     setExp(false);
   }
+  // ── Facturar UN cliente, desde su tarjeta ─────────────────────────────────────────
+  //
+  // Lo que resuelve: antes se cargaba todo el día y se facturaba al final, y si alguien se
+  // iba en el medio quedaban ventas cargadas y sin facturar — que no existen ni en la app
+  // ni en Xubio hasta que alguien se acuerda. Ahora cada cliente se cierra al terminarlo.
+  //
+  // Pasa por el MISMO camino que el botón de abajo: guarda todo lo tipeado, manda lo que
+  // mostró para que el servidor lo compare contra la planilla antes de emitir, y termina
+  // en el mismo acuse. Lo único que agrega es `soloCliente`.
+  async function facturarCliente(idControl:string):Promise<{ok:boolean;error?:string}>{
+    if(exp) return {ok:false,error:'Esperá a que termine la carga anterior.'};
+    setExp(true);setMsg(null);
+    try{
+      Object.values(tmrs.current).forEach(t=>clearTimeout(t));
+      const todas = armarLineas();
+      const delCliente = todas.filter((l:any)=>String(l.id_control)===String(idControl));
+      if(!delCliente.length){setExp(false);return {ok:false,error:'Ese cliente no tiene nada cargado.'};}
+      // Se guarda TODO lo tipeado, no solo lo del cliente: si quedaran cantidades de otros
+      // sin guardar y la pantalla se recarga con el acuse, se perderían.
+      const flushR=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:todas})});
+      if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar la venta');}
+      const r=await fetch('/api/ventas/cargar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,esperado:delCliente,soloCliente:String(idControl)})});
+      const j=await r.json();
+      if(!r.ok)throw new Error(j.error);
+      if(j.acuse) setAcuse(j.acuse);
+      const nErr=(j.errores||[]).length;
+      setResumenCarga(nErr>0
+        ? `${(j.errores||[]).map((e:any)=>`• ${e.cliente}: ${e.error}`).join('\n')}`
+        : `✓ ${resumenCarga(delCliente, ARTS_UNIDAD)}`);
+      // Solo se limpia lo de ESE cliente: lo que haya tipeado para otros sigue ahí.
+      const suyas=new Set(filas.filter(f=>String(f.id_control)===String(idControl)).map(f=>`${f.id_control}__${f.sucursal}`));
+      setCtds(p=>Object.fromEntries(Object.entries(p).filter(([k])=>!suyas.has(k))) as any);
+      setCtdsKg(p=>{const n=Object.fromEntries(Object.entries(p).filter(([k])=>!suyas.has(k)));ctdsKgLive.current=n as any;return n as any;});
+      cargarVentasSemana();
+      setExp(false);
+      return {ok:true};
+    }catch(err:any){
+      setExp(false);
+      return {ok:false,error:err?.message||'No se pudo facturar'};
+    }
+  }
+
   async function exportar(){
     setExp(true);setMsg(null);
     try{
@@ -1123,6 +1165,10 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
           facturadoDe={facturadoDe as any}
           total7d={total7d}
           fecha={fecha}
+          // Confirmar factura ESE cliente, con todas sus sucursales. Es lo que evita que
+          // queden ventas cargadas sin facturar.
+          onConfirmar={facturarCliente}
+          trabajando={exp}
         />
       )}
 
@@ -1241,8 +1287,11 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
         </div>
       )}
 
-      {/* ── Sección KG ── */}
-        {filasKg.length>0&&(
+      {/* ── Sección KG ──
+          Solo en la grilla: en la vista por cliente los cajones van adentro de la tarjeta
+          de cada cliente, que es el punto de esa vista. Dejarla acá abajo ademas obligaba
+          a bajar a buscar al mismo cliente de nuevo. */}
+        {vista==='grilla'&&filasKg.length>0&&(
           <div style={{marginTop:'16px',border:'1px solid #fde68a',borderRadius:'8px',overflow:'hidden'}}>
             <div style={{background:'#fffbeb',padding:'8px 14px',borderBottom:'1px solid #fde68a',display:'flex',alignItems:'center',gap:'8px'}}>
               <span style={{fontSize:'13px',fontWeight:700,color:'#92400e'}}>📫 Venta por cajón</span>
@@ -1381,7 +1430,8 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
             Aparte de la grilla de paquetes a pedido de Marcos: mezcladas ahí se hacía
             confuso. Usa los mismos handlers que la grilla principal, así que guarda igual
             —al salir del campo, con el mismo indicador de color— sin código duplicado. */}
-        {APARTE.length>0&&(
+        {/* Igual que los cajones: en la vista por cliente ya están adentro de su tarjeta. */}
+        {vista==='grilla'&&APARTE.length>0&&(
           filasEnsalada.length>0?(
           <div style={{marginTop:'16px',border:'1px solid #99f6e4',borderRadius:'8px',overflow:'hidden'}}>
             <div style={{background:'#f0fdfa',padding:'8px 14px',borderBottom:'1px solid #99f6e4',display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap'}}>

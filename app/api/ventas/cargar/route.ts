@@ -25,7 +25,10 @@ export async function POST(req: NextRequest) {
     // no cierra nada: la pantalla es una cortina, la API es la puerta.
   if (user.rol !== 'admin') return NextResponse.json({ error: 'Solo un administrador puede ver o cambiar esto.' }, { status: 403 });
   try {
-    const { fecha, esperado } = await req.json();
+    // `soloCliente` factura las ventas de UN cliente de esa fecha, no las del día entero.
+    // Es lo que permite confirmar cliente por cliente desde la pantalla de carga, en vez de
+    // dejar todo cargado y facturar al final — que es donde quedaban ventas sin facturar.
+    const { fecha, esperado, soloCliente } = await req.json();
     if (!fecha) return NextResponse.json({ error: 'fecha requerida' }, { status: 400 });
 
     const ventas = await leerVentasConIdsUnicos();
@@ -37,15 +40,17 @@ export async function POST(req: NextRequest) {
     // la encontraba y la app contestaba "no hay ventas para cargar en esa fecha" con la
     // venta cargada y a la vista. Las ventas por kilo caían en lo mismo.
     const claves = await clavesDeVenta();
+    const idSolo = String(soloCliente || '').trim();
     const aCargar = ventas.filter(v =>
       soloDia(v.fecha) === fecha &&
       (!v.exportado || v.exportado === '') &&
+      (!idSolo || String(v.id_control) === idSolo) &&
       tieneCantidad(v, claves)
     );
     if (!aCargar.length) {
       // El motivo, no solo el hecho. Son tres situaciones distintas —no hay nada cargado,
       // ya se facturó todo, o hay filas pero vacías— y las tres se leían igual.
-      const delDia = ventas.filter(v => soloDia(v.fecha) === fecha);
+      const delDia = ventas.filter(v => soloDia(v.fecha) === fecha && (!idSolo || String(v.id_control) === idSolo));
       const yaExportadas = delDia.filter(v => v.exportado && v.exportado !== '').length;
       const motivo = !delDia.length
         ? 'No hay ninguna venta cargada en esa fecha.'

@@ -76,7 +76,66 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
   // Las dos formas son EXCLUYENTES y por eso se eligen, no se combinan. Con la nota de
   // crédito la deuda baja en Xubio; con el ajuste baja solo del lado de la app. Hacer las
   // dos sobre la misma factura la bajaría dos veces, y ese error es silencioso.
-  const [modo, setModo] = useState<'app' | 'nc'>('app');
+  // `importe` es el tercer camino, y es otra cosa que los dos anteriores: no se corrige
+  // nada, se acredita plata. El caso que lo pidió: un cliente reclama un 20% por acuerdo
+  // comercial. Las cantidades están bien —se entregó lo que dice la factura— y aun así hay
+  // que cobrarle menos. Con la NC por cantidades habría que inventar que se entregó de
+  // menos, y la factura pasaría a decir algo que no pasó.
+  const [modo, setModo] = useState<'app' | 'nc' | 'importe'>('app');
+  const [impFinal, setImpFinal] = useState('');
+  const [impMotivo, setImpMotivo] = useState('');
+  const [impBase, setImpBase] = useState<{ importe: number } | null>(null);
+  const [impPrevia, setImpPrevia] = useState<{ acreditar: number; porcentaje: number } | null>(null);
+  const [impErr, setImpErr] = useState<string | null>(null);
+
+  // Cuánto dice la factura, según los mismos precios con los que se facturó. Se pide al
+  // servidor y no se calcula acá: es el mismo número que va a usar el prorrateo al emitir.
+  async function cargarBaseImporte(numero: string) {
+    setImpErr(null); setImpBase(null); setImpPrevia(null);
+    try {
+      const r = await fetch(`/api/ventas/nc-importe?numero=${encodeURIComponent(numero)}`);
+      const j = await r.json();
+      if (!r.ok || !j.ok) { setImpErr(j?.error || 'No se pudo leer la factura.'); return; }
+      setImpBase({ importe: j.importeFactura });
+      setImpFinal(String(j.importeFactura));
+    } catch { setImpErr('No se pudo leer la factura.'); }
+  }
+
+  async function previaImporte(numero: string, valor: string) {
+    const n = Math.round(Number(valor) || 0);
+    if (!impBase || !(n >= 0) || n >= impBase.importe) { setImpPrevia(null); return; }
+    try {
+      const r = await fetch(`/api/ventas/nc-importe?numero=${encodeURIComponent(numero)}&importe_final=${n}`);
+      const j = await r.json();
+      if (j?.previa?.ok) { setImpPrevia({ acreditar: j.previa.acreditar, porcentaje: j.previa.porcentaje }); setImpErr(null); }
+      else { setImpPrevia(null); if (j?.previa?.error) setImpErr(j.previa.error); }
+    } catch { setImpPrevia(null); }
+  }
+
+  async function emitirNCImporte(numero: string) {
+    if (!impBase) return;
+    const n = Math.round(Number(impFinal) || 0);
+    if (!(n >= 0) || n >= impBase.importe) { setImpErr('El importe nuevo tiene que ser menor que el de la factura.'); return; }
+    if (!impMotivo.trim()) { setImpErr('Escribí por qué se acredita.'); return; }
+    const fmt = (x: number) => '$' + Math.round(x).toLocaleString('es-AR');
+    if (!window.confirm(
+      `Se va a emitir una NOTA DE CRÉDITO en Xubio sobre ${numero}.\n\n`
+      + `${fmt(impBase.importe)} → ${fmt(n)}\n`
+      + `Se acreditan ${fmt(impBase.importe - n)}${impPrevia ? ` (${impPrevia.porcentaje}%)` : ''}.\n\n`
+      + 'Se emite en AFIP y no se deshace. ¿Confirmás?')) return;
+    setEmitiendo(true); setImpErr(null);
+    try {
+      const r = await fetch('/api/ventas/nc-importe', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ numero, importe_final: n, motivo: impMotivo.trim() }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'No se pudo emitir');
+      setResultadoNC({ numeroNC: j.numeroNC, cae: j.cae, importe: j.importe });
+      setImpPrevia(null);
+    } catch (e: any) { setImpErr(e?.message || 'No se pudo emitir'); }
+    setEmitiendo(false);
+  }
   // ── Qué va a pasar en Xubio si guardo esto ──────────────────────────────────────
   //
   // Corregir cantidades de una factura emitida dispara un comprobante — nota de crédito
@@ -227,9 +286,10 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
       <div style={{ display: 'flex', gap: '6px', marginBottom: '9px', flexWrap: 'wrap' }}>
         {([
           { k: 'app' as const, t: 'Corregir sin Xubio', d: 'Cambia lo que la app reclama. La factura sigue diciendo lo que dice.' },
-          { k: 'nc' as const, t: 'Emitir nota de crédito', d: 'Emite la NC en Xubio. Es la corrección formal: el cliente la recibe y AFIP la ve.' },
+          { k: 'nc' as const, t: 'NC por cantidades', d: 'Se entregó de menos: se acredita producto por producto y las cantidades de la venta bajan solas.' },
+          { k: 'importe' as const, t: 'NC por importe', d: 'Un acuerdo comercial o un descuento: las cantidades están bien y hay que cobrar menos.' },
         ]).map((o) => (
-          <button key={o.k} type="button" onClick={() => { setModo(o.k); setError(null); }} title={o.d}
+          <button key={o.k} type="button" onClick={() => { setModo(o.k); setError(null); if (o.k === 'importe' && numeroFactura) cargarBaseImporte(numeroFactura); }} title={o.d}
             style={{
               fontSize: '12px', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 700,
               border: `1px solid ${modo === o.k ? '#2563eb' : '#e5e7eb'}`,
@@ -242,7 +302,9 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
         <span style={{ fontSize: '11px', color: '#9ca3af', alignSelf: 'center', flex: 1, minWidth: '220px' }}>
           {modo === 'nc'
             ? 'Poné cuánto acreditar de cada producto. Las cantidades de la venta bajan solas al emitir.'
-            : 'Corregí las cantidades, o escribí abajo el importe a cobrar.'}
+            : modo === 'importe'
+              ? 'Poné el importe final que tiene que quedar. Las cantidades no se tocan: se entregó lo que dice la factura.'
+              : 'Corregí las cantidades, o escribí abajo el importe a cobrar.'}
         </span>
       </div>
 
@@ -362,7 +424,68 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
           </tbody>
         </table>
       </div>
-      {modo === 'nc' ? (
+      {modo === 'importe' ? (
+        <div style={{ marginTop: '10px' }}>
+          {!numeroFactura ? (
+            <p style={{ margin: 0, fontSize: '12px', color: '#b45309' }}>
+              {numerosFactura.length > 1
+                ? `Estas filas están en más de una factura (${numerosFactura.join(', ')}). Una nota de crédito va sobre una sola.`
+                : 'Estas ventas todavía no tienen factura emitida, así que no hay nada que acreditar.'}
+            </p>
+          ) : !impBase ? (
+            <p style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}>{impErr || 'Leyendo la factura…'}</p>
+          ) : (
+            <>
+              <p style={{ margin: '0 0 8px', fontSize: '12px', color: '#6b7280' }}>
+                La factura <strong style={{ fontFamily: 'ui-monospace, monospace', color: '#111827' }}>{numeroFactura}</strong> vale{' '}
+                <strong style={{ color: '#111827' }}>${impBase.importe.toLocaleString('es-AR')}</strong>.
+              </p>
+              {/* Un acuerdo comercial se pide en porcentaje. Hacer la cuenta a mano es donde
+                  se cuela el error, y acá el error se emite en AFIP. */}
+              <div style={{ display: 'flex', gap: '5px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '11.5px', color: '#6b7280' }}>Descuento:</span>
+                {[5, 10, 15, 20, 25].map((pct) => (
+                  <button key={pct} type="button" disabled={emitiendo}
+                    onClick={() => { const v = String(Math.round(impBase.importe * (1 - pct / 100))); setImpFinal(v); previaImporte(numeroFactura, v); }}
+                    style={{ fontSize: '11.5px', fontWeight: 700, padding: '4px 11px', borderRadius: '999px', border: '1px solid #e5e7eb', background: 'white', color: '#374151', cursor: 'pointer' }}>
+                    {pct}%
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <label style={{ fontSize: '11.5px', color: '#374151' }}>
+                  Importe final
+                  <input type="number" value={impFinal} disabled={emitiendo}
+                    onChange={(e) => { setImpFinal(e.target.value); previaImporte(numeroFactura, e.target.value); }}
+                    style={{ marginLeft: '6px', fontSize: '13px', padding: '6px 8px', border: '1px solid #d1d5db', borderRadius: '6px', width: '130px' }} />
+                </label>
+                <input type="text" value={impMotivo} disabled={emitiendo}
+                  onChange={(e) => setImpMotivo(e.target.value)}
+                  placeholder="¿Por qué? (ej: 20% acuerdo comercial)"
+                  style={{ flex: '1 1 240px', minWidth: '200px', fontSize: '13px', padding: '6px 8px', border: '1px solid #d1d5db', borderRadius: '6px' }} />
+              </div>
+              {impPrevia && (
+                <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#b91c1c', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '8px 10px', lineHeight: 1.5 }}>
+                  Se acreditan <strong>${impPrevia.acreditar.toLocaleString('es-AR')}</strong> — el <strong>{impPrevia.porcentaje}%</strong> de la factura.
+                  La NC lleva los mismos artículos de {numeroFactura}, con las mismas cantidades, al precio proporcional:
+                  no se inventa que se entregó de menos, y las cantidades de la venta no se tocan.
+                </p>
+              )}
+              {impErr && <p style={{ margin: '7px 0 0', fontSize: '12px', color: '#dc2626', fontWeight: 600 }}>⚠ {impErr}</p>}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '9px' }}>
+                <button onClick={() => emitirNCImporte(numeroFactura)} disabled={emitiendo || !impPrevia} className="btn"
+                  style={{ fontSize: '12px', padding: '6px 14px', background: impPrevia ? '#b91c1c' : '#e5e7eb', color: impPrevia ? 'white' : '#9ca3af' }}>
+                  {emitiendo ? 'Emitiendo…' : 'Emitir nota de crédito'}
+                </button>
+                <button onClick={onCerrar} className="btn secondary" style={{ fontSize: '12px', padding: '6px 14px' }} disabled={emitiendo}>Cerrar</button>
+                <span style={{ fontSize: '11px', color: '#9ca3af' }}>
+                  Es un comprobante fiscal: una vez emitido no se deshace desde la app.
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+      ) : modo === 'nc' ? (
         <div style={{ marginTop: '10px' }}>
           {!numeroFactura ? (
             <p style={{ margin: 0, fontSize: '12px', color: '#b45309' }}>

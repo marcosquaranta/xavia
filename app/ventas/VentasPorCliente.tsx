@@ -35,7 +35,7 @@ export interface ArticuloCol { key: string; label: string }
 export default function VentasPorCliente({
   filas, articulos, ensaladas, keysKg, labelKg,
   precioDe, q, onChange, onBlur, qKg, onChangeKg, saveKg, kgDe, registrarRefKg,
-  facturadoDe, total7d, fecha,
+  facturadoDe, total7d, fecha, onConfirmar, trabajando = false,
 }: {
   filas: FilaCliente[];
   // Los artículos por unidad, los que van aparte (ensaladas) y las claves por kilo. Llegan
@@ -66,9 +66,14 @@ export default function VentasPorCliente({
   // Cuánto llevó hace 7 días, como referencia al cargar.
   total7d: (id: string, suc: string) => number;
   fecha: string;
+  // Facturar ESE cliente, con todas sus sucursales. Devuelve el error en vez de tirarlo:
+  // la tarjeta lo muestra al lado del botón, donde está mirando el que apretó.
+  onConfirmar: (idControl: string) => Promise<{ ok: boolean; error?: string }>;
+  trabajando?: boolean;
 }) {
   const [abierto, setAbierto] = useState<string | null>(null);
   const [buscar, setBuscar] = useState('');
+  const [errorDe, setErrorDe] = useState<Record<string, string>>({});
 
   const nombreDe = (f: FilaCliente) => String(f.nombre_display || f.nombre_cliente || f.id_control);
   const clave = (f: FilaCliente) => `${f.id_control}__${f.sucursal}`;
@@ -111,6 +116,20 @@ export default function VentasPorCliente({
     if (!t) return filas;
     return filas.filter((f) => nombreDe(f).toLowerCase().includes(t) || String(f.sucursal || '').toLowerCase().includes(t));
   })();
+
+  // Las sucursales de este cliente, y cuál es la próxima que todavía no se cargó. Un
+  // cliente con tres sucursales es UNA factura: confirmar tiene que facturarlas juntas, no
+  // dejar dos a medio camino.
+  const sucursalesDe = (id: string) => filas.filter((x) => String(x.id_control) === String(id));
+  function siguienteSucursal(f: FilaCliente): FilaCliente | null {
+    const hermanas = sucursalesDe(f.id_control);
+    const i = hermanas.findIndex((x) => clave(x) === clave(f));
+    for (let j = i + 1; j < hermanas.length; j++) {
+      const c = cargado(hermanas[j]);
+      if (c.unidades === 0 && c.kilos === 0) return hermanas[j];
+    }
+    return null;
+  }
 
   // El siguiente de la lista, para poder encadenar sin volver al listado. Es lo que hace
   // que cargar veinte clientes no sea veinte idas y vueltas.
@@ -265,23 +284,58 @@ export default function VentasPorCliente({
                     </strong>
                     {/* Guardar NO factura: deja la venta cargada. Se factura todo junto al
                         final. Decirlo acá evita la pregunta de si ya salió. */}
-                    <span style={{ fontSize: '10.5px', color: '#9ca3af' }}>Se guarda solo. Facturar es al final, todo junto.</span>
+                    <span style={{ fontSize: '10.5px', color: '#9ca3af' }}>
+                      Confirmar <strong>factura este cliente</strong> en Xubio. Se emite en AFIP y no se deshace.
+                    </span>
+                    {/* ── Confirmar ───────────────────────────────────────────────────
+                        Confirmar FACTURA este cliente, ahí mismo. Antes se cargaba todo el
+                        día y se facturaba al final: si alguien se iba en el medio quedaban
+                        ventas cargadas y sin facturar, que no existen ni en la app ni en
+                        Xubio hasta que alguien se acuerda.
+
+                        Con una sola sucursal hay un botón y listo. Con varias hay dos,
+                        porque son dos cosas distintas: seguir cargando el resto del mismo
+                        cliente, o cerrar acá lo que ya está. Las sucursales se facturan
+                        juntas — un cliente es una factura— así que confirmar manda todo lo
+                        que tenga cargado, no solo esta sucursal. */}
                     {(() => {
+                      const sigSuc = siguienteSucursal(f);
                       const sig = siguienteDe(f);
-                      return sig ? (
-                        <button type="button" onClick={() => setAbierto(clave(sig))}
-                          style={{ marginLeft: 'auto', background: '#1d4ed8', color: 'white', border: 'none', borderRadius: '7px', padding: '7px 14px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>
-                          Seguir con {nombreDe(sig)}{sig.sucursal && sig.sucursal !== nombreDe(sig) ? ` — ${sig.sucursal}` : ''} →
-                        </button>
-                      ) : (
-                        <button type="button" onClick={() => setAbierto(null)}
-                          style={{ marginLeft: 'auto', background: 'white', border: '1px solid #e5e7eb', borderRadius: '7px', padding: '7px 14px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer', color: '#374151' }}>
-                          Listo
-                        </button>
+                      const confirmar = async () => {
+                        setErrorDe((p) => ({ ...p, [f.id_control]: '' }));
+                        const r = await onConfirmar(f.id_control);
+                        if (!r.ok) { setErrorDe((p) => ({ ...p, [f.id_control]: r.error || 'No se pudo facturar' })); return; }
+                        setAbierto(sig ? clave(sig) : null);
+                      };
+                      return (
+                        <span style={{ marginLeft: 'auto', display: 'flex', gap: '7px', flexWrap: 'wrap' }}>
+                          {sigSuc && (
+                            <button type="button" onClick={() => setAbierto(clave(sigSuc))} disabled={trabajando}
+                              style={{ background: 'white', border: '1px solid #1d4ed8', borderRadius: '7px', padding: '7px 13px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer', color: '#1d4ed8' }}>
+                              Seguir con {sigSuc.sucursal || nombreDe(sigSuc)} →
+                            </button>
+                          )}
+                          <button type="button" onClick={confirmar} disabled={trabajando || !tieneAlgo}
+                            title={tieneAlgo ? 'Factura este cliente en Xubio ahora' : 'No hay nada cargado para facturar'}
+                            style={{
+                              background: tieneAlgo && !trabajando ? '#166534' : '#e5e7eb',
+                              color: tieneAlgo && !trabajando ? 'white' : '#9ca3af',
+                              border: 'none', borderRadius: '7px', padding: '7px 15px', fontSize: '12.5px', fontWeight: 700,
+                              cursor: tieneAlgo && !trabajando ? 'pointer' : 'not-allowed',
+                            }}>
+                            {trabajando ? 'Facturando…' : sigSuc ? 'Confirmar y facturar' : 'Confirmar'}
+                          </button>
+                        </span>
                       );
                     })()}
                   </div>
                 </div>
+              )}
+
+              {esteAbierto && errorDe[f.id_control] && (
+                <p style={{ margin: 0, padding: '8px 12px', background: '#fef2f2', borderTop: '1px solid #fecaca', fontSize: '12px', color: '#b91c1c', fontWeight: 600 }}>
+                  ⚠ {errorDe[f.id_control]}
+                </p>
               )}
 
               {esteAbierto && sinNada && (
