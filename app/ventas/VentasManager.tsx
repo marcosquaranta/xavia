@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import VentasPorCliente from './VentasPorCliente';
+import { choquesDeCarga } from '@/lib/cargaMezclada';
 import Link from 'next/link';
 import type { ClienteVenta, PrecioVenta, VentaDia, PedidoFijo } from '@/lib/types';
 import { ventasCargadasSemana, precioFinal } from '@/lib/estadisticasVentas';
@@ -989,11 +990,11 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
             const art = [...ARTS_UNIDAD,...PE].find((a)=>a.key===k);
             detalle.push({ label: art?.label || String(k).replace(/_/g,' '), cant, monto: sub, sinPrecio: unit<=0 });
           }
-          // Unidades Y cajones en la misma sucursal: no pasa, y cuando aparece es una
-          // cantidad en la fila equivocada. Ver el comentario en VentasPorCliente.
-          const conUnidad = KEYS_ENVIO.some((k)=>Number((l as any)[k])>0);
-          const conCajon = KEYS_KG.some((k)=>Number((l as any)[k])>0);
-          return { nombre, sucursal: l.sucursal, tipo: String(cli?.tipo_factura||'?'), detalle, monto, sinPrecio, mezclado: conUnidad&&conCajon };
+          // El MISMO cultivo en unidades y en cajones. Unidades y cajones juntos es
+          // normal —rúcula en cajón y albahaca en paquete—; el mismo cultivo de las dos
+          // formas, no. Ver lib/cargaMezclada.ts.
+          const choques = choquesDeCarga(l as any);
+          return { nombre, sucursal: l.sucursal, tipo: String(cli?.tipo_factura||'?'), detalle, monto, sinPrecio, choques };
         }).sort((a,b)=>b.monto-a.monto);
         const total = items.reduce((a,x)=>a+x.monto,0);
         const conProblema = items.filter((x)=>x.sinPrecio>0);
@@ -1009,15 +1010,16 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
             </p>
 
             {(()=>{
-              const mezclados = items.filter((x:any)=>x.mezclado);
+              const mezclados = items.filter((x:any)=>x.choques?.length);
               if(!mezclados.length) return null;
+              const nombreArt=(k:string)=>[...ARTS_UNIDAD,...PE].find((a:any)=>a.key===k)?.label||k.replace(/_/g,' ');
               return (
                 <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'7px',padding:'8px 11px',marginBottom:'10px'}}>
                   <p style={{margin:0,fontSize:'12px',color:'#b91c1c',lineHeight:1.5}}>
-                    <strong>{mezclados.length} sucursal(es) llevan unidades Y cajones:</strong>{' '}
-                    {mezclados.map((x:any)=>`${x.nombre}${x.sucursal?` (${x.sucursal})`:''}`).join(', ')}.
-                    Normalmente se vende de una forma o de la otra — revisá que no haya una cantidad en la fila
-                    equivocada antes de facturar. Si de verdad lleva las dos, seguí.
+                    <strong>Un cultivo cargado de las dos formas:</strong>{' '}
+                    {mezclados.map((x:any)=>`${x.nombre}${x.sucursal?` (${x.sucursal})`:''} — ${x.choques.map((c:any)=>nombreArt(c.keyUnidad)).join(', ')}`).join(' · ')}.
+                    Ese cultivo está en unidades y también en cajones, y se vende de una forma o de la otra.
+                    Revisá que no haya una cantidad en la fila equivocada antes de facturar. Si de verdad va así, seguí.
                   </p>
                 </div>
               );

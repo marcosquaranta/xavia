@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { choquesDeCarga } from '@/lib/cargaMezclada';
 
 // ── Cargar el día cliente por cliente ────────────────────────────────────────────────
 //
@@ -76,6 +77,8 @@ export default function VentasPorCliente({
   const [errorDe, setErrorDe] = useState<Record<string, string>>({});
 
   const nombreDe = (f: FilaCliente) => String(f.nombre_display || f.nombre_cliente || f.id_control);
+  const etiquetaDe = (key: string) =>
+    [...articulos, ...ensaladas].find((a) => a.key === key)?.label || labelKg(key) || key;
   const clave = (f: FilaCliente) => `${f.id_control}__${f.sucursal}`;
 
   // Qué artículos se le pueden cargar a este cliente: los que tienen precio. Sin precio
@@ -88,6 +91,16 @@ export default function VentasPorCliente({
 
   // Lo cargado AHORA para ese cliente, en unidades y en plata. El importe es lo que
   // convierte una lista de cantidades en algo que se puede revisar de un vistazo.
+  // Las cantidades tal como están cargadas, por clave. Es lo que mira el detector de
+  // carga mezclada, que razona por clave de artículo y no por etiqueta.
+  function cantidadesDe(f: FilaCliente): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const a of [...articulos, ...ensaladas]) out[a.key] = Number(q(f.id_control, f.sucursal, a.key)) || 0;
+    // Los cajones se comparan como cajones: lo que importa acá es si hay carga, no cuánta.
+    for (const k of keysKg) out[k] = Number(qKg(f.id_control, f.sucursal, k)) || 0;
+    return out;
+  }
+
   function cargado(f: FilaCliente) {
     const detalle: { label: string; cant: number; importe: number; kg?: boolean }[] = [];
     let unidades = 0, kilos = 0, importe = 0;
@@ -175,17 +188,16 @@ export default function VentasPorCliente({
           const kgs = suyosKg(f);
           const sinNada = arts.length === 0 && ens.length === 0 && kgs.length === 0;
           const tieneAlgo = c.unidades > 0 || c.kilos > 0;
-          // ── Unidades y cajones en la misma sucursal ────────────────────────────
+          // ── El MISMO cultivo en unidades y en cajones ──────────────────────────
           //
-          // No pasa: una sucursal vende de una forma o de la otra (lo confirmó Marcos).
-          // Cuando aparecen las dos, es una cantidad tipeada en la fila equivocada.
+          // Unidades y cajones juntos es normal: rúcula en cajón y albahaca en paquete es
+          // una venta de todos los días. Lo que no pasa es el mismo cultivo de las dos
+          // formas (lo precisó Marcos), y eso es lo que se avisa.
           //
-          // Avisarlo acá no es cosmético: esa combinación fue la que hizo perder los
-          // cajones de Mamina Funes. La línea llevaba las dos cosas, los cajones salieron
-          // mal en cero y como las unidades no eran cero la línea se guardó igual y los
-          // piso. El error de fondo está arreglado, pero la carga mezclada sigue siendo
-          // una venta mal cargada y nadie la estaba mirando.
-          const mezclado = c.unidades > 0 && c.kilos > 0;
+          // No es cosmético: esa combinación fue la que hizo perder los cajones de Mamina
+          // Funes. La línea llevaba las dos cosas, los cajones salieron mal en cero y, como
+          // las unidades no eran cero, la línea se guardó igual y los pisó.
+          const choques = choquesDeCarga(cantidadesDe(f));
 
           return (
             <div key={k} style={{
@@ -218,10 +230,10 @@ export default function VentasPorCliente({
                     sin precios cargados
                   </span>
                 )}
-                {mezclado && (
-                  <span title="Esta sucursal tiene cargadas unidades Y cajones. Normalmente se vende de una forma o de la otra: revisá que no haya una cantidad en la fila equivocada."
+                {choques.length > 0 && (
+                  <span title="El mismo cultivo está cargado en unidades y en cajones. Se vende de una forma o de la otra: revisá que no haya una cantidad en la fila equivocada."
                     style={{ fontSize: '10.5px', color: '#b91c1c', background: '#fef2f2', padding: '2px 7px', borderRadius: '10px', fontWeight: 700 }}>
-                    unidades Y cajones
+                    mismo cultivo en unidades y cajones
                   </span>
                 )}
 
@@ -242,11 +254,12 @@ export default function VentasPorCliente({
 
               {esteAbierto && !sinNada && (
                 <div style={{ borderTop: '1px solid #e5e7eb', padding: '11px 12px', background: '#fcfcfd' }}>
-                  {mezclado && (
+                  {choques.length > 0 && (
                     <p style={{ margin: '0 0 9px', padding: '8px 10px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '7px', fontSize: '12px', color: '#b91c1c', lineHeight: 1.5 }}>
-                      <strong>Esta sucursal tiene unidades Y cajones cargados.</strong> Normalmente se vende de una
-                      forma o de la otra: revisá que no haya una cantidad tipeada en la fila equivocada. Si de verdad
-                      lleva las dos cosas, ignorá el aviso.
+                      <strong>Hay un cultivo cargado de las dos formas:</strong>{' '}
+                      {choques.map((x) => etiquetaDe(x.keyUnidad)).join(', ')} en unidades y también en cajones.
+                      Se vende de una forma o de la otra: revisá que no haya una cantidad tipeada en la fila
+                      equivocada. Si de verdad va así, ignorá el aviso.
                     </p>
                   )}
                   {ant > 0 && (
