@@ -29,6 +29,17 @@ export const maxDuration = 120;
 const CLAVE_CONFIG = 'email_reporte_precios';
 const CLAVE_ULTIMO = 'reporte_precios_ultimo_mes';
 const DIA_DEL_MES = 20;
+// ── Hasta cuándo se puede mandar ────────────────────────────────────────────────────
+//
+// El cron corre todos los días y manda solo si todavía no se mandó este mes. Eso depende
+// de que el "ya se mandó" quede guardado: si esa escritura falla, el aviso sale TODOS los
+// días del 20 en adelante. Fue lo que pasó.
+//
+// Esta ventana es el cinturón además de los tirantes. Aunque el flag no se guarde nunca,
+// el reporte puede repetirse a lo sumo cuatro veces y no once. Y como el fallo ahora se
+// informa (ver `guardado` más abajo), se puede arreglar en vez de descubrirlo por el
+// cuarto mail.
+const DIA_LIMITE = 23;
 // Qué ventana se mira para el volumen. 60 días y no 30: con 30, un cliente que esa semana
 // no pidió aparece como chico y queda al final de una lista que se ordena justamente por
 // eso.
@@ -77,6 +88,11 @@ export async function GET(req: NextRequest) {
     if (!soloVer && !forzar) {
       if (dia < DIA_DEL_MES) {
         return NextResponse.json({ ok: true, enviado: false, hoy, motivo: `es el día ${dia}: se manda el ${DIA_DEL_MES}` });
+      }
+      if (dia > DIA_LIMITE) {
+        return NextResponse.json({ ok: true, enviado: false, hoy,
+          motivo: `es el día ${dia}: la ventana para mandarlo va del ${DIA_DEL_MES} al ${DIA_LIMITE}`,
+          ultimoMesGuardado: yaMandado || '(nada guardado)' });
       }
       if (yaMandado === mes) {
         return NextResponse.json({ ok: true, enviado: false, hoy, motivo: `el reporte de ${mes} ya se mandó` });
@@ -138,7 +154,13 @@ export async function GET(req: NextRequest) {
 
     if (soloVer) {
       return NextResponse.json({
-        hoy, mes, yaMandado, dia, clientes: activos.length,
+        hoy, mes, dia,
+        // Lo primero que hay que mirar si el reporte llega más de una vez: si esto no es
+        // el mes en curso, la marca no se guardó y por eso se repite.
+        ultimo_mes_guardado: yaMandado || '(nada guardado)',
+        se_repetiria: dia >= DIA_DEL_MES && dia <= DIA_LIMITE && yaMandado !== mes,
+        ventana: `del ${DIA_DEL_MES} al ${DIA_LIMITE}`,
+        clientes: activos.length,
         atrasados: atrasadosL.length,
         filas: activos.map((f) => ({
           nombre: f.nombre, monto: f.monto,
@@ -245,19 +267,40 @@ export async function GET(req: NextRequest) {
 
     // Se anota DESPUÉS de que el mail salió. Al revés, un fallo de Resend dejaría el mes
     // marcado como mandado y el reporte no llegaría hasta el mes siguiente.
-    await guardarUltimoMes(mes).catch(() => {});
+    //
+    // Y se VERIFICA. Antes esto era `.catch(() => {})`: si la escritura fallaba, el fallo
+    // se tragaba, el mes nunca quedaba marcado y el reporte salía todos los días. Un error
+    // silencioso en el lugar exacto donde el silencio se nota como "llega demasiado".
+    const guardado = await guardarUltimoMes(mes);
 
-    return NextResponse.json({ ok: true, enviado: true, hoy, mes, clientes: activos.length, atrasados: atrasadosL.length, destinatarios });
+    return NextResponse.json({
+      ok: true, enviado: true, hoy, mes, clientes: activos.length, atrasados: atrasadosL.length, destinatarios,
+      // Si esto viene en false, el reporte va a repetirse hasta el día límite: la marca de
+      // "ya se mandó" no se pudo escribir y hay que mirar la hoja Configuracion.
+      guardado,
+    });
   } catch (err: any) {
     console.error('[cron/reporte-precios] error:', err);
     return NextResponse.json({ error: err?.message || 'server_error' }, { status: 500 });
   }
 }
 
-// Qué mes se mandó por última vez, para no mandarlo todos los días del 20 en adelante.
-async function guardarUltimoMes(mes: string) {
-  const { updateRow, appendRowObj, asegurarHoja } = await import('@/lib/sheets');
-  await asegurarHoja('Configuracion', ['clave', 'valor']);
-  const ok = await updateRow('Configuracion', 'clave', CLAVE_ULTIMO, { valor: mes }).catch(() => false);
-  if (!ok) await appendRowObj('Configuracion', { clave: CLAVE_ULTIMO, valor: mes });
+// ── Dejar asentado qué mes se mandó ─────────────────────────────────────────────────
+//
+// Devuelve si quedó guardado DE VERDAD: se vuelve a leer la hoja para confirmarlo. Sin esa
+// vuelta, una escritura que falla deja el mes sin marcar y el reporte sale todos los días
+// —que es exactamente lo que pasó— sin que nada lo diga.
+async function guardarUltimoMes(mes: string): Promise<boolean> {
+  const { updateRow, appendRowObj, readSheet } = await import('@/lib/sheets');
+  try {
+    const ok = await updateRow('Configuracion', 'clave', CLAVE_ULTIMO, { valor: mes }).catch(() => false);
+    if (!ok) await appendRowObj('Configuracion', { clave: CLAVE_ULTIMO, valor: mes });
+    // La confirmación: lo que importa no es que la escritura no tirara error, sino que el
+    // valor esté. Son cosas distintas cuando se escribe en una planilla por API.
+    const filas = await readSheet<ConfigItem>('Configuracion').catch(() => [] as ConfigItem[]);
+    return filas.some((c) => String(c.clave).trim() === CLAVE_ULTIMO && String(c.valor).trim() === mes);
+  } catch (e) {
+    console.error('[cron/reporte-precios] no se pudo guardar el último mes:', e);
+    return false;
+  }
 }
