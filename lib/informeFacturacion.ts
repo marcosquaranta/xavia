@@ -20,7 +20,20 @@ import { cobranzasParaMirar } from './xubioLectura';
 import { medirDependencia, type Dependencia } from './dependenciaXubio';
 import { HOJA_COBROS, type CobroRegistrado } from './cobros';
 
-const DIAS_VENTANA = 30;
+// ── Una semana, no un mes ───────────────────────────────────────────────────────────
+//
+// El informe sale los lunes y miraba 30 días: cada semana volvía a listar las mismas
+// diferencias de hace tres semanas, que o ya se resolvieron o ya se decidió no tocarlas.
+// Un control que repite lo viejo enseña a cerrarlo sin leer, y entonces la diferencia
+// nueva —la única sobre la que se puede hacer algo— tampoco se ve.
+const DIAS_VENTANA = 7;
+
+function correrDias(fecha: string, n: number): string {
+  const d = new Date(`${fecha}T12:00:00Z`);
+  if (!Number.isFinite(d.getTime())) return fecha;
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
 
 const fmtMoneda = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
 const fmtDia = (iso: string) => { const [, m, d] = String(iso || '').split('-'); return d ? `${d}/${m}` : iso; };
@@ -50,7 +63,9 @@ export async function obtenerDatosInformeFacturacion(): Promise<DatosInformeFact
     readSheet<VentaDia>('Ventas'),
     readSheet<PrecioVenta>('Precios'),
     readSheet<ClienteVenta>('Clientes'),
-    comprobantesParaMirar(desde, hasta),
+    // Con margen a los dos lados: el cruce lo recorta después, pero si los comprobantes
+    // corridos de fecha no se piden, no hay con qué cruzarlos y aparecen como faltantes.
+    comprobantesParaMirar(correrDias(desde, -DIAS_CORRIMIENTO), correrDias(hasta, DIAS_CORRIMIENTO)),
     cobranzasParaMirar(desde, hasta),
     readSheet<CobroRegistrado>(HOJA_COBROS).catch(() => [] as CobroRegistrado[]),
   ]);
@@ -118,6 +133,7 @@ export function construirHtmlFacturacion(d: DatosInformeFacturacion): string {
          <table style="border-collapse:collapse;width:100%;font-size:12.5px">
           <thead><tr style="background:#f9fafb;color:#6b7280">
             <th style="padding:5px 8px;text-align:left">Comprobante</th>
+            <th style="padding:5px 8px;text-align:left">Fecha</th>
             <th style="padding:5px 8px;text-align:left">Cliente</th>
             <th style="padding:5px 8px;text-align:right">Según la app</th>
             <th style="padding:5px 8px;text-align:right">En Xubio</th>
@@ -129,13 +145,18 @@ export function construirHtmlFacturacion(d: DatosInformeFacturacion): string {
               <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;font-family:ui-monospace,monospace;font-size:11.5px">
                 ${x.numero}<br><span style="color:${e.color};font-family:inherit;font-size:10.5px">${e.txt}</span>
               </td>
+              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;white-space:nowrap;font-size:11.5px">
+                ${fmtDia(x.fechaApp || x.fechaXubio) || '—'}
+                ${x.fechaApp && x.fechaXubio && x.fechaApp !== x.fechaXubio
+                  ? `<br><span style="color:#9ca3af;font-size:10.5px">en Xubio ${fmtDia(x.fechaXubio)}</span>` : ''}
+              </td>
               <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6">${x.cliente || '(sin cliente)'}</td>
               <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;text-align:right">${x.app ? fmtMoneda(x.app) : '—'}</td>
               <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;text-align:right">${x.xubio ? fmtMoneda(x.xubio) : '—'}</td>
               <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;text-align:right;font-weight:700;color:${e.color}">${x.diferencia > 0 ? '+' : '−'}${fmtMoneda(Math.abs(x.diferencia))}</td>
             </tr>`;
           }).join('')}
-          ${pc.comprobantes.length > 25 ? `<tr><td colspan="5" style="padding:4px 8px;color:#9ca3af;font-size:11.5px">y ${pc.comprobantes.length - 25} más</td></tr>` : ''}
+          ${pc.comprobantes.length > 25 ? `<tr><td colspan="6" style="padding:4px 8px;color:#9ca3af;font-size:11.5px">y ${pc.comprobantes.length - 25} más</td></tr>` : ''}
           </tbody>
         </table>`;
 

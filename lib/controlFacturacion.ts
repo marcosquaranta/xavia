@@ -474,6 +474,10 @@ export interface DiferenciaComprobante {
   numero: string;
   cliente: string;
   fechaXubio: string;
+  // La fecha de la VENTA, del lado de la app. Sin esto el informe listaba comprobantes sin
+  // decir de cuándo eran, y no había forma de saber si una diferencia era de ayer o de
+  // hace dos meses — que es justo lo que decide si hay que hacer algo.
+  fechaApp: string;
   app: number;
   xubio: number;
   diferencia: number;
@@ -502,6 +506,14 @@ export interface ComparacionPorComprobante {
 // como parámetro porque leerlas es asíncrono y esto es una función pura: si usara la lista
 // del código, un artículo nuevo valdría cero del lado de la app y aparecería como
 // diferencia en todas las facturas que lo tengan.
+// Correr una fecha ISO N días. Mediodía UTC para que el cambio de horario no corra un día.
+function correrDiasISO(fecha: string, n: number): string {
+  const d = new Date(`${fecha}T12:00:00Z`);
+  if (!Number.isFinite(d.getTime())) return fecha;
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
 export function compararPorComprobante(
   ventas: VentaDia[], precios: PrecioVenta[], clientes: ClienteVenta[],
   comprobantes: any[] | null, desde: string, hasta: string, claves: string[],
@@ -512,8 +524,23 @@ export function compararPorComprobante(
   if (!comprobantes) return vacio;
 
   // ── Lado app, agrupado por el número que Xubio devolvió al emitir ──
-  const app = new Map<string, { monto: number; cliente: string }>();
+  //
+  // OJO CON LA FECHA. Esto recorría TODAS las ventas de la historia mientras el lado Xubio
+  // se filtraba a la ventana. Resultado: cada factura más vieja que el rango aparecía como
+  // "la app la emitió y Xubio no la tiene". En el informe del 23/11 fueron 366, con
+  // comprobantes de septiembre que están perfectamente en Xubio.
+  //
+  // El comentario de más abajo decía que podía pasar y que por eso el texto dice "revisá".
+  // No alcanza: un informe con 366 falsos positivos no se revisa, se cierra.
+  //
+  // La ventana del lado app se estira DIAS_CORRIMIENTO hacia atrás a propósito: una venta
+  // del día anterior al rango puede estar facturada dentro del rango (AFIP corre el
+  // correlativo), y recortarla al día exacto la haría aparecer como "solo en Xubio".
+  const app = new Map<string, { monto: number; cliente: string; fecha: string }>();
+  const desdeApp = correrDiasISO(desde, -DIAS_CORRIMIENTO);
   for (const v of ventas) {
+    const fv = soloFecha(v.fecha);
+    if (!fv || fv < desdeApp || fv > hasta) continue;
     const numero = String(v.exportado || '').trim();
     // Sin número no hay con qué cruzar: PENDIENTE y FACTURADO (el fallback viejo) quedan
     // afuera y los cuenta el control de pendientes, que es su problema.
@@ -528,15 +555,23 @@ export function compararPorComprobante(
     if (monto <= 0) continue;
     if (llevaIva(cliente)) monto = monto * (1 + IVA_FACTURA_A);
     const prev = app.get(numero);
-    if (prev) prev.monto += monto;
-    else app.set(numero, { monto, cliente: nombreClienteVisible(cliente) || String(v.nombre_cliente || '') });
+    if (prev) { prev.monto += monto; if (fv < prev.fecha) prev.fecha = fv; }
+    else app.set(numero, { monto, cliente: nombreClienteVisible(cliente) || String(v.nombre_cliente || ''), fecha: fv });
   }
 
   // ── Lado Xubio, por número ──
+  //
+  // La ventana se estira para los dos lados por el mismo motivo que la del lado app, y uno
+  // más: Xubio le pone a la factura una fecha ANTERIOR a la de la venta cuando corre el
+  // correlativo de AFIP (verificado: ocho facturas seguidas quedaron con el día anterior).
+  // Con el corte al día exacto, una venta del primer día del rango se cruzaba contra un
+  // comprobante que quedaba afuera y aparecía como "Xubio no la tiene".
   const xubio = new Map<string, { monto: number; cliente: string; fecha: string }>();
+  const desdeX = correrDiasISO(desde, -DIAS_CORRIMIENTO);
+  const hastaX = correrDiasISO(hasta, DIAS_CORRIMIENTO);
   for (const c of comprobantes) {
     const f = soloFecha(c?.fecha);
-    if (!f || f < desde || f > hasta) continue;
+    if (!f || f < desdeX || f > hastaX) continue;
     const numero = String(c?.numeroDocumento || '').trim();
     if (!numero) continue;
     const signo = Number(c?.tipo) === 3 ? -1 : 1;
@@ -558,12 +593,12 @@ export function compararPorComprobante(
     // una factura más vieja que el rango: se informa igual, pero por eso el texto del
     // informe dice "revisá", no "falta".
     if (enApp && !enXubio) {
-      out.push({ numero, cliente: app.get(numero)!.cliente, fechaXubio: '', app: a, xubio: 0, diferencia: a, estado: 'falta_en_xubio' });
+      out.push({ numero, cliente: app.get(numero)!.cliente, fechaXubio: '', fechaApp: app.get(numero)!.fecha, app: a, xubio: 0, diferencia: a, estado: 'falta_en_xubio' });
       continue;
     }
     if (!enApp && enXubio) {
       const d = xubio.get(numero)!;
-      out.push({ numero, cliente: d.cliente, fechaXubio: d.fecha, app: 0, xubio: x, diferencia: -x, estado: 'solo_en_xubio' });
+      out.push({ numero, cliente: d.cliente, fechaXubio: d.fecha, fechaApp: '', app: 0, xubio: x, diferencia: -x, estado: 'solo_en_xubio' });
       continue;
     }
     if (Math.abs(dif) < DIF_MINIMA_PESOS) { coinciden++; continue; }
@@ -571,7 +606,7 @@ export function compararPorComprobante(
     // del cliente no se pudo leer, el ajuste no se aplica y queda un 10,5% exacto de
     // diferencia en una factura que esta perfecta. Cuenta como coincidencia.
     if (soloDifiereElIva(a, x)) { coinciden++; continue; }
-    out.push({ numero, cliente: app.get(numero)!.cliente || xubio.get(numero)!.cliente, fechaXubio: xubio.get(numero)!.fecha, app: a, xubio: x, diferencia: dif, estado: 'difiere' });
+    out.push({ numero, cliente: app.get(numero)!.cliente || xubio.get(numero)!.cliente, fechaXubio: xubio.get(numero)!.fecha, fechaApp: app.get(numero)!.fecha, app: a, xubio: x, diferencia: dif, estado: 'difiere' });
   }
 
   // Lo más grave primero —una factura que falta en Xubio es mercadería sin facturar— y
