@@ -57,6 +57,9 @@ export default function AlertasVentas({ cajones, sinFacturar, sinFacturarViejas 
           : `hace ${p.dias} días — falta facturar`,
         grave: !p.huboFacturaEseDia,
       })),
+      // Esta NO se pliega: una venta sin facturar se arregla cargando, que es lo que se
+      // viene a hacer a esta pantalla.
+      plegada: false,
       resto: Math.max(0, sinFacturar.length - 6),
       // Lo viejo no entra en la alerta para no tapar lo de esta semana, pero se cuenta.
       pie: sinFacturarViejas > 0
@@ -68,6 +71,16 @@ export default function AlertasVentas({ cajones, sinFacturar, sinFacturarViejas 
       color: '#9a3412', fondo: '#fff7ed', borde: '#fed7aa',
       titulo: `${cajones.length} ${cajones.length === 1 ? 'cliente con cajones sin volver' : 'clientes con cajones sin volver'}`,
       href: '/cajones', verTexto: 'Ver cajones →',
+      // ── Plegada ───────────────────────────────────────────────────────────────────
+      //
+      // Esta pantalla es para CARGAR la venta del día, y había cuatro bloques de alertas
+      // arriba de todo empujando el formulario abajo del pliegue. Los cajones no se
+      // resuelven cargando una venta: son una gestión aparte, de otro día.
+      //
+      // Se pliega, no se saca: el número sigue a la vista y se abre de un click. Y para que
+      // no dependa de que alguien lo abra, sale por mail a Juan Pablo los lunes (ver
+      // /api/cron/cajones-lunes).
+      plegada: true,
       filas: cajones.slice(0, 6).map((c) => ({
         clave: c.id_control,
         principal: c.nombre,
@@ -82,6 +95,9 @@ export default function AlertasVentas({ cajones, sinFacturar, sinFacturarViejas 
       color: '#6d28d9', fondo: '#f5f3ff', borde: '#ddd6fe',
       titulo: `${sinPedir.length} ${sinPedir.length === 1 ? 'cliente dejó de pedir' : 'clientes dejaron de pedir'}`,
       href: '/ventas/historial', verTexto: '',
+      // Mismo criterio que los cajones: es una tarea de seguimiento comercial, no de la
+      // carga del día. Ya sale por mail a Juan Pablo (email_clientes_sin_pedir).
+      plegada: true,
       filas: sinPedir.slice(0, 6).map((c) => ({
         clave: c.id_control,
         principal: c.nombre,
@@ -96,7 +112,7 @@ export default function AlertasVentas({ cajones, sinFacturar, sinFacturarViejas 
     },
   ].filter(Boolean) as {
     clave: string; color: string; fondo: string; borde: string; titulo: string;
-    href: string; verTexto: string;
+    href: string; verTexto: string; plegada?: boolean;
     filas: { clave: string; principal: string; secundario: string; grave: boolean }[];
     resto: number;
     pie: string | null;
@@ -107,8 +123,37 @@ export default function AlertasVentas({ cajones, sinFacturar, sinFacturarViejas 
       <p style={{ margin: '0 0 7px', fontSize: '12px', fontWeight: 800, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
         ⚠️ Alertas · {total}
       </p>
+      {/* Las plegadas van juntas y en una línea: ocupan lo que ocupa su título. */}
+      {bloques.some((b) => b.plegada) && (
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: bloques.some((b) => !b.plegada) ? '10px' : 0 }}>
+          {bloques.filter((b) => b.plegada).map((b) => (
+            <details key={b.clave} style={{ background: b.fondo, border: `1px solid ${b.borde}`, borderRadius: '9px', padding: '7px 11px', flex: '1 1 290px' }}>
+              <summary style={{ cursor: 'pointer', fontSize: '12.5px', fontWeight: 800, color: b.color, listStyle: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
+                <span>{b.titulo}</span>
+                <span style={{ fontSize: '11px', fontWeight: 600, color: b.color, opacity: 0.75 }}>ver ▾</span>
+              </summary>
+              <div style={{ marginTop: '7px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                {b.filas.map((f) => (
+                  <div key={f.clave} style={{ fontSize: '12px', lineHeight: 1.4 }}>
+                    <span style={{ fontWeight: f.grave ? 700 : 600, color: '#374151' }}>{f.principal}</span>
+                    <span style={{ color: '#6b7280' }}> — {f.secundario}</span>
+                  </div>
+                ))}
+                {b.resto > 0 && <p style={{ margin: '2px 0 0', fontSize: '11.5px', color: '#9ca3af' }}>y {b.resto} más</p>}
+                {b.verTexto && (
+                  <Link href={b.href} style={{ fontSize: '11.5px', color: b.color, fontWeight: 600, marginTop: '3px' }}>{b.verTexto}</Link>
+                )}
+                <p style={{ margin: '4px 0 0', fontSize: '10.5px', color: '#9ca3af' }}>
+                  Esto también le llega a Juan Pablo por mail los lunes.
+                </p>
+              </div>
+            </details>
+          ))}
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: '10px' }}>
-        {bloques.map((b) => (
+        {bloques.filter((b) => !b.plegada).map((b) => (
           <div key={b.clave} style={{ background: b.fondo, border: `1px solid ${b.borde}`, borderRadius: '9px', padding: '11px 13px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
               <p style={{ margin: 0, fontSize: '13px', fontWeight: 800, color: b.color }}>{b.titulo}</p>

@@ -393,18 +393,46 @@ export default function VentasEvolucionCharts({ articulo, clienteSemanal, client
   if (!articulo.length && !clienteSemanal.meses.length && !precio.length) return null;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '16px' }}>
+      {/* Las ensaladas a media pantalla: es un número que se mira de reojo, no un
+          análisis. A ancho completo empujaba todo lo demás —y el formulario de carga, que
+          es para lo que se entra acá— abajo del pliegue. */}
       {ensaladas.length > 0 && tiposEnsalada.length > 0 && (
-        <EnsaladasMes datos={ensaladas} tipos={tiposEnsalada} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: '14px' }}>
+          <EnsaladasMes datos={ensaladas} tipos={tiposEnsalada} />
+          <div />
+        </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: '14px' }}>
         <GraficoVentaPorArticulo datos={articulo} />
         <GraficoVentaPorCliente semanal={clienteSemanal} mensual={clienteMensual} />
       </div>
       <TarjetaIndicadores datos={resumenMes} />
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: '14px' }}>
-        <GraficoValorComercial datos={clientesPrecioVolumen} ultimaSuba={ultimaSuba} />
-        <GraficoPrecioPromedio datos={precio} />
+
+      {/* ── Precio vs. volumen y evolución del precio: ahora son un vínculo ───────────
+          No son datos de la carga diaria: son para decidir aumentos, y esa decisión se
+          toma una vez por mes, no todos los días mientras se cargan las ventas. Los dos
+          van enteros en el reporte mensual de precios (el del día 20).
+          Se dejan accesibles de un click, no escondidos: el que los quiere mirar hoy
+          sigue pudiendo. */}
+      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', fontSize: '12.5px', color: '#6b7280', background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: '9px', padding: '10px 13px' }}>
+        <span style={{ fontWeight: 700, color: '#374151' }}>Precios</span>
+        <a href="#precio-volumen" style={{ color: '#2563eb', fontWeight: 600 }}>Precio vs. volumen por cliente ↓</a>
+        <span style={{ color: '#d1d5db' }}>·</span>
+        <a href="#precio-promedio" style={{ color: '#2563eb', fontWeight: 600 }}>Evolución del precio promedio ↓</a>
+        <span style={{ marginLeft: 'auto', fontSize: '11px', color: '#9ca3af' }}>
+          Los dos van enteros en el reporte de precios del 20 de cada mes.
+        </span>
       </div>
+
+      <details>
+        <summary style={{ cursor: 'pointer', fontSize: '12.5px', fontWeight: 700, color: '#374151' }}>
+          Ver los dos gráficos de precios
+        </summary>
+        <div id="precio-volumen" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: '14px', marginTop: '12px' }}>
+          <GraficoValorComercial datos={clientesPrecioVolumen} ultimaSuba={ultimaSuba} />
+          <div id="precio-promedio"><GraficoPrecioPromedio datos={precio} /></div>
+        </div>
+      </details>
     </div>
   );
 }

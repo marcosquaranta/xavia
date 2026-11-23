@@ -57,6 +57,10 @@
       "schedule": "0 15 * * *"
     },
     {
+      "path": "/api/cron/cajones-lunes",
+      "schedule": "0 12 * * 1"
+    },
+    {
       "path": "/api/cron/clientes-sin-pedir",
       "schedule": "0 12 * * 1,4"
     },

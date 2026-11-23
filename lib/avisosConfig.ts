@@ -81,6 +81,15 @@ export const AVISOS: AvisoConfigurable[] = [
     porDefecto: ['marcos.quaranta@gmail.com'],
   },
   {
+    clave: 'email_cajones_lunes',
+    titulo: 'Cajones sin volver (Juan Pablo)',
+    descripcion: 'Los lunes, solo si hay algo. Los clientes con cajones afuera y mas de 7 dias sin movimiento. La alerta sigue en Ventas, plegada: esto es para que no dependa de que alguien la abra.',
+    // La direccion del responsable se carga en Admin -> Avisos por mail, no aca: una
+    // direccion personal de otra persona no tiene por que quedar versionada en el
+    // repositorio. Mientras no este cargada, el aviso llega al dueno de la cuenta.
+    porDefecto: ['marcos.quaranta@gmail.com'],
+  },
+  {
     clave: 'email_cobro_automatico',
     titulo: 'Cobros que se registran solos',
     descripcion: 'En el momento en que pasa. Cuando llega un aviso de pago y las facturas que nombra suman exactamente lo que declara, la app registra la cobranza en Xubio sola y avisa al instante, con el detalle y el link para anularla.',

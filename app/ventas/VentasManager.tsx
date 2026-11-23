@@ -163,11 +163,6 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   const [ctds,setCtds]=useState<Ctds>({});
   const [ests,setEsts]=useState<Ests>({});
   const [disp,setDisp]=useState<Record<PK,string>>(vacio(''));
-  // Arranca prendido si algún cliente tiene precio cargado en alguno de esos artículos, o
-  // sea si de verdad se venden. El texto del tilde también sale del catálogo: decía
-  // "Bandeja + Albahaca" escrito a mano y siguió diciéndolo después de dar de baja la
-  // bandeja, que es exactamente cómo un artículo termina escondido sin que nadie lo sepa.
-  const [extras,setExtras]=useState(()=>PE.some(a=>precios.some(p=>Number((p as any)[a.key])>0)));
   const [loading,setLoading]=useState(false);
   const [exp,setExp]=useState(false);
   const [msg,setMsg]=useState<{t:'ok'|'err';s:string}|null>(null);
@@ -254,7 +249,13 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   const [estsKg,setEstsKg]=useState<EstKG>({});
   const tmrs=useRef<Record<string,ReturnType<typeof setTimeout>>>({});
 
-  const prods = extras ? ALL : PP;
+  // ── Sin tilde: si tiene precio, se muestra ────────────────────────────────────────
+  //
+  // Había un tilde "Albahaca" que agregaba o sacaba esos artículos de la grilla. Hoy sobra:
+  // cada celda ya se decide sola por el precio del cliente —sin precio no se deja cargar—,
+  // así que un cliente que no compra albahaca ve "sin precio" y listo. El tilde solo
+  // agregaba una forma de esconder sin querer un artículo que sí se vende.
+  const prods = ALL;
   const filas = mkFilas(clientes,frecuencias);
   // Solo los clientes con precio cargado en alguna ensalada. Tener precio es lo que
   // significa "a este cliente se le vende esto": sin precio la venta se cargaría en
@@ -915,9 +916,6 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
           <label style={{fontSize:'10px',color:'#6b7280',display:'block',marginBottom:'2px'}}>FECHA FACTURACIÓN</label>
           <input type="date" value={fecha} onChange={ev=>setFecha(ev.target.value)} style={{fontSize:'14px',fontWeight:600,border:'1px solid #e5e7eb',borderRadius:'7px',padding:'6px 10px'}}/>
         </div>
-        <label style={{display:'flex',alignItems:'center',gap:'5px',fontSize:'11px',color:'#6b7280',cursor:'pointer',userSelect:'none',marginBottom:'2px'}}>
-          <input type="checkbox" checked={extras} onChange={ev=>setExtras(ev.target.checked)}/> {PE.map(a=>a.label).join(' + ')}
-        </label>
         <button onClick={()=>limpiarDia(false)} disabled={limpiando}
           style={{background:'none',border:'1px solid #fca5a5',borderRadius:'8px',padding:'8px 12px',fontWeight:600,fontSize:'12px',cursor:'pointer',color:'#dc2626',marginTop:'14px'}}>
           🗑 Limpiar día

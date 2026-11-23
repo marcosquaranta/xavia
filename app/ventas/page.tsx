@@ -145,8 +145,12 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
           {/* Cobranzas no entra al menú de arriba a propósito — lo acabamos de achicar. Se
               entra desde acá, que es donde se está cuando uno piensa en facturas. */}
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <Link href="/facturacion" className="btn secondary" style={{ fontSize: '13px', marginTop: '2px' }}>
-              📄 Facturación →
+            {/* "Facturación" no decía nada: la pantalla de Ventas también factura. La
+                diferencia es CUÁNDO se usa cada una — acá se carga y se emite el día;
+                allá se reintenta lo que no salió. El nombre ahora lo dice. */}
+            <Link href="/facturacion" className="btn secondary" style={{ fontSize: '13px', marginTop: '2px' }}
+              title="Las ventas cargadas que todavía no se emitieron en Xubio: se reintentan desde ahí.">
+              📄 Emitir lo que quedó pendiente →
             </Link>
             <Link href="/cobranzas" className="btn secondary" style={{ fontSize: '13px', marginTop: '2px' }}>
               💰 Cobranzas →
@@ -154,7 +158,8 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
             {/* El historial es donde se ve qué se facturó y qué quedó colgado, y se entraba
                 solo desde Facturación. Acá arriba porque es la pantalla a la que manda la
                 alerta de ventas sin facturar. */}
-            <Link href="/ventas/historial" className="btn secondary" style={{ fontSize: '13px', marginTop: '2px' }}>
+            <Link href="/ventas/historial" className="btn secondary" style={{ fontSize: '13px', marginTop: '2px' }}
+              title="Lo ya facturado: corregir cantidades, emitir notas de crédito, anular una carga.">
               🧾 Historial de facturación →
             </Link>
           </div>
