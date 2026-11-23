@@ -63,7 +63,7 @@ export const AVISOS: AvisoConfigurable[] = [
   {
     clave: 'email_pagos_pendientes',
     titulo: 'Pagos pendientes',
-    descripcion: 'Todos los días a la mañana, solo si hay algo. Todas las compras cargadas con "todavía no lo pagué": qué vence primero, a qué alias transferir y cuánto se le debe a cada proveedor. Reemplaza las solicitudes de pago por mail.',
+    descripcion: 'Los lunes a la mañana, solo si hay algo. Todas las compras cargadas con "todavía no lo pagué": qué vence primero, a qué alias transferir y cuánto se le debe a cada proveedor. Reemplaza las solicitudes de pago por mail.',
     porDefecto: ['marcos.quaranta@gmail.com'],
   },
   {

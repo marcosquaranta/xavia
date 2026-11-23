@@ -21,8 +21,12 @@ export const maxDuration = 60;
 // trabajo — lo que hay para pagar hoy — y tiene que llegar aunque nada esté vencido, porque
 // el punto es pagar ANTES de que lo esté.
 //
-// Si no hay nada pendiente no se manda nada: un mail diario que la mitad de los días dice
-// "no hay nada" se archiva sin abrir, y el día que sí trae algo se archiva igual.
+// Va los LUNES y no todos los días (decisión de Marcos). Lo que hay para pagar no cambia
+// de un día para el otro —las facturas tienen plazo— así que un mail diario repetía casi
+// la misma lista y se dejaba de abrir. Semanal cae cuando se arma la semana y se paga.
+//
+// Si no hay nada pendiente tampoco se manda: un mail que dice "no hay nada" se archiva sin
+// abrir, y el que sí trae algo se archiva igual.
 const CLAVE_CONFIG = 'email_pagos_pendientes';
 const URL_GASTOS = 'https://xavia-self.vercel.app/gastos';
 
@@ -103,6 +107,7 @@ export async function GET(req: NextRequest) {
             ? `<strong style="color:#b91c1c">${fmt$(r.vencido)} ya está vencido.</strong> `
             : 'Nada vencido todavía. '}
           Son las compras cargadas con "todavía no lo pagué". Se marcan pagadas en Deuda a proveedores.
+          Este aviso llega los lunes.
         </p>
 
         <h3 style="margin:0 0 6px;font-size:14px">Por vencimiento — en este orden hay que pagarlas</h3>

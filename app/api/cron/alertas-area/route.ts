@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
-import type { Lote, Articulo, StockMes, ClienteVenta, PrecioVenta, VentaDia, ConfigItem, Gasto, CajonMovimiento } from '@/lib/types';
+import type { Lote, Articulo, StockMes, ClienteVenta, PrecioVenta, VentaDia, ConfigItem, Gasto, CajonMovimiento , Ubicacion } from '@/lib/types';
 import { generarAlertas, alertasStockBajo, alertasCobrosComprometidos } from '@/lib/alertasPanel';
 import { comprometidasDeBandeja } from '@/lib/comprometidas';
 import { HOJA_BANDEJA, type ItemBandeja } from '@/lib/bandejaCobranzas';
@@ -12,7 +12,7 @@ import { saldoPorCliente, alertasCajones } from '@/lib/cajones';
 import { deudaProveedores } from '@/lib/proveedores';
 import { destinatariosDe } from '@/lib/avisosConfig';
 import { AREAS, porArea, htmlDeArea, type AlertaArea } from '@/lib/areasAlertas';
-import { fechaArgentinaHoy } from '@/lib/ocupacion';
+import { fechaArgentinaHoy, ocupacionPorMesada } from '@/lib/ocupacion';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
   const soloVer = new URL(req.url).searchParams.get('ver') === '1';
 
   try {
-    const [lotes, articulos, stocks, clientes, precios, ventas, config, gastos, movCajones, tubosMesadas] = await Promise.all([
+    const [lotes, articulos, stocks, clientes, precios, ventas, config, gastos, movCajones, tubosMesadas, ubicaciones] = await Promise.all([
       readSheet<Lote>('Lotes').catch(() => [] as Lote[]),
       readSheet<Articulo>('Articulos').catch(() => [] as Articulo[]),
       readSheet<StockMes>('StockMensual').catch(() => [] as StockMes[]),
@@ -54,6 +54,8 @@ export async function GET(req: NextRequest) {
       readSheet<Gasto>('Gastos').catch(() => [] as Gasto[]),
       readSheet<CajonMovimiento>('CajonesMovimientos').catch(() => [] as CajonMovimiento[]),
       readSheet<any>('TubosMesadas').catch(() => [] as any[]),
+      // Las mesadas, para poder decir cuáles están a medio llenar.
+      readSheet<Ubicacion>('Ubicaciones').catch(() => [] as Ubicacion[]),
     ]);
 
     const hoy = new Date();
@@ -67,6 +69,43 @@ export async function GET(req: NextRequest) {
         // Panel con su color por tiempo. Lo que va es lo que no se mira solo.
         if (a.categoria === 'lote_atraso') continue;
         todas.push({ area: 'produccion', tipo: a.tipo, msg: a.msg, href: a.href || '/panel' });
+      }
+      // ── Mesadas subocupadas ──────────────────────────────────────────────────────
+      //
+      // Una mesada a medio llenar es capacidad instalada que no produce: ocupa lugar, se
+      // riega y se mantiene igual. Estaba en el reporte semanal y en la pantalla, pero no
+      // en el mail diario de Marcelo, que es el que decide qué se siembra y dónde.
+      //
+      // El corte en 70% y no en 100: una mesada recién trasplantada o a punto de
+      // cosecharse está baja por el ciclo, no por un problema. Debajo del 70 ya es un
+      // hueco que se podría estar usando.
+      //
+      // Las vacías van aparte: no es lo mismo una mesada a medio llenar que una que no
+      // tiene nada, y mezclarlas hace que la vacía se lea como una más de la lista.
+      const mesadas = ocupacionPorMesada(ubicaciones, lotes);
+      const vacias = mesadas.filter((m) => m.plantas_vivas === 0);
+      const bajas = mesadas.filter((m) => m.plantas_vivas > 0 && m.ocupacion_pct < 70)
+        .sort((a, b) => a.ocupacion_pct - b.ocupacion_pct);
+      if (vacias.length) {
+        todas.push({
+          area: 'produccion', tipo: 'error',
+          msg: `${vacias.length} mesada(s) vacías: ${vacias.slice(0, 5).map((m) => m.nombre).join(', ')}${vacias.length > 5 ? ` y ${vacias.length - 5} más` : ''}`,
+          href: '/ocupacion',
+        });
+      }
+      for (const m of bajas.slice(0, 6)) {
+        todas.push({
+          area: 'produccion', tipo: m.ocupacion_pct < 40 ? 'error' : 'warn',
+          msg: `${m.nombre} al ${m.ocupacion_pct}% — ${m.huecos_libres} huecos libres de ${m.capacidad}`,
+          href: '/ocupacion',
+        });
+      }
+      if (bajas.length > 6) {
+        todas.push({
+          area: 'produccion', tipo: 'info',
+          msg: `y ${bajas.length - 6} mesada(s) más por debajo del 70%`,
+          href: '/ocupacion',
+        });
       }
     } catch { /* un área que falla no puede tumbar las otras tres */ }
 
