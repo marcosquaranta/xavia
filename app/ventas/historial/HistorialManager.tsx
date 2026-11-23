@@ -1,6 +1,7 @@
 'use client';
 import { Fragment, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Remitos from './Remitos';
 import Link from 'next/link';
 import type { VentaDia } from '@/lib/types';
 
@@ -610,6 +611,16 @@ export default function HistorialManager() {
   // Las que quedaron sueltas de un cliente que ese mismo día SÍ se facturó. No se muestran
   // en la lista: casi siempre son la misma venta guardada dos veces, y tenerlas mezcladas con
   // lo que de verdad falta facturar es lo que hacía que la lista no sirviera.
+  const [verRemitos, setVerRemitos] = useState(false);
+  // ── 20 por página ────────────────────────────────────────────────────────────────
+  //
+  // La tabla traía las 407 líneas de una. Scrollear cuatrocientas filas para llegar a la
+  // de anteayer no es mirar un historial, es buscar a ojo. Veinte entran en una pantalla.
+  //
+  // La página vuelve a 1 cuando cambia cualquier filtro: quedarse en la página 9 de una
+  // lista que ahora tiene 3 resultados muestra una tabla vacía y parece que no hay nada.
+  const POR_PAGINA = 20;
+  const [pagina, setPagina] = useState(1);
   const [verRepetidas, setVerRepetidas] = useState(false);
   const [borrandoRepetidas, setBorrandoRepetidas] = useState(false);
 
@@ -637,6 +648,7 @@ export default function HistorialManager() {
     }).catch(() => {}).finally(() => setLoading(false));
   }
   useEffect(() => { cargar(); }, []);
+  useEffect(() => { setPagina(1); }, [filtro, filtroCliente, filtroSucursal]);
 
   useEffect(() => {
     if (!facturaPedida) return;
@@ -759,6 +771,9 @@ export default function HistorialManager() {
       || (e.sucursales || []).some(su => su.toLowerCase().includes(q));
   });
   const hayFiltro = !!(q || filtroCliente || filtroSucursal);
+  const totalPaginas = Math.max(1, Math.ceil(expFiltradas.length / POR_PAGINA));
+  const paginaActual = Math.min(pagina, totalPaginas);
+  const expPagina = expFiltradas.slice((paginaActual - 1) * POR_PAGINA, paginaActual * POR_PAGINA);
   // Cada tabla dibuja solo los artículos que aparecen en SUS filas: lo facturado y lo
   // pendiente casi nunca tienen los mismos, y compartir columnas dejaba la mitad vacías.
   const colsExp = colsCon(expFiltradas);
@@ -897,7 +912,15 @@ export default function HistorialManager() {
       {/* ── Facturado ── */}
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px', marginBottom: '2px' }}>
-          <p className="card-title" style={{ margin: 0 }}>📤 Facturado</p>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap' }}>
+            <p className="card-title" style={{ margin: 0 }}>📤 Facturado</p>
+            {/* El remito sale DESPUÉS de facturar, así que el lugar es este: la lista de
+                lo ya emitido. */}
+            <button type="button" onClick={() => setVerRemitos((v) => !v)}
+              style={{ fontSize: '12px', fontWeight: 700, padding: '4px 11px', borderRadius: '7px', cursor: 'pointer', border: '1px solid #0f766e', background: verRemitos ? '#f0fdfa' : 'white', color: '#0f766e' }}>
+              📄 Generar remitos
+            </button>
+          </div>
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
             <select value={filtroCliente} onChange={ev => setFiltroCliente(ev.target.value)}
               style={{ fontSize: '12px', padding: '5px 8px', maxWidth: '200px' }}>
@@ -924,7 +947,12 @@ export default function HistorialManager() {
         <p className="card-sub">
           Ya enviado a Xubio · más reciente primero ·{' '}
           {hayFiltro ? `${expFiltradas.length} de ${exportaciones.length} líneas` : `${exportaciones.length} líneas`}
+          {/* Qué se está viendo de todo lo que hay. Sin esto, veinte filas de cuatrocientas
+              se leen como si fueran todas. */}
+          {expFiltradas.length > POR_PAGINA && ` · mostrando ${(paginaActual - 1) * POR_PAGINA + 1}-${Math.min(paginaActual * POR_PAGINA, expFiltradas.length)}`}
         </p>
+
+        {verRemitos && <Remitos onCerrar={() => setVerRemitos(false)} />}
         {expFiltradas.length === 0 ? (
           <p style={{ color: '#9ca3af', fontSize: '13px' }}>{hayFiltro ? 'Sin resultados para ese filtro.' : 'Todavía no se facturó nada.'}</p>
         ) : (
@@ -942,7 +970,7 @@ export default function HistorialManager() {
                 <th style={{ padding: '6px 10px' }}></th>
               </tr></thead>
               <tbody>
-                {expFiltradas.map(h => {
+                {expPagina.map(h => {
                   const key = `${h.id_exportacion}__${h.id_control}`;
                   const abierto = editando === key;
                   return (
@@ -988,6 +1016,43 @@ export default function HistorialManager() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* ── Las páginas ───────────────────────────────────────────────────────────
+            Números y no solo "siguiente": el historial se mira para encontrar algo de
+            una fecha, y saltar de a una página hasta la 14 no es buscar, es resignarse. */}
+        {expFiltradas.length > POR_PAGINA && (
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', marginTop: '10px' }}>
+            <button type="button" onClick={() => setPagina((p) => Math.max(1, p - 1))} disabled={paginaActual <= 1}
+              style={{ fontSize: '12px', padding: '5px 11px', borderRadius: '6px', border: '1px solid #e5e7eb', background: 'white', color: paginaActual <= 1 ? '#d1d5db' : '#374151', cursor: paginaActual <= 1 ? 'not-allowed' : 'pointer' }}>
+              ← Anterior
+            </button>
+            {Array.from({ length: totalPaginas }, (_, i) => i + 1)
+              // Con muchas páginas se muestran las cercanas más la primera y la última: una
+              // fila de treinta números es tan difícil de usar como ninguno.
+              .filter((n) => n === 1 || n === totalPaginas || Math.abs(n - paginaActual) <= 2)
+              .map((n, idx, arr) => (
+                <span key={n} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {idx > 0 && arr[idx - 1] !== n - 1 && <span style={{ color: '#d1d5db', fontSize: '12px' }}>…</span>}
+                  <button type="button" onClick={() => setPagina(n)}
+                    style={{
+                      fontSize: '12px', padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontWeight: n === paginaActual ? 800 : 500,
+                      border: `1px solid ${n === paginaActual ? '#2563eb' : '#e5e7eb'}`,
+                      background: n === paginaActual ? '#eff6ff' : 'white',
+                      color: n === paginaActual ? '#1d4ed8' : '#6b7280',
+                    }}>
+                    {n}
+                  </button>
+                </span>
+              ))}
+            <button type="button" onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))} disabled={paginaActual >= totalPaginas}
+              style={{ fontSize: '12px', padding: '5px 11px', borderRadius: '6px', border: '1px solid #e5e7eb', background: 'white', color: paginaActual >= totalPaginas ? '#d1d5db' : '#374151', cursor: paginaActual >= totalPaginas ? 'not-allowed' : 'pointer' }}>
+              Siguiente →
+            </button>
+            <span style={{ fontSize: '11.5px', color: '#9ca3af', marginLeft: '4px' }}>
+              {expFiltradas.length} líneas en {totalPaginas} páginas
+            </span>
           </div>
         )}
       </div>
