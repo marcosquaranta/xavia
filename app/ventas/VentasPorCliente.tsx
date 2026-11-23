@@ -175,6 +175,17 @@ export default function VentasPorCliente({
           const kgs = suyosKg(f);
           const sinNada = arts.length === 0 && ens.length === 0 && kgs.length === 0;
           const tieneAlgo = c.unidades > 0 || c.kilos > 0;
+          // ── Unidades y cajones en la misma sucursal ────────────────────────────
+          //
+          // No pasa: una sucursal vende de una forma o de la otra (lo confirmó Marcos).
+          // Cuando aparecen las dos, es una cantidad tipeada en la fila equivocada.
+          //
+          // Avisarlo acá no es cosmético: esa combinación fue la que hizo perder los
+          // cajones de Mamina Funes. La línea llevaba las dos cosas, los cajones salieron
+          // mal en cero y como las unidades no eran cero la línea se guardó igual y los
+          // piso. El error de fondo está arreglado, pero la carga mezclada sigue siendo
+          // una venta mal cargada y nadie la estaba mirando.
+          const mezclado = c.unidades > 0 && c.kilos > 0;
 
           return (
             <div key={k} style={{
@@ -207,6 +218,12 @@ export default function VentasPorCliente({
                     sin precios cargados
                   </span>
                 )}
+                {mezclado && (
+                  <span title="Esta sucursal tiene cargadas unidades Y cajones. Normalmente se vende de una forma o de la otra: revisá que no haya una cantidad en la fila equivocada."
+                    style={{ fontSize: '10.5px', color: '#b91c1c', background: '#fef2f2', padding: '2px 7px', borderRadius: '10px', fontWeight: 700 }}>
+                    unidades Y cajones
+                  </span>
+                )}
 
                 <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '10px' }}>
                   {tieneAlgo ? (
@@ -225,6 +242,13 @@ export default function VentasPorCliente({
 
               {esteAbierto && !sinNada && (
                 <div style={{ borderTop: '1px solid #e5e7eb', padding: '11px 12px', background: '#fcfcfd' }}>
+                  {mezclado && (
+                    <p style={{ margin: '0 0 9px', padding: '8px 10px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '7px', fontSize: '12px', color: '#b91c1c', lineHeight: 1.5 }}>
+                      <strong>Esta sucursal tiene unidades Y cajones cargados.</strong> Normalmente se vende de una
+                      forma o de la otra: revisá que no haya una cantidad tipeada en la fila equivocada. Si de verdad
+                      lleva las dos cosas, ignorá el aviso.
+                    </p>
+                  )}
                   {ant > 0 && (
                     <p style={{ margin: '0 0 9px', fontSize: '11px', color: '#6b7280' }}>
                       Hace 7 días se le cargaron <strong>{ant} u</strong>.
@@ -323,7 +347,12 @@ export default function VentasPorCliente({
                               border: 'none', borderRadius: '7px', padding: '7px 15px', fontSize: '12.5px', fontWeight: 700,
                               cursor: tieneAlgo && !trabajando ? 'pointer' : 'not-allowed',
                             }}>
-                            {trabajando ? 'Facturando…' : sigSuc ? 'Confirmar y facturar' : 'Confirmar'}
+                            {/* Un cliente de varias sucursales se factura entero: el botón
+                                tiene que decirlo. "Confirmar" a secas, estando parado en una
+                                sucursal, se lee como que factura solo esa. */}
+                            {trabajando ? 'Facturando…'
+                              : sucursalesDe(f.id_control).length > 1 ? `Facturar las ${sucursalesDe(f.id_control).length} sucursales`
+                              : 'Confirmar'}
                           </button>
                         </span>
                       );

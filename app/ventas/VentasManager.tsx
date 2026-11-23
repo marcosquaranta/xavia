@@ -989,7 +989,11 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
             const art = [...ARTS_UNIDAD,...PE].find((a)=>a.key===k);
             detalle.push({ label: art?.label || String(k).replace(/_/g,' '), cant, monto: sub, sinPrecio: unit<=0 });
           }
-          return { nombre, sucursal: l.sucursal, tipo: String(cli?.tipo_factura||'?'), detalle, monto, sinPrecio };
+          // Unidades Y cajones en la misma sucursal: no pasa, y cuando aparece es una
+          // cantidad en la fila equivocada. Ver el comentario en VentasPorCliente.
+          const conUnidad = KEYS_ENVIO.some((k)=>Number((l as any)[k])>0);
+          const conCajon = KEYS_KG.some((k)=>Number((l as any)[k])>0);
+          return { nombre, sucursal: l.sucursal, tipo: String(cli?.tipo_factura||'?'), detalle, monto, sinPrecio, mezclado: conUnidad&&conCajon };
         }).sort((a,b)=>b.monto-a.monto);
         const total = items.reduce((a,x)=>a+x.monto,0);
         const conProblema = items.filter((x)=>x.sinPrecio>0);
@@ -1004,6 +1008,20 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
               Esto se emite en AFIP y no se deshace: una nota de crédito no borra la factura, la compensa. Los importes son con el IVA de cada cliente, a los precios vigentes.
             </p>
 
+            {(()=>{
+              const mezclados = items.filter((x:any)=>x.mezclado);
+              if(!mezclados.length) return null;
+              return (
+                <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'7px',padding:'8px 11px',marginBottom:'10px'}}>
+                  <p style={{margin:0,fontSize:'12px',color:'#b91c1c',lineHeight:1.5}}>
+                    <strong>{mezclados.length} sucursal(es) llevan unidades Y cajones:</strong>{' '}
+                    {mezclados.map((x:any)=>`${x.nombre}${x.sucursal?` (${x.sucursal})`:''}`).join(', ')}.
+                    Normalmente se vende de una forma o de la otra — revisá que no haya una cantidad en la fila
+                    equivocada antes de facturar. Si de verdad lleva las dos, seguí.
+                  </p>
+                </div>
+              );
+            })()}
             {conProblema.length>0 && (
               <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'7px',padding:'8px 11px',marginBottom:'10px'}}>
                 <p style={{margin:0,fontSize:'12px',color:'#92400e'}}>
