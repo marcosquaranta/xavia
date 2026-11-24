@@ -65,6 +65,21 @@ function totales(items: Ubicacion[], nave: number) {
 
 const fmt = (n: number) => Math.round(n).toLocaleString('es-AR');
 
+// ── Un desplegable no puede mentir sobre lo que hay guardado ────────────────────────
+//
+// Si la planilla tiene un valor que no está en la lista —vacío, con mayúscula, "F2"—, un
+// <select> no muestra nada raro: muestra la PRIMERA opción. O sea que una mesada sin fase
+// se ve como "Fase 1" aunque adentro tenga vacío, y al guardar la API la rechaza por algo
+// que en pantalla parecía estar bien puesto.
+//
+// Así que lo que no está en la lista se agrega como opción propia y se marca. El valor que
+// se ve es el que hay.
+function opciones(actual: string, lista: readonly { v: string; l: string }[]) {
+  const raw = String(actual ?? '');
+  if (lista.some((o) => o.v === raw)) return lista;
+  return [{ v: raw, l: raw ? `⚠ ${raw} (no reconocido)` : '⚠ sin asignar' }, ...lista];
+}
+
 export default function NavesForm({ ubicaciones }: { ubicaciones: Ubicacion[] }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -184,13 +199,13 @@ export default function NavesForm({ ubicaciones }: { ubicaciones: Ubicacion[] })
                         <td>
                           <select style={sel} value={u.variedad_asignada} disabled={loading}
                             onChange={(e) => actualizar(u.id_ubicacion, { variedad_asignada: e.target.value as Ubicacion['variedad_asignada'] })}>
-                            {VARIEDADES.map((v) => <option key={v.v} value={v.v}>{v.l}</option>)}
+                            {opciones(u.variedad_asignada, VARIEDADES).map((v) => <option key={v.v} value={v.v}>{v.l}</option>)}
                           </select>
                         </td>
                         <td>
                           <select style={sel} value={u.sector_fase} disabled={loading}
                             onChange={(e) => actualizar(u.id_ubicacion, { sector_fase: e.target.value as Ubicacion['sector_fase'] })}>
-                            {FASES.map((f) => <option key={f.v} value={f.v}>{f.l}</option>)}
+                            {opciones(u.sector_fase, FASES).map((f) => <option key={f.v} value={f.v}>{f.l}</option>)}
                           </select>
                         </td>
                         <td style={{ textAlign: 'right' }}>
