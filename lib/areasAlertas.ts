@@ -24,6 +24,24 @@ export interface AreaConfig {
   responsable: string;
   clave: string;
   queIncluye: string;
+  // Dia de la semana en el que sale (0 domingo .. 6 sabado). Sin esto, sale todos los dias.
+  //
+  // No todas las areas se miran con la misma frecuencia. Lo de produccion y stock cambia
+  // de un dia para el otro y hay que verlo el dia que pasa. Lo de cobranzas y gastos se
+  // mueve de a semanas: mandarlo todos los dias repite las mismas dos lineas hasta que se
+  // archiva sin abrir, y despues no se lee el dia que trae algo nuevo.
+  diaSemana?: number;
+}
+
+const DIAS = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+export const nombreDia = (d: number) => DIAS[d] || String(d);
+
+// Si el area tiene dia fijo, solo ese dia. `fechaISO` es la fecha argentina, no la del
+// servidor: el cron corre en UTC y a las 9 de la noche de Argentina ya seria otro dia.
+export function tocaHoy(cfg: AreaConfig, fechaISO: string): boolean {
+  if (cfg.diaSemana === undefined) return true;
+  const d = new Date(`${fechaISO}T12:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.getUTCDay() === cfg.diaSemana;
 }
 
 export const AREAS: AreaConfig[] = [
@@ -54,6 +72,8 @@ export const AREAS: AreaConfig[] = [
     responsable: 'Marcos',
     clave: 'email_alertas_plata',
     queIncluye: 'Compras a proveedores vencidas y cobros que entraron y están sin imputar.',
+    // Viernes. Ver la nota de `diaSemana`: esto se mueve de a semanas, no de a dias.
+    diaSemana: 5,
   },
 ];
 
@@ -101,8 +121,10 @@ export function htmlDeArea(cfg: AreaConfig, alertas: AlertaArea[], baseUrl: stri
         </tbody>
       </table>
       <p style="margin:14px 0 0;font-size:11px;color:#9ca3af;line-height:1.5">
-        Llega solo si hay algo: un mail diario que casi siempre dice “sin novedades” se archiva sin abrir, y el día que
-        traiga algo tampoco se va a leer. Para cambiar a quién le llega: Admin → Avisos por mail.
+        ${cfg.diaSemana === undefined
+          ? 'Llega solo si hay algo: un mail diario que casi siempre dice “sin novedades” se archiva sin abrir, y el día que traiga algo tampoco se va a leer.'
+          : `Llega los ${nombreDia(cfg.diaSemana)}, y solo si hay algo.`}
+        Para cambiar a quién le llega: Admin → Avisos por mail.
       </p>
     </div>`;
 }

@@ -11,7 +11,7 @@ import { calcularDriversMes } from '@/lib/usoTeorico';
 import { saldoPorCliente, alertasCajones } from '@/lib/cajones';
 import { deudaProveedores } from '@/lib/proveedores';
 import { destinatariosDe } from '@/lib/avisosConfig';
-import { AREAS, porArea, htmlDeArea, type AlertaArea } from '@/lib/areasAlertas';
+import { AREAS, porArea, htmlDeArea, tocaHoy, nombreDia, type AlertaArea } from '@/lib/areasAlertas';
 import { fechaArgentinaHoy, ocupacionPorMesada } from '@/lib/ocupacion';
 
 export const dynamic = 'force-dynamic';
@@ -175,6 +175,12 @@ export async function GET(req: NextRequest) {
     const omitidos: { area: string; motivo: string }[] = [];
 
     for (const cfg of AREAS) {
+      // Las areas con dia fijo no salen el resto de la semana. El chequeo va antes que el
+      // de "sin alertas" para que el motivo que se ve en `?ver=1` sea el verdadero.
+      if (!soloVer && !tocaHoy(cfg, hoyISO)) {
+        omitidos.push({ area: cfg.area, motivo: `sale los ${nombreDia(cfg.diaSemana as number)}` });
+        continue;
+      }
       const lista = agrupadas.get(cfg.area) || [];
       // Sin alertas no se manda nada. Ver la nota al pie del mail: el silencio es la señal
       // de que no hay nada, y vale más que un "sin novedades" diario.
