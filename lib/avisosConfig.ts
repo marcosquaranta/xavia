@@ -98,6 +98,12 @@ export const AVISOS: AvisoConfigurable[] = [
     porDefecto: ['marcos.quaranta@gmail.com'],
   },
   {
+    clave: 'email_cuentas_por_cobrar',
+    titulo: 'Cuentas por cobrar (cada 15 dias)',
+    descripcion: 'El 1 y el 16 de cada mes. Que debe cada cliente, cuantas facturas y cuantos dias tiene la mas vieja, del que mas debe al que menos. Mismo criterio que la pantalla de Cobranzas, con las notas de credito ya descontadas.',
+    porDefecto: ['marcos.quaranta@gmail.com'],
+  },
+  {
     clave: 'email_cobro_automatico',
     titulo: 'Cobros que se registran solos',
     descripcion: 'En el momento en que pasa. Cuando llega un aviso de pago y las facturas que nombra suman exactamente lo que declara, la app registra la cobranza en Xubio sola y avisa al instante, con el detalle y el link para anularla.',

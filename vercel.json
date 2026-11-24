@@ -57,6 +57,10 @@
       "schedule": "0 15 * * *"
     },
     {
+      "path": "/api/cron/cuentas-por-cobrar",
+      "schedule": "0 12 * * *"
+    },
+    {
       "path": "/api/cron/protocolo-semanal",
       "schedule": "0 13 * * 5"
     },
