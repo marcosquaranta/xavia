@@ -25,7 +25,7 @@ export const maxDuration = 120;
 // pedir el resumen de impagas a mano — que es justo lo que no se hace cuando nadie lo
 // reclama.
 //
-// Sale los días 1 y 16. No lleva marca de "ya se mandó" como el reporte de precios: con un
+// Sale los días 8 y 21. No lleva marca de "ya se mandó" como el reporte de precios: con un
 // día exacto el cron no puede repetirse, porque corre una sola vez por día. El costo es que
 // si justo ese día falla, se pierde esa vuelta y la siguiente llega en 15 días — a cambio
 // de no poder mandarlo once veces, que es lo que pasó con el otro.
@@ -39,6 +39,9 @@ const DIAS_VENTANA = 365;
 // A partir de cuántos días la factura más vieja se marca. No es una regla de cobranza: es
 // dónde cortar para que el mail empiece por algo y no por los treinta clientes.
 const DIAS_ALERTA = 45;
+// Qué días del mes sale. Dos fechas fijas y no "cada 15 días desde la última": con un día
+// exacto el cron no puede repetirse, porque corre una sola vez por día.
+const DIAS_DEL_MES = [8, 21];
 const URL_COBRANZAS = 'https://xavia-self.vercel.app/cobranzas?ver=impagas';
 
 const fmtDia = (f: string) => { const [y, m, d] = String(f || '').split('-'); return d ? `${d}/${m}/${y}` : String(f || ''); };
@@ -64,8 +67,8 @@ export async function GET(req: NextRequest) {
 
   const hoy = fechaArgentinaHoy();
   const dia = Number(hoy.slice(8, 10));
-  if (!soloVer && !forzar && dia !== 1 && dia !== 16) {
-    return NextResponse.json({ ok: true, enviado: false, hoy, motivo: `es el día ${dia}: sale el 1 y el 16` });
+  if (!soloVer && !forzar && !DIAS_DEL_MES.includes(dia)) {
+    return NextResponse.json({ ok: true, enviado: false, hoy, motivo: `es el día ${dia}: sale el ${DIAS_DEL_MES.join(' y el ')}` });
   }
 
   try {
@@ -93,13 +96,14 @@ export async function GET(req: NextRequest) {
       correccionesPorFactura(ajustesPorFactura(ajustesRaw), notas),
     );
 
-    const filas: { cliente: string; monto: number; cantidad: number; masVieja: string; dias: number }[] = [];
+    const filas: { id_control: string; cliente: string; monto: number; cantidad: number; masVieja: string; dias: number }[] = [];
     for (const [id, fs] of Object.entries(todas)) {
       const impagas = fs.filter((f) => !f.yaCobrada && !f.cubierta && !f.saldadaManual && !f.imputadaManual);
       if (!impagas.length) continue;
       const cli = clientes.find((c) => String(c.id_control) === String(id));
       const masVieja = impagas.map((f) => f.fecha).filter(Boolean).sort()[0] || '';
       filas.push({
+        id_control: String(id),
         cliente: nombreClienteVisible(cli) || String(id),
         monto: impagas.reduce((a, f) => a + (Number(f.importe) || 0), 0),
         cantidad: impagas.length,
@@ -125,7 +129,9 @@ export async function GET(req: NextRequest) {
     const filasHtml = filas.map((f) => {
       const viejo = f.dias >= DIAS_ALERTA;
       return `<tr>
-        <td style="padding:8px 10px;border-bottom:1px solid #f0f0f0"><strong>${f.cliente}</strong></td>
+        <td style="padding:8px 10px;border-bottom:1px solid #f0f0f0">
+          <a href="${URL_COBRANZAS}&cliente=${encodeURIComponent(f.id_control)}" style="color:#1d4ed8;font-weight:800;text-decoration:none">${f.cliente}</a>
+        </td>
         <td style="padding:8px 10px;border-bottom:1px solid #f0f0f0;text-align:right;font-weight:800;white-space:nowrap">${fmt$(f.monto)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #f0f0f0;text-align:right;white-space:nowrap">${f.cantidad}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #f0f0f0;text-align:right;white-space:nowrap;color:${viejo ? '#b91c1c' : '#6b7280'};font-weight:${viejo ? 800 : 600}">
@@ -167,7 +173,8 @@ export async function GET(req: NextRequest) {
           Impaga = ni imputada desde la app, ni cubierta por los cobros que el cliente tiene en Xubio, ni dada por
           saldada a mano. Es el mismo criterio de la pantalla de Cobranzas, así que los números coinciden.
           Las notas de crédito ya están descontadas.
-          <br>Llega el 1 y el 16 de cada mes.
+          <br>Tocá el nombre de un cliente para abrir su cuenta corriente y mandarle el recordatorio de pago desde ahí.
+          <br>Llega el ${DIAS_DEL_MES.join(' y el ')} de cada mes.
         </p>
 
         <p style="margin:18px 0 0">

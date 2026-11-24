@@ -1,7 +1,7 @@
 'use client';
 import ReclamoManual from './ReclamoManual';
 import MayorCliente from './MayorCliente';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import type { FacturaCliente } from '@/lib/facturasCliente';
 
@@ -66,6 +66,27 @@ export default function ResumenImpagas({
 }) {
   const router = useRouter();
   const [abierto, setAbierto] = useState<string | null>(null);
+
+  // ── Llegar a un cliente puntual desde afuera ──────────────────────────────────────
+  //
+  // `?cliente=<id_control>` abre la fila de ese cliente ya desplegada y la trae a la
+  // vista. Se entra así desde el mail de cuentas por cobrar: cada nombre de la tabla es
+  // un link, y lo que se quiere al tocarlo es ver SU cuenta y poder reclamarle — las dos
+  // cosas ya viven en esta fila.
+  //
+  // Sin esto el link llevaba a la pantalla entera y había que buscar al cliente entre
+  // treinta, que es pedirle al que abrió el mail que haga el trabajo de nuevo.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const id = new URLSearchParams(window.location.search).get('cliente');
+    if (!id) return;
+    setAbierto(id);
+    // El scroll va en el siguiente tick: la fila recién existe después de este render.
+    const t = setTimeout(() => {
+      document.getElementById(`cliente-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 120);
+    return () => clearTimeout(t);
+  }, []);
   // El reclamo abierto dentro de la fila. Se cierra al cambiar de cliente: dejarlo abierto
   // mostraría el reclamo de uno adentro de la fila de otro.
   const [reclamando, setReclamando] = useState(false);
@@ -229,7 +250,7 @@ export default function ResumenImpagas({
               const dias = diasDesde(f.masVieja);
               const esta = abierto === f.id_control;
               return (
-                <tr key={f.id_control} style={{ borderTop: '1px solid #f3f4f6', cursor: 'pointer', background: esta ? '#f8fafc' : undefined }}
+                <tr key={f.id_control} id={`cliente-${f.id_control}`} style={{ borderTop: '1px solid #f3f4f6', cursor: 'pointer', background: esta ? '#f8fafc' : undefined }}
                   onClick={() => { setReclamando(false); setAbierto(esta ? null : f.id_control); }}>
                   <td style={{ padding: '6px 8px', fontWeight: 600 }}>
                     <span style={{ color: '#9ca3af', fontSize: '10px', marginRight: '5px' }}>{esta ? '▾' : '▸'}</span>

@@ -100,7 +100,7 @@ export const AVISOS: AvisoConfigurable[] = [
   {
     clave: 'email_cuentas_por_cobrar',
     titulo: 'Cuentas por cobrar (cada 15 dias)',
-    descripcion: 'El 1 y el 16 de cada mes. Que debe cada cliente, cuantas facturas y cuantos dias tiene la mas vieja, del que mas debe al que menos. Mismo criterio que la pantalla de Cobranzas, con las notas de credito ya descontadas.',
+    descripcion: 'El 8 y el 21 de cada mes. Que debe cada cliente, cuantas facturas y cuantos dias tiene la mas vieja, del que mas debe al que menos. Mismo criterio que la pantalla de Cobranzas, con las notas de credito ya descontadas.',
     porDefecto: ['marcos.quaranta@gmail.com'],
   },
   {
