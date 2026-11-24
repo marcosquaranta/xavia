@@ -4,6 +4,7 @@ import { readSheet } from '@/lib/sheets';
 import type { VentaDia, PrecioVenta, ClienteVenta, ConfigItem, Lote } from '@/lib/types';
 import { ARTICULOS, PROD_KEYS } from '@/lib/articulos';
 import { clientesPrecioVsVolumen } from '@/lib/estadisticasVentas';
+import { evolucionPrecioPromedio } from '@/lib/estadisticasVentas';
 import { HOJA_PRECIOS_HIST, CAMPOS_PRECIO, type CambioPrecio } from '@/lib/preciosHistorico';
 import { armarReporte, atrasados, pctPonderado, type FilaReportePrecios } from '@/lib/reportePrecios';
 import { destinatariosDe } from '@/lib/avisosConfig';
@@ -138,6 +139,8 @@ export async function GET(req: NextRequest) {
     }
 
     const historial = await readSheet<CambioPrecio>(HOJA_PRECIOS_HIST).catch(() => [] as CambioPrecio[]);
+    // La evolución del precio promedio, la misma función que dibuja la pantalla de Ventas.
+    const evolPrecio = evolucionPrecioPromedio(ventas, precios, clientes, 12, lotes);
 
     const filas = armarReporte({
       hoy,
@@ -205,6 +208,65 @@ export async function GET(req: NextRequest) {
       </tr>`;
     };
 
+    // ── Los dos gráficos, dibujados con tablas ─────────────────────────────────────
+    //
+    // En un mail no hay JavaScript, y Gmail borra el SVG: los gráficos de la pantalla no se
+    // pueden pegar acá. Se redibujan con celdas de colores, que es lo único que todos los
+    // clientes de correo muestran igual.
+    //
+    // No es una limitación que se sufra: lo que se quiere ver en estos dos es la FORMA
+    // —quién paga poco llevándose mucho, y si el precio promedio viene subiendo o
+    // aplanándose—, y una barra la muestra igual que un punto.
+    const barra = (pct: number, color: string, alto = 9) => `
+      <div style="background:#f1f1f1;border-radius:${alto}px;height:${alto}px;width:100%">
+        <div style="background:${color};border-radius:${alto}px;height:${alto}px;width:${Math.max(1, Math.min(100, Math.round(pct)))}%"></div>
+      </div>`;
+
+    // ── Precio vs. volumen ──
+    //
+    // El gráfico de la pantalla es una nube de puntos. Acá va como tabla ordenada por
+    // volumen, con las dos barras al lado: el que tiene la barra de volumen larga y la de
+    // precio corta es el que hay que mirar, que es exactamente lo que se busca en la nube.
+    const maxVol = Math.max(1, ...activos.map((f) => f.unidades));
+    const maxPre = Math.max(1, ...vol.map((v) => v.precioPromedio));
+    const filasVol = activos.slice(0, 20).map((f) => {
+      const v = vol.find((x) => String(x.id_control) === String(f.id_control));
+      const precio = v?.precioPromedio || 0;
+      const barato = precio > 0 && precio < maxPre * 0.85;
+      return `<tr>
+        <td style="padding:5px 8px;border-bottom:1px solid #f5f5f5;font-size:12px;white-space:nowrap">${f.nombre}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #f5f5f5;width:34%">
+          ${barra((f.unidades / maxVol) * 100, '#1d4ed8')}
+          <span style="font-size:10.5px;color:#9ca3af">${f.unidades.toLocaleString('es-AR')} u</span>
+        </td>
+        <td style="padding:5px 8px;border-bottom:1px solid #f5f5f5;width:34%">
+          ${barra((precio / maxPre) * 100, barato ? '#b45309' : '#059669')}
+          <span style="font-size:10.5px;color:${barato ? '#b45309' : '#9ca3af'}">$${Math.round(precio).toLocaleString('es-AR')}/u${barato ? ' · por debajo' : ''}</span>
+        </td>
+      </tr>`;
+    }).join('');
+
+    // ── Evolución del precio promedio ──
+    //
+    // Doce meses, una columna por mes y por cultivo. El alto es relativo al mes más caro:
+    // lo que importa es si viene subiendo o se aplanó, no el valor absoluto, que ya está
+    // escrito debajo de cada columna.
+    const maxEvo = Math.max(1, ...evolPrecio.flatMap((p2) => [p2.precioRucula, p2.precioLechuga]));
+    const colsEvo = evolPrecio.map((p2) => {
+      const col = (valor: number, color: string) => {
+        const alto = Math.max(2, Math.round((valor / maxEvo) * 80));
+        return `<div title="$${Math.round(valor).toLocaleString('es-AR')}" style="display:inline-block;width:9px;height:${alto}px;background:${color};border-radius:2px 2px 0 0;margin:0 1px;vertical-align:bottom"></div>`;
+      };
+      return `<td style="padding:0 3px;text-align:center;vertical-align:bottom">
+        <div style="height:84px;vertical-align:bottom">${col(p2.precioRucula, '#166534')}${col(p2.precioLechuga, '#84cc16')}</div>
+        <div style="font-size:9px;color:#9ca3af;padding-top:3px;white-space:nowrap">${p2.label}</div>
+      </td>`;
+    }).join('');
+    const ultimo = evolPrecio[evolPrecio.length - 1];
+    const primero = evolPrecio[0];
+    const subioR = primero?.precioRucula > 0 && ultimo?.precioRucula > 0
+      ? Math.round(((ultimo.precioRucula - primero.precioRucula) / primero.precioRucula) * 100) : null;
+
     const html = `
       <div style="font-family:system-ui,Arial,sans-serif;color:#111;max-width:760px">
         <h2 style="margin:0 0 4px">Precios por cliente — ${fmtDia(hoy)}</h2>
@@ -233,6 +295,35 @@ export async function GET(req: NextRequest) {
           </tr></thead>
           <tbody>${activos.map(filaHtml).join('')}</tbody>
         </table>
+
+        <h3 style="margin:26px 0 6px;font-size:14px">Precio vs. volumen por cliente</h3>
+        <p style="margin:0 0 8px;color:#6b7280;font-size:12.5px">
+          Del que más lleva al que menos. El que tiene la barra azul larga y la verde corta es el que compra mucho y
+          paga poco — ese es el que conviene mirar primero.
+        </p>
+        <table style="border-collapse:collapse;width:100%">
+          <thead><tr style="background:#f9fafb;color:#6b7280;font-size:10.5px;text-transform:uppercase">
+            <th style="padding:5px 8px;text-align:left">Cliente</th>
+            <th style="padding:5px 8px;text-align:left">Volumen</th>
+            <th style="padding:5px 8px;text-align:left">Precio por unidad</th>
+          </tr></thead>
+          <tbody>${filasVol}</tbody>
+        </table>
+        ${activos.length > 20 ? `<p style="margin:5px 0 0;font-size:11px;color:#9ca3af">Van los 20 de más volumen, de ${activos.length}.</p>` : ''}
+
+        <h3 style="margin:26px 0 6px;font-size:14px">Evolución del precio promedio</h3>
+        <p style="margin:0 0 10px;color:#6b7280;font-size:12.5px">
+          Últimos 12 meses, con IVA incluido y ponderado por unidades.
+          <span style="color:#166534;font-weight:700">&#9632; Rúcula</span>
+          <span style="color:#84cc16;font-weight:700">&#9632; Lechuga</span>
+          ${subioR !== null ? ` · la rúcula ${subioR >= 0 ? 'subió' : 'bajó'} ${Math.abs(subioR)}% en el período.` : ''}
+        </p>
+        <table style="border-collapse:collapse"><tbody><tr>${colsEvo}</tr></tbody></table>
+        <p style="margin:6px 0 0;font-size:11px;color:#9ca3af">
+          Hoy: rúcula $${Math.round(ultimo?.precioRucula || 0).toLocaleString('es-AR')} ·
+          lechuga $${Math.round(ultimo?.precioLechuga || 0).toLocaleString('es-AR')}.
+          Los kilos se pasan a paquetes con el peso real de las cosechas de cada mes.
+        </p>
 
         <p style="margin:16px 0 0;font-size:11.5px;color:#9ca3af;line-height:1.5">
           <strong>El $/mes es una estimación.</strong> Es la diferencia de precio aplicada al volumen de los últimos
