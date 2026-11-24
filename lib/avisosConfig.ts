@@ -90,6 +90,14 @@ export const AVISOS: AvisoConfigurable[] = [
     porDefecto: ['marcos.quaranta@gmail.com'],
   },
   {
+    clave: 'email_protocolo_semanal',
+    titulo: 'Protocolo y aplicaciones (Marcelo)',
+    descripcion: 'Los viernes, si hubo actividad. Todo lo que se aplico y se midio en la semana —producto, dosis, litros, condiciones y responsable—, lo que quedo sin registrar, y las alertas: agua de osmosis fuera de limite, foliares aplicadas fuera de rango, dosis desviadas y calibracion del instrumental.',
+    // La direccion del responsable se carga en Admin -> Avisos por mail, no aca: una
+    // direccion personal de otra persona no tiene por que quedar versionada en el repo.
+    porDefecto: ['marcos.quaranta@gmail.com'],
+  },
+  {
     clave: 'email_cobro_automatico',
     titulo: 'Cobros que se registran solos',
     descripcion: 'En el momento en que pasa. Cuando llega un aviso de pago y las facturas que nombra suman exactamente lo que declara, la app registra la cobranza en Xubio sola y avisa al instante, con el detalle y el link para anularla.',
