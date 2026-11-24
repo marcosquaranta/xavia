@@ -21,7 +21,7 @@ import { claveComprobante } from '../comprobantes';
 import { nombreClienteVisible } from '../clientes';
 import { HOJA_COBROS, type CobroRegistrado } from '../cobros';
 import { calcularCapacidad, diasCicloDefault } from '../planificacionServer';
-import { calcularPlan, parseReparto, REPARTO_DEFAULT, tareasDelDia, siembraDelDia, planchasSiembra } from '../planificacion';
+import { calcularPlan, parseReparto, REPARTO_DEFAULT, tareasDelDia, siembraDelDia, planchasSiembra, MARGEN_SIEMBRA } from '../planificacion';
 import { CATEGORIAS_GASTO } from '../types';
 
 // ── Las herramientas del asistente ────────────────────────────────────────────────────
@@ -110,6 +110,11 @@ export const HERRAMIENTAS: Herramienta[] = [
         siembra: siembra
           ? {
             rucula_planchas: siembra.rucPl, lechuga_planchas: siembra.lecPl, albahaca_planchas: siembra.albPl,
+            // Las planchas ya vienen con el margen. Se manda tambien el numero sin margen y el
+            // porcentaje para que el asistente pueda explicar de donde sale si se lo preguntan,
+            // en vez de inventar una explicacion.
+            margen_siembra_pct: Math.round(MARGEN_SIEMBRA * 100),
+            rucula_planchas_sin_margen: siembra.rucBase, lechuga_planchas_sin_margen: siembra.lecBase,
             por_nave: { rucula: [pl.rucN1, pl.rucN2], lechuga: [pl.lecN1, pl.lecN2] },
           }
           : 'Hoy no es día de siembra (se siembra los miércoles).',

@@ -4,7 +4,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { readSheet } from '@/lib/sheets';
 import { calcularDiasPorFase } from '@/lib/lotes';
 import { calcularCapacidad, diasCicloDefault } from '@/lib/planificacionServer';
-import { calcularPlan, DIA_SIEMBRA, CUB, planchas, planchasSiembra } from '@/lib/planificacion';
+import { calcularPlan, DIA_SIEMBRA, CUB, planchas, planchasSiembra, MARGEN_SIEMBRA } from '@/lib/planificacion';
 import { calcularCapacidadProductiva } from '@/lib/capacidadProductiva';
 import { productividadDeMes, productividadPlantasDeMes } from '@/lib/productividad';
 import { obtenerTemperaturasRosario, temperaturaPromedioPorMes } from '@/lib/clima';
@@ -1141,7 +1141,11 @@ export default async function EstadisticasPage({ searchParams }: { searchParams:
         {/* Siembra del mes: real vs. lo que indica el plan */}
         <div className="card">
           <p className="card-title">Siembra — {nombre}</p>
-          <p className="card-sub">Planchas sembradas en lo que va del mes vs. lo que el plan de siembra indica a esta altura</p>
+          <p className="card-sub">
+            Planchas sembradas en lo que va del mes vs. lo que el plan de siembra indica a esta altura.
+            El plan incluye el {Math.round(MARGEN_SIEMBRA * 100)}% de margen por plantines que no sirven, así que
+            sembrar justo lo que llena los perfiles ahora aparece como un {Math.round(MARGEN_SIEMBRA * 100)}% por debajo.
+          </p>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:'12px' }}>
             {[
               { label: 'Rúcula', color: '#166534', real: siembraRealRucPl, plan: siembraPlanRucPl },

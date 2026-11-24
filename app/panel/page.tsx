@@ -6,7 +6,7 @@ import { ocupacionPorNave, tubosPorMesada } from '@/lib/ocupacion';
 import { plantasPorCultivo, proyeccionCosechaSemanal, ciclosPorSemana, cicloRealPorVariedad, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio } from '@/lib/estadisticas';
 import { codigoCultivo } from '@/lib/lotes';
 import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, ClienteVenta, PrecioVenta, VentaHistorica, StockCamara, CajonMovimiento, KilometrajeVehiculo, ProductividadDiaria, Articulo, StockMes, RegistroProtocolo } from '@/lib/types';
-import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, type SiembraHoy } from '@/lib/planificacion';
+import { calcularPlan, tareasDelDia, siembraDelDia, parseReparto, REPARTO_DEFAULT, MARGEN_SIEMBRA, type SiembraHoy } from '@/lib/planificacion';
 import { calcularCapacidad, diasCicloDefault, trasplantesAgrupados, cosechasAgrupadas, type GrupoLotes } from '@/lib/planificacionServer';
 import { evolucionVentaPorArticulo, resumenMesActual } from '@/lib/estadisticasVentas';
 import { generarAlertas, motivoAlertaCosecha, alertasStockBajo, alertasCobrosComprometidos, type MotivoAlertaCosecha } from '@/lib/alertasPanel';
@@ -637,6 +637,11 @@ export default async function PanelPage() {
                     <p style={{ margin:'2px 0 0', fontSize:'10px', color:'#166534', fontWeight:600, textTransform:'uppercase' }}>planchas albahaca</p>
                   </div>
                 </div>
+                <p style={{ margin:'8px 0 0', fontSize:'11px', color:'#6b7280', lineHeight:1.45 }}>
+                  Incluye un <strong>{Math.round(MARGEN_SIEMBRA * 100)}% de margen</strong> por plantines que no sirven.
+                  Lo justo para llenar los perfiles son {siembraHoy.rucBase} de rúcula y {siembraHoy.lecBase} de lechuga;
+                  los de más son repuesto y no cambian los trasplantes ni la cosecha.
+                </p>
               </div>
             )}
             {tareasHoy.length > 0 && (

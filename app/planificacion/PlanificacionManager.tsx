@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   CUB, POSPAQ, CUBPOSRUC, CUBPLLEC, DIAS, DIA_SIEMBRA, REPARTO_DEFAULT,
-  calcularPlan, repartoHelpers, tareasDelDia, siembraDelDia, planchas, planchasSiembra,
+  calcularPlan, repartoHelpers, tareasDelDia, siembraDelDia, planchas, planchasSiembra, MARGEN_SIEMBRA,
   type Cultivo, type Slot, type NavesCap, type Dias,
 } from '@/lib/planificacion';
 import type { GrupoLotes, CosechaSemanalReal, CicloRealReciente } from '@/lib/planificacionServer';
@@ -127,6 +127,12 @@ export default function PlanificacionManager({ naves, defaults, repartoInicial, 
                     <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#166534', fontWeight: 600, textTransform: 'uppercase' }}>planchas albahaca</p>
                   </div>
                 </div>
+                <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#6b7280', lineHeight: 1.45 }}>
+                  Incluye un <strong>{Math.round(MARGEN_SIEMBRA * 100)}% de margen</strong> por plantines que no sirven
+                  (no nacen, salen chicos o se espigan). Lo justo para llenar los perfiles son {siembraHoy.rucBase} de
+                  rúcula y {siembraHoy.lecBase} de lechuga. Los de más son repuesto: los trasplantes y la cosecha no cambian.
+                  La albahaca va aparte, es una cantidad fija.
+                </p>
               </div>
             )}
             {tareasHoy.length > 0 && (
@@ -224,6 +230,11 @@ export default function PlanificacionManager({ naves, defaults, repartoInicial, 
             <Tot v={String(pl.lec)} l="PLANCHAS LECHUGA" c={LEAF} />
             <Tot v={fmt(totLecPlantas)} l="PLANTAS/SEM" c={LEAF} />
           </div>
+          <p style={{ margin: '10px 0 0', fontSize: '11px', color: '#6b7280', lineHeight: 1.45 }}>
+            Las planchas llevan un <strong>{Math.round(MARGEN_SIEMBRA * 100)}% de margen</strong> por plantines que no
+            sirven: sin margen serían {pl.rucBase} de rúcula y {pl.lecBase} de lechuga. Los paquetes y las plantas por
+            semana <strong>no</strong> lo llevan — son la capacidad real de los perfiles, que no cambia por sembrar de más.
+          </p>
         </div>
 
         <div style={card}>

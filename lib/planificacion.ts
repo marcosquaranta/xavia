@@ -46,12 +46,38 @@ export const planchas = (n: number) => Math.ceil(n);
 export interface PlanchasSiembra {
   rucN1: number; rucN2: number; ruc: number;
   lecN1: number; lecN2: number; lec: number;
+  // Lo mismo sin el margen, para poder mostrar de dónde sale el número. Un total que nadie
+  // puede reconstruir se desconfía, y el que desconfía siembra lo que le parece.
+  rucBase: number; lecBase: number;
 }
 
-export function planchasSiembra(plan: Plan): PlanchasSiembra {
-  const rucN1 = planchas(plan.n1.rucPl), rucN2 = planchas(plan.n2.rucPl);
-  const lecN1 = planchas(plan.n1.lecPl), lecN2 = planchas(plan.n2.lecPl);
-  return { rucN1, rucN2, ruc: rucN1 + rucN2, lecN1, lecN2, lec: lecN1 + lecN2 };
+// ── Margen de siembra ────────────────────────────────────────────────────────────────
+//
+// Se siembra un 10% de más. El cálculo de arriba dice cuántos plantines hacen falta para
+// llenar los perfiles, y asume que todos los plantines sembrados sirven — y no es así:
+// algunos no nacen, otros salen chicos o se espigan en plantinera y se descartan. Sembrar
+// justo el número exacto significa que cualquier problema deja perfiles vacíos, y un
+// perfil vacío ya no se recupera: el ciclo siguiente arranca igual.
+//
+// El margen va SOLO sobre las planchas a sembrar. No toca los trasplantes ni las cosechas:
+// esos siguen siendo la capacidad real de los perfiles, que no cambió. Los plantines de
+// más son repuesto, no producción — si entraran en la cosecha proyectada, el plan diría
+// que se va a vender un 10% más de lo que las mesadas pueden dar.
+export const MARGEN_SIEMBRA = 0.10;
+
+export function planchasSiembra(plan: Plan, margen: number = MARGEN_SIEMBRA): PlanchasSiembra {
+  const m = 1 + margen;
+  // El margen se aplica ANTES de redondear, y por nave. Redondear primero y sumar el 10%
+  // después da otro número, y el que se puede ejecutar es este: la plancha es entera en
+  // cada nave.
+  const rucN1 = planchas(plan.n1.rucPl * m), rucN2 = planchas(plan.n2.rucPl * m);
+  const lecN1 = planchas(plan.n1.lecPl * m), lecN2 = planchas(plan.n2.lecPl * m);
+  return {
+    rucN1, rucN2, ruc: rucN1 + rucN2,
+    lecN1, lecN2, lec: lecN1 + lecN2,
+    rucBase: planchas(plan.n1.rucPl) + planchas(plan.n2.rucPl),
+    lecBase: planchas(plan.n1.lecPl) + planchas(plan.n2.lecPl),
+  };
 }
 
 export interface PlanNave { rucPos: number; rucPaq: number; rucPl: number; lote: number; lecPl: number; f1PerfNec: number; f1OK: number; rucTrasp: number; f1Trasp: number; f2Trasp: number }
@@ -120,7 +146,7 @@ export function tareasDelDia(plan: Plan, reparto: Slot[], jsDay: number): Tarea[
 // Si algún día hay que subirla, se cambia acá y listo.
 export const PLANCHAS_ALBAHACA_SEMANA = 1;
 
-export interface SiembraHoy { rucPl: number; lecPl: number; albPl: number }
+export interface SiembraHoy { rucPl: number; lecPl: number; albPl: number; rucBase: number; lecBase: number }
 
 // Solo devuelve algo el día de siembra (miércoles) — se renderiza como bloque destacado,
 // no como línea de texto, para que los números por cultivo no se pierdan.
@@ -132,7 +158,12 @@ export function siembraDelDia(plan: Plan, reparto: Slot[], jsDay: number): Siemb
   return {
     rucPl: pl.ruc,
     lecPl: pl.lec,
+    // La albahaca no entra en el margen: no sale de este cálculo, es una cantidad fija que
+    // definió Marcelo (ver PLANCHAS_ALBAHACA_SEMANA). Con una sola plancha, un 10% redondeado
+    // para arriba serían dos: el doble, no un margen.
     albPl: PLANCHAS_ALBAHACA_SEMANA,
+    rucBase: pl.rucBase,
+    lecBase: pl.lecBase,
   };
 }
 
