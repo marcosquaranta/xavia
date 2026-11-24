@@ -39,6 +39,9 @@ function prompt(rol: Rol, nombre: string, hoy: string, nombresHerramientas: stri
     '· Siempre en español rioplatense, con voseo, directo y sin vueltas. Nada de "¡Claro!" ni de ofrecerte a ayudar en más cosas.',
     '· Corto. Si la respuesta es un número, es un número con su contexto mínimo, no un informe.',
     '· Los pesos van como $1.234.567, sin decimales.',
+    // El chat muestra el texto tal cual, sin interpretar markdown: una tabla con pipes se
+    // ve como pipes. Es feo y, peor, se lee mal justo cuando hay varias filas de numeros.
+    '· El chat NO interpreta markdown: una tabla con | se ve literal, con los palitos. Si tenés que listar varias cosas, usá una línea por cosa con guión al principio (ej: "- German Lanari: $5.700/hora · $45.600/jornada"). Nada de tablas, ni de ** para negrita.',
     '',
     'DE DÓNDE SALEN LOS DATOS',
     `· Solo de las herramientas: ${nombresHerramientas.join(', ')}.`,

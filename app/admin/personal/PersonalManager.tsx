@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 
 const MESES_TXT = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 import type { Empleado } from '@/lib/types';
-import { horasTeoricasAuto, rangoQuincena, reciboWhatsApp, resumenSueldosWhatsApp, type ResumenEmpleado, type PeriodoPago } from '@/lib/personal';
+import { horasTeoricasAuto, rangoQuincena, reciboWhatsApp, resumenSueldosWhatsApp, type ResumenEmpleado, type PeriodoPago, horasDeJornada } from '@/lib/personal';
 import { CATEGORIA_SUELDO, type LiquidacionDetalle } from '@/lib/adelantos';
 import AdelantosEmpleado from '@/components/AdelantosEmpleado';
 import type { AdelantoDetalle } from '@/lib/adelantos';
@@ -288,7 +288,7 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                   sacó no se perdió — horas de más/de menos, sueldo/hora y el detalle del
                   presentismo están en el desplegable de cada empleado. */}
               <th>Empleado</th>
-              <th style={{ textAlign: 'right' }}>$ / hora</th>
+              <th style={{ textAlign: 'right' }}>$ / hora<br /><span style={{ fontWeight: 400, fontSize: '10px', color: '#9ca3af' }}>y por jornada</span></th>
               <th style={{ textAlign: 'right' }} title="Reales / teóricas">Horas</th>
               <th style={{ textAlign: 'right' }} title="Horas teóricas × $/hora, más el presentismo si corresponde">Sueldo</th>
               <th style={{ textAlign: 'right' }} title="Horas trabajadas por encima de las teóricas. Se pagan solo si marcás cuántas querés pagar.">Hs. extra</th>
@@ -354,7 +354,20 @@ export default function PersonalManager({ resumen, empleados, anio, mes, quincen
                         <input type="number" min={0} value={form.sueldo_hora} onChange={(e) => setForm((f) => ({ ...f, sueldo_hora: e.target.value }))}
                           style={{ width: '90px', textAlign: 'right', fontSize: '12px' }} title="Sueldo por hora" />
                       ) : r.sueldoHora > 0 ? (
-                        <span style={{ fontWeight: 600 }}>{fmt$(r.sueldoHora)}</span>
+                        <>
+                          <span style={{ fontWeight: 600 }}>{fmt$(r.sueldoHora)}</span>
+                          {/* ── El valor de la jornada, al lado del valor hora ──────────────
+                              Es lo que hay que pagarle por un día entero, y es la cuenta que
+                              se hace a mano cada vez que alguien trabaja un feriado. El dato
+                              para hacerla ya estaba (valor hora × horas del día), pero
+                              estaba en dos lugares distintos de la pantalla. */}
+                          {horasDeJornada(emp) > 0 && (
+                            <span style={{ display: 'block', fontSize: '10px', color: '#6b7280', fontWeight: 500 }}
+                              title={`Jornada completa: ${fmtN(horasDeJornada(emp))} hs × ${fmt$(r.sueldoHora)}. No incluye recargo por feriado.`}>
+                              {fmt$(horasDeJornada(emp) * r.sueldoHora)} / jornada
+                            </span>
+                          )}
+                        </>
                       ) : <span style={{ color: '#dc2626', fontSize: '11px' }}>sin cargar</span>}
                     </td>
 

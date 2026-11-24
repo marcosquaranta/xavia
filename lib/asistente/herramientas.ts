@@ -1,4 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
+import { horasDeJornada } from '../personal';
 import { Planillas } from './datos';
 import type { Rol } from '../types';
 import { MEDIOS_PAGO } from '../types';
@@ -761,7 +762,7 @@ export const HERRAMIENTAS: Herramienta[] = [
   // cliente, facturación pendiente, pagos a proveedores y stock de cámara.
   {
     nombre: 'sueldos_y_horas',
-    descripcion: 'Qué cobra por hora cada empleado, cuántas horas teóricas hace por quincena y cuánto cuesta. Incluye el costo total por hora de toda la gente activa.',
+    descripcion: 'Qué cobra por hora y POR JORNADA COMPLETA cada empleado, cuántas horas teóricas hace por quincena y cuánto cuesta. Sirve para saber cuánto pagarle a alguien por un día trabajado, por ejemplo un feriado. Incluye el costo total por hora de toda la gente activa.',
     schema: {
       type: 'object',
       properties: {
@@ -790,9 +791,15 @@ export const HERRAMIENTAS: Herramienta[] = [
       const filas = activos.map((e) => {
         const hq = horasQuincena(e);
         const hora = num(e.sueldo_hora);
+        // Mismo calculo que la pantalla de Personal, importado: el valor de la jornada se
+        // usa para pagar un feriado, asi que el chat y la pantalla no pueden decir dos
+        // numeros distintos.
+        const jornadaHs = horasDeJornada(e);
         return {
           nombre: String(e.nombre || ''),
           sueldo_por_hora: $(hora),
+          horas_por_jornada: jornadaHs || null,
+          valor_jornada_completa: jornadaHs > 0 ? $(jornadaHs * hora) : null,
           horas_por_quincena: Math.round(hq * 10) / 10,
           bruto_quincena: $(hora * hq),
           presentismo: $(num(e.presentismo)),
@@ -803,7 +810,99 @@ export const HERRAMIENTAS: Herramienta[] = [
         empleados: filas,
         cuantos: filas.length,
         costo_por_hora_todos: $(filas.reduce((t, f) => t + f.sueldo_por_hora, 0)),
-        nota: 'El sueldo por hora es el de la ficha del empleado. El bruto de la quincena no incluye presentismo ni descuentos: es horas teóricas por el valor hora.',
+        nota: 'El sueldo por hora es el de la ficha del empleado. El bruto de la quincena no incluye presentismo ni descuentos: es horas teóricas por el valor hora. El valor de la jornada completa es horas por día × valor hora y NO incluye recargo por feriado: la app no tiene ningún recargo cargado, así que si el día fue feriado hay que aplicarlo encima. Si dice null es que al empleado no le está cargado el horario — no asumas 8 horas, decí que falta cargarlo.',
+      };
+    },
+  },
+  {
+    // ── Por que existe esta herramienta ────────────────────────────────────────────────
+    //
+    // `horas_trabajadas` da el acumulado del mes y nada mas, asi que a "cuantas horas se
+    // hicieron ayer" el asistente tenia que contestar que no podia verlo. El dato estaba:
+    // la hoja FichajesDiarios guarda una fila por empleado y por dia desde que el cron de
+    // CrossChex la llena. Lo que faltaba era la puerta.
+    //
+    // El calculo NO se rehace: sale de calcularResumenQuincena, la misma funcion que
+    // liquida los sueldos (ver lib/fichajesRango.ts). Si el chat y la liquidacion
+    // calcularan distinto, el que se paga es el de la liquidacion.
+    nombre: 'fichajes_por_dia',
+    descripcion: 'Quien ficho cada dia y cuantas horas hizo: entrada, salida, tardanza, dia incompleto y horas de mas. Sirve para un dia puntual ("ayer"), una semana o un rango. Incluye el costo de esas horas al valor hora de cada uno, sin recargos.',
+    schema: {
+      type: 'object',
+      properties: {
+        desde: { type: 'string', description: 'Fecha YYYY-MM-DD. Si no se dice, los ultimos 7 dias.' },
+        hasta: { type: 'string', description: 'Fecha YYYY-MM-DD. Si no se dice, hoy.' },
+        empleado: { type: 'string', description: 'Filtrar por nombre. Si no se dice, van todos.' },
+        con_detalle_diario: { type: 'boolean', description: 'Dia por dia ademas del total por empleado. Por defecto si el rango es de 14 dias o menos.' },
+      },
+    },
+    soloAdmin: true,
+    ejecutar: async (a, { p, hoy }) => {
+      const { registrosDesdeCache } = await import('../fichajesCache');
+      const { fichajesEnRango } = await import('../fichajesRango');
+
+      const corrido = (dias: number) => {
+        const d = new Date(`${hoy}T12:00:00Z`);
+        d.setUTCDate(d.getUTCDate() - dias);
+        return d.toISOString().slice(0, 10);
+      };
+      const iso = (x: any) => (/^\d{4}-\d{2}-\d{2}$/.test(String(x || '')) ? String(x) : null);
+      const hasta = iso(a?.hasta) || hoy;
+      const desde = iso(a?.desde) || corrido(6);
+      if (desde > hasta) return { error: `El rango esta al reves: desde ${desde} es posterior a hasta ${hasta}.` };
+
+      const [filas, empleados] = await Promise.all([p.fichajes(), p.empleados()]);
+      const registros = registrosDesdeCache(filas as any, desde, hasta);
+
+      // Sin filas en la cache no es "nadie vino": es que el cron todavia no guardo esos
+      // dias. Son dos cosas muy distintas y la diferencia la tiene que decir la respuesta,
+      // no el que la lee.
+      const diasEnCache = new Set((filas as any[]).map((f) => String(f.fecha || '').slice(0, 10)).filter(Boolean));
+      const faltan: string[] = [];
+      for (let d = new Date(`${desde}T12:00:00Z`); d.toISOString().slice(0, 10) <= hasta; d.setUTCDate(d.getUTCDate() + 1)) {
+        const f = d.toISOString().slice(0, 10);
+        if (f > hoy) break;
+        if (!diasEnCache.has(f)) faltan.push(f);
+      }
+
+      const norm = (x: any) => String(x || '').toLowerCase();
+      let gente = fichajesEnRango(registros, empleados, desde, hasta);
+      if (a?.empleado) gente = gente.filter((g) => norm(g.nombre).includes(norm(a.empleado)));
+
+      const largoDias = Math.round((Date.parse(`${hasta}T12:00:00Z`) - Date.parse(`${desde}T12:00:00Z`)) / 86_400_000) + 1;
+      const detalle = a?.con_detalle_diario ?? (largoDias <= 14);
+
+      return {
+        desde, hasta,
+        dias_sin_fichajes_guardados: faltan.length ? faltan : null,
+        empleados: gente.map((g) => ({
+          nombre: g.nombre,
+          horas: g.horas,
+          // Lo que marco el reloj, al lado de lo computado. Difieren cuando hubo un dia
+          // incompleto: ahi se computan las horas esperadas y no las fichadas, porque el
+          // tipo vino y lo que falta es el dato de la salida.
+          horas_que_marco_el_reloj: g.horas_fichadas,
+          dias_con_fichaje: g.dias_con_fichaje,
+          dias_incompletos: g.dias_incompletos || null,
+          sueldo_por_hora: $(g.sueldo_hora),
+          costo_sin_recargos: $(g.horas * g.sueldo_hora),
+          dias: detalle ? g.dias.filter((d) => d.entrada || d.salida).map((d) => ({
+            fecha: d.fecha, dia: d.diaSemana,
+            entrada: d.entrada, salida: d.salida,
+            horas: Math.round((Number(d.horas) || 0) * 100) / 100,
+            horas_que_marco_el_reloj: d.horasFichadas != null ? Math.round(d.horasFichadas * 100) / 100 : null,
+            incompleto: d.incompleto || null,
+            tardanza_min: d.tardanzaMin > 0 ? d.tardanzaMin : null,
+            horas_de_mas: d.horasDeMas > 0 ? d.horasDeMas : null,
+            domingo: d.esDomingo || null,
+          })) : null,
+        })),
+        totales: {
+          horas: Math.round(gente.reduce((t, g) => t + g.horas, 0) * 100) / 100,
+          costo_sin_recargos: $(gente.reduce((t, g) => t + g.horas * g.sueldo_hora, 0)),
+          personas: gente.length,
+        },
+        nota: 'Un dia incompleto (ficho la entrada y no la salida) computa las horas ESPERADAS, no las que marco el reloj; por eso pueden no coincidir los dos numeros. El costo es horas por valor hora y NO incluye recargos por feriado, nocturnidad ni horas extra: la app no tiene cargado ningun recargo, asi que si el dia fue feriado hay que aplicarlo aparte. Los domingos se marcan porque nunca son dia programado.',
       };
     },
   },

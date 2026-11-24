@@ -3,6 +3,7 @@ import type {
   Articulo, StockMes, Gasto, VentaDia, PrecioVenta, ClienteVenta, Lote, Movimiento, Ubicacion,
   Empleado, ProductividadDiaria, StockCamara,
 } from '../types';
+import { HOJA_FICHAJES, type FichajeDiaRow } from '../fichajesCache';
 import type { CambioPrecio } from '../preciosHistorico';
 
 // ── Las planillas, leídas una sola vez por consulta ───────────────────────────────────
@@ -41,6 +42,10 @@ export class Planillas {
   // CrossChex en vivo por lo mismo que el resto de la app: pedirle un rango tarda una
   // eternidad y acá hay alguien esperando una respuesta en un chat.
   horas() { return this.leer<ProductividadDiaria>('ProductividadDiaria'); }
+  // Los fichajes crudos de CrossChex, una fila por empleado y por dia. Es lo que permite
+  // contestar "cuantas horas se hicieron ayer": `horas()` solo tiene el total por dia de
+  // toda la gente junta, sin quien ni cuando.
+  fichajes() { return this.leer<FichajeDiaRow>(HOJA_FICHAJES); }
   camara() { return this.leer<StockCamara>('StockCamara'); }
   preciosHistorico() { return this.leer<CambioPrecio>('PreciosHistorico'); }
   hoja<T>(nombre: string) { return this.leer<T>(nombre); }

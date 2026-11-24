@@ -145,6 +145,25 @@ function sumarHorasPares(checksRaw: number[]): { horas: number; entrada: number;
 // indicador de productividad (paquetes cosechados ÷ horas-hombre). Mismo criterio de
 // emparejamiento que calcularResumenQuincena (ver sumarHorasPares); un solo fichaje ese
 // día queda "incompleto" y no aporta horas (no se puede calcular).
+// ── Cuanto vale un dia entero de trabajo ────────────────────────────────────────────
+//
+// `horas_lv` son las horas que hace por dia de lunes a viernes. Multiplicado por el valor
+// hora da lo que cuesta una jornada completa, que es justo la cuenta que hay que hacer
+// cuando alguien trabaja un feriado y hay que pagarselo aparte.
+//
+// Devuelve 0 si no hay horario cargado, y el que lo use NO tiene que inventar un default
+// de 8 horas: un valor por jornada sacado de una suposicion es peor que no mostrarlo,
+// porque se paga.
+export function horasDeJornada(e: { horas_lv?: number | string } | undefined | null): number {
+  const h = Number(e?.horas_lv) || 0;
+  return h > 0 ? h : 0;
+}
+
+export function valorJornada(e: { horas_lv?: number | string; sueldo_hora?: number | string } | undefined | null, sueldoHora?: number): number {
+  const hora = Number(sueldoHora ?? e?.sueldo_hora) || 0;
+  return horasDeJornada(e) * hora;
+}
+
 export function horasHombreEnRango(registros: RegistroCrossChex[]): number {
   const porEmpleadoDia = agruparPorEmpleadoYDia(registros);
   let total = 0;
