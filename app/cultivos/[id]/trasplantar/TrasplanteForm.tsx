@@ -161,9 +161,19 @@ export default function TrasplanteForm({
         <div>
           <label>Mesada destino *</label>
           <select value={ubicId} onChange={(e) => handleUbic(e.target.value)} required disabled={loading}>
-            {ubicacionesDestino.map((u) => (
-              <option key={u.id_ubicacion} value={u.id_ubicacion}>{u.nombre}</option>
-            ))}
+            {/* Las posiciones por perfil van EN la opcion, no solo debajo del desplegable
+                ya elegido. Dos mesadas de la misma fase pueden tener tubos muy distintos
+                —11 y 14 posiciones conviven hoy en F2 de Nave 1—, y el nombre no siempre
+                lo dice: uno eligia a ciegas y se enteraba del numero despues, cuando la
+                cuenta de plantines no daba. */}
+            {ubicacionesDestino.map((u) => {
+              const o = Number(u.orificios_por_perfil) || 0;
+              return (
+                <option key={u.id_ubicacion} value={u.id_ubicacion}>
+                  {u.nombre}{o > 0 ? ` — ${o} pos/perfil` : ' — sin posiciones cargadas'}
+                </option>
+              );
+            })}
           </select>
           {ubic && (
             <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#6b7280' }}>
