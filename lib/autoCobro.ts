@@ -8,7 +8,7 @@ import { getCuentas, getCobranzas } from './xubio';
 import { nombreClienteVisible } from './clientes';
 import { numerosSaldados, leerSaldadas } from './facturasSaldadas';
 import { sumarDias } from './recordatoriosCobro';
-import { extraerCuentaDeclarada } from './cuentasCobro';
+import { cuentasElegibles, extraerCuentaDeclarada } from './cuentasCobro';
 import { fechaArgentinaHoy } from './ocupacion';
 import type { ClienteVenta } from './types';
 
@@ -87,6 +87,10 @@ export interface Candidato {
   comprobantes: string[];
   cuentaId: number;
   cuentaNombre: string;
+  // De dónde salió la cuenta: lo dijo el aviso, se usó la última de ese cliente, o la de
+  // siempre. Viaja hasta el recibo de Xubio: un cobro imputado a una cuenta que nadie
+  // declaró tiene que poder decir por qué fue a esa.
+  cuentaDe: 'aviso' | 'historial' | 'defecto';
   // La suma de las facturas nombradas, que tiene que dar importe + retención.
   sumaFacturas: number;
 }
@@ -108,6 +112,9 @@ export interface ResultadoAuto {
   registrados: {
     idItem: string; idCobro: string; cliente: string; importe: number;
     retencion: number; comprobantes: string[]; cuentaNombre: string; fecha: string;
+    // Cómo se eligió esa cuenta, para poder decirlo en el aviso: es el único dato del
+    // cobro automático que puede no venir del aviso.
+    cuentaDe?: 'aviso' | 'historial' | 'defecto';
   // El aviso decía que el pago estaba programado y todavía no acreditado. Se registra igual
   // (ver el comentario del gate), con la fecha que el aviso programa. Va marcado porque es
   // lo único de este mail que conviene mirar: es plata contada antes de llegar.
@@ -234,6 +241,37 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
     cuentas = (await getCuentas(await getCobranzas(sumarDias(hoy, -120), hoy).catch(() => []))).cuentas;
   } catch { cuentas = []; }
 
+  // ── Cuando el aviso no dice a qué cuenta entró ───────────────────────────────
+  //
+  // Hasta acá eso frenaba el registro: la cuenta es lo único que no se puede verificar
+  // contra datos propios, y adivinarla manda plata a un banco donde nunca entró.
+  //
+  // Decisión de Marcos, con los casos a la vista (Pacheco, La Reina): quedaban en la
+  // bandeja avisos donde TODO lo demás cerraba exacto, sólo porque el mail no nombraba el
+  // banco — que es lo normal, el cliente no tiene por qué saber dónde cobramos.
+  //
+  // El orden es el de la información que hay, de más a menos:
+  //   1. lo que declara el aviso (no cambia: si lo dice y no resuelve, sigue frenando);
+  //   2. la última cuenta por la que entró plata de ESE cliente — un dato propio, de un
+  //      cobro que ya pasó, no una suposición sobre este;
+  //   3. Brubank, la primera de CUENTAS_COBRO, que recibe casi todo.
+  //
+  // Lo que esto cambia de verdad: antes un error de cuenta era imposible porque no se
+  // registraba. Ahora puede pasar — un cliente que empezó a pagar a otro banco queda
+  // imputado al anterior hasta que alguien lo corrija. Por eso cada cobro dice de dónde
+  // salió la cuenta, en el recibo de Xubio y en la nota de la bandeja.
+  const elegibles = cuentasElegibles(cuentas);
+  const cuentaPorDefecto = elegibles[0];
+  const ultimaCuentaDe = new Map<string, number>();
+  for (const c of [...cobros].sort((a, b) =>
+    String(a.fecha || a.fecha_registro || '').localeCompare(String(b.fecha || b.fecha_registro || '')))) {
+    if (String(c.estado) === 'anulado') continue;
+    const id = Number(c.cuenta_id);
+    const idc = String(c.id_control || '').trim();
+    if (!id || !idc) continue;
+    ultimaCuentaDe.set(idc, id);
+  }
+
   for (const it of pendientes) {
     const cliente = String(it.cliente || '') || String(it.id_control || '');
     const importe = Math.round(num(it.importe));
@@ -355,13 +393,24 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
     // filas anteriores a la columna.
     const declaradaTexto = String((it as any).cuenta_destino || '').trim() || extraerCuentaDeclarada(String(it.descripcion || ''));
     const declarada = norm(declaradaTexto);
-    const cuenta = declarada ? cuentas.find((c) => norm(c.nombre).includes(declarada) || declarada.includes(norm(c.nombre))) : null;
-    if (!cuenta) { rechazar(declarada ? `no se pudo resolver la cuenta "${declaradaTexto}"` : 'el aviso no dice a qué cuenta entró'); continue; }
+    let cuenta = declarada ? cuentas.find((c) => norm(c.nombre).includes(declarada) || declarada.includes(norm(c.nombre))) : undefined;
+    let cuentaDe: 'aviso' | 'historial' | 'defecto' = 'aviso';
+    // Si el aviso NOMBRA un banco y no se puede resolver, sigue frenando: ahí no falta
+    // información, hay información que no entendemos, y reemplazarla por la de siempre
+    // sería pisar lo único que el cliente dijo al respecto.
+    if (!cuenta && declarada) { rechazar(`no se pudo resolver la cuenta "${declaradaTexto}"`); continue; }
+    if (!cuenta) {
+      const ult = ultimaCuentaDe.get(String(it.id_control).trim());
+      const porHistorial = ult ? elegibles.find((c) => Number(c.id) === ult) : undefined;
+      cuenta = porHistorial || cuentaPorDefecto;
+      cuentaDe = porHistorial ? 'historial' : 'defecto';
+    }
+    if (!cuenta) { rechazar('no hay ninguna cuenta de cobro disponible en Xubio'); continue; }
 
     out.candidatos.push({
       idItem: String(it.id_item), cliente, idControl: String(it.id_control),
       fecha: String(it.fecha).split(/[T ]/)[0], importe, retencion, programado,
-      comprobantes: nums, cuentaId: cuenta.id, cuentaNombre: cuenta.nombre,
+      comprobantes: nums, cuentaId: cuenta.id, cuentaNombre: cuenta.nombre, cuentaDe,
       sumaFacturas: Math.round(suma),
       // Si las facturas no venían en el aviso sino que se dedujeron del importe, se dice
       // cómo: quien lea el cobro después tiene que poder distinguir "el cliente dijo qué
@@ -379,15 +428,23 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
   // dejarían cobros con forma distinta y uno de los dos sería el raro.
   for (const c of out.candidatos) {
     try {
+      // Si la cuenta no salió del aviso, el cobro lo dice. En Xubio y en la planilla: el
+      // día que una cuenta esté mal, la pregunta va a ser "¿y por qué fue a esa?", y la
+      // respuesta tiene que estar escrita al lado del cobro.
+      const comoLaCuenta = c.cuentaDe === 'historial'
+        ? ` · Cuenta ${c.cuentaNombre}: el aviso no la decía, es la última por la que entró plata de este cliente`
+        : c.cuentaDe === 'defecto'
+          ? ` · Cuenta ${c.cuentaNombre}: el aviso no la decía y no hay cobros anteriores de este cliente`
+          : '';
       const pedido = {
         idControl: c.idControl, fecha: c.fecha, importe: c.importe, cuentaId: c.cuentaId,
         comprobantes: c.comprobantes, retencion: c.retencion,
         // Si las facturas se dedujeron, el recibo lo dice. Dentro de seis meses, "Cancela:
         // 0849, 0851" sobre un aviso que no nombraba ninguna factura tiene que poder
         // explicarse sin reconstruir la cuenta.
-        observacion: c.deducidas
+        observacion: (c.deducidas
           ? `Registrado solo: el aviso no nombraba facturas, pero ${TEXTO_DEDUCCION[c.deducidas] || 'las cuentas cierran de una sola manera'} (${c.comprobantes.join(', ')})`
-          : `Registrado solo desde el aviso de pago (${c.comprobantes.join(', ')})`,
+          : `Registrado solo desde el aviso de pago (${c.comprobantes.join(', ')})`) + comoLaCuenta,
         usuario: 'automático',
       };
       const r = await registrarCobro(pedido);
@@ -395,16 +452,17 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
       if (!r.ok) { out.errores.push({ idItem: c.idItem, cliente: c.cliente, error: r.error || 'Xubio lo rechazó' }); continue; }
       await updateRow(HOJA_BANDEJA, 'id_item', c.idItem, {
         estado: 'confirmado', id_cobro: r.idCobro || '', usuario: 'automático',
-        nota: c.deducidas
+        nota: (c.deducidas
           ? `registrado solo: el aviso no nombraba facturas y ${TEXTO_DEDUCCION[c.deducidas] || 'las cuentas cierran de una sola manera'} (${c.comprobantes.join(', ')})`
           : c.programado
             ? `registrado solo con la fecha programada del aviso (${c.fecha}): las facturas suman exactamente lo que dice`
-            : 'registrado solo: las facturas suman exactamente lo que dice el aviso',
+            : 'registrado solo: las facturas suman exactamente lo que dice el aviso') + comoLaCuenta,
       });
       out.registrados.push({
         idItem: c.idItem, idCobro: r.idCobro || '', cliente: c.cliente, importe: c.importe,
         retencion: c.retencion, comprobantes: c.comprobantes, cuentaNombre: c.cuentaNombre,
         fecha: c.fecha, numeroRecibo: r.numeroRecibo || '', programado: c.programado,
+        cuentaDe: c.cuentaDe,
       });
     } catch (e: any) {
       out.errores.push({ idItem: c.idItem, cliente: c.cliente, error: e?.message || 'error' });

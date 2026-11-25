@@ -39,6 +39,27 @@ export function esConfirmacionDeReenvio(asunto: string, texto: string): boolean 
   return PISTAS_CONFIRMACION.some(p => t.includes(sinAcentos(p)));
 }
 
+// ── Los mails que manda la app y vuelven ────────────────────────────────────
+//
+// El reenvío de Gmail es ciego: manda TODO lo que entra a la casilla, y ahí adentro
+// también están los mails que manda la app misma —el backup diario, las alertas, los
+// acuses de esta misma función—. Cada uno de esos entra al webhook como un aviso de pago
+// más.
+//
+// El backup fue el caso que lo hizo visible: su texto dice "5.253 filas en total", la IA
+// leyó ese número como un importe y quedó una fila de $5.253 sin cliente en la bandeja.
+// No es un error de lectura — es un mail que nunca tenía que haber llegado hasta la IA.
+//
+// Se corta por el remitente, que es el dato duro: ventas@xavia.com.ar somos nosotros, y
+// nosotros no nos pagamos a nosotros. El asunto del backup queda como segunda red por si
+// algún día el reenvío reescribe el From.
+const REMITENTE_APP = 'ventas@xavia.com.ar';
+
+export function esMailDeLaApp(remitente: string, asunto: string): boolean {
+  if (sinAcentos(remitente).includes(REMITENTE_APP)) return true;
+  return sinAcentos(asunto).includes('backup de datos');
+}
+
 // El código de confirmación de Gmail son 9 dígitos sueltos.
 export function codigoConfirmacion(texto: string): string | null {
   const m = String(texto || '').match(/\b(\d{9})\b/);
@@ -65,7 +86,7 @@ export function htmlATexto(html: string): string {
 
 export interface ResultadoItemAviso {
   ok: boolean;
-  motivo?: 'duplicado' | 'sin_importe' | 'confirmacion';
+  motivo?: 'duplicado' | 'sin_importe' | 'confirmacion' | 'propio';
   idItem?: string;
   importe?: number | null;
   comprobantes?: string[];
@@ -102,6 +123,13 @@ export async function crearItemDesdeAviso(args: {
 }): Promise<ResultadoItemAviso> {
   const texto = String(args.texto || '');
   const asunto = String(args.asunto || '');
+
+  // Un mail nuestro no es un aviso de pago. Se corta acá arriba, antes de leer la planilla
+  // y antes de llamar a la IA: no hay fila que descartar después ni tokens gastados en un
+  // backup.
+  if (esMailDeLaApp(String(args.remitente || ''), asunto)) {
+    return { ok: false, motivo: 'propio' };
+  }
 
   await asegurarHoja(HOJA_BANDEJA, HEADERS_BANDEJA);
   // Las columnas nuevas no existen en una hoja creada antes, y appendRowObj escribe por

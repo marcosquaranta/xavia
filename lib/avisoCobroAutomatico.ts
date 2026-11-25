@@ -44,7 +44,15 @@ export async function avisarCobroRegistrado(
       ${r.retencion > 0 ? `<span style="display:block;font-size:11px;font-weight:400;color:#6b7280">+ ${fmt$(r.retencion)} retenidos</span>` : ''}
     </td>
     <td style="padding:7px 10px;border-bottom:1px solid #f0f0f0;font-family:ui-monospace,monospace;font-size:11.5px;color:#1d4ed8">${r.comprobantes.join('<br>')}</td>
-    <td style="padding:7px 10px;border-bottom:1px solid #f0f0f0;color:#6b7280;font-size:11.5px">${r.cuentaNombre}${r.numeroRecibo ? `<br>recibo ${r.numeroRecibo}` : ''}</td>
+    <td style="padding:7px 10px;border-bottom:1px solid #f0f0f0;color:#6b7280;font-size:11.5px">${r.cuentaNombre}${
+      // La cuenta es el único dato del cobro que puede no venir del aviso. Si se eligió sola,
+      // se dice acá: es lo único de este mail que a veces hay que corregir.
+      r.cuentaDe === 'historial'
+        ? '<span style="display:block;color:#b45309">el aviso no la decía — es la última de este cliente</span>'
+        : r.cuentaDe === 'defecto'
+          ? '<span style="display:block;color:#b45309">el aviso no la decía — es la de siempre</span>'
+          : ''
+    }${r.numeroRecibo ? `<br>recibo ${r.numeroRecibo}` : ''}</td>
   </tr>`).join('');
 
   const html = `

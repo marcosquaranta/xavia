@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { crearItemDesdeAviso, htmlATexto } from '@/lib/bandejaMail';
+import { crearItemDesdeAviso, esMailDeLaApp, htmlATexto } from '@/lib/bandejaMail';
 import { evaluarBandeja } from '@/lib/autoCobro';
 import { avisarCobroRegistrado } from '@/lib/avisoCobroAutomatico';
 import { readSheet } from '@/lib/sheets';
@@ -301,6 +301,19 @@ export async function POST(req: NextRequest) {
       console.log('[cobranzas/email] ignorado, no iba a', BUZON_COBROS, '→', paraQuien.slice(0, 200));
       return NextResponse.json({ ok: true, ignorado: 'otro_destinatario' });
     }
+
+    // ── Un mail que mandamos nosotros ────────────────────────────────────────
+    //
+    // El backup diario, las alertas y los acuses salen de ventas@xavia.com.ar, caen en la
+    // casilla de Marcos y el reenvío los manda para acá como a cualquier otro mail.
+    //
+    // Se corta antes de bajar el cuerpo y los adjuntos: el backup lleva 22 CSV pegados y no
+    // hay ninguna razón para descargarlos ni para pasarle el texto a la IA. Y no se acusa
+    // recibo — el acuse saldría de la misma dirección y volvería a entrar acá.
+    if (esMailDeLaApp(String(data?.from || ''), String(data?.subject || ''))) {
+      console.log('[cobranzas/email] ignorado, lo mandó la app:', String(data?.subject || ''));
+      return NextResponse.json({ ok: true, ignorado: 'mail_propio' });
+    }
     // El webhook trae SOLO metadatos —así lo diseñó Resend, para no mandar adjuntos
     // gigantes—, el cuerpo se pide aparte. Si por lo que sea ya viniera el texto, se usa.
     const yaTraeTexto = String(data?.text || '').trim() || htmlATexto(String(data?.html || ''));
@@ -346,6 +359,10 @@ export async function POST(req: NextRequest) {
       pdfs,
       emailId: String(data?.email_id || ''),
     });
+
+    if ((r as any)?.motivo === 'propio') {
+      return NextResponse.json({ ok: true, ignorado: 'mail_propio' });
+    }
 
     // ── Registrarlo en el momento, si no hace falta mirarlo ──────────────────────────
     //
