@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { crearItemDesdeAviso, esMailDeLaApp, htmlATexto } from '@/lib/bandejaMail';
 import { evaluarBandeja } from '@/lib/autoCobro';
-import { avisarCobroRegistrado } from '@/lib/avisoCobroAutomatico';
 import { readSheet } from '@/lib/sheets';
 import type { ConfigItem } from '@/lib/types';
 import type { AdjuntoIA } from '@/lib/extraerAvisoIA';
@@ -378,17 +377,10 @@ export async function POST(req: NextRequest) {
         const ev = await evaluarBandeja({ soloItem: String((r as any).idItem) });
         const reg = ev.registrados[0];
         if (reg) {
+          // El acuse de este mismo mail ya dice que el cobro quedó registrado, así que la
+          // señal inmediata no se pierde. El detalle de todos los del día —con cuenta,
+          // recibo y facturas— sale una vez por día en el resumen de /api/cron/auto-cobros.
           auto = { registrado: true, idCobro: reg.idCobro, retencion: reg.retencion };
-          // El aviso sale ACÁ y no solo en el resumen del mediodía siguiente: esto es lo
-          // único que la app hace sin preguntar, y si quedó mal el momento de verlo es
-          // ahora. Va en su propio try porque un mail que falla no puede deshacer un cobro
-          // que ya está registrado en Xubio.
-          try {
-            const cfg = await readSheet<ConfigItem>('Configuracion').catch(() => [] as ConfigItem[]);
-            await avisarCobroRegistrado(ev, cfg);
-          } catch (e: any) {
-            console.error('[cobranzas/email] no se pudo avisar del cobro automático:', e);
-          }
         }
         else {
           const err = ev.errores[0]?.error;

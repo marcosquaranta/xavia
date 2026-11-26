@@ -126,6 +126,11 @@ export interface ResultadoAuto {
     retencionSoloLocal?: boolean;
   }[];
   errores: { idItem: string; cliente: string; error: string }[];
+  // Las cuentas de Xubio, tal como se leyeron acá. Van de vuelta para que el resumen diario
+  // pueda poner el NOMBRE de la cuenta al lado de cada cobro: en la hoja se guarda el id, y
+  // volver a pedirle el plan de cuentas a Xubio para traducir seis números es una consulta
+  // pesada que ya se hizo en esta misma corrida.
+  cuentas?: { id: number; nombre: string }[];
 }
 
 const num = (v: any) => { const n = Number(v); return isNaN(n) ? 0 : n; };
@@ -240,6 +245,7 @@ export async function evaluarBandeja(opciones: { soloItem?: string } = {}): Prom
   try {
     cuentas = (await getCuentas(await getCobranzas(sumarDias(hoy, -120), hoy).catch(() => []))).cuentas;
   } catch { cuentas = []; }
+  out.cuentas = cuentas;
 
   // ── Cuando el aviso no dice a qué cuenta entró ───────────────────────────────
   //

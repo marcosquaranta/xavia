@@ -1,111 +1,76 @@
-// ── Avisar en el momento en que un cobro se registra solo ────────────────────────────
+// ── Los cobros que se registraron solos, una vez por día ─────────────────────────────
 //
-// El resumen diario de auto-cobros ya existía, pero llega a las 12 del mediodía siguiente.
-// Entre que el aviso de pago entra y ese mail pasan horas en las que la app registró una
-// cobranza en Xubio y nadie se enteró.
+// Antes salía un mail por cobro, en el momento. La idea era buena —si algo se registró
+// mal, el momento de verlo es cuando todavía te acordás de qué aviso era— pero en la
+// práctica son varios mails por día diciendo lo mismo, y varios mails por día que no piden
+// nada se vuelven ruido: se archivan sin leer, y el día que uno importe también.
 //
-// Eso es justamente lo que no puede pasar con lo único que la app hace sin preguntar: si
-// algo se registró mal, el momento de verlo es ahora, cuando todavía se acuerda de qué
-// aviso era. Así que este mail sale al instante, con una fila por cobro y el link para
-// anularlo.
+// Decisión de Marcos: uno solo, con todos los del día. El acuse de cada aviso reenviado
+// sigue saliendo al instante y ya dice si el cobro quedó registrado, así que no se pierde
+// la señal inmediata — lo que se saca es el segundo mail que decía lo mismo.
 //
-// El resumen diario NO se saca: sigue sirviendo para ver juntos los que quedaron para
-// revisar a mano, que este mail no toca.
+// Lo que se reporta sale de la hoja de Cobros y no de la corrida del cron: la mayoría de
+// los cobros se registran cuando el aviso entra, horas antes, y una corrida del cron no
+// sabe nada de esos. Se marcan con `avisado` al mandarlos, así ninguno sale dos veces ni
+// se pierde si un día el cron no corre.
 
-import type { ResultadoAuto } from './autoCobro';
-import { destinatariosDe } from './avisosConfig';
+import { HOJA_COBROS, type CobroRegistrado } from './cobros';
+import { asegurarColumnas, readSheet, updateRow } from './sheets';
 
 export const CLAVE_AVISO_AUTO = 'email_cobro_automatico';
-const URL_COBRANZAS = 'https://xavia-self.vercel.app/cobranzas';
 
-const fmt$ = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
-const fmtDia = (f: string) => { const [y, m, d] = String(f || '').split('-'); return d ? `${d}/${m}/${y}` : String(f || ''); };
+// Como quedó anotado el usuario de un cobro que se registró solo (ver autoCobro.ts).
+const USUARIO_AUTO = 'automático';
 
-export async function avisarCobroRegistrado(
-  ev: Pick<ResultadoAuto, 'registrados'>,
-  config: { clave: string; valor: any }[],
-): Promise<{ enviado: boolean; motivo?: string }> {
-  const regs = ev.registrados || [];
-  if (!regs.length) return { enviado: false, motivo: 'no se registró ninguno' };
-  if (!process.env.RESEND_API_KEY) return { enviado: false, motivo: 'RESEND_API_KEY no configurada' };
+export interface CobroAutomatico {
+  idCobro: string;
+  cliente: string;
+  fecha: string;
+  importe: number;
+  retencion: number;
+  comprobantes: string[];
+  cuentaNombre: string;
+  numeroRecibo: string;
+  // Si la cuenta no salió del aviso. Se lee de la observación, que es donde autoCobro lo
+  // deja escrito: es el único dato del cobro que puede no venir del aviso, y por lo tanto
+  // el único que a veces hay que corregir.
+  cuentaDudosa: boolean;
+}
 
-  const destinatarios = destinatariosDe(CLAVE_AVISO_AUTO, config);
-  if (!destinatarios.length) return { enviado: false, motivo: 'sin destinatarios' };
+const num = (v: any) => { const n = Number(v); return isNaN(n) ? 0 : n; };
 
-  const total = regs.reduce((a, r) => a + r.importe, 0);
-  const hayProgramados = regs.some((r) => r.programado);
+export async function cobrosAutomaticosSinAvisar(
+  cuentas: { id: number; nombre: string }[] = [],
+): Promise<CobroAutomatico[]> {
+  await asegurarColumnas(HOJA_COBROS, ['avisado']).catch(() => null);
+  const filas = await readSheet<CobroRegistrado & { avisado?: string }>(HOJA_COBROS).catch(() => []);
+  const nombreDe = new Map(cuentas.map((c) => [Number(c.id), c.nombre]));
 
-  const filas = regs.map((r) => `<tr>
-    <td style="padding:7px 10px;border-bottom:1px solid #f0f0f0"><strong>${r.cliente}</strong>
-      ${r.programado ? '<span style="display:block;font-size:11px;color:#b45309;font-weight:700">pago programado</span>' : ''}
-    </td>
-    <td style="padding:7px 10px;border-bottom:1px solid #f0f0f0;color:#6b7280">${fmtDia(r.fecha)}</td>
-    <td style="padding:7px 10px;border-bottom:1px solid #f0f0f0;text-align:right;font-weight:800">${fmt$(r.importe)}
-      ${r.retencion > 0 ? `<span style="display:block;font-size:11px;font-weight:400;color:#6b7280">+ ${fmt$(r.retencion)} retenidos</span>` : ''}
-    </td>
-    <td style="padding:7px 10px;border-bottom:1px solid #f0f0f0;font-family:ui-monospace,monospace;font-size:11.5px;color:#1d4ed8">${r.comprobantes.join('<br>')}</td>
-    <td style="padding:7px 10px;border-bottom:1px solid #f0f0f0;color:#6b7280;font-size:11.5px">${r.cuentaNombre}${
-      // La cuenta es el único dato del cobro que puede no venir del aviso. Si se eligió sola,
-      // se dice acá: es lo único de este mail que a veces hay que corregir.
-      r.cuentaDe === 'historial'
-        ? '<span style="display:block;color:#b45309">el aviso no la decía — es la última de este cliente</span>'
-        : r.cuentaDe === 'defecto'
-          ? '<span style="display:block;color:#b45309">el aviso no la decía — es la de siempre</span>'
-          : ''
-    }${r.numeroRecibo ? `<br>recibo ${r.numeroRecibo}` : ''}</td>
-  </tr>`).join('');
+  return filas
+    .filter((c) => String(c.usuario || '').trim().toLowerCase() === USUARIO_AUTO)
+    .filter((c) => String(c.estado || '') !== 'anulado')
+    .filter((c) => String(c.avisado || '').trim().toUpperCase() !== 'SI')
+    .map((c) => ({
+      idCobro: String(c.id_cobro || ''),
+      cliente: String(c.cliente || ''),
+      fecha: String(c.fecha || '').split(/[T ]/)[0],
+      importe: Math.round(num(c.importe)),
+      retencion: Math.round(num(c.retencion)),
+      comprobantes: String(c.comprobantes || '').split(',').map((x) => x.trim()).filter(Boolean),
+      cuentaNombre: nombreDe.get(Number(c.cuenta_id)) || '',
+      numeroRecibo: String(c.numero_recibo || ''),
+      cuentaDudosa: /el aviso no la dec/i.test(String(c.observacion || '')),
+    }))
+    .sort((a, b) => a.fecha.localeCompare(b.fecha) || a.cliente.localeCompare(b.cliente));
+}
 
-  const html = `
-    <div style="font-family:system-ui,Arial,sans-serif;color:#111;max-width:640px">
-      <h2 style="margin:0 0 4px;font-size:18px;color:#166534">
-        ${regs.length === 1 ? 'Se registró un cobro solo' : `Se registraron ${regs.length} cobros solos`} — ${fmt$(total)}
-      </h2>
-      <p style="margin:0 0 14px;color:#6b7280;font-size:13px">
-        Llegó un aviso de pago y las facturas que nombra, abiertas y de ese cliente, suman exactamente lo que declara.
-        Ya está en Xubio.
-      </p>
-      <table style="border-collapse:collapse;width:100%;font-size:13px">
-        <thead><tr style="background:#f5f5f5">
-          <th style="padding:6px 10px;text-align:left">Cliente</th>
-          <th style="padding:6px 10px;text-align:left">Fecha</th>
-          <th style="padding:6px 10px;text-align:right">Importe</th>
-          <th style="padding:6px 10px;text-align:left">Facturas</th>
-          <th style="padding:6px 10px;text-align:left">Cuenta</th>
-        </tr></thead>
-        <tbody>${filas}</tbody>
-      </table>
-
-      ${hayProgramados ? `
-        <p style="margin:12px 0 0;font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:7px;padding:9px 11px">
-          Hay cobros de <strong>pagos programados</strong>: el aviso dice que la plata entra en esa fecha y todavía no
-          entró. Se registran con esa fecha, así que hasta ese día el saldo de la cuenta muestra plata que no llegó.
-          Si alguno no entra, se anula desde Cobranzas.
-        </p>` : ''}
-
-      <p style="margin:16px 0 0">
-        <a href="${URL_COBRANZAS}" style="background:#166534;color:white;text-decoration:none;padding:9px 16px;border-radius:6px;font-weight:700;display:inline-block">
-          Ver en Cobranzas
-        </a>
-      </p>
-      <p style="margin:12px 0 0;font-size:11.5px;color:#9ca3af;line-height:1.5">
-        Esto sale en el momento en que pasa. Si algo quedó mal, se anula desde Cobranzas y la factura vuelve a figurar
-        impaga. El resumen de los que quedaron para revisar a mano sigue llegando al mediodía siguiente.
-      </p>
-    </div>`;
-
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: 'Xavia App <ventas@xavia.com.ar>',
-      to: destinatarios,
-      subject: `Cobro registrado solo: ${regs.map((r) => r.cliente).join(', ')} — ${fmt$(total)}`,
-      html,
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.text().catch(() => '');
-    return { enviado: false, motivo: `Resend ${res.status}: ${err.slice(0, 150)}` };
+// Se marcan DESPUÉS de que el mail salió. Al revés, un error de Resend dejaría los cobros
+// marcados como avisados sin que nadie se haya enterado nunca.
+export async function marcarAvisados(cobros: { idCobro: string }[]): Promise<void> {
+  for (const c of cobros) {
+    if (!c.idCobro) continue;
+    try {
+      await updateRow(HOJA_COBROS, 'id_cobro', c.idCobro, { avisado: 'SI' });
+    } catch { /* que no se pueda marcar uno no puede impedir marcar el resto */ }
   }
-  return { enviado: true };
 }
