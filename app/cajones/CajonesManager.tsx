@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import type { CajonMovimiento, ClienteVenta } from '@/lib/types';
 import type { SaldoCajonCliente, AlertaCajon } from '@/lib/cajones';
 import { nombreClienteVisible } from '@/lib/clientes';
-import { saldoPorSucursal } from '@/lib/cajones';
+import { saldoPorSucursal, saldoPorLugar } from '@/lib/cajones';
 import NumberInput from '@/components/NumberInput';
 
 const HOY = new Date().toISOString().split('T')[0];
@@ -66,6 +66,11 @@ export default function CajonesManager({ saldos, alertas, clientes, movimientos,
   // para ir a buscarlos.
   const porSucursalDelCliente = saldoPorSucursal(movimientos, clientes)
     .filter(x => x.id_control === idControl && x.saldo !== 0);
+
+  // Dónde están los cajones, por lugar y no por razón social. Hay lugares donde dos
+  // razón sociales del mismo dueño dejan los cajones en la misma pila (Heroica Güemes):
+  // el reparto ve UNA pila, así que la pantalla tiene que mostrar una fila.
+  const lugares = useMemo(() => saldoPorLugar(movimientos, clientes), [movimientos, clientes]);
 
   // Info del cliente elegido en el formulario — aparece apenas se selecciona, para poder
   // chequear el saldo actual antes de confirmar (y, en un ajuste, ver la diferencia al toque).
@@ -362,6 +367,50 @@ export default function CajonesManager({ saldos, alertas, clientes, movimientos,
         )}
       </div>
 
+      {/* Dónde están — por lugar, no por razón social */}
+      {lugares.length > 0 && (
+        <div className="card" style={{ marginBottom: '16px' }}>
+          <p className="card-title">Dónde están</p>
+          <p style={{ margin: '0 0 10px', fontSize: '11.5px', color: '#6b7280', lineHeight: 1.5 }}>
+            Cajones por lugar, que es la pila que se cuenta cuando se va a buscarlos. Si en un lugar
+            compran dos razón sociales, los cajones se suman en una fila y abajo dice de quién es cada uno.
+          </p>
+          <div style={{ display: 'grid', gap: '8px' }}>
+            {lugares.map((l) => (
+              <div key={l.lugar || '(sin)'} style={{
+                border: '1px solid ' + (l.lugar ? '#e5e7eb' : '#fde68a'),
+                background: l.lugar ? '#fff' : '#fffbeb',
+                borderRadius: '8px', padding: '10px 12px',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px' }}>
+                  <strong style={{ fontSize: '13.5px', color: l.lugar ? '#111' : '#92400e' }}>
+                    {l.lugar || 'Sin lugar cargado'}
+                  </strong>
+                  <span style={{ fontSize: '17px', fontWeight: 800, color: '#d97706', whiteSpace: 'nowrap' }}>{fmt(l.saldo)}</span>
+                </div>
+                <div style={{ marginTop: '4px', fontSize: '11.5px', color: '#6b7280' }}>
+                  {l.detalle.length > 1
+                    ? l.detalle.map((d) => `${d.nombre} ${fmt(d.saldo)}`).join(' · ')
+                    : l.detalle[0]?.nombre}
+                  {l.ultimoMovimiento ? ` — último mov. ${l.ultimoMovimiento}` : ''}
+                </div>
+                {l.detalle.length > 1 && (
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#2563eb' }}>
+                    Lugar compartido por {l.detalle.length} razón sociales — una sola pila, cada una responde por los suyos.
+                  </p>
+                )}
+                {!l.lugar && (
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#92400e' }}>
+                    Son movimientos cargados sin elegir sucursal. No se sabe dónde están: lo arregla un conteo
+                    físico (ajuste) eligiendo el lugar.
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Historial */}
       <div className="card">
         <button onClick={() => setVerHistorial(v => !v)} style={{ background: 'none', border: 'none', color: '#2563eb', fontSize: '12px', cursor: 'pointer', padding: 0, fontWeight: 600 }}>
@@ -373,6 +422,7 @@ export default function CajonesManager({ saldos, alertas, clientes, movimientos,
               <thead><tr>
                 <th style={{ textAlign: 'left' }}>Fecha</th>
                 <th style={{ textAlign: 'left' }}>Cliente</th>
+                <th style={{ textAlign: 'left' }}>Dónde</th>
                 <th style={{ textAlign: 'left' }}>Tipo</th>
                 <th style={{ textAlign: 'right' }}>Cantidad</th>
                 <th style={{ textAlign: 'right' }}>Diferencia</th>
@@ -387,6 +437,7 @@ export default function CajonesManager({ saldos, alertas, clientes, movimientos,
                     <tr key={m.id_movimiento} style={{ borderBottom: '1px solid #f3f4f6' }}>
                       <td>{m.fecha}</td>
                       <td>{m.nombre_cliente}</td>
+                      <td style={{ color: (m as any).sucursal ? '#374151' : '#d1d5db', fontSize: '11px' }}>{(m as any).sucursal || '—'}</td>
                       <td style={{ color: t.color, fontWeight: 600 }}>{t.icon} {t.label}</td>
                       <td style={{ textAlign: 'right' }}>{fmt(Number(m.cantidad) || 0)}</td>
                       <td style={{ textAlign: 'right', fontWeight: dif ? 700 : 400, color: dif === null ? '#d1d5db' : dif === 0 ? '#9ca3af' : dif > 0 ? '#059669' : '#dc2626' }}>

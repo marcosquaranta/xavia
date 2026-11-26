@@ -189,6 +189,48 @@ export function saldoPorSucursal(movimientos: CajonMovimiento[], clientes: Clien
   return out.sort((a, b) => b.saldo - a.saldo || a.nombre.localeCompare(b.nombre));
 }
 
+// ── Cuántos cajones hay en cada LUGAR, sin importar a quién se le factura ────────
+//
+// saldoPorSucursal() corta por cliente+sucursal, que es lo correcto para la deuda: cada
+// razón social responde por los suyos. Pero para ir a buscarlos lo que importa es el
+// lugar, y hay lugares donde conviven DOS razón sociales del mismo dueño — el caso de
+// Heroica Güemes. Ahí el reparto ve una pila sola y la pantalla mostraba dos filas con
+// nombres de razón social, uno de los cuales ni siquiera es el nombre del lugar.
+//
+// Esto suma por lugar y deja el detalle por cliente adentro, así que no se pierde de
+// quién es cada cajon: se ve la pila que hay que contar Y cómo se reparte.
+//
+// El agrupado es por nombre normalizado (sin acentos, sin mayúsculas, sin espacios de
+// más): "Güemes" y "guemes" son el mismo lugar. Se muestra la primera escritura que
+// aparezca.
+export interface SaldoCajonLugar {
+  lugar: string;          // '' = sin sucursal cargada en el movimiento
+  saldo: number;
+  ultimoMovimiento: string | null;
+  // Quiénes componen esa pila. Con más de uno, el lugar es compartido.
+  detalle: { id_control: string; nombre: string; saldo: number }[];
+}
+
+const claveLugar = (x: string) =>
+  String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+export function saldoPorLugar(movimientos: CajonMovimiento[], clientes: ClienteVenta[]): SaldoCajonLugar[] {
+  const porLugar = new Map<string, SaldoCajonLugar>();
+  for (const s of saldoPorSucursal(movimientos, clientes)) {
+    if (s.saldo === 0) continue;
+    const k = claveLugar(s.sucursal);
+    let g = porLugar.get(k);
+    if (!g) { g = { lugar: s.sucursal, saldo: 0, ultimoMovimiento: null, detalle: [] }; porLugar.set(k, g); }
+    g.saldo += s.saldo;
+    if (s.ultimoMovimiento && (!g.ultimoMovimiento || s.ultimoMovimiento > g.ultimoMovimiento)) g.ultimoMovimiento = s.ultimoMovimiento;
+    g.detalle.push({ id_control: s.id_control, nombre: s.nombre, saldo: s.saldo });
+  }
+  const out = [...porLugar.values()];
+  for (const g of out) g.detalle.sort((a, b) => b.saldo - a.saldo);
+  // El "sin sucursal" al final: no es un lugar, es un dato que falta.
+  return out.sort((a, b) => (a.lugar ? 0 : 1) - (b.lugar ? 0 : 1) || b.saldo - a.saldo);
+}
+
 export interface AlertaCajon { id_control: string; nombre: string; saldo: number; diasSinMovimiento: number | null }
 
 // Clientes que deben cajones (saldo > 0) y no tuvieron NINGÚN movimiento (ni entrega ni
