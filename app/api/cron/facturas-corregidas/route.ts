@@ -85,9 +85,26 @@ export async function GET(req: NextRequest) {
       </tr>${a.motivo ? `<tr><td colspan="6" style="padding:0 8px 6px 8px;font-size:11px;color:#9ca3af">${a.motivo}</td></tr>` : ''}`;
     };
 
+    // ── Lo único que hay que hacer, arriba de todo ──────────────────────────────
+    //
+    // El mail junta tres cosas distintas y sólo UNA pide algo: los ajustes sin nota de
+    // crédito, que dejan una diferencia abierta entre Xubio y lo que se cobra. Las notas
+    // emitidas y las facturas nuevas ya están cerradas de los dos lados.
+    //
+    // Salía todo en marrón de alerta y con el mismo título, así que un mail donde no había
+    // nada que hacer se leía igual que uno donde sí. Ahora el color y la primera línea
+    // dicen cuál de los dos es antes de leer las tablas.
+    const hayPendiente = nuevosAjustes.length > 0;
+    const color = hayPendiente ? '#92400e' : '#166534';
+
     const html = `
       <div style="font-family:system-ui,Arial,sans-serif;color:#111;max-width:700px">
-        <h2 style="margin:0 0 4px;font-size:18px;color:#92400e">Facturas corregidas después de emitidas</h2>
+        <h2 style="margin:0 0 4px;font-size:18px;color:${color}">Facturas corregidas después de emitidas</h2>
+        <p style="margin:0 0 14px;font-size:13px;line-height:1.55;color:${hayPendiente ? '#92400e' : '#166534'}">
+          ${hayPendiente
+            ? 'Hay <strong>una diferencia abierta</strong>: el comprobante de Xubio dice un importe y la app reclama otro. Mirá la primera tabla.'
+            : 'Esto es <strong>para que lo sepas, no para que hagas nada</strong>: lo que se corrigió ya quedó emitido en Xubio de los dos lados.'}
+        </p>
 
         ${nuevosAjustes.length ? `
           <p style="margin:0 0 10px;font-size:12.5px;color:#6b7280;line-height:1.55">
@@ -127,25 +144,29 @@ export async function GET(req: NextRequest) {
           </table>` : ''}
 
         ${nuevasExtras.length ? `
-          <p style="margin:18px 0 6px;font-size:13px;font-weight:800;color:#1e40af">Facturas emitidas por una corrección que sumó</p>
-          <p style="margin:0 0 6px;font-size:12px;color:#6b7280">La corrección agregó mercadería, así que la diferencia salió en una factura nueva en vez de una nota de débito.</p>
+          <p style="margin:18px 0 6px;font-size:13px;font-weight:800;color:#1e40af">Se facturó de más porque la corrección agregó mercadería</p>
+          <p style="margin:0 0 6px;font-size:12px;color:#6b7280;line-height:1.55">
+            A estas ventas se les sumó mercadería después de facturarlas. Lo que se agregó salió en una factura
+            <strong>nueva</strong> — no se tocó la original, que sigue valiendo por lo suyo.
+            <strong>Ya están las dos en Xubio y en la deuda del cliente: no hay nada que hacer con estas.</strong>
+          </p>
           <table style="border-collapse:collapse;width:100%;font-size:12.5px">
             <thead><tr style="background:#f5f5f5">
-              <th style="padding:5px 8px;text-align:left">Factura nueva</th>
-              <th style="padding:5px 8px;text-align:left">Corrige a</th>
               <th style="padding:5px 8px;text-align:left">Cliente</th>
-              <th style="padding:5px 8px;text-align:right">Importe</th>
+              <th style="padding:5px 8px;text-align:left">Se le agregó a la factura</th>
+              <th style="padding:5px 8px;text-align:left">Con esta factura nueva</th>
+              <th style="padding:5px 8px;text-align:right">De más</th>
             </tr></thead>
             <tbody>${nuevasExtras.map((f) => `<tr>
+              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6"><strong>${f.cliente || ''}</strong></td>
+              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;font-family:ui-monospace,monospace;font-size:11.5px;color:#6b7280">${f.numero_original}</td>
               <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;font-family:ui-monospace,monospace;font-size:11.5px">${f.numero_nuevo}</td>
-              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;font-family:ui-monospace,monospace;font-size:11.5px">${f.numero_original}</td>
-              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6">${f.cliente || ''}</td>
-              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;text-align:right;font-weight:700">${$(f.importe)}</td>
-            </tr>`).join('')}</tbody>
+              <td style="padding:5px 8px;border-bottom:1px solid #f3f4f6;text-align:right;font-weight:700;color:#1e40af">+ ${$(f.importe)}</td>
+            </tr>${f.detalle ? `<tr><td colspan="4" style="padding:0 8px 6px 8px;font-size:11px;color:#9ca3af">${f.detalle}</td></tr>` : ''}`).join('')}</tbody>
           </table>` : ''}
 
         <p style="margin:18px 0 0">
-          <a href="${BASE}/ventas/historial" style="background:#92400e;color:white;text-decoration:none;padding:9px 16px;border-radius:6px;font-weight:700;display:inline-block">
+          <a href="${BASE}/ventas/historial" style="background:${color};color:white;text-decoration:none;padding:9px 16px;border-radius:6px;font-weight:700;display:inline-block">
             Ver el historial de facturación
           </a>
         </p>
@@ -154,15 +175,23 @@ export async function GET(req: NextRequest) {
         </p>
       </div>`;
 
+    const cuantas = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
+    const partesAsunto = [
+      nuevosAjustes.length ? `${cuantas(nuevosAjustes.length, 'factura corregida', 'facturas corregidas')} sin nota de crédito` : '',
+      nuevasNotas.length ? cuantas(nuevasNotas.length, 'nota de crédito emitida', 'notas de crédito emitidas') : '',
+      nuevasExtras.length ? `${cuantas(nuevasExtras.length, 'factura nueva', 'facturas nuevas')} por corrección que sumó` : '',
+    ].filter(Boolean);
+
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         from: 'Xavia App <ventas@xavia.com.ar>',
         to: destinatarios,
-        subject: nuevosAjustes.length
-          ? `${nuevosAjustes.length} factura(s) corregidas sin nota de crédito`
-          : `${nuevasNotas.length} nota(s) de crédito emitidas`,
+        // El asunto nombra lo que el mail trae, no una de las tres cosas elegida de
+        // antemano. Decía "0 nota(s) de crédito emitidas" cuando lo único que había era una
+        // factura nueva: un cero en el asunto de un mail que no estaba vacío.
+        subject: partesAsunto.join(' · ') || 'Facturas corregidas después de emitidas',
         html,
       }),
     });
