@@ -293,6 +293,111 @@ Las funciones puras de `lib/entregas.ts`, que es donde está toda la lógica:
 - el estado de una entrega a partir de Ventas + Entregas (sin confirmar, validada, auto);
 - el resumen del mail: totales en plata y la detección del patrón de varias semanas.
 
+## El mail de diferencias, definido
+
+- **Cuándo**: todos los días a las 19:00 de Argentina (22:00 UTC), después de que volvió el
+  reparto. Un cron nuevo, `/api/cron/diferencias-entrega`.
+- **A quién**: `email_diferencias_entrega` en `lib/avisosConfig.ts`, con Juan Pablo por
+  defecto (su dirección ya está en el repo). Marcos lo agrega desde Admin → Avisos si quiere
+  recibirlo.
+- **Cuándo NO sale**: si no hubo ninguna diferencia. Un mail diario que dice "todo bien" se
+  archiva sin abrir y se lleva puesto el día que trae algo.
+- **El titular es la plata**, no la cantidad: "se facturaron $47.900 de más" o "de menos".
+  Un titular que dice "3 diferencias" no distingue tres paquetes de treinta.
+
+**Cómo se valoriza.** Con `getPrecio` del cliente, igual que la pantalla de ventas — y
+**neto, sin IVA**, que es como valoriza toda la app. El mail lo dice en una línea al pie,
+porque el importe de la factura que está al lado sí lleva IVA adentro y si no se aclara
+parece que los números no cierran. Es el mismo problema que obligó a `mismoImporte()` en el
+freno de duplicados.
+
+**El patrón.** Es la parte que convierte el mail en algo que se acciona, y es una cuenta
+simple: para cada cliente + artículo, mirar las últimas 4 entregas confirmadas; si en 3 o
+más el entregado fue menor al pedido, se marca como pedido fijo viejo y se linkea directo a
+Admin → Pedidos fijos de ese cliente. Menos de 3 de 4 no es un patrón, es una semana.
+
+**Las `auto` van en su propio bloque**, nunca mezcladas con las confirmadas. "Nadie dijo
+nada" no es "se entregó tal cual", y si se leen juntas, la mitad del mail dice algo que
+nadie verificó.
+
+## Lo que esta función NO hace
+
+Escrito para no discutirlo de nuevo mañana a la mitad:
+
+- No le pide firma al cliente, ni foto, ni ubicación. Es una herramienta para nosotros, no
+  un control sobre el repartidor; el día que parezca un control, deja de usarse.
+- No carga ventas nuevas. Cargar sigue siendo del admin.
+- No toca stock ni cámara: la cámara se ajusta por conteo físico, no por lo que diga una
+  entrega.
+- No arma rutas ni asigna clientes a repartidores.
+- No emite ni aprueba ninguna nota de crédito sola.
+- No manda nada al cliente.
+
+## El acceso del repartidor
+
+- Un usuario en la hoja `Usuarios` con rol `reparto`, dado de alta como cualquiera.
+- La sesión dura 7 días (`sessionOptions.maxAge`, ya es así), así que en la práctica se
+  loguea una vez y se olvida. Hay que verificar que el celular no borre la cookie: si lo
+  hace, hay que subir ese plazo **solo para este rol**, no para todos.
+- Se accede por el navegador del celular, agregando `xavia-self.vercel.app/reparto` a la
+  pantalla de inicio. No hay app que instalar ni nada que mantener.
+- Si el celular es prestado o compartido, el usuario sigue siendo el de quien se logueó: por
+  eso `validado_por` se guarda, pero se lee como "quién estaba logueado", no como una prueba.
+
+## Offline, concreto
+
+Lo que está en la calle es la confirmación, y es poca cosa: un objeto por cliente.
+
+- Al confirmar, se guarda primero en el celular (`localStorage`) y se intenta mandar.
+- Si falla, la tarjeta queda con un reloj ámbar: **"guardado en el celular, falta subirlo"**.
+  Nunca se dice "listo" por algo que no se guardó: ese es el único bug acá que haría perder
+  datos de verdad.
+- Reintenta al reconectar y al volver a abrir la pantalla.
+- Arriba, un contador: "2 sin subir". Si al final del día queda algo, se ve.
+- Si dos personas confirman el mismo cliente al mismo tiempo, gana la última y la fila es
+  una sola (la clave es fecha + cliente + sucursal, no la hora): la escritura busca la fila
+  existente antes de agregar, igual que hace `guardar` con las ventas.
+
+## La franja en Facturación e Historial
+
+Un solo bloque, arriba de la tabla, y solo si hay algo:
+
+> **2 entregas de hoy esperando que el reparto confirme** — Mamina (Newbery) · Heroica
+> (Güemes)
+
+En la etapa 1 es informativa y no tiene botón: las facturas ya salieron. En la etapa 2 suma
+"Facturar igual". En las filas ya confirmadas con diferencia, la cantidad entregada y al
+lado en gris la cargada. Nada más: ni columnas nuevas, ni filtros, ni pestañas.
+
+## Dos cosas que hay que decir de entrada
+
+1. **Al principio las notas de crédito pueden AUMENTAR.** Hoy hay diferencias que no
+   terminan en NC porque nadie se entera: el cliente paga más de lo que recibió. Cuando el
+   reparto empiece a confirmar, esas aparecen. No es que el sistema empeoró las cosas: es
+   que se ven. Después bajan a cero con la etapa 2.
+2. **Entregar de más también aparece**, y eso es plata que hoy se regala. Es la mitad del
+   valor de esto y no estaba en la conversación original.
+
+## Antes de dárselo al repartidor
+
+Una semana usándolo vos o Juan Pablo al volver el camión, con lo que el repartidor cuente
+por teléfono. Sirve para dos cosas: ver si el mail dice algo útil, y llegar con la pantalla
+ya probada el día que se la mostrás a él — explicarle una herramienta que todavía falla es
+la forma más rápida de que no la use más.
+
+Y una alerta de salud: si pasan 5 días hábiles sin una sola confirmación, que avise. Si no,
+esto se apaga en silencio y nos enteramos en tres meses.
+
+## Qué se le dice al repartidor
+
+Un párrafo, no un instructivo:
+
+> Antes de arrancar, abrí esto en el celular. Tenés la lista de los clientes del día con lo
+> que te cargamos. Si dejás lo mismo, tocás *Confirmar* y listo. Si dejaste menos o más,
+> corregís el número y confirmás. Lo que anotes ahí es lo que se le factura al cliente, así
+> que es la forma de que no te llamen después por algo que no dejaste. Aprovechá y cargá los
+> cajones que te devuelven.
+
 ## Orden de ejecución sugerido
 
 Los pasos 1 a 5 son la **etapa 1** y no cambian nada de lo que pasa hoy con las facturas.
