@@ -28,7 +28,42 @@ hecho hoy está invertido también en el remito, que se genera *desde* la factur
   fuerte del diseño: son pantallas que ya se usan todos los días y que acaban de recibir el
   freno de duplicados y el acuse.
 
+## Las dos etapas — y por qué la primera NO frena ninguna factura
+
+Corrección de Marcos (27-nov, después del primer boceto): *"si el repartidor empieza no
+usándolo, que no me genere problema; que mientras aprendo a usarlo las facturas se sigan
+emitiendo solas"*. El diseño original tenía el default al revés: la factura esperaba la
+validación, así que el primer día que el repartidor no abriera la pantalla, **todas** las
+facturas se atrasaban 24 h. Es un costo de iniciación alto y un problema con el cliente,
+por una herramienta que todavía nadie sabe usar.
+
+### Etapa 1 — la pantalla avisa, no bloquea (así se lanza)
+
+Todo sigue **exactamente** como hoy: la venta se carga y la factura sale en ese momento.
+La pantalla del repartidor existe, y lo que confirma no frena nada: genera la diferencia,
+el mail a Juan Pablo, el movimiento de cajones y **la nota de crédito ya armada, lista para
+aprobar** (que hoy se hace entera a mano).
+
+- Si el repartidor no la usa: no pasa nada, cero cambio respecto de hoy.
+- Si la usa a medias: esos clientes tienen la NC lista en vez de hecha a mano.
+- El valor aparece desde el primer día sin depender de que la adopción sea completa.
+
+Es además la única forma honesta de saber si la idea sirve: en unas semanas el mail de
+diferencias dice **cuánto** se está corrigiendo y **en qué clientes**, con datos y no con
+impresiones.
+
+### Etapa 2 — la factura espera la validación (cliente por cliente)
+
+Cuando el reparto ya lo usa todos los días, se da vuelta con una marca por cliente
+(`espera_validacion` en Clientes). Se empieza por **dos o tres**, los que más NC generan, no
+por todos. Ahí recién desaparecen las notas de crédito.
+
+Mientras un cliente no tenga la marca, se comporta como la etapa 1. La marca es el único
+interruptor y se vuelve atrás en un minuto.
+
 ## Cuándo sale la factura a Xubio
+
+**Todo esto es de la etapa 2.** En la etapa 1 la factura sale al cargar, como hoy.
 
 **En el momento en que el repartidor confirma el cliente.** No se juntan, no hay cola nueva,
 no hay una hora fija a la que "sale todo".
@@ -141,10 +176,18 @@ Lo mínimo:
 
 ## Orden de ejecución sugerido
 
+Los pasos 1 a 5 son la **etapa 1** y no cambian nada de lo que pasa hoy con las facturas.
+
 1. Hoja `Entregas` + `lib/entregas.ts` (funciones puras: armar el día, comparar pedido vs
    entregado, calcular diferencias). Tests de la comparación.
 2. Rol `reparto` en `lib/auth.ts` / `types.ts` y el filtro de navegación.
-3. Pantalla `/reparto` (las tres vistas) + API de confirmar, que guarda y emite ese cliente.
-4. Franja en Facturación e Historial.
-5. Cron de barrido al mediodía + mail de diferencias.
-6. Ajustar las alertas de "sin facturar" y el freno de duplicados.
+3. Pantalla `/reparto` (las tres vistas) + API de confirmar, que guarda la entrega. **No
+   emite ni frena nada.**
+4. Mail de diferencias a Juan Pablo + la NC pre-armada lista para aprobar.
+5. Franja en Facturación e Historial (solo informativa).
+
+Y después, con semanas de datos encima:
+
+6. Marca `espera_validacion` por cliente, emisión al confirmar y cron de barrido al mediodía.
+7. Ajustar las alertas de "sin facturar" y el freno de duplicados para el estado nuevo —
+   recién hace falta acá, porque antes no existe ninguna venta esperando validación.
