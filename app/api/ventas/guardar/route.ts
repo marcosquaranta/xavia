@@ -33,7 +33,10 @@ export async function POST(req: NextRequest) {
     // no cierra nada: la pantalla es una cortina, la API es la puerta.
   if (user.rol !== 'admin') return NextResponse.json({ error: 'Solo un administrador puede ver o cambiar esto.' }, { status: 403 });
   try {
-    const { fecha, lineas, id_exportacion, importeManual, sinXubio} = await req.json();
+    // `segundaEntrega`: claves "idControl||sucursal" que el que carga ya vio advertidas y
+    // confirmó a mano (ver más abajo, “Una venta nueva sobre un día ya facturado”).
+    const { fecha, lineas, id_exportacion, importeManual, sinXubio, segundaEntrega } = await req.json();
+    const autorizadas = new Set<string>(Array.isArray(segundaEntrega) ? segundaEntrega.map(String) : []);
     // Con ids únicos garantizados: si quedaron repetidos de antes, se corrigen acá.
     const ventas = await leerVentasConIdsUnicos();
     const fechaCarga = new Date().toISOString().split('T')[0];
@@ -43,6 +46,18 @@ export async function POST(req: NextRequest) {
 
     const toUpdate: Array<{ keyValue: string; fila?: number; updates: Record<string, any> }> = [];
     const nuevas: Record<string, any>[] = [];
+    // ── Una venta nueva sobre un día ya facturado ────────────────────────────
+    //
+    // Acá nació la duplicación del 26-nov-2026. Guardar busca la fila de ese cliente ENTRE
+    // LAS NO EXPORTADAS: si la venta del día ya salió facturada, no la encuentra y crea una
+    // fila nueva en borrador. Después esa fila se factura de cero y el cliente termina con
+    // dos comprobantes del mismo día.
+    //
+    // Que a veces sea legítimo —una segunda entrega de verdad— es justamente por qué esto
+    // no se puede resolver solo: el dato que falta no está en la planilla, está en la cabeza
+    // del que carga. Entonces se pregunta: no se guarda nada, se devuelve qué pasó, y si
+    // confirma que es otra entrega se vuelve a mandar con la clave autorizada.
+    const sobreFacturado: { id_control: string; sucursal: string; cliente: string; comprobantes: string[]; clave: string }[] = [];
 
     for (const l of lineas) {
       // Si la línea trae id_venta (edición puntual desde el historial de facturación),
@@ -95,6 +110,30 @@ export async function POST(req: NextRequest) {
           }
         }
       } else {
+        // ¿Ya salió facturada la venta de este cliente, esta sucursal y este día? Si sí, la
+        // fila nueva es, casi siempre, la misma venta cargada de nuevo.
+        const yaFacturadas = !l.id_venta && !id_exportacion
+          ? ventas.filter((v) =>
+              soloDia(v.fecha) === fecha &&
+              String(v.id_control) === String(l.id_control) &&
+              String(v.sucursal || '') === String(l.sucursal || '') &&
+              String(v.exportado || '').trim() && String(v.exportado || '').trim() !== 'PENDIENTE')
+          : [];
+        const claveSeg = `${String(l.id_control)}||${String(l.sucursal || '')}`;
+        if (yaFacturadas.length && !autorizadas.has(claveSeg)) {
+          const tieneAlgoLinea = [...clavesUnidad, 'bandeja_rucula', 'lechuga_kg', ...KG]
+            .some((k) => (l as any)[k] !== undefined && Number((l as any)[k]) > 0);
+          if (tieneAlgoLinea) {
+            sobreFacturado.push({
+              id_control: String(l.id_control),
+              sucursal: String(l.sucursal || ''),
+              cliente: String(l.nombre_cliente || l.id_control),
+              comprobantes: [...new Set(yaFacturadas.map((v) => String(v.exportado).trim()))].sort(),
+              clave: claveSeg,
+            });
+            continue;
+          }
+        }
         const fila = {
           id_venta: nuevoIdVenta(), fecha,
           id_control: l.id_control, nombre_cliente: l.nombre_cliente, sucursal: l.sucursal,
@@ -108,6 +147,19 @@ export async function POST(req: NextRequest) {
         const tieneAlgo = [...clavesUnidad, 'bandeja_rucula', 'lechuga_kg', ...KG].some((k) => Number((fila as any)[k]) > 0);
         if (tieneAlgo) nuevas.push(fila);
       }
+    }
+
+    // No se guarda NADA mientras haya una carga sobre un día ya facturado sin confirmar.
+    // A medias sería lo peor de los dos mundos: parte de la venta guardada y la advertencia
+    // igual en pantalla, sin saber qué quedó y qué no.
+    if (sobreFacturado.length) {
+      return NextResponse.json({
+        error: 'No se guardó nada: a estos clientes ya se les facturó esta fecha.\n'
+          + sobreFacturado.map((x) => `• ${x.cliente}${x.sucursal ? ` (${x.sucursal})` : ''} — ya salió ${x.comprobantes.join(', ')}`).join('\n')
+          + '\nSi es la MISMA venta que se está cargando de nuevo, no la guardes: se va a facturar dos veces. '
+          + 'Si de verdad hubo una segunda entrega ese día, confirmalo y se guarda aparte.',
+        sobreFacturado,
+      }, { status: 409 });
     }
 
     if (nuevas.length) await appendRowsObj('Ventas', nuevas);

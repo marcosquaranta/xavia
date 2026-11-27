@@ -16,6 +16,9 @@ import AlertasVentas from './AlertasVentas';
 import { saldoPorCliente, alertasCajones, type AlertaCajon } from '@/lib/cajones';
 import { clientesSinPedir, DIAS_AVISO, DIAS_DESCARTE, type ClienteSinPedir } from '@/lib/clientesSinPedir';
 import { ventasSinFacturar, DIAS_MAX_ALERTA, type PendienteSinFacturar } from '@/lib/alertasVentas';
+import { ventasRepetidas, facturasRepetidas, type VentaRepetida, type FacturaRepetida } from '@/lib/duplicadosVenta';
+import { clavesDeVenta } from '@/lib/clavesVenta';
+import { leerComprobantesCache } from '@/lib/xubioCache';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
 import type { CajonMovimiento } from '@/lib/types';
 export const dynamic = 'force-dynamic';
@@ -117,6 +120,8 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
   // silencioso se lee como que no hay nada más.
   let sinFacturarViejas = 0;
   let alertaSinPedir: ClienteSinPedir[] = [];
+  let alertaRepetidas: VentaRepetida[] = [];
+  let alertaFacturasDobles: FacturaRepetida[] = [];
   try {
     alertaCajonesVentas = alertasCajones(saldoPorCliente(movimientosCajones, clientes), 7);
     // La alerta muestra lo de la última semana. Lo más viejo sigue entero en el
@@ -128,6 +133,25 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
     // semana\", es un cliente que no compra más, y mezclarlos hace que la lista no se mire.
     alertaSinPedir = clientesSinPedir(ventas, clientes, hoyISO)
       .filter((c) => c.dias > DIAS_AVISO && c.dias <= DIAS_DESCARTE);
+
+    // ── Ventas y facturas repetidas ─────────────────────────────────────
+    //
+    // Sin mínimo de días: la carga repetida de HOY es la única que todavía se arregla
+    // borrando una fila. Se recorta a los últimos 30 días porque más atrás ya no es una
+    // tarea de esta pantalla — y una lista que crece para siempre se deja de mirar.
+    const claves = await clavesDeVenta().catch(() => [] as string[]);
+    const desdeDup = new Date(Date.parse(`${hoyISO}T12:00:00Z`) - 30 * 86400000).toISOString().slice(0, 10);
+    alertaRepetidas = ventasRepetidas(ventas, clientes, claves).filter((r) => r.fecha >= desdeDup);
+
+    // ── Por qué del caché y no de Xubio directo ──────────────────────────────────
+    //
+    // Esta es la pantalla de carga del día: no puede esperar 30 días de comprobantes de
+    // Xubio para pintar una alerta. El caché es un snapshot, así que una factura doble
+    // emitida hace un rato puede tardar en aparecer acá — y está bien, porque ese caso lo
+    // cubren los otros dos controles, que sí son en vivo: el freno al emitir y el acuse
+    // que sale al terminar la carga. Esta alerta es la vigilancia de lo que ya pasó.
+    const comps = await leerComprobantesCache(desdeDup, hoyISO).catch(() => [] as any[]);
+    alertaFacturasDobles = facturasRepetidas(comps);
   } catch {
     // Una alerta que no se puede calcular no puede tirar abajo la pantalla de carga: cargar
     // la venta del día es para lo que se entra acá.
@@ -164,7 +188,14 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
             </Link>
           </div>
         </div>
-        <AlertasVentas cajones={alertaCajonesVentas} sinFacturar={alertaSinFacturar} sinFacturarViejas={sinFacturarViejas} sinPedir={alertaSinPedir} />
+        <AlertasVentas
+          cajones={alertaCajonesVentas}
+          sinFacturar={alertaSinFacturar}
+          sinFacturarViejas={sinFacturarViejas}
+          sinPedir={alertaSinPedir}
+          repetidas={alertaRepetidas}
+          facturasDobles={alertaFacturasDobles}
+        />
         <VentasEvolucionCharts articulo={evolArticulo} clienteSemanal={evolClienteSemanal} clienteMensual={evolClienteMensual} precio={evolPrecio} resumenMes={resumenMes} clientesPrecioVolumen={clientesPrecioVolumen} ultimaSuba={ultimaSuba} ensaladas={evolEnsaladas} tiposEnsalada={tiposEnsaladaVentas} />
         <div className="card">
           <VentasManager articulosExtra={articulosExtra} clientes={clientes.filter(c=>c.activo==='SI')} precios={precios} frecuencias={frecuencias} stats={calcStats(ventas)} pedidosFijos={pedidosFijos.filter(p=>p.activo==='SI')} initialFecha={searchParams.fecha} />

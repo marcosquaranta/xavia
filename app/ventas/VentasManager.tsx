@@ -167,6 +167,21 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
   const [loading,setLoading]=useState(false);
   const [exp,setExp]=useState(false);
   const [msg,setMsg]=useState<{t:'ok'|'err';s:string}|null>(null);
+  // ── Cargar sobre un día ya facturado ────────────────────────────────
+  //
+  // El servidor no guarda una venta nueva de un cliente al que ya se le facturó esa fecha:
+  // ahí nació la duplicación del 26-nov-2026 (ver /api/ventas/guardar). Contesta 409 con el
+  // detalle, y acá se pregunta.
+  //
+  // El guardado de esta pantalla es automático al salir de la celda, así que un 409 sin
+  // esto dejaba la celda en rojo y nada más: el peor resultado posible — la advertencia más
+  // importante de la pantalla, convertida en un borde de color.
+  const [avisoSegunda,setAvisoSegunda]=useState<{
+    clave:string; cliente:string; sucursal:string; comprobantes:string[]; reintentar:()=>void;
+  }|null>(null);
+  // Las que ya se confirmaron en esta sesión: no se vuelve a preguntar por cada celda del
+  // mismo cliente. Es una ref y no estado porque la lee `save` en el mismo tick del click.
+  const segundasOk=useRef<Set<string>>(new Set());
   // El acuse de la última carga. Se muestra como pantalla completa: confirma lo que Xubio
   // tiene de verdad, no solo que el pedido salió.
   const [acuse,setAcuse]=useState<Acuse|null>(null);
@@ -397,7 +412,17 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
     if(q(f.id_control,f.sucursal,k)==='')return;
     se(f.id_control,f.sucursal,k,'saving');
     try{
-      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_ENVIO.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0]))}]})});
+      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,segundaEntrega:[...segundasOk.current],lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...Object.fromEntries(KEYS_ENVIO.map(k=>[k,Number(q(f.id_control,f.sucursal,k))||0]))}]})});
+      if(r.status===409){
+        const j=await r.json().catch(()=>({} as any));
+        const d=(j as any)?.sobreFacturado?.[0];
+        if(d){
+          se(f.id_control,f.sucursal,k,'idle');
+          setAvisoSegunda({clave:d.clave,cliente:d.cliente,sucursal:d.sucursal,comprobantes:d.comprobantes||[],
+            reintentar:()=>{segundasOk.current.add(d.clave);setAvisoSegunda(null);save(f,k);}});
+          return;
+        }
+      }
       if(!r.ok)throw new Error();
       se(f.id_control,f.sucursal,k,'saved');setTimeout(()=>se(f.id_control,f.sucursal,k,'idle'),2000);
       cargarVentasSemana();
@@ -423,7 +448,17 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
     const lkgR=kgDeCajones('lechuga_kg_roble',cj.lechuga_kg_roble);
     KGK_ALL.forEach(k=>seKg(f.id_control,f.sucursal,k,'saving'));
     try{
-      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...vacio(0),rucula_kg:rkg,lechuga_kg_crespa:lkgC,lechuga_kg_roble:lkgR}]})});
+      const r=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,segundaEntrega:[...segundasOk.current],lineas:[{id_control:f.id_control,nombre_cliente:f.nombre_cliente,sucursal:f.sucursal,...vacio(0),rucula_kg:rkg,lechuga_kg_crespa:lkgC,lechuga_kg_roble:lkgR}]})});
+      if(r.status===409){
+        const j=await r.json().catch(()=>({} as any));
+        const d=(j as any)?.sobreFacturado?.[0];
+        if(d){
+          KGK_ALL.forEach(kk=>seKg(f.id_control,f.sucursal,kk,'idle'));
+          setAvisoSegunda({clave:d.clave,cliente:d.cliente,sucursal:d.sucursal,comprobantes:d.comprobantes||[],
+            reintentar:()=>{segundasOk.current.add(d.clave);setAvisoSegunda(null);saveKg(f);}});
+          return;
+        }
+      }
       if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error((j as any).error||'Error');};
       KGK_ALL.forEach(k=>{seKg(f.id_control,f.sucursal,k,'saved');setTimeout(()=>seKg(f.id_control,f.sucursal,k,'idle'),2000);});
       cargarVentasSemana();
@@ -1109,6 +1144,34 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       )}
 
       {msg&&<div style={{padding:'9px 14px',borderRadius:'7px',marginBottom:'10px',fontSize:'12px',whiteSpace:'pre-line',background:msg.t==='ok'?'#f0fdf4':'#fef2f2',border:`1px solid ${msg.t==='ok'?'#86efac':'#fca5a5'}`,color:msg.t==='ok'?'#166534':'#dc2626'}}>{msg.s}</div>}
+
+      {/* ── A este cliente ya se le facturó esta fecha ──────────────────────────────
+          No se guardó nada. Son dos cosas distintas y solo quien cargó sabe cuál es:
+          la misma venta cargada de nuevo (y entonces NO hay que guardarla, porque se
+          factura dos veces) o una segunda entrega real. Por eso se pregunta en vez de
+          decidir, y el camino que no hace nada es el que está primero. */}
+      {avisoSegunda&&(
+        <div style={{padding:'12px 14px',borderRadius:'8px',marginBottom:'10px',background:'#fffbeb',border:'2px solid #d97706'}}>
+          <p style={{margin:0,fontSize:'14px',fontWeight:800,color:'#92400e'}}>
+            ⚠ A {avisoSegunda.cliente}{avisoSegunda.sucursal?` (${avisoSegunda.sucursal})`:''} ya se le facturó el {fecha}
+          </p>
+          <p style={{margin:'5px 0 0',fontSize:'12.5px',color:'#92400e',lineHeight:1.55}}>
+            Ya salió <strong>{avisoSegunda.comprobantes.join(', ')||'un comprobante'}</strong> de esa fecha.
+            {' '}<strong>No se guardó nada todavía.</strong> Si estás cargando de nuevo la misma venta,
+            no la guardes: se le va a facturar dos veces y después hay que anularla con una nota de crédito.
+          </p>
+          <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginTop:'10px'}}>
+            <button onClick={()=>setAvisoSegunda(null)}
+              style={{padding:'7px 14px',fontSize:'12.5px',fontWeight:700,background:'#92400e',color:'#fff',border:'none',borderRadius:'6px',cursor:'pointer'}}>
+              No guardar
+            </button>
+            <button onClick={avisoSegunda.reintentar}
+              style={{padding:'7px 14px',fontSize:'12.5px',fontWeight:700,background:'#fff',color:'#92400e',border:'1.5px solid #d97706',borderRadius:'6px',cursor:'pointer'}}>
+              Es una segunda entrega — guardar aparte
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Ya facturado hoy — para no volver a cargarlo por duplicado */}
       {(()=>{

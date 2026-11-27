@@ -13,6 +13,9 @@ import { deudaProveedores } from '@/lib/proveedores';
 import { destinatariosDe } from '@/lib/avisosConfig';
 import { AREAS, porArea, htmlDeArea, tocaHoy, nombreDia, type AlertaArea } from '@/lib/areasAlertas';
 import { fechaArgentinaHoy, ocupacionPorMesada } from '@/lib/ocupacion';
+import { ventasRepetidas, facturasRepetidas, queHacerConLaRepetida } from '@/lib/duplicadosVenta';
+import { clavesDeVenta } from '@/lib/clavesVenta';
+import { leerComprobantesCache } from '@/lib/xubioCache';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -163,6 +166,43 @@ export async function GET(req: NextRequest) {
       const { sinImputar } = comprometidasDeBandeja(bandeja, hoyISO, claveComprobante);
       for (const a of alertasCobrosComprometidos(sinImputar)) {
         todas.push({ area: 'plata', tipo: a.tipo, msg: a.msg, href: a.href || '/cobranzas' });
+      }
+    } catch { /* idem */ }
+
+    // ── Plata: ventas y facturas duplicadas ──────────────────────────────
+    //
+    // El 26-nov-2026 se duplicó la facturación de un día entero y la app no avisó nada: se
+    // enteró Marcos mirando. Que esté en la pantalla de Ventas no alcanza — hay que entrar
+    // a verla, y el que entra a cargar la venta del día no es necesariamente el que tiene
+    // que emitir la nota de crédito.
+    //
+    // Va a 'plata' y no a 'ventas' porque lo que abre es un comprobante en AFIP y una deuda
+    // mal puesta al cliente, no una tarea de venta. Y como error, no como aviso: son las dos
+    // únicas alertas de este mail donde esperar un día cambia lo que se puede hacer.
+    try {
+      const claves = await clavesDeVenta().catch(() => [] as string[]);
+      const desdeDup = new Date(Date.parse(`${hoyISO}T12:00:00Z`) - 30 * 86400000).toISOString().slice(0, 10);
+
+      for (const r of ventasRepetidas(ventas, clientes, claves).filter((x) => x.fecha >= desdeDup)) {
+        todas.push({
+          area: 'plata',
+          // La que todavía no se facturó es la única que se arregla gratis, y por eso es la
+          // urgente: mañana ya es un comprobante.
+          tipo: 'error',
+          msg: `${r.cliente}${r.sucursal ? ` (${r.sucursal})` : ''} · ${r.fecha}: venta cargada dos veces — ${queHacerConLaRepetida(r)}`,
+          href: '/ventas/historial',
+        });
+      }
+
+      const comps = await leerComprobantesCache(desdeDup, hoyISO).catch(() => [] as any[]);
+      for (const f of facturasRepetidas(comps)) {
+        todas.push({
+          area: 'plata',
+          tipo: 'error',
+          msg: `${f.cliente} · ${f.fecha}: dos facturas por $${f.importe.toLocaleString('es-AR')} `
+            + `(${f.numeros.join(' y ')}). Si una está de más hay que anularla con una nota de crédito.`,
+          href: '/ventas/historial',
+        });
       }
     } catch { /* idem */ }
 
