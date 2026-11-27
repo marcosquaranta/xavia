@@ -1,4 +1,5 @@
 import { PRODUCTO_XUBIO } from './articulos';
+import { claveComprobante } from './comprobantes';
 // Cliente de la API de Xubio (https://xubio.com/API/1.1/)
 // OAuth2 client-credentials. Token válido 1h, cacheado a nivel de módulo.
 
@@ -700,15 +701,68 @@ export async function emitirFactura(args: { clienteId: number; esA: boolean; fec
 // NC en un crédito es el tipo, no el signo. Los importes vuelven en negativo al leerla, que es
 // como la app ya los interpreta en los saldos.
 //
-// SOBRE EL COMPROBANTE ASOCIADO: las notas que ya existen no exponen ningún campo que lo
-// referencie —se compararon sus claves contra las de las facturas y no hay ninguna de más—,
-// así que por API no hay dónde declararlo. Lo que sí se puede es escribirlo en `descripcion`,
-// que en las notas existentes viene vacío: no reemplaza la asociación formal, pero deja el
-// número de la factura en el comprobante en vez de dejarlo en ningún lado.
+// ── EL COMPROBANTE ASOCIADO ─────────────────────────────────────────
+//
+// Esto antes decía que por API no se podía declarar, porque al LEER las notas ya emitidas
+// no aparece ningún campo que referencie la factura. Era una conclusión sacada de la
+// respuesta del GET, y estaba mal: el bean de escritura tiene más campos que los que la
+// lectura devuelve.
+//
+// El campo es `comprobanteAsociado` de ComprobanteVentaBean, y es el `transaccionid` de la
+// factura original — no su número. Está en la especificación de Xubio
+// (https://xubio.com/API/1.1/swagger.json, nov-2026), junto con el endpoint
+// /comprobantesAsociados, que devuelve justamente las facturas de un cliente con el id que
+// hay que mandar acá.
+//
+// Sin esto ARCA no deja presentar la nota: exige el comprobante al que corrige. Por eso
+// ahora se resuelve el id ANTES de emitir, y si no se encuentra la nota sale igual pero
+// avisando (`sinAsociar`), porque una NC emitida sin asociar se arregla en Xubio y una
+// venta que no se pudo acreditar, no.
+//
+// El número sigue yendo también en `descripcion`: la asociación formal es un id que no se
+// ve, y el que mira el comprobante necesita leer de qué factura es.
+// Las facturas de un cliente que Xubio ofrece para asociar, con el id que hay que mandar
+// como `comprobanteAsociado`. tipoComprobante: 1 = factura, 3 = nota de crédito.
+export interface ComprobanteAsociable { idComprobante: number; numeroComprobante: string; tipoComprobante: number }
+export async function comprobantesAsociables(clienteId: number, tipoComprobante = 1): Promise<ComprobanteAsociable[]> {
+  const r = await xubioGet<any>(`comprobantesAsociados?clienteId=${clienteId}&tipoComprobante=${tipoComprobante}`);
+  // La especificación declara un objeto y el endpoint devuelve una lista. Se aceptan las
+  // dos formas: si alguna vez cambia, no queremos que el campo deje de viajar en silencio.
+  const arr = Array.isArray(r) ? r : r ? [r] : [];
+  return arr
+    .map((c: any) => ({
+      idComprobante: Number(c?.idComprobante) || 0,
+      numeroComprobante: String(c?.numeroComprobante || '').trim(),
+      tipoComprobante: Number(c?.tipoComprobante) || 0,
+    }))
+    .filter((c: ComprobanteAsociable) => c.idComprobante > 0);
+}
+
+// El transaccionid de una factura, buscado por su número. La comparación es por clave y no
+// literal: "A-00002-00000878" y "A 2-878" son el mismo comprobante (ver comprobantes.ts).
+export async function idDeFacturaParaAsociar(clienteId: number, numeroFactura: string): Promise<number | null> {
+  const clave = claveComprobante(numeroFactura);
+  if (!clave) return null;
+  const lista = await comprobantesAsociables(clienteId, 1).catch((e) => {
+    console.error('[xubio] no se pudieron leer los comprobantes asociables:', e);
+    return [] as ComprobanteAsociable[];
+  });
+  const f = lista.find((c) => claveComprobante(c.numeroComprobante) === clave);
+  return f ? f.idComprobante : null;
+}
+
 export async function emitirNotaCredito(args: {
   clienteId: number; esA: boolean; fecha: string; items: FacturaItem[]; facturaOriginal: string;
-}): Promise<{ ok: boolean; numeroDocumento?: string; cae?: string; transaccionid?: number; error?: string }> {
-  const body = {
+  // El transaccionid de la factura original. Si no viene, se busca por número.
+  facturaId?: number;
+}): Promise<{ ok: boolean; numeroDocumento?: string; cae?: string; transaccionid?: number; error?: string; sinAsociar?: boolean }> {
+  const facturaId = args.facturaId && args.facturaId > 0
+    ? args.facturaId
+    : await idDeFacturaParaAsociar(args.clienteId, args.facturaOriginal);
+  if (!facturaId) {
+    console.error(`[xubio] NC de ${args.facturaOriginal}: no se encontró la factura en Xubio para asociarla`);
+  }
+  const body: Record<string, any> = {
     tipo: 3,
     cliente: { ID: args.clienteId },
     fecha: args.fecha,
@@ -716,6 +770,9 @@ export async function emitirNotaCredito(args: {
     puntoVenta: { ID: args.esA ? PV_ID_A : PV_ID_B },
     condicionDePago: 1,
     deposito: { codigo: 'DEPOSITO_UNIVERSAL' },
+    // La asociación formal, la que ARCA exige. Solo se manda si se encontró: un campo con
+    // 0 o null es peor que no mandarlo — Xubio podría rechazar la nota entera.
+    ...(facturaId ? { comprobanteAsociado: facturaId } : {}),
     descripcion: `NC por la factura ${args.facturaOriginal}`,
     transaccionProductoItems: args.items.map((it) => ({
       producto: { nombre: it.codigo },
@@ -737,6 +794,9 @@ export async function emitirNotaCredito(args: {
     numeroDocumento: res.data?.numeroDocumento,
     cae: res.data?.cae || res.data?.CAE,
     transaccionid: res.data?.transaccionid,
+    // Se emitió pero sin la asociación formal: hay que vincularla a mano en Xubio antes de
+    // presentarla. Decirlo es la diferencia entre arreglarlo hoy y descubrirlo en ARCA.
+    sinAsociar: !facturaId,
   };
 }
 

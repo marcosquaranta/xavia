@@ -73,6 +73,10 @@ export interface ResultadoNC {
   cae?: string;
   importe?: number;
   error?: string;
+  // La NC se emitió pero no se pudo asociar a la factura original en Xubio. No es un error
+  // —el comprobante existe y la deuda bajó— pero ARCA no la deja presentar así: hay que
+  // entrar a la nota en Xubio y elegir la factura a mano.
+  sinAsociar?: boolean;
 }
 
 export async function emitirNCDeFactura(args: {
@@ -192,9 +196,10 @@ export async function emitirNCDeFactura(args: {
     importe: Math.round(importe),
     detalle: items.map((i) => `${i.cantidad} ${i.codigo}`).join(' · '),
     automatica: false,
+    sinAsociar: r.sinAsociar,
   });
 
-  return { ok: true, numeroNC: r.numeroDocumento, cae: r.cae, importe: Math.round(importe) };
+  return { ok: true, numeroNC: r.numeroDocumento, cae: r.cae, importe: Math.round(importe), sinAsociar: r.sinAsociar };
 }
 
 // ── La nota de crédito que sale sola al corregir una factura ─────────────────────────
@@ -309,6 +314,7 @@ export async function emitirNCPorCorreccion(args: {
     importe: Math.round(importe),
     detalle: items.map((i) => `${i.cantidad} ${i.codigo}`).join(' · '),
     automatica: true,
+    sinAsociar: r.sinAsociar,
     motivo: 'Se corrigieron las cantidades de la venta después de facturar',
   });
 
@@ -332,6 +338,9 @@ export async function avisarNotaCredito(d: {
   detalle: string;
   automatica: boolean;
   motivo?: string;
+  // La NC salió pero sin la asociación formal a la factura. ARCA no la deja presentar así:
+  // hay que vincularla a mano en Xubio. Es lo único de este mail que pide una acción.
+  sinAsociar?: boolean;
 }): Promise<void> {
   try {
     if (!process.env.RESEND_API_KEY) return;
@@ -349,6 +358,14 @@ export async function avisarNotaCredito(d: {
             ? 'Salió sola al corregir una venta ya facturada: la factura quedó corregida en Xubio también.'
             : 'Emitida a mano desde el historial de facturación.'}
         </p>
+        ${d.sinAsociar ? `<div style="background:#fffbeb;border:1px solid #fde68a;border-left:4px solid #d97706;border-radius:6px;padding:10px 12px;margin:0 0 14px">
+          <p style="margin:0;font-size:13px;color:#92400e;font-weight:700">Hay que vincularla a mano en Xubio</p>
+          <p style="margin:4px 0 0;font-size:12.5px;color:#92400e">
+            La nota quedó emitida pero sin el comprobante asociado: no se encontró la factura
+            ${d.numeroFactura} entre las que Xubio ofrece para asociar. ARCA no deja presentar una
+            nota de crédito sin eso — entrá a la nota en Xubio y elegí la factura.
+          </p>
+        </div>` : ''}
         <table style="border-collapse:collapse;font-size:13px">
           <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Nota de crédito</td><td style="padding:3px 0;font-family:ui-monospace,monospace"><strong>${d.numeroNC || '(sin número)'}</strong></td></tr>
           <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Sobre la factura</td><td style="padding:3px 0;font-family:ui-monospace,monospace">${d.numeroFactura}</td></tr>

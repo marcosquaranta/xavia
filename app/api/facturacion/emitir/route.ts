@@ -18,9 +18,13 @@ export async function POST(req: NextRequest) {
   try {
     let idControls: string[] | null = null;
     let pares: { id_control: string; fecha: string }[] = [];
+    // Claves que el que factura ya vio advertidas y autorizó a mano (ver
+    // lib/facturaDuplicada.ts). Llegan de un click en la pantalla, nunca de un default.
+    let permitirDuplicados: string[] = [];
     try {
       const body = await req.json();
       if (Array.isArray(body?.idControls)) idControls = body.idControls.map(String);
+      if (Array.isArray(body?.permitirDuplicados)) permitirDuplicados = body.permitirDuplicados.map(String);
       if (Array.isArray(body?.pares)) {
         pares = body.pares
           .map((p: any) => ({ id_control: String(p?.id_control || ''), fecha: String(p?.fecha || '') }))
@@ -28,7 +32,7 @@ export async function POST(req: NextRequest) {
       }
     } catch {}
 
-    const { emitidas, errores } = await emitirPendientes(idControls, { pares });
+    const { emitidas, errores } = await emitirPendientes(idControls, { pares, permitirDuplicados });
     if (!emitidas.length && !errores.length) {
       return NextResponse.json({ error: 'No hay ventas seleccionadas para facturar' }, { status: 400 });
     }

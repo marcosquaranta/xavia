@@ -22,6 +22,7 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
   const [quitando, setQuitando] = useState<string | null>(null);
 
   const [emitiendoUna, setEmitiendoUna] = useState<string | null>(null);
+  const [forzando, setForzando] = useState<string | null>(null);
   const [informe, setInforme] = useState<string | null>(null);
   // Renglon que se esta corrigiendo (id_venta + producto) y el valor tipeado.
   const [editando, setEditando] = useState<string | null>(null);
@@ -139,11 +140,11 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
   }
 
   // Emite exactamente los días elegidos: una factura por cada uno.
-  async function emitirPares(pares: { id_control: string; fecha: string }[]) {
+  async function emitirPares(pares: { id_control: string; fecha: string }[], permitirDuplicados: string[] = []) {
     setErr(null); setResult(null);
     const r = await fetch('/api/facturacion/emitir', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pares }),
+      body: JSON.stringify({ pares, permitirDuplicados }),
     });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || 'Error');
@@ -162,6 +163,32 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
     finally { setEmitiendoUna(null); }
   }
 
+  // ── Pasar la advertencia de duplicado ──────────────────────────────────
+  //
+  // Autoriza UNA clave, la de este comprobante y no la del lote: si hay tres frenados y
+  // dos son el duplicado de verdad, forzar uno no puede largar los otros dos.
+  async function emitirIgual(e: any) {
+    if (!e?.clave) return;
+    const partes = String(e.clave).split('||');
+    const idControl = partes[0];
+    const fecha = partes[2] || e.fechaVenta;
+    // `window.confirm` y no `confirm`: en este archivo `confirm` es el estado del cuadro de
+    // confirmación de la facturación masiva, y pisa al del navegador.
+    if (!window.confirm(
+      `Se va a emitir OTRA factura de ${e.cliente}, del mismo día y por el mismo importe que `
+      + `${e.duplicado?.numero || 'una que ya existe'}.\n\n`
+      + `Una factura de más en AFIP no se borra: se compensa con una nota de crédito.\n\n`
+      + `¿Emitir igual?`,
+    )) return;
+    setForzando(e.clave);
+    try {
+      const j = await emitirPares([{ id_control: idControl, fecha }], [String(e.clave)]);
+      setResult({ emitidas: j.emitidas || [], errores: j.errores || [] });
+      router.refresh();
+    } catch (err: any) { setErr(err.message); }
+    finally { setForzando(null); }
+  }
+
   async function facturar() {
     setLoading(true); setErr(null); setResult(null);
     try {
@@ -178,6 +205,8 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
     const nErr = result.errores.length;
     const ajustadas = result.emitidas.filter((e: any) => e.fechaAjustada);
     const otraLetra = result.emitidas.filter((e: any) => e.letraInesperada);
+    const nDup = result.errores.filter((e: any) => e.duplicado).length;
+    const soloDuplicados = nErr > 0 && nDup === nErr;
 
     // Lo que hay que poder verificar de un vistazo: qué producto, cuánto y a qué sucursal.
     // El número de comprobante y el importe quedan en letra chica — al que carga no le
@@ -217,19 +246,24 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
     return (
       <div>
         {/* Lo primero: salió todo o no. En rojo cuando algo falló. */}
+        {/* Un duplicado frenado es ámbar y no rojo: nada se rompió, hay algo que decidir. */}
         <div style={{
           borderRadius: '10px', padding: '14px 16px', marginBottom: '14px',
-          background: nErr > 0 ? '#fef2f2' : '#f0fdf4',
-          border: `2px solid ${nErr > 0 ? '#dc2626' : '#16a34a'}`,
+          background: nErr === 0 ? '#f0fdf4' : soloDuplicados ? '#fffbeb' : '#fef2f2',
+          border: `2px solid ${nErr === 0 ? '#16a34a' : soloDuplicados ? '#d97706' : '#dc2626'}`,
         }}>
-          <p style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: nErr > 0 ? '#991b1b' : '#166534' }}>
+          <p style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: nErr === 0 ? '#166534' : soloDuplicados ? '#92400e' : '#991b1b' }}>
             {nErr === 0
               ? `✓ Salió todo: ${nOk} ${nOk === 1 ? 'factura emitida' : 'facturas emitidas'}`
-              : `⚠ ${nErr} ${nErr === 1 ? 'factura NO se emitió' : 'facturas NO se emitieron'}${nOk > 0 ? ` · ${nOk} sí` : ''}`}
+              : soloDuplicados
+                ? `⚠ ${nDup} ${nDup === 1 ? 'factura frenada' : 'facturas frenadas'}: ya hay una igual en Xubio${nOk > 0 ? ` · ${nOk} sí salió` : ''}`
+                : `⚠ ${nErr} ${nErr === 1 ? 'factura NO se emitió' : 'facturas NO se emitieron'}${nOk > 0 ? ` · ${nOk} sí` : ''}`}
           </p>
           {nErr > 0 && (
-            <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#991b1b' }}>
-              Esa mercadería quedó sin facturar. Las ventas siguen pendientes: se pueden corregir y reintentar.
+            <p style={{ margin: '4px 0 0', fontSize: '13px', color: soloDuplicados ? '#92400e' : '#991b1b' }}>
+              {soloDuplicados
+                ? 'Nada se rompió: la app no emitió para no duplicar. La mercadería sigue pendiente. Si hay que facturarla igual, está el botón abajo.'
+                : 'Esa mercadería quedó sin facturar. Las ventas siguen pendientes: se pueden corregir y reintentar.'}
             </p>
           )}
         </div>
@@ -240,16 +274,41 @@ export default function FacturacionManager({ facturas }: { facturas: FacturaPend
             <p style={{ fontSize: '13px', fontWeight: 800, color: '#991b1b', margin: '0 0 6px' }}>
               NO se facturó
             </p>
-            {result.errores.map((e: any, i: number) => (
-              <div key={i} style={{ padding: '10px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderLeft: '4px solid #dc2626', borderRadius: '6px', marginBottom: '8px' }}>
+            {result.errores.map((e: any, i: number) => {
+              // El duplicado NO es un error: es una pregunta. Va en ámbar y con la salida
+              // adentro — un freno rojo sin botón se lee como que la app se rompió.
+              const esDup = !!e.duplicado;
+              return (
+              <div key={i} style={{
+                padding: '10px 12px',
+                background: esDup ? '#fffbeb' : '#fef2f2',
+                border: `1px solid ${esDup ? '#fde68a' : '#fecaca'}`,
+                borderLeft: `4px solid ${esDup ? '#d97706' : '#dc2626'}`,
+                borderRadius: '6px', marginBottom: '8px',
+              }}>
                 <div style={{ fontSize: '14px', fontWeight: 700, color: '#111827' }}>
+                  {esDup && <span style={{ color: '#b45309' }}>⚠ Posible duplicado — </span>}
                   {e.cliente}
                   {e.fechaVenta && <span style={{ color: '#9ca3af', fontWeight: 400, fontSize: '12px' }}> · entrega {fmtDia(e.fechaVenta)}</span>}
                 </div>
                 <Mercaderia items={e.items} />
-                <div style={{ marginTop: '6px', fontSize: '12.5px', color: '#991b1b', fontWeight: 600 }}>{e.error}</div>
+                <div style={{ marginTop: '6px', fontSize: '12.5px', color: esDup ? '#92400e' : '#991b1b', fontWeight: 600 }}>{e.error}</div>
+                {esDup && e.clave && (
+                  <button
+                    onClick={() => emitirIgual(e)}
+                    disabled={forzando === e.clave}
+                    style={{
+                      marginTop: '8px', padding: '6px 12px', fontSize: '12px', fontWeight: 700,
+                      background: '#fff', color: '#92400e', border: '1.5px solid #d97706',
+                      borderRadius: '6px', cursor: forzando === e.clave ? 'default' : 'pointer',
+                    }}
+                  >
+                    {forzando === e.clave ? 'Emitiendo…' : 'Emitir igual'}
+                  </button>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 

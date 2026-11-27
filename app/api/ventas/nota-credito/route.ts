@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
       usuario: user.email,
     });
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 });
-    return NextResponse.json({ ok: true, numeroNC: r.numeroNC, cae: r.cae, importe: r.importe });
+    return NextResponse.json({ ok: true, numeroNC: r.numeroNC, cae: r.cae, importe: r.importe, sinAsociar: r.sinAsociar });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || 'server_error' }, { status: 500 });
   }

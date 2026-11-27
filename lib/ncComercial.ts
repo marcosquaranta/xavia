@@ -164,6 +164,7 @@ export async function emitirNCPorImporte(args: {
     importe: Math.round(rep.importe),
     detalle: `${rep.porcentaje}% de la factura`,
     automatica: false,
+    sinAsociar: r.sinAsociar,
     motivo,
   });
 

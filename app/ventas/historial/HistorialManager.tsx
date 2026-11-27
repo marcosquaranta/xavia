@@ -132,7 +132,7 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'No se pudo emitir');
-      setResultadoNC({ numeroNC: j.numeroNC, cae: j.cae, importe: j.importe });
+      setResultadoNC({ numeroNC: j.numeroNC, cae: j.cae, importe: j.importe, sinAsociar: j.sinAsociar });
       setImpPrevia(null);
     } catch (e: any) { setImpErr(e?.message || 'No se pudo emitir'); }
     setEmitiendo(false);
@@ -149,7 +149,7 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
   // Cuánto acreditar de cada (fila, artículo).
   const [aAcreditar, setAAcreditar] = useState<Record<string, string>>({});
   const [emitiendo, setEmitiendo] = useState(false);
-  const [resultadoNC, setResultadoNC] = useState<{ numeroNC?: string; cae?: string; importe?: number } | null>(null);
+  const [resultadoNC, setResultadoNC] = useState<{ numeroNC?: string; cae?: string; importe?: number; sinAsociar?: boolean } | null>(null);
 
   useEffect(() => {
     fetch(`/api/ventas/fecha?id_exportacion=${idExportacion}`).then(r => r.json()).then((data: VentaDia[]) => {
@@ -265,7 +265,7 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'No se pudo emitir');
-      setResultadoNC({ numeroNC: j.numeroNC, cae: j.cae, importe: j.importe });
+      setResultadoNC({ numeroNC: j.numeroNC, cae: j.cae, importe: j.importe, sinAsociar: j.sinAsociar });
       setAAcreditar({});
       onGuardado();
     } catch (e: any) { setError(e.message); }
@@ -318,6 +318,15 @@ function EditorFacturadoDetalle({ idExportacion, idControl, fecha, camposExtra =
             Las cantidades de la venta ya quedaron corregidas y, si había una corrección interna sobre esta factura, se anuló
             para no descontar dos veces.
           </span>
+          {/* Lo único de este cuadro que pide una acción: sin el comprobante asociado, ARCA
+              no deja presentar la nota. La NC existe y la deuda ya bajó — falta vincularla. */}
+          {resultadoNC.sinAsociar && (
+            <span style={{ display: 'block', marginTop: '7px', padding: '7px 9px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '5px', color: '#92400e', fontSize: '11.5px' }}>
+              <strong>Falta vincularla a la factura en Xubio.</strong> No se encontró la factura original entre
+              las que Xubio ofrece para asociar, así que la nota salió sin el comprobante asociado y ARCA no la
+              va a dejar presentar. Entrá a la nota en Xubio y elegí la factura.
+            </span>
+          )}
         </div>
       )}
 

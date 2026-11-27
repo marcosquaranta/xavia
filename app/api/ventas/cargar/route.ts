@@ -28,7 +28,9 @@ export async function POST(req: NextRequest) {
     // `soloCliente` factura las ventas de UN cliente de esa fecha, no las del día entero.
     // Es lo que permite confirmar cliente por cliente desde la pantalla de carga, en vez de
     // dejar todo cargado y facturar al final — que es donde quedaban ventas sin facturar.
-    const { fecha, esperado, soloCliente } = await req.json();
+    // `permitirDuplicados`: claves que la pantalla ya advirtió y el que carga autorizó a
+    // mano. Solo llega con un click en "Emitir igual" (ver lib/facturaDuplicada.ts).
+    const { fecha, esperado, soloCliente, permitirDuplicados } = await req.json();
     if (!fecha) return NextResponse.json({ error: 'fecha requerida' }, { status: 400 });
 
     const ventas = await leerVentasConIdsUnicos();
@@ -130,7 +132,10 @@ export async function POST(req: NextRequest) {
       // Solo ESTE día de estos clientes. Sin los pares, también salían las ventas que
       // hubieran quedado PENDIENTE de otras fechas: facturas de días que nadie había
       // revisado en esta carga. Esas se reintentan desde Facturación, a la vista.
-      const r = await emitirPendientes(idControls, { pares: idControls.map((id) => ({ id_control: id, fecha })) });
+      const r = await emitirPendientes(idControls, {
+        pares: idControls.map((id) => ({ id_control: id, fecha })),
+        permitirDuplicados: Array.isArray(permitirDuplicados) ? permitirDuplicados.map(String) : [],
+      });
       emitidas = r.emitidas; errores = r.errores;
       if (errores.length) console.error('[ventas/cargar] errores al emitir a Xubio:', JSON.stringify(errores));
       // El aviso de CAEs pendientes ya NO sale acá: un día con tres cargas mandaba tres

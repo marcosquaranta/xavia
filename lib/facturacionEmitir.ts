@@ -4,7 +4,8 @@ import { registrarEmitidas } from './caePendientes';
 import { nombreClienteVisible } from './clientes';
 import { idsRepetidos, revisarIdentidad } from './identidadCliente';
 import type { ClienteVenta, PrecioVenta, VentaDia } from './types';
-import { getClientesXubio, matchClienteXubio, emitirFactura, ultimaFechaPorLetra, PRODUCTO_CODIGO } from './xubio';
+import { getClientesXubio, matchClienteXubio, emitirFactura, ultimaFechaPorLetra, PRODUCTO_CODIGO, getComprobantes } from './xubio';
+import { facturaYaEmitida, mensajeDuplicado } from './facturaDuplicada';
 
 // lechuga_kg queda para no perder ventas por kg cargadas antes del split crespa/roble.
 import { PROD_KEYS, LABELS_LARGOS } from './articulos';
@@ -257,6 +258,13 @@ export interface FacturaConError {
   items: ItemFacturado[];
   total: number;
   error: string;
+  // Lo que hay que mandar de vuelta para forzar la emisión de ESTE comprobante y no de
+  // otro. Es la clave del grupo (cliente + sucursal + fecha), no el cliente: un cliente
+  // puede tener dos días frenados y forzar uno no puede forzar el otro.
+  clave?: string;
+  // Cuando el freno fue el control de duplicados. La pantalla lo muestra distinto — ámbar
+  // y no rojo — porque no es un error: es una pregunta.
+  duplicado?: { numero: string; fecha: string; total: number };
 }
 
 export interface ResultadoEmision {
@@ -297,7 +305,14 @@ export interface ParFechaCliente { id_control: string; fecha: string }
 // Con `pares` se factura día por día: solo esas combinaciones cliente+fecha, y cada fecha
 // sale como su propia factura.
 export async function emitirPendientes(
-  idControls?: string[] | null, opciones: { pares?: ParFechaCliente[]; porFecha?: boolean } = {},
+  idControls?: string[] | null,
+  opciones: {
+    pares?: ParFechaCliente[];
+    porFecha?: boolean;
+    // Claves de grupo que YA fueron advertidas y se autorizaron a mano desde la pantalla
+    // (ver lib/facturaDuplicada.ts). Nunca se infieren acá: tienen que venir de un click.
+    permitirDuplicados?: string[];
+  } = {},
 ): Promise<ResultadoEmision> {
   // Una sola lectura del catálogo para toda la corrida: incluye los artículos dados de
   // alta en Admin, que antes no entraban en ningún renglón de la factura.
@@ -348,7 +363,7 @@ export async function emitirPendientes(
   // facturar_por_sucursal='SI' (misma razón social, pero pide un comprobante A XUBIO
   // SEPARADO por cada sucursal, ej. "La Esperanza"): ahí la clave de agrupación suma la
   // sucursal, así cada una sale como su propia factura en vez de mezclarse en una sola.
-  interface Grupo { idControl: string; sucursal: string | null; fecha: string | null; lineas: VentaDia[] }
+  interface Grupo { clave: string; idControl: string; sucursal: string | null; fecha: string | null; lineas: VentaDia[] }
   const grupos = new Map<string, Grupo>();
   for (const v of pendientes) {
     const cliente = clientesMap.get(v.id_control);
@@ -356,7 +371,7 @@ export async function emitirPendientes(
     const sucursal = porSucursal ? (v.sucursal || '(sin sucursal)') : null;
     const fecha = porFecha ? String(v.fecha || '').split(/[T ]/)[0] : null;
     const key = [v.id_control, sucursal ?? '', fecha ?? ''].join('||');
-    if (!grupos.has(key)) grupos.set(key, { idControl: v.id_control, sucursal, fecha, lineas: [] });
+    if (!grupos.has(key)) grupos.set(key, { clave: key, idControl: v.id_control, sucursal, fecha, lineas: [] });
     grupos.get(key)!.lineas.push(v);
   }
   // De la fecha más vieja a la más nueva: la numeración del punto de venta avanza con las
@@ -366,11 +381,33 @@ export async function emitirPendientes(
   const ordenados = [...grupos.values()].sort((a, b) =>
     String(a.lineas[0]?.fecha || '').localeCompare(String(b.lineas[0]?.fecha || '')));
 
+  // ── Lo que Xubio ya tiene ──────────────────────────────────────────
+  //
+  // Una sola lectura para todo el lote, en la ventana de fechas que tocan estas facturas.
+  // Es el único freno real contra emitir dos veces lo mismo: la marca en la hoja se
+  // escribe después de que Xubio acepta, así que dos corridas simultáneas la ven igual
+  // de vacía (ver lib/facturaDuplicada.ts).
+  //
+  // Si la consulta falla NO se frena la facturación: quedarse sin facturar por no poder
+  // leer Xubio es peor que el riesgo que esto cubre. Pero se avisa en cada factura emitida
+  // que salió sin control, para que no pase por verificada.
+  const fechasDelLote = ordenados
+    .map((g) => String(g.lineas[0]?.fecha || '').split(/[T ]/)[0])
+    .filter(Boolean)
+    .sort();
+  const desdeControl = fechasDelLote[0] || hoyAR;
+  const hastaControl = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const yaEnXubio = await getComprobantes(desdeControl, hastaControl).catch((e) => {
+    console.error('[facturacionEmitir] no se pudo leer Xubio para el control de duplicados:', e);
+    return null;
+  });
+  const permitidos = new Set(opciones.permitirDuplicados || []);
+
   const emitidas: ResultadoEmision['emitidas'] = [];
   const errores: FacturaConError[] = [];
   const paraRegistrar: { cliente: string; numero?: string; cae?: string; fechaVenta: string }[] = [];
 
-  for (const { idControl, sucursal, fecha, lineas } of ordenados) {
+  for (const { clave, idControl, sucursal, fecha, lineas } of ordenados) {
     const cliente = clientesMap.get(idControl);
     // Nombre que se muestra en emitidas/errores — con la sucursal entre paréntesis
     // cuando la factura salió separada, para poder distinguir cuál es cuál de un vistazo.
@@ -380,7 +417,7 @@ export async function emitirPendientes(
       cliente: cliente?.nombre_xubio || nombreClienteVisible(cliente) || idControl,
       sucursal: sucursal || undefined, fechaVenta: fechaLinea, items: [], total: 0,
     };
-    if (!cliente) { errores.push({ ...datos, error: 'cliente no encontrado en la base local' }); continue; }
+    if (!cliente) { errores.push({ ...datos, clave, error: 'cliente no encontrado en la base local' }); continue; }
 
     // ── Los dos testigos tienen que coincidir ───────────────────────────────────────
     //
@@ -389,7 +426,7 @@ export async function emitirPendientes(
     // resuelve eligiendo uno: se frena y se dice qué pasó. Una factura emitida mal en AFIP
     // no se borra, se compensa con una nota de crédito.
     const problema = revisarIdentidad(idControl, String(lineas[0]?.nombre_cliente || ''), clientes, repetidos);
-    if (problema) { errores.push({ ...datos, error: problema.mensaje }); continue; }
+    if (problema) { errores.push({ ...datos, clave, error: problema.mensaje }); continue; }
 
 
     // Se calcula antes de armar los renglones porque la descripción de cada uno lleva la
@@ -435,7 +472,7 @@ export async function emitirPendientes(
       // No debería pasar (ya se filtró por cantidad>0 antes de marcar PENDIENTE), pero
       // si pasa no lo dejamos en silencio: sin esto, el cliente quedaba PENDIENTE para
       // siempre sin ningún rastro de error ni de éxito.
-      errores.push({ ...datos, error: 'sin productos con cantidad > 0 (revisar la carga de esta venta)' });
+      errores.push({ ...datos, clave, error: 'sin productos con cantidad > 0 (revisar la carga de esta venta)' });
       continue;
     }
 
@@ -447,14 +484,35 @@ export async function emitirPendientes(
     // más común de todos, y sin los items el aviso no diría qué mercadería quedó sin
     // facturar, que es lo primero que hay que saber para resolverlo.
     const clienteId = matchClienteXubio(cliente.nombre_xubio, clientesXubio);
-    if (!clienteId) { errores.push({ ...datos, error: 'no se encontró el cliente en Xubio (revisá que el nombre coincida)' }); continue; }
+    if (!clienteId) { errores.push({ ...datos, clave, error: 'no se encontró el cliente en Xubio (revisá que el nombre coincida)' }); continue; }
     const esA = esA_;
+
+    // ── El freno ──────────────────────────────────────────────────────
+    //
+    // Acá abajo está la única línea de esta función que no se puede deshacer. Si Xubio ya
+    // tiene una factura de este cliente, este día y este importe, no se emite: la venta
+    // queda PENDIENTE y a la vista, que es reversible, en vez de un comprobante de más en
+    // AFIP, que no lo es.
+    //
+    // Se compara contra la fecha con la que la factura VA a salir, no contra la de la
+    // venta: es la que va a quedar en el comprobante.
+    if (yaEnXubio && !permitidos.has(clave)) {
+      const ya = facturaYaEmitida(yaEnXubio, {
+        clienteId, nombreXubio: cliente.nombre_xubio || '', fecha: fechaFactura, totalNeto: totalFactura,
+      });
+      if (ya) {
+        console.error(`[facturacionEmitir] ${nombre}: frenada por duplicado de ${ya.numero} (${ya.fecha}, ${ya.total})`);
+        errores.push({ ...datos, clave, total: totalFactura, duplicado: ya, error: mensajeDuplicado(ya) });
+        continue;
+      }
+    }
+
     let res;
     try {
       res = await emitirFactura({ clienteId, esA, fecha: fechaFactura, items });
     } catch (e: any) {
       console.error(`[facturacionEmitir] excepción emitiendo factura para ${nombre}:`, e);
-      errores.push({ ...datos, total: totalFactura, error: e?.message || 'excepción al emitir' });
+      errores.push({ ...datos, clave, total: totalFactura, error: e?.message || 'excepción al emitir' });
       continue;
     }
 
@@ -487,6 +545,16 @@ export async function emitirPendientes(
         }
       }
 
+      // La factura que acaba de salir entra al control: dos grupos del mismo lote pueden
+      // ser el mismo duplicado entre sí (la misma venta cargada dos veces en la hoja), y
+      // eso no lo ve la lectura de Xubio de antes de empezar.
+      if (yaEnXubio) {
+        yaEnXubio.push({
+          tipo: 1, fecha: fechaFactura, numeroDocumento: res.numeroDocumento,
+          importetotal: totalFactura, cliente: { ID: clienteId, nombre: cliente.nombre_xubio },
+        });
+      }
+
       emitidas.push(emitida);
       paraRegistrar.push({ cliente: nombre, numero: res.numeroDocumento, cae: res.cae, fechaVenta });
       await batchUpdateRows('Ventas', 'id_venta', lineas.map(l => ({
@@ -495,7 +563,7 @@ export async function emitirPendientes(
       })));
     } else {
       console.error(`[facturacionEmitir] Xubio rechazó la factura de ${nombre}:`, res.error);
-      errores.push({ ...datos, total: totalFactura, error: res.error || 'Error desconocido' });
+      errores.push({ ...datos, clave, total: totalFactura, error: res.error || 'Error desconocido' });
     }
   }
 

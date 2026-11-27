@@ -26,7 +26,13 @@ export interface Acuse {
   // se emitieron igual; lo que falta es la confirmacion del otro lado.
   verificado?: boolean;
   emitidas: FacturaAcuse[];
-  errores: { cliente: string; error: string; items?: ItemAcuse[]; total?: number }[];
+  errores: {
+    cliente: string; error: string; items?: ItemAcuse[]; total?: number;
+    // Cuando el freno fue el control de duplicados (ver lib/facturaDuplicada.ts). No es
+    // una falla: es una decisión pendiente, y se muestra distinto para que no se lea como
+    // que la carga se rompió.
+    duplicado?: { numero: string; fecha: string; total: number };
+  }[];
   antes: GrupoAntes[];
 }
 
@@ -158,13 +164,23 @@ export default function AcuseFacturacion({ acuse, onCerrar, resumen }: {
             <p style={{ margin: '14px 0 6px', fontSize: '11px', fontWeight: 700, color: '#991b1b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
               No se pudo facturar
             </p>
-            {acuse.errores.map((e, i) => (
-              <div key={i} style={{ border: '1px solid #fecaca', background: '#fef2f2', borderRadius: '8px', padding: '9px 11px', marginBottom: '7px' }}>
-                <strong style={{ fontSize: '13.5px' }}>{e.cliente}</strong>
+            {acuse.errores.map((e, i) => {
+              const esDup = !!e.duplicado;
+              return (
+              <div key={i} style={{
+                border: `1px solid ${esDup ? '#fde68a' : '#fecaca'}`,
+                background: esDup ? '#fffbeb' : '#fef2f2',
+                borderRadius: '8px', padding: '9px 11px', marginBottom: '7px',
+              }}>
+                <strong style={{ fontSize: '13.5px' }}>
+                  {esDup && <span style={{ color: '#b45309' }}>⚠ Posible duplicado — </span>}
+                  {e.cliente}
+                </strong>
                 {e.items?.length ? listaItems(e.items) : null}
-                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#991b1b' }}>{e.error}</p>
+                <p style={{ margin: '4px 0 0', fontSize: '12px', color: esDup ? '#92400e' : '#991b1b' }}>{e.error}</p>
               </div>
-            ))}
+              );
+            })}
           </>
         )}
 
