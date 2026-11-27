@@ -90,9 +90,24 @@ export const AVISOS: AvisoConfigurable[] = [
     porDefecto: ['marcos.quaranta@gmail.com'],
   },
   {
+    // ── El reporte semanal completo ─────────────────────────────────────────────────
+    //
+    // Hasta ahora iba fijo a administracion@: la mirada de conjunto la mira uno solo. La
+    // decisión de Marcos (nov-2026) es que la vean los cuatro que manejan cada área, para
+    // que cada uno vea su parte en el contexto del resto y no solo su mail de alertas.
+    //
+    // El default lleva solo las direcciones que ya estaban en el repositorio. Las de Franco
+    // y Marcelo se cargan desde Admin → Avisos por mail, como el resto: una dirección
+    // personal de otra persona no tiene por qué quedar versionada acá.
+    clave: 'email_reporte_semanal',
+    titulo: 'Reporte semanal completo',
+    descripcion: 'Los viernes. La mirada de conjunto: ventas de la semana y del mes, cosecha, ciclos, pesos, descarte, ocupación y las alertas de venta. Va a los cuatro responsables — agregar acá a Franco y a Marcelo.',
+    porDefecto: ['marcos.quaranta@gmail.com', 'juanpablosoroeta@gmail.com'],
+  },
+  {
     clave: 'email_protocolo_semanal',
     titulo: 'Protocolo y aplicaciones (Marcelo)',
-    descripcion: 'Los viernes, si hubo actividad. Todo lo que se aplico y se midio en la semana —producto, dosis, litros, condiciones y responsable—, lo que quedo sin registrar, y las alertas: agua de osmosis fuera de limite, foliares aplicadas fuera de rango, dosis desviadas y calibracion del instrumental.',
+    descripcion: 'Los viernes, solo si hay algo que corregir. Le llega SOLO a Marcelo: cargar su dirección acá reemplaza al default. Todo lo que se aplico y se midio en la semana —producto, dosis, litros, condiciones y responsable—, lo que quedo sin registrar, y las alertas: agua de osmosis fuera de limite, foliares aplicadas fuera de rango, dosis desviadas y calibracion del instrumental. El detalle de todo lo que se hizo no va por mail: esta en la pantalla de Protocolo.',
     // La direccion del responsable se carga en Admin -> Avisos por mail, no aca: una
     // direccion personal de otra persona no tiene por que quedar versionada en el repo.
     porDefecto: ['marcos.quaranta@gmail.com'],

@@ -1,15 +1,13 @@
 import { readSheet } from './sheets';
-import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, PrecioVenta, ClienteVenta, VentaHistorica, StockCamara, RegistroProtocolo, ProductividadDiaria, KilometrajeVehiculo } from './types';
+import type { Lote, Movimiento, Ubicacion, Variedad, VentaDia, PrecioVenta, ClienteVenta, VentaHistorica, StockCamara, RegistroProtocolo, ProductividadDiaria, KilometrajeVehiculo, CajonMovimiento, ConfigItem } from './types';
 import { tubosPorMesada, mesadasVaciasEnLaSemana, ocupacionSemanalPorNave, mesadasBajasSemana, DIAS_HUECO_PERDONADOS, type OcupacionHistorialRow, type MesadaVacia } from './ocupacion';
 import { cosechasEstimadasPorLote, ciclosPorSemana, pesoPromedioRango, pesoPromedioMes, mesAnteriorClamp, cicloMesPromedio, type PesoPromedioMes } from './estadisticas';
-import { calcularCamara, diferenciaAjustesRango } from './camara';
 import { nombreClienteVisible } from './clientes';
 import { POSPAQ } from './planificacion'; // 3 posiciones (plantas) por paquete de rúcula
 import { ventasPorCultivoUltimasSemanas, resumenMesActual, ventasEnRango, gramajeDeRango, paquetesDeKg, esKeyKg, GRAMAJE_NOMINAL, type Gramaje, type PuntoVentaCultivoSemana, type VentasRango, type ResumenMesActual } from './estadisticasVentas';
 import { plantasPerdidasPorSubocupacion, type PlantasPerdidasSubocupacion } from './kpisOperativos';
 import { getComprobantes } from './xubio';
 import { KEYS_UNIDAD_HISTORICAS } from './articulos';
-import { controlFacturacion, DIAS_ATRASO_AVISO, type ControlFacturacion } from './controlFacturacion';
 import { leerConfigProtocolo, tareasVencidas, tareasDelDia as tareasProtocoloDelDia, cumplimientoProtocolo, detalleFueraDeRango, type InstanciaTarea, type FueraDeRangoDetalle } from './protocoloTareas';
 import { fechaArgentinaHoy } from './ocupacion';
 import { germinacionYSupervivenciaMes } from './germinacion';
@@ -18,6 +16,15 @@ import { kmEnRango, VEHICULO_PARTNER } from './kilometraje';
 
 import { comprobantesParaMirar } from './xubioLectura';
 import { leerArticulosExtra } from './articulosVenta';
+// Las alertas de venta del reporte salen de los MISMOS generadores que la pantalla de
+// Ventas y el mail diario por área. No se recalcula nada acá: si se recalculara, el
+// reporte del viernes y la pantalla del viernes podrían decir cosas distintas del mismo día.
+import { saldoPorCliente, alertasCajones } from './cajones';
+import { clientesSinPedir } from './clientesSinPedir';
+import { ventasRepetidas, facturasRepetidas, queHacerConLaRepetida } from './duplicadosVenta';
+import { clavesDeVenta } from './clavesVenta';
+import { leerComprobantesCache } from './xubioCache';
+import { destinatariosDe } from './avisosConfig';
 const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
 function lunesDe(d: Date): Date {
@@ -176,8 +183,8 @@ function descartePorFaseUltimasSemanas(
     }
   }
   // Descarte de cámara de la misma ventana. Solo lo que se cargó COMO descarte: la
-  // diferencia que revela un ajuste de stock es un faltante y se informa aparte, en la
-  // sección de stock en cámara. Son dos cosas distintas — el faltante es producto que no se
+  // diferencia que revela un ajuste de stock es un faltante y se mira en Stocks, el día que
+  // se cuenta la cámara. Son dos cosas distintas — el faltante es producto que no se
   // sabe dónde está, el descarte es producto que se decidió tirar— y mezclarlas haría que
   // ninguno de los dos números sirva.
   for (const r of registrosCamara) {
@@ -309,7 +316,8 @@ const UMBRAL_MIX_PP = 8;
 // Mes contra mes, con el mes todavía abierto: se compara proyectado, así que el umbral es
 // alto para no gritar por una proyección de los primeros días.
 const UMBRAL_MES_PCT = 25;
-const UMBRAL_FALTANTE_PAQ = 100;    // paquetes faltantes en el conteo de cámara de la semana
+// Debajo de esto una mesada F2 entra en el detalle de ocupación del reporte.
+export const UMBRAL_MESADA_BAJA = 80;
 
 function destacadosDeLaSemana(d: Omit<ReporteSemanalData, 'destacados'>): Destacado[] {
   const out: Destacado[] = [];
@@ -509,17 +517,11 @@ function destacadosDeLaSemana(d: Omit<ReporteSemanalData, 'destacados'>): Destac
     }
   }
 
-  // ── Ventas que no llegaron a la factura ──
-  // Mercadería que salió y no se facturó: mientras no se facture no se puede cobrar.
-  if (d.facturacion.hayProblema) {
-    const f = d.facturacion;
-    const masViejo = f.pendientes[0];
-    out.push({
-      tono: 'malo',
-      titulo: `Sin facturar: ${fmtMoneda(f.montoPendiente)} — lo más viejo tiene ${f.atrasoMax} días`,
-      detalle: `${f.pendientes.length} ${f.pendientes.length === 1 ? 'cliente' : 'clientes'} en la cola de facturación. El atraso más viejo es de ${masViejo?.cliente || ''} (desde ${fmtDiaCorto(masViejo?.diaMasViejo || '')}). La mercadería salió: mientras no se facture, no se puede ni cobrar ni reclamar.`,
-    });
-  }
+  // Lo que se cargó y no se facturó salió de acá (nov-2026). No porque deje de importar,
+  // sino porque ya tiene dos mails propios que salen TODOS los días — el de ventas sin
+  // facturar y el resumen de facturación por día— y los dos son más rápidos que este,
+  // que llega una vez por semana. Repetirlo acá no agregaba un día de reacción: agregaba
+  // una tercera copia del mismo aviso, que es como se desactiva un aviso.
 
   // La comparación contra Xubio salió de acá: tiene su propio informe semanal
   // (lib/informeFacturacion.ts). Mezclada con producción se leía por encima y nunca se
@@ -542,15 +544,6 @@ function destacadosDeLaSemana(d: Omit<ReporteSemanalData, 'destacados'>): Destac
     });
   }
 
-  // ── Faltante de stock en cámara (lo contado por debajo de lo esperado) ──
-  if (d.faltanteSemana.total < -UMBRAL_FALTANTE_PAQ) {
-    out.push({
-      tono: 'malo',
-      titulo: `Faltaron ${fmtN(Math.abs(d.faltanteSemana.total))} paq en el conteo de cámara`,
-      detalle: 'Se contó menos de lo que el sistema esperaba según cosechas y ventas de la semana.',
-    });
-  }
-
   // ── Mesadas muy vacías ──
   const muyBajas = d.mesadasBajas.filter((m) => m.pct < 70);
   if (muyBajas.length > 0) {
@@ -567,12 +560,23 @@ function destacadosDeLaSemana(d: Omit<ReporteSemanalData, 'destacados'>): Destac
 
   // Primero lo malo (es lo que hay que accionar), después lo bueno. Tope de 8 para que la
   // sección siga siendo un titular y no otra tabla larga.
+  //
+  // Las alertas de venta van ARRIBA y fuera del tope. Todo lo demás de esta lista es un
+  // número que se movió más de lo normal — información. Una alerta de venta es una tarea
+  // concreta con nombre y apellido: llamar a un cliente que dejó de pedir, ir a buscar
+  // cajones, borrar una venta cargada dos veces. Si el tope la empuja afuera porque esa
+  // semana la lechuga subió 30%, se pierde lo único accionable del bloque.
   const orden = (t: TonoDestacado) => (t === 'malo' ? 0 : t === 'bueno' ? 1 : 2);
-  return out.sort((a, b) => orden(a.tono) - orden(b.tono)).slice(0, 8);
+  return [...d.alertasVenta, ...out.sort((a, b) => orden(a.tono) - orden(b.tono)).slice(0, 8)];
 }
 
 export interface ReporteSemanalData {
   destacados: Destacado[];
+  // Las alertas de venta del día que se genera el reporte: cajones que no volvieron,
+  // clientes que dejaron de pedir, ventas o facturas cargadas dos veces. Se arman en
+  // `obtenerDatosReporteSemanal` porque necesitan leer hojas (cajones, comprobantes), y
+  // `destacadosDeLaSemana` solo las antepone al resto.
+  alertasVenta: Destacado[];
   fechaGenerado: string;
   ventasSemana: VentasRango;
   ventasSemanaAnterior: VentasRango;
@@ -603,9 +607,6 @@ export interface ReporteSemanalData {
   mesadasVacias: MesadaVacia[];
   plantasPerdidasSubocupacion: PlantasPerdidasSubocupacion;
   ventasSemanas: PuntoVentaCultivoSemana[];
-  stock: { rucula: number; lechuga_crespa: number; lechuga_roble: number; albahaca: number };
-  faltanteSemana: { rucula: number; lechuga_crespa: number; lechuga_roble: number; albahaca: number; total: number };
-  faltanteMes: { rucula: number; lechuga_crespa: number; lechuga_roble: number; albahaca: number; total: number };
   descartePorFase: DescarteFaseReporte[];
   // Protocolo de aplicaciones: lo que quedó sin registrar (la semana pasa y una aplicación
   // que no se hizo no se recupera, así que el reporte del viernes es el último momento útil
@@ -634,12 +635,11 @@ export interface ReporteSemanalData {
   protocoloCumplimiento: { nombre: string; correspondian: number; cerradas: number; pendientes: number; fueraDeRango: number; pct: number | null }[];
   // Ventas cargadas que no llegaron a la factura. Va en el reporte del viernes porque es
   // el último momento en que todavía se puede corregir la semana.
-  facturacion: ControlFacturacion;
   // Lo facturado según la app contra lo que hay en Xubio, últimos 30 días.
 }
 
 export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> {
-  const [lotes, movimientos, ubicaciones, variedades, ventas, precios, clientes, historicas, registrosCamara, ocupacionHistorial, registrosProtocolo, configRows, productividadCache, registrosKm] = await Promise.all([
+  const [lotes, movimientos, ubicaciones, variedades, ventas, precios, clientes, historicas, registrosCamara, ocupacionHistorial, registrosProtocolo, configRows, productividadCache, registrosKm, movCajones] = await Promise.all([
     readSheet<Lote>('Lotes'), readSheet<Movimiento>('Movimientos'), readSheet<Ubicacion>('Ubicaciones'),
     readSheet<Variedad>('Variedades'), readSheet<VentaDia>('Ventas'), readSheet<PrecioVenta>('Precios'),
     readSheet<ClienteVenta>('Clientes'),
@@ -650,6 +650,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     readSheet<{ clave: string; valor: any }>('Configuracion').catch(() => []),
     readSheet<ProductividadDiaria>('ProductividadDiaria').catch(() => []),
     readSheet<KilometrajeVehiculo>('Kilometraje').catch(() => []),
+    readSheet<CajonMovimiento>('CajonesMovimientos').catch(() => []),
   ]);
   void historicas; // no se usa en la evolución semanal (los históricos son totales mensuales)
 
@@ -822,7 +823,12 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const pesoSemana = pesoPromedioRango(lotes, desde7, hoy);
   const pesoMesAnterior = pesoPromedioMes(lotes, mesPasadoRef);
 
-  // ── Ocupación de la SEMANA por nave + mesadas por debajo del 90% en promedio ──
+  // ── Ocupación de la SEMANA por nave + mesadas por debajo del 80% en promedio ──
+  //
+  // El corte del detalle bajó de 90 a 80 (Marcos, nov-2026). Al 90 entraba media granja:
+  // una mesada recién trasplantada o a punto de cosecharse está abajo del 90 por el ciclo,
+  // no por un problema, y una lista de veinte nombres donde diecisiete son normales se
+  // deja de leer. Abajo del 80 ya es un hueco que se podría estar usando.
   //
   // Antes esto era la foto del momento en que se genera el reporte, y eso hacía que todo
   // el informe dependiera del día que le tocó: cosechar una mesada grande un viernes
@@ -831,7 +837,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   // el hueco de un día del recambio entre cosecha y trasplante (ver DIAS_HUECO_PERDONADOS).
   const tubosMesadas = tubosPorMesada(ubicaciones, lotes);
   const ocupacionSemana = ocupacionSemanalPorNave(ocupacionHistorial, desdeSemana, hastaHoy);
-  const mesadasBajasSem = mesadasBajasSemana(ocupacionHistorial, desdeSemana, hastaHoy, 90);
+  const mesadasBajasSem = mesadasBajasSemana(ocupacionHistorial, desdeSemana, hastaHoy, UMBRAL_MESADA_BAJA);
   // Si el historial diario todavía no tiene datos de la semana, se cae a la foto de hoy —
   // es peor no mostrar nada que mostrar un número de un solo día, aclarándolo.
   const hayHistorialSemana = ocupacionSemana.length > 0;
@@ -844,7 +850,7 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   const mesadasBajas = hayHistorialSemana
     ? mesadasBajasSem.map(m => ({ nombre: m.nombre, nave: m.nave, pct: m.pct, diasBajo: m.diasBajo, diasConDatos: m.diasConDatos }))
     : tubosMesadas.flatMap((n: any) => (n.mesadas || [])
-        .filter((m: any) => m.sector_fase !== 'fase_1' && m.tubos_totales > 10 && m.ocupacion_pct < 90)
+        .filter((m: any) => m.sector_fase !== 'fase_1' && m.tubos_totales > 10 && m.ocupacion_pct < UMBRAL_MESADA_BAJA)
         .map((m: any) => ({ nombre: String(m.nombre).replace(/^Nave \d+ - /, ''), nave: n.nave, pct: m.ocupacion_pct })))
         .sort((a: any, b: any) => a.pct - b.pct);
   const diasOcupacion = hayHistorialSemana ? Math.max(...ocupacionSemana.map(o => o.diasConDato)) : 0;
@@ -856,35 +862,10 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
   // ── Ventas por cultivo, últimas 4 semanas calendario completas (lunes a domingo) ──
   const ventasSemanas = ventasPorCultivoUltimasSemanas(ventas, precios, clientes, 4, hoy, lotes);
 
-  // ── Stock en cámara + faltante acumulado por ajustes del mes en curso ──
-  const stock = {
-    rucula: calcularCamara('rucula', registrosCamara, lotes, ventas).stockActual,
-    lechuga_crespa: calcularCamara('lechuga_crespa', registrosCamara, lotes, ventas).stockActual,
-    lechuga_roble: calcularCamara('lechuga_roble', registrosCamara, lotes, ventas).stockActual,
-    albahaca: calcularCamara('albahaca', registrosCamara, lotes, ventas).stockActual,
-  };
-  const inicioMesActual = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-  const finMesActual = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0, 23, 59, 59);
-  const ajusteRuc = diferenciaAjustesRango('rucula', registrosCamara, lotes, ventas, inicioMesActual, finMesActual);
-  const ajusteLecCrespa = diferenciaAjustesRango('lechuga_crespa', registrosCamara, lotes, ventas, inicioMesActual, finMesActual);
-  const ajusteLecRoble = diferenciaAjustesRango('lechuga_roble', registrosCamara, lotes, ventas, inicioMesActual, finMesActual);
-  const ajusteAlb = diferenciaAjustesRango('albahaca', registrosCamara, lotes, ventas, inicioMesActual, finMesActual);
-  const faltanteMes = {
-    rucula: ajusteRuc.acumulado, lechuga_crespa: ajusteLecCrespa.acumulado, lechuga_roble: ajusteLecRoble.acumulado, albahaca: ajusteAlb.acumulado,
-    total: ajusteRuc.acumulado + ajusteLecCrespa.acumulado + ajusteLecRoble.acumulado + ajusteAlb.acumulado,
-  };
-  // Faltante de la SEMANA — mismo cálculo, acotado a los últimos 7 días (desdeSemana/hoy),
-  // no al mes calendario completo.
-  const inicioSemanaDia = new Date(desdeSemana + 'T00:00:00');
-  const finSemanaDia = new Date(hastaHoy + 'T23:59:59');
-  const ajusteSemRuc = diferenciaAjustesRango('rucula', registrosCamara, lotes, ventas, inicioSemanaDia, finSemanaDia);
-  const ajusteSemLecCrespa = diferenciaAjustesRango('lechuga_crespa', registrosCamara, lotes, ventas, inicioSemanaDia, finSemanaDia);
-  const ajusteSemLecRoble = diferenciaAjustesRango('lechuga_roble', registrosCamara, lotes, ventas, inicioSemanaDia, finSemanaDia);
-  const ajusteSemAlb = diferenciaAjustesRango('albahaca', registrosCamara, lotes, ventas, inicioSemanaDia, finSemanaDia);
-  const faltanteSemana = {
-    rucula: ajusteSemRuc.acumulado, lechuga_crespa: ajusteSemLecCrespa.acumulado, lechuga_roble: ajusteSemLecRoble.acumulado, albahaca: ajusteSemAlb.acumulado,
-    total: ajusteSemRuc.acumulado + ajusteSemLecCrespa.acumulado + ajusteSemLecRoble.acumulado + ajusteSemAlb.acumulado,
-  };
+  // El stock en cámara y el faltante de los ajustes salieron del reporte (nov-2026). No
+  // es un dato de la semana: el stock de cámara se mira el día que se cuenta, en Stocks,
+  // y una foto del viernes no dice nada que se pueda accionar el lunes. El descarte de
+  // cámara —lo que efectivamente se tiró— sigue en "Dónde se está perdiendo producto".
 
   // ── Resumen en tarjetas ────────────────────────────────────────────────────────────
   //
@@ -973,6 +954,73 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     { titulo: 'Producción', icono: '📊', items: indicadoresMes },
   ].filter((g) => g.items.length > 0);
 
+  // ── Alertas de venta ────────────────────────────────────────────────
+  //
+  // Hasta acá, "Para mirar" eran todos números que se movieron más de lo normal. Faltaba
+  // lo otro: las cosas que hay que ir a hacer, que vivían solo en la pantalla de Ventas y
+  // en el mail diario del área. El reporte semanal lo leen los cuatro, y es donde se mira
+  // la semana completa — es el lugar donde una de estas todavía se puede resolver.
+  //
+  // Son los mismos generadores que usan la pantalla y el mail diario, importados. Cada una
+  // va agrupada en UN renglón y no en uno por cliente: acá es un titular, el detalle
+  // entero está en la pantalla que linkea cada alerta.
+  //
+  // Si algo de esto falla —una hoja que no se puede leer, el caché de Xubio vacío— el
+  // reporte sale igual sin esas alertas: un reporte entero no se cae por un bloque.
+  const alertasVenta: Destacado[] = [];
+  try {
+    const cajones = alertasCajones(saldoPorCliente(movCajones, clientes, hoy), 7);
+    if (cajones.length) {
+      const top = cajones.slice(0, 5);
+      alertasVenta.push({
+        tono: 'malo',
+        titulo: `${cajones.length} ${cajones.length === 1 ? 'cliente tiene' : 'clientes tienen'} cajones sin devolver`,
+        detalle: top.map((c) => `${c.nombre} (${c.saldo} caj, ${c.diasSinMovimiento} días)`).join(' · ')
+          + (cajones.length > top.length ? ` y ${cajones.length - top.length} más.` : '.'),
+      });
+    }
+
+    const sinPedir = clientesSinPedir(ventas, clientes, hastaHoy);
+    if (sinPedir.length) {
+      const top = sinPedir.slice(0, 5);
+      alertasVenta.push({
+        tono: 'malo',
+        titulo: `${sinPedir.length} ${sinPedir.length === 1 ? 'cliente dejó' : 'clientes dejaron'} de pedir`,
+        // Ordenados por lo que compraban: si no se puede llamar a todos, el primero de la
+        // lista es al que más cuesta perder.
+        detalle: top.map((c) => `${c.nombre} (${c.dias} días, comú ${fmtN(c.unidadesUltimas8Semanas)} u en 8 sem)`).join(' · ')
+          + (sinPedir.length > top.length ? ` y ${sinPedir.length - top.length} más.` : '.'),
+      });
+    }
+
+    // Cargadas dos veces y facturadas dos veces: la primera todavía se borra gratis, la
+    // segunda ya es una nota de crédito y una deuda mal puesta al cliente.
+    const claves = await clavesDeVenta().catch(() => [] as string[]);
+    const desdeDup = fmtISO(new Date(hoy.getTime() - 30 * 86400000));
+    const repetidas = ventasRepetidas(ventas, clientes, claves).filter((r) => r.fecha >= desdeDup);
+    for (const r of repetidas.slice(0, 3)) {
+      alertasVenta.push({
+        tono: 'malo',
+        titulo: `${r.cliente}${r.sucursal ? ` (${r.sucursal})` : ''} · ${fmtDiaCorto(r.fecha)}: venta cargada dos veces`,
+        detalle: queHacerConLaRepetida(r),
+      });
+    }
+    if (repetidas.length > 3) {
+      alertasVenta.push({ tono: 'malo', titulo: `y ${repetidas.length - 3} ventas más cargadas dos veces`, detalle: 'Están listadas en Ventas → alertas y en el historial.' });
+    }
+
+    const comps = await leerComprobantesCache(desdeDup, hastaHoy).catch(() => [] as any[]);
+    for (const f of facturasRepetidas(comps).slice(0, 3)) {
+      alertasVenta.push({
+        tono: 'malo',
+        titulo: `${f.cliente} · ${fmtDiaCorto(f.fecha)}: dos facturas por ${fmtMoneda(f.importe)}`,
+        detalle: `${f.numeros.join(' y ')}. Si una está de más hay que anularla con una nota de crédito: mientras tanto el cliente figura debiendo algo que no debe.`,
+      });
+    }
+  } catch (e) {
+    console.error('[reporteSemanal] alertas de venta:', e);
+  }
+
   // Los destacados se arman al final, sobre todo lo demás ya calculado — no leen nada por
   // su cuenta, solo marcan lo que se sale de lo normal en esos mismos números.
   const datosSinDestacados = {
@@ -984,13 +1032,12 @@ export async function obtenerDatosReporteSemanal(): Promise<ReporteSemanalData> 
     proyeccionMesActual, cosechaRealMesAnterior,
     cicloSemana, cicloSemanaAnterior, cicloMesAnterior,
     pesoSemana, pesoMesAnterior,
-    ocupacion, diasOcupacion, mesadasBajas, mesadasVacias, plantasPerdidasSubocupacion, ventasSemanas,
+    ocupacion, diasOcupacion, mesadasBajas, mesadasVacias, plantasPerdidasSubocupacion, ventasSemanas, alertasVenta,
     descarteSemana, descarteSemanaAnterior, descarteMes,
     kmSemana, kmSemanaAnterior,
     protocoloPendientes, protocoloHoy, protocoloCumplimiento, indicadoresMes, resumenTarjetas,
     protocoloFueraDeRango: detalleFueraDeRango(registrosProtocolo, desdeSemana, hastaHoy),
-    facturacion: controlFacturacion(ventas, precios, clientes, hastaHoy),
-    stock, faltanteSemana, faltanteMes, descartePorFase,
+    descartePorFase,
   };
   return { ...datosSinDestacados, destacados: destacadosDeLaSemana(datosSinDestacados) };
 }
@@ -1142,24 +1189,6 @@ export function construirHtml(d: ReporteSemanalData): string {
     </tr>`;
   }).join('');
 
-  // + verde = sobra (contado por encima de lo esperado), − rojo = falta (contado por
-  // debajo) — mismo signo que "Dif. acumulada mes" del resto de la app.
-  const stockFilas = (['rucula', 'lechuga_crespa', 'lechuga_roble', 'albahaca'] as const).map((c) => {
-    const label = c === 'rucula' ? 'Rúcula' : c === 'lechuga_crespa' ? 'Lechuga Crespa' : c === 'lechuga_roble' ? 'Lechuga Roble' : 'Albahaca';
-    const faltSem = d.faltanteSemana[c], faltMes = d.faltanteMes[c];
-    return `<tr>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">${label}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${fmtN(d.stock[c])} paq</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${flechaPaqHtml(faltSem, true)}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${flechaPaqHtml(faltMes, true)}</td>
-    </tr>`;
-  }).join('');
-  const stockTotalRow = `<tr style="background:#fafafa">
-    <td style="padding:6px 10px;font-weight:800">Total</td>
-    <td style="padding:6px 10px;text-align:right;font-weight:800">${fmtN(d.stock.rucula + d.stock.lechuga_crespa + d.stock.lechuga_roble)} paq</td>
-    <td style="padding:6px 10px;text-align:right;font-weight:800">${flechaPaqHtml(d.faltanteSemana.total, true)}</td>
-    <td style="padding:6px 10px;text-align:right;font-weight:800">${flechaPaqHtml(d.faltanteMes.total, true)}</td>
-  </tr>`;
 
   const ocupacionHtml = d.ocupacion.map(o =>
     `<div style="display:inline-block;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:8px 16px;margin-right:10px">
@@ -1294,31 +1323,6 @@ export function construirHtml(d: ReporteSemanalData): string {
       }).join('')}</tbody>
     </table>`;
 
-  // ── Control de facturación ──
-  // Lo que se cargó y no se facturó, separado en los dos estados posibles: la cola de
-  // facturación y el borrador. El borrador va primero porque es el que no se ve en
-  // ninguna pantalla.
-  const filaSinFacturar = (g: { cliente: string; ventas: number; dias: number; diaMasViejo: string; atraso: number; unidades: number; monto: number }) => `<tr>
-    <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6">${g.cliente}</td>
-    <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:right">${g.dias}</td>
-    <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:right;color:${g.atraso >= DIAS_ATRASO_AVISO ? '#dc2626' : '#6b7280'};font-weight:${g.atraso >= DIAS_ATRASO_AVISO ? 700 : 400}">${g.atraso}d</td>
-    <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:right;color:#6b7280">${fmtDiaCorto(g.diaMasViejo)}</td>
-    <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:right">${fmtN(g.unidades)}</td>
-    <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:right;font-weight:600">${fmtMoneda(g.monto)}</td>
-  </tr>`;
-  const tablaSinFacturar = (titulo: string, nota: string, filas: any[]) => !filas.length ? '' : `
-    <p style="margin:8px 0 4px;font-size:13px;font-weight:600;color:#111">${titulo} <span style="font-weight:400;color:#9ca3af">${nota}</span></p>
-    <table style="border-collapse:collapse;width:100%;font-size:12.5px">
-      <thead><tr style="background:#f9fafb;color:#6b7280">
-        <th style="padding:4px 8px;text-align:left">Cliente</th>
-        <th style="padding:4px 8px;text-align:right">Días</th>
-        <th style="padding:4px 8px;text-align:right">Atraso</th>
-        <th style="padding:4px 8px;text-align:right">Más viejo</th>
-        <th style="padding:4px 8px;text-align:right">Unid.</th>
-        <th style="padding:4px 8px;text-align:right">Monto</th>
-      </tr></thead>
-      <tbody>${filas.map(filaSinFacturar).join('')}</tbody>
-    </table>`;
 
   // ── Kilómetros vs. unidades vendidas ──
   //
@@ -1362,13 +1366,11 @@ export function construirHtml(d: ReporteSemanalData): string {
       <p style="margin:6px 0 0;font-size:11px;color:#9ca3af;line-height:1.5">Cuántas unidades se repartieron por kilómetro recorrido. Más es mejor: el mismo viaje rindió más. La lectura del odómetro se carga los jueves desde el Panel.</p>`;
   })();
 
+  // El control de facturación salió de acá (nov-2026): lo mismo lo mandan todos los días
+  // el mail de ventas sin facturar y el resumen de facturación por día. Queda el bloque de
+  // la camioneta, que no sale por ningún otro lado.
   const controlFactHtml = `
-    <div style="margin:18px 0 0;padding:12px 14px;border:1px solid ${d.facturacion.hayProblema ? '#fecaca' : '#e5e7eb'};border-radius:8px;background:${d.facturacion.hayProblema ? '#fef2f2' : '#fafafa'}">
-      <h3 style="margin:0 0 6px;font-size:14px">Control de facturación <span style="font-weight:400;color:#9ca3af">(ventas cargadas que todavía no se facturaron)</span></h3>
-      ${!d.facturacion.pendientes.length
-        ? `<p style="margin:0;font-size:13px;color:#059669">✓ No quedó ninguna venta sin facturar.</p>`
-        : `<p style="margin:0 0 6px;font-size:13px;color:#111">Sin facturar: <strong>${fmtMoneda(d.facturacion.montoPendiente)}</strong>. La mercadería ya salió: mientras no se facture no se puede cobrar ni reclamar.</p>
-           ${tablaSinFacturar('En la cola de facturación', '— esperando que se emitan, o fallaron al emitir', d.facturacion.pendientes)}`}
+    <div style="margin:18px 0 0;padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;background:#fafafa">
       ${kmHtml}
     </div>`;
 
@@ -1533,12 +1535,6 @@ export function construirHtml(d: ReporteSemanalData): string {
       <tbody>${ciclosPesoFilas}</tbody>
     </table>
 
-    <h3 style="margin:0 0 8px;font-size:14px">Stock en cámara</h3>
-    <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:6px">
-      <thead><tr style="background:#f5f5f5"><th style="padding:6px 10px;text-align:left">Cultivo</th><th style="padding:6px 10px;text-align:right">Stock actual</th><th style="padding:6px 10px;text-align:right">Faltante semana</th><th style="padding:6px 10px;text-align:right">Faltante acum. mes</th></tr></thead>
-      <tbody>${stockFilas}${stockTotalRow}</tbody>
-    </table>
-    <p style="margin:0 0 20px;font-size:11px;color:#9ca3af">− (rojo) = falta, contado por debajo de lo esperado · + (verde) = sobra, contado por encima de lo esperado.</p>
 
     <h3 style="margin:0 0 2px;font-size:14px">Dónde se está perdiendo producto</h3>
     <p style="margin:0 0 8px;font-size:11.5px;color:#9ca3af">Solo las etapas con descarte. El % es sobre las plantas que pasaron por esa etapa.</p>
@@ -1554,8 +1550,8 @@ export function construirHtml(d: ReporteSemanalData): string {
     <p style="margin:0 0 20px;font-size:11px;color:#9ca3af">
       Total de 4 semanas: <strong style="color:#374151">${fmtN(totalDescarte)} plantas</strong>.
       <strong>Cámara</strong> es producto ya empaquetado que se tiró (cargado desde Stocks), pasado a plantas para poder
-      sumarlo con el resto. No incluye el faltante de los ajustes de stock — eso no se tiró, no se sabe dónde está, y va en
-      la sección de stock en cámara.
+      sumarlo con el resto. No incluye el faltante de los ajustes de stock — eso no se tiró, no se sabe dónde está, y se
+      mira en Stocks el día que se cuenta la cámara.
     </p>
 
     ${indicadoresHtml}
@@ -1654,11 +1650,6 @@ export function construirTexto(d: ReporteSemanalData): string {
   L.push(`Lechuga: ${d.cicloSemana.lechuga > 0 ? d.cicloSemana.lechuga + 'd' : '—'} ciclo · sem. ant. ${cicloVsTxt(d.cicloSemana.lechuga, d.cicloSemanaAnterior.lechuga)} · mes ant. ${cicloVsTxt(d.cicloSemana.lechuga, d.cicloMesAnterior.lechuga)} · ${d.pesoSemana.lechuga > 0 ? d.pesoSemana.lechuga + 'g' : '—'} peso`);
   L.push('');
 
-  L.push(`❄️ *Stock en cámara* (− = falta, + = sobra)`);
-  L.push(`Rúcula: ${fmtN(d.stock.rucula)} paq · semana ${d.faltanteSemana.rucula >= 0 ? '+' : ''}${d.faltanteSemana.rucula} paq · mes ${d.faltanteMes.rucula >= 0 ? '+' : ''}${d.faltanteMes.rucula} paq`);
-  L.push(`Lechuga Crespa: ${fmtN(d.stock.lechuga_crespa)} paq · semana ${d.faltanteSemana.lechuga_crespa >= 0 ? '+' : ''}${d.faltanteSemana.lechuga_crespa} paq · mes ${d.faltanteMes.lechuga_crespa >= 0 ? '+' : ''}${d.faltanteMes.lechuga_crespa} paq`);
-  L.push(`Lechuga Roble: ${fmtN(d.stock.lechuga_roble)} paq · semana ${d.faltanteSemana.lechuga_roble >= 0 ? '+' : ''}${d.faltanteSemana.lechuga_roble} paq · mes ${d.faltanteMes.lechuga_roble >= 0 ? '+' : ''}${d.faltanteMes.lechuga_roble} paq`);
-  L.push('');
 
   if (d.indicadoresMes.length > 0) {
     L.push(`📈 *Indicadores del mes* (hasta hoy vs. mes pasado al mismo día)`);
@@ -1669,17 +1660,7 @@ export function construirTexto(d: ReporteSemanalData): string {
     L.push('');
   }
 
-  L.push(`🧾 *Control de facturación*`);
-  if (!d.facturacion.pendientes.length) {
-    L.push(`  ✓ No quedó ninguna venta sin facturar.`);
-  } else {
-    L.push(`  Sin facturar: ${fmtMoneda(d.facturacion.montoPendiente)} — lo más viejo tiene ${d.facturacion.atrasoMax} días.`);
-    for (const g of d.facturacion.pendientes) {
-      L.push(`  • ${g.cliente} — en la cola, ${g.dias} ${g.dias === 1 ? 'día' : 'días'} (desde ${fmtDiaCorto(g.diaMasViejo)}) · ${fmtMoneda(g.monto)}`);
-    }
-  }
-  L.push('');
-
+  // El control de facturación tiene dos mails propios todos los días; acá no se repite.
   if (d.kmSemana > 0) {
     const u = d.ventasSemana.rucula.unidades + d.ventasSemana.lechuga.unidades + d.ventasSemana.albahaca.unidades;
     L.push(`  Camioneta: ${fmtN(d.kmSemana)} km · ${fmtN(u)} u repartidas · ${(Math.round((u / d.kmSemana) * 10) / 10).toLocaleString('es-AR')} u/km`);
@@ -1763,9 +1744,17 @@ export function construirTexto(d: ReporteSemanalData): string {
   return L.join('\n');
 }
 
+// ── A quién le llega ──────────────────────────────────────────────────────
+//
+// Iba fijo a administracion@. Ahora sale de la hoja de configuración como el resto de los
+// avisos (Admin → Avisos por mail): los cuatro responsables lo leen, y el día que cambie
+// quién mira qué no tiene que haber un deploy para cambiar una dirección.
 export async function enviarReporteSemanal(): Promise<{ ok: boolean; error?: string }> {
   if (!process.env.RESEND_API_KEY) return { ok: false, error: 'RESEND_API_KEY no configurada' };
   try {
+    const configRows = await readSheet<ConfigItem>('Configuracion').catch(() => [] as ConfigItem[]);
+    const destinatarios = destinatariosDe('email_reporte_semanal', configRows as any);
+    if (!destinatarios.length) return { ok: false, error: 'email_reporte_semanal no tiene ningún mail válido' };
     const datos = await obtenerDatosReporteSemanal();
     const html = construirHtml(datos);
     const text = construirTexto(datos);
@@ -1774,7 +1763,7 @@ export async function enviarReporteSemanal(): Promise<{ ok: boolean; error?: str
       headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         from: 'Xavia App <ventas@xavia.com.ar>',
-        to: ['administracion@xavia.com.ar'],
+        to: destinatarios,
         subject: `Reporte semanal — Xavia — ${datos.fechaGenerado}`,
         html,
         text,

@@ -5,7 +5,7 @@ import type { RegistroProtocolo, ConfigItem } from '@/lib/types';
 import {
   HOJA_REGISTROS, leerConfigProtocolo, tareasVencidas, tareaPorId,
   alarmaOsmosis, fueraDeRangoFoliar, evaluarDosis, evaluarInstrumental,
-  resumenMedicion, sumarDias, CONDICIONES_TXT,
+  sumarDias, CONDICIONES_TXT,
 } from '@/lib/protocoloTareas';
 import { destinatariosDe } from '@/lib/avisosConfig';
 import { fechaArgentinaHoy } from '@/lib/ocupacion';
@@ -117,32 +117,26 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ hoy, desde, ejecuciones: ejecuciones.length, vencidas: vencidas.length, alertas });
     }
 
-    // Sin nada que contar —ni una aplicación, ni un vencimiento, ni una alerta— no se
-    // manda: pasa en una semana de parate, y un mail vacío todas las semanas se archiva
-    // sin abrir.
-    if (!ejecuciones.length && !vencidas.length && !alertas.length) {
-      return NextResponse.json({ ok: true, enviado: false, motivo: 'no hubo actividad de protocolo esta semana' });
+    // Sin nada que corregir no se manda. Antes alcanzaba con que hubiera habido alguna
+    // aplicación, porque el mail llevaba la tabla de todo lo que se hizo; ahora el mail es
+    // solo lo que faltó y lo que se fue de rango, así que una semana sin nada de eso es
+    // una semana sin mail. Una semana en la que se hizo todo bien no necesita un mail para
+    // decirlo, y uno que llega siempre deja de abrirse justo el viernes que trae algo.
+    if (!vencidas.length && !alertas.length) {
+      return NextResponse.json({ ok: true, enviado: false, motivo: 'no quedó nada sin registrar ni fuera de rango', registros: ejecuciones.length });
     }
     if (!process.env.RESEND_API_KEY) return NextResponse.json({ ok: false, error: 'RESEND_API_KEY no configurada' }, { status: 500 });
 
     const destinatarios = destinatariosDe(CLAVE_CONFIG, configRows);
     if (!destinatarios.length) return NextResponse.json({ ok: false, error: `${CLAVE_CONFIG} no tiene ningún mail válido` }, { status: 500 });
 
-    const filasReg = ejecuciones.map((r) => {
-      const t = tareaPorId(String(r.id_tarea));
-      const med = resumenMedicion(r);
-      return `<tr>
-        <td style="padding:7px 9px;border-bottom:1px solid #f0f0f0;white-space:nowrap;font-size:12px">
-          ${fmtDia(String(r.fecha))}${r.hora ? `<br><span style="color:#9ca3af;font-size:10.5px">${r.hora}</span>` : ''}
-        </td>
-        <td style="padding:7px 9px;border-bottom:1px solid #f0f0f0;font-size:12.5px">
-          <strong>${t?.nombre || r.id_tarea}</strong>
-          ${(r as any).producto ? `<br><span style="color:#6b7280;font-size:11px">${(r as any).producto}${(r as any).dosis ? ` · dosis ${(r as any).dosis}` : ''}${(r as any).litros ? ` · ${(r as any).litros} L` : ''}</span>` : ''}
-        </td>
-        <td style="padding:7px 9px;border-bottom:1px solid #f0f0f0;font-size:11.5px;color:#374151">${med || '—'}</td>
-        <td style="padding:7px 9px;border-bottom:1px solid #f0f0f0;font-size:11.5px;color:#6b7280;white-space:nowrap">${r.responsable || '—'}</td>
-      </tr>`;
-    }).join('');
+    // La tabla de todo lo que se hizo salió del mail (Marcos, nov-2026). El mail marca lo
+    // que faltó y lo que se fue de rango — eso es lo accionable, y era lo que quedaba
+    // tapado abajo de veinte renglones de cosas que salieron bien.
+    //
+    // El respaldo no se pierde: los registros están enteros en la pantalla de Protocolo,
+    // con producto, dosis, litros, condiciones y responsable. Lo que cambia es que no se
+    // mandan por mail todas las semanas, que no es lo mismo que guardarlos.
 
     const filasAlerta = alertas.map((a) => `<tr>
       <td style="padding:6px 9px;border-bottom:1px solid #fee2e2;white-space:nowrap;font-size:11.5px;color:${a.grave ? '#b91c1c' : '#92400e'}">${fmtDia(a.fecha)}</td>
@@ -176,22 +170,11 @@ export async function GET(req: NextRequest) {
           Sin registro no se puede verificar si se aplicó ni en qué condiciones. Si se hizo, se carga con la fecha real.
         </p>` : ''}
 
-        <h3 style="margin:22px 0 6px;font-size:14px">Lo que se hizo</h3>
-        ${ejecuciones.length ? `
-        <table style="border-collapse:collapse;width:100%">
-          <thead><tr style="background:#f9fafb;color:#6b7280;font-size:10.5px;text-transform:uppercase">
-            <th style="padding:5px 9px;text-align:left">Cuándo</th>
-            <th style="padding:5px 9px;text-align:left">Tarea</th>
-            <th style="padding:5px 9px;text-align:left">Mediciones</th>
-            <th style="padding:5px 9px;text-align:left">Responsable</th>
-          </tr></thead>
-          <tbody>${filasReg}</tbody>
-        </table>` : '<p style="margin:0;font-size:12.5px;color:#9ca3af">No se registró ninguna aplicación ni control esta semana.</p>'}
-
         <p style="margin:18px 0 0;font-size:11px;color:#9ca3af;line-height:1.5">
           <strong>Condiciones para foliares:</strong> ${CONDICIONES_TXT}
-          <br>Este informe es también el respaldo de qué se aplicó y en qué condiciones: una foliar es un producto
-          sobre algo que se come, y el registro es lo que queda si alguien pregunta.
+          <br>El detalle de lo que se hizo —producto, dosis, litros, condiciones y responsable— está entero en la
+          pantalla de Protocolo. Ahí está el respaldo: una foliar es un producto sobre algo que se come, y el registro
+          es lo que queda si alguien pregunta.
         </p>
 
         <p style="margin:18px 0 0">
