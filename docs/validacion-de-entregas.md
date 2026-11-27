@@ -174,6 +174,125 @@ Lo mínimo:
 - `lib/remitos.ts`: hoy el remito sale de la factura. Con este orden, la entrega validada es
   la fuente natural. No es urgente, pero conviene dejarlo anotado.
 
+## La fila de `Entregas`, exacta
+
+Las cantidades NO van como un diccionario por artículo, van como una lista de líneas, una
+por **fila de Ventas**. El motivo es concreto: `LineaNC` (`lib/notaCredito.ts`) pide
+`{ id_venta, key, cantidad }`, y una entrega de un cliente puede venir de varias filas. Si
+se guarda agregado por artículo, después hay que adivinar de qué fila salió cada paquete y
+la NC pre-armada no se puede construir sin inventar.
+
+```jsonc
+{
+  "id_entrega": "ENT-20261127-0007",
+  "fecha": "2026-11-27",              // la de la entrega = la de la venta
+  "id_control": "12",
+  "sucursal": "Uriburu",
+  "estado": "validada",               // pendiente | validada | auto
+  "validado_por": "diego@xavia.com.ar",
+  "validado_en": "2026-11-27T14:42:11Z",
+  "lineas": [
+    { "id_venta": "V-8841", "key": "rucula",         "pedido": 24, "entregado": 24 },
+    { "id_venta": "V-8841", "key": "lechuga_crespa", "pedido": 12, "entregado": 9  },
+    { "id_venta": "V-8841", "key": "hoja_roble",     "pedido": 6,  "entregado": 6  }
+  ],
+  "cajones_devueltos": 8,
+  "nota": "",
+  "comprobante": "A-00002-00000881"   // la factura que ya había salido (etapa 1)
+}
+```
+
+- `pedido` se escribe una vez y **no se vuelve a tocar nunca**.
+- Las claves de artículo salen de `clavesDeVenta()`, no de una lista escrita acá: un
+  artículo dado de alta en Admin tiene que aparecer solo.
+- En la hoja, `lineas` va como JSON en una celda. Es un detalle feo pero es lo que hace que
+  la hoja no tenga que crecer una columna por artículo cada vez que se da de alta uno.
+
+**Cuándo nace la fila:** al confirmar, no antes. No hace falta ningún proceso que la cree:
+la lista del día del repartidor se arma de las ventas de esa fecha, y una venta sin fila en
+`Entregas` es una entrega sin confirmar. Un pre-armado nocturno sería una cosa más que se
+puede desincronizar de la planilla sin que nadie se entere.
+
+## Los endpoints
+
+| método | ruta | quién | qué hace |
+|---|---|---|---|
+| GET | `/api/reparto/dia?fecha=` | `reparto` y `admin` | Las entregas de la fecha: cliente, sucursal, líneas con lo cargado, estado, cajones afuera y si hay que cobrar facturas viejas ahí. Una sola lectura. |
+| POST | `/api/reparto/confirmar` | `reparto` y `admin` | `{ fecha, id_control, sucursal, lineas, cajones_devueltos, nota }`. Escribe la fila de `Entregas`, y el movimiento de cajones si hay devolución. Idempotente: confirmar dos veces el mismo cliente actualiza la fila, no crea otra. |
+| GET | `/api/reparto/diferencias?desde=&hasta=` | `admin` | Lo que alimenta el mail y la franja de Facturación. Sin estado propio: se calcula de `Entregas`. |
+
+El POST **no emite nada en la etapa 1**. La emisión por validación es el paso 6, y entra
+como una rama dentro de ese mismo endpoint cuando el cliente tiene `espera_validacion`.
+
+Los cajones no se escriben a mano: se reusa `/api/cajones/movimiento` con
+`tipo: 'devolucion'`. Dos caminos que escriben la misma hoja terminan siendo dos criterios.
+
+## Quién ve qué
+
+El rol nuevo es `reparto` en `lib/types.ts` (`Rol = 'admin' | 'usuario' | 'reparto'`) y ve
+**una sola pantalla**: `/reparto`. Todo lo demás —el menú entero— no aparece y las APIs lo
+rechazan. Es un rol más chico que `usuario`, no una variante.
+
+Lo que hay que revisar al agregarlo: todo lo que hoy pregunta `rol !== 'admin'` sigue
+andando igual (reparto no es admin), pero lo que pregunta "está logueado" se abre de más.
+Hay que ir una por una por las APIs que solo chequean `getCurrentUser()`.
+
+**Dos repartidores:** en la etapa 1 los dos ven todas las entregas del día. No hay rutas
+cargadas en ningún lado y inventarlas ahora es construir una tabla de datos que nadie
+mantiene. Lo que importa queda registrado igual: `validado_por` dice quién confirmó cada
+cliente. Si con el uso se pisan, ahí se agrega una ruta por repartidor, con el dato real de
+cómo se reparten las entregas, que hoy no tenemos.
+
+## Casos borde, resueltos
+
+| situación | qué pasa |
+|---|---|
+| Entregó más de lo cargado | Se guarda igual y va al mail en verde: falta facturar esa diferencia. Es plata que hoy se regala. |
+| Entregó un artículo que no estaba en la lista | Se agrega una línea sin `id_venta` y sin `pedido`. No crea una venta: cargar sigue siendo del admin. Va al mail. |
+| No entregó nada en ese cliente | Confirma todo en cero. Es distinto de no confirmar, y el mail lo dice así. |
+| Confirma dos veces | La segunda pisa la primera. `pedido` no se toca; `validado_en` sí. |
+| Se equivocó y quiere corregir | Vuelve a entrar y confirma de nuevo, mientras la NC no esté aprobada (etapa 1) o la factura no haya salido (etapa 2). |
+| Confirma un cliente de ayer | Se permite: a veces se confirma al volver al depósito. El mail del día siguiente lo muestra con su fecha real. |
+| Confirma algo de hace dos semanas | No se permite. Más de 7 días atrás es otra conversación, no una corrección de reparto. |
+| El cliente tiene dos sucursales | Una entrega por sucursal, siempre. Es la clave de la fila. |
+| La Gallega | Igual que cualquiera en la pantalla del reparto. Lo que no cambia nunca es cuándo sale su factura. |
+| Se queda sin señal | La confirmación queda en el celular y reintenta sola. Si al volver sigue sin subir, la pantalla lo dice en rojo: nunca se da por guardado algo que no se guardó. |
+| El admin ya había hecho la NC a mano | La diferencia aparece igual, pero la NC pre-armada chequea contra las NC ya emitidas de esa factura y no propone acreditar dos veces lo mismo. |
+
+## La nota de crédito pre-armada
+
+No se emite nada solo. Lo que hace la app es dejar el botón cargado: la diferencia ya es
+exactamente `LineaNC[]` (de ahí que las líneas guarden `id_venta`), y el número de factura
+sale de `exportado` de esas mismas filas. En la pantalla de Historial, donde hoy se arma la
+NC a mano eligiendo artículo por artículo, aparece precargada con "el reparto dijo que
+entregó 3 crespas menos".
+
+Aprobar sigue siendo un acto de un admin, y sigue siendo el mismo
+`emitirNCDeFactura(...)`. Un comprobante fiscal que se emite solo porque alguien tocó un −
+en un celular es exactamente lo que no queremos.
+
+## Cómo se decide pasar a la etapa 2
+
+No por impresión. Después de tres o cuatro semanas de etapa 1, el mail ya respondió:
+
+- cuántas entregas por semana tienen diferencia, y de cuánta plata;
+- en qué clientes se concentran;
+- qué porcentaje de las entregas confirma el reparto (si es bajo, el problema es la
+  pantalla o el acuerdo con el repartidor, y adelantar la etapa 2 lo empeora).
+
+Si las diferencias se concentran en dos o tres clientes, probablemente el arreglo no sea la
+etapa 2 sino corregirles el pedido fijo. Eso es gratis y sale primero.
+
+## Qué se testea
+
+Las funciones puras de `lib/entregas.ts`, que es donde está toda la lógica:
+
+- comparar pedido contra entregado: igual, menos, más, artículo nuevo, todo en cero;
+- agrupar varias filas de venta del mismo cliente y sucursal en una entrega;
+- convertir una diferencia en `LineaNC[]`, descontando lo que ya tenga NC emitida;
+- el estado de una entrega a partir de Ventas + Entregas (sin confirmar, validada, auto);
+- el resumen del mail: totales en plata y la detección del patrón de varias semanas.
+
 ## Orden de ejecución sugerido
 
 Los pasos 1 a 5 son la **etapa 1** y no cambian nada de lo que pasa hoy con las facturas.
