@@ -18,12 +18,19 @@ export const dynamic = 'force-dynamic';
 // Una sola lectura para todo: la lista, los cajones que ese cliente tiene afuera y las
 // etiquetas de los artículos. En la calle, cada ida y vuelta de más es una pantalla que
 // tarda en abrir con mala señal.
+// ── Quién puede entrar ───────────────────────────────────────────────
+//
+// Cualquiera que tenga usuario. Decisión de Marcos (28-nov-2026): los repartidores ya
+// tenían cuenta y arrancar cambiándole el rol a cada uno frenaba el lanzamiento por un
+// trámite.
+//
+// Lo que eso implica, dicho para que no se pierda: confirmar una entrega EMITE UNA FACTURA
+// en AFIP, así que esto es lo único que un rol `usuario` puede hacer que mueve plata. El
+// resto de la plata sigue siendo solo de admin. El día que se quiera cerrar, se vuelve a
+// pedir el rol `reparto` acá y en los dos endpoints, y nada más cambia.
 export async function GET(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
-  if (user.rol !== 'admin' && user.rol !== 'reparto') {
-    return NextResponse.json({ error: 'Esta pantalla es del reparto.' }, { status: 403 });
-  }
   try {
     const fecha = String(new URL(req.url).searchParams.get('fecha') || '').trim() || fechaArgentinaHoy();
     const [ventas, clientes, entregas, claves, movCajones, extras] = await Promise.all([

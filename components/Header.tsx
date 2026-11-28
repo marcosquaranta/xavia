@@ -19,10 +19,12 @@ export default function Header({ user, current }: { user: UsuarioPublico; curren
   items.push({ href: '/planificacion', label: 'Planificación', key: 'planificacion' });
   // Protocolo de aplicaciones: lo usa el operario todos los días, va para todos los roles.
   items.push({ href: '/protocolo', label: 'Protocolo', key: 'protocolo' });
+  // Reparto va para todos los roles: lo abre el que entrega, desde el celular, y por ahora
+  // los repartidores entran con el usuario que ya tenían (ver app/reparto/page.tsx).
+  items.push({ href: '/reparto', label: 'Reparto', key: 'reparto' });
   if (isAdmin) {
     items.push({ href: '/estadisticas', label: 'Estadísticas', key: 'estadisticas' });
     items.push({ href: '/ventas', label: 'Ventas', key: 'ventas' });
-    items.push({ href: '/reparto', label: 'Reparto', key: 'reparto' });
     items.push({ href: '/gastos', label: 'Gastos', key: 'gastos' });
     items.push({ href: '/cobranzas', label: 'Cobranzas', key: 'cobranzas' });
     items.push({ href: '/eerr', label: 'Cierre mensual', key: 'eerr' });

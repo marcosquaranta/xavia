@@ -32,12 +32,19 @@ const HEADERS_CAJONES = ['id_movimiento', 'fecha', 'id_control', 'nombre_cliente
 // Si Xubio falla, la entrega ya quedó registrada. Al revés —emitir primero— una caída de
 // Xubio dejaría al repartidor con la pantalla en rojo y sin rastro de lo que dijo, que es
 // lo único acá que no se puede volver a averiguar.
+// ── Quién puede entrar ───────────────────────────────────────────────
+//
+// Cualquiera que tenga usuario. Decisión de Marcos (28-nov-2026): los repartidores ya
+// tenían cuenta y arrancar cambiándole el rol a cada uno frenaba el lanzamiento por un
+// trámite.
+//
+// Lo que eso implica, dicho para que no se pierda: confirmar una entrega EMITE UNA FACTURA
+// en AFIP, así que esto es lo único que un rol `usuario` puede hacer que mueve plata. El
+// resto de la plata sigue siendo solo de admin. El día que se quiera cerrar, se vuelve a
+// pedir el rol `reparto` acá y en los dos endpoints, y nada más cambia.
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'no_auth' }, { status: 401 });
-  if (user.rol !== 'admin' && user.rol !== 'reparto') {
-    return NextResponse.json({ error: 'Esta pantalla es del reparto.' }, { status: 403 });
-  }
   try {
     const body = await req.json();
     const fecha = soloDia(body?.fecha);
