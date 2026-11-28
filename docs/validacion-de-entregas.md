@@ -61,6 +61,20 @@ por todos. Ahí recién desaparecen las notas de crédito.
 Mientras un cliente no tenga la marca, se comporta como la etapa 1. La marca es el único
 interruptor y se vuelve atrás en un minuto.
 
+### La etapa 1 no tiene por qué durar mucho
+
+El interruptor es **por cliente**, así que las dos etapas conviven. Lo razonable es:
+
+- Semana 1: todos en etapa 1, mirando si el reparto confirma y si el mail dice algo.
+- Semana 2 o 3: los **dos o tres clientes que más notas de crédito generan** pasan a etapa 2.
+  Son los que más duelen y son pocos, así que el riesgo está acotado a ellos: si el
+  repartidor no confirma, se atrasa esa factura y nada más. Se vuelve atrás en un minuto.
+- De ahí en adelante, se van sumando los que se portan bien.
+
+Dicho de otra forma: la etapa 1 no es una fase que hay que atravesar entera, es el estado
+por defecto de los clientes que todavía no pasaste. Los que te están generando las NC
+pueden pasar enseguida.
+
 ## Cuándo sale la factura a Xubio
 
 **Todo esto es de la etapa 2.** En la etapa 1 la factura sale al cargar, como hoy.
@@ -349,11 +363,14 @@ Escrito para no discutirlo de nuevo mañana a la mitad:
 Lo que está en la calle es la confirmación, y es poca cosa: un objeto por cliente.
 
 - Al confirmar, se guarda primero en el celular (`localStorage`) y se intenta mandar.
-- Si falla, la tarjeta queda con un reloj ámbar: **"guardado en el celular, falta subirlo"**.
-  Nunca se dice "listo" por algo que no se guardó: ese es el único bug acá que haría perder
-  datos de verdad.
+- Si falla, la tarjeta queda con un reloj ámbar: **"Guardado en el celular — todavía no
+  llegó a la app"**. Nunca se dice "listo" por algo que no se guardó: ese es el único bug
+  acá que haría perder datos de verdad.
+  (Marcos, 28-nov: el texto anterior decía "falta subirlo", que es jerga nuestra. El
+  repartidor no tiene por qué saber qué es "subir" algo. Vale para toda la pantalla: nada de
+  "sincronizar", "pendiente de envío" ni "error de red" — qué pasó y qué tiene que hacer.)
 - Reintenta al reconectar y al volver a abrir la pantalla.
-- Arriba, un contador: "2 sin subir". Si al final del día queda algo, se ve.
+- Arriba, un contador: "2 sin enviar". Si al final del día queda algo, se ve.
 - Si dos personas confirman el mismo cliente al mismo tiempo, gana la última y la fila es
   una sola (la clave es fecha + cliente + sucursal, no la hora): la escritura busca la fila
   existente antes de agregar, igual que hace `guardar` con las ventas.
@@ -375,6 +392,13 @@ lado en gris la cargada. Nada más: ni columnas nuevas, ni filtros, ni pestañas
    terminan en NC porque nadie se entera: el cliente paga más de lo que recibió. Cuando el
    reparto empiece a confirmar, esas aparecen. No es que el sistema empeoró las cosas: es
    que se ven. Después bajan a cero con la etapa 2.
+
+   La app no decide ninguna: emitir sigue siendo tuyo, caso por caso. Lo único que cambia es
+   que la que ya ibas a hacer sale de un click en vez de armarse artículo por artículo.
+   (Pregunta de Marcos, 28-nov: *"¿por qué van a subir las NC si vamos a facturar después
+   del remito?"* — porque en la etapa 1 **no** se factura después del remito: la factura
+   sigue saliendo al cargar, exactamente como hoy. Facturar después es la etapa 2, y ahí no
+   queda ninguna.)
 2. **Entregar de más también aparece**, y eso es plata que hoy se regala. Es la mitad del
    valor de esto y no estaba en la conversación original.
 
