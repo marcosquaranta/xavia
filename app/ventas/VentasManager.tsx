@@ -530,12 +530,25 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       // quedó de antes, una cantidad que no llegó a guardarse— se emitía en AFIP algo que
       // nadie había visto. Mandando lo revisado, el servidor compara antes de emitir y no
       // factura nada si difiere.
-      const r=await fetch('/api/ventas/cargar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,esperado:todasLineas})});
+      const r=await fetch('/api/ventas/cargar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,esperado:todasLineas,soloCargar:true})});
       const j=await r.json();if(!r.ok)throw new Error(j.error);
       // El acuse ocupa la pantalla: lo que informa es irreversible del lado de AFIP y un
       // renglón al pie no se mira. El mensaje de siempre queda abajo como respaldo, para
       // cuando el acuse no se pudo armar (si Xubio no contesta, por ejemplo).
       if (j.acuse) setAcuse(j.acuse);
+      // Con `soloCargar` no hay emision ni acuse: la venta queda cargada esperando que el
+      // reparto confirme el remito. Que se facturo y que no se ve en Ventas cargadas.
+      if(j.cargadas){
+        setResumenCarga(`OK — ${j.clientes} cliente(s) cargados
+${resumenCarga(todasLineas, ARTS_UNIDAD)}
+
+Las facturas salen cuando el reparto confirme la entrega. Lo que nadie confirme se factura solo a las 16.`);
+        setMsg(null);
+        setCtds({});setEsts({});setCtdsKg({});ctdsKgLive.current={};setFc({});
+        cargarVentasSemana();
+        setExp(false);
+        return;
+      }
       const nEmit=(j.emitidas||[]).length, nErr=(j.errores||[]).length;
       // Antes solo se mostraba la cantidad de errores ("revisá en Facturación") sin el
       // detalle — y esa página no guarda el error en ningún lado, solo lo muestra al
@@ -579,7 +592,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
       // sin guardar y la pantalla se recarga con el acuse, se perderían.
       const flushR=await fetch('/api/ventas/guardar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,id_exportacion:null,lineas:todas})});
       if(!flushR.ok){const j=await flushR.json().catch(()=>({}));throw new Error((j as any).error||'Error al guardar la venta');}
-      const r=await fetch('/api/ventas/cargar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,esperado:delCliente,soloCliente:String(idControl)})});
+      const r=await fetch('/api/ventas/cargar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,esperado:delCliente,soloCliente:String(idControl),soloCargar:true})});
       const j=await r.json();
       if(!r.ok)throw new Error(j.error);
       if(j.acuse) setAcuse(j.acuse);
@@ -1037,7 +1050,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
         return (
           <div style={{background:'#fff',border:'2px solid #1d4ed8',borderRadius:'10px',padding:'16px',marginBottom:'12px'}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',gap:'10px',flexWrap:'wrap',marginBottom:'4px'}}>
-              <p style={{margin:0,fontSize:'14px',fontWeight:800,color:'#1d4ed8'}}>Revisar antes de facturar — {fecha}</p>
+              <p style={{margin:0,fontSize:'14px',fontWeight:800,color:'#1d4ed8'}}>Revisar antes de cargar — {fecha}</p>
               <p style={{margin:0,fontSize:'12px',color:'#6b7280'}}>{items.length} factura(s) · <strong style={{color:'#111827'}}>{fmt(total)}</strong></p>
             </div>
             <p style={{margin:'0 0 10px',fontSize:'11.5px',color:'#6b7280'}}>
@@ -1100,7 +1113,7 @@ export default function VentasManager({clientes,precios,frecuencias,stats,pedido
             <div style={{display:'flex',gap:'8px',marginTop:'12px'}}>
               <button onClick={cargarVentas} disabled={exp}
                 style={{background:'#1d4ed8',color:'white',border:'none',borderRadius:'8px',padding:'10px 20px',fontWeight:700,fontSize:'13px',cursor:exp?'wait':'pointer',flex:1}}>
-                {exp?'Facturando…':`✓ Facturar ${items.length} cliente(s) por ${fmt(total)}`}
+                {exp?'Cargando…':`✓ Cargar ${items.length} cliente(s) por ${fmt(total)}`}
               </button>
               <button onClick={()=>setPreCargar(null)} disabled={exp}
                 style={{background:'white',color:'#6b7280',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'10px 16px',fontSize:'13px',cursor:'pointer'}}>

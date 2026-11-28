@@ -172,6 +172,12 @@ export default async function VentasPage({ searchParams }: { searchParams: { fec
             {/* "Facturación" no decía nada: la pantalla de Ventas también factura. La
                 diferencia es CUÁNDO se usa cada una — acá se carga y se emite el día;
                 allá se reintenta lo que no salió. El nombre ahora lo dice. */}
+            {/* Desde que la factura sale con el remito, lo que se mira todos los dias es
+                esto: que se cargo, que se facturo y si fue contra un remito confirmado. */}
+            <Link href="/ventas/cargadas" className="btn secondary" style={{ fontSize: '13px', marginTop: '2px' }}
+              title="Que se cargo cada dia, que se facturo con remito y que sin remito.">
+              📦 Ventas cargadas →
+            </Link>
             <Link href="/facturacion" className="btn secondary" style={{ fontSize: '13px', marginTop: '2px' }}
               title="Las ventas cargadas que todavía no se emitieron en Xubio: se reintentan desde ahí.">
               📄 Emitir lo que quedó pendiente →

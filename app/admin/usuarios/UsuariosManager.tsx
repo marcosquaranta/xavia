@@ -21,7 +21,7 @@ export default function UsuariosManager({ usuarios }: { usuarios: Usuario[] }) {
   const [nombre, setNombre] = useState('');
   const [password, setPassword] = useState('');
   const [confirmar, setConfirmar] = useState('');
-  const [rol, setRol] = useState<'usuario' | 'admin'>('usuario');
+  const [rol, setRol] = useState<'usuario' | 'admin' | 'reparto'>('usuario');
 
   async function handleCrear(e: React.FormEvent) {
     e.preventDefault();
@@ -131,9 +131,10 @@ export default function UsuariosManager({ usuarios }: { usuarios: Usuario[] }) {
             </div>
             <div>
               <label>Rol *</label>
-              <select value={rol} onChange={(e) => setRol(e.target.value as 'usuario' | 'admin')} disabled={loading}>
+              <select value={rol} onChange={(e) => setRol(e.target.value as 'usuario' | 'admin' | 'reparto')} disabled={loading}>
                 <option value="usuario">Usuario — puede crear y editar, NO borrar</option>
                 <option value="admin">Admin — acceso completo</option>
+                <option value="reparto">Reparto — solo confirma las entregas del día</option>
               </select>
             </div>
             <div>

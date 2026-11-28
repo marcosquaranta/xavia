@@ -30,7 +30,11 @@ export async function POST(req: NextRequest) {
     // dejar todo cargado y facturar al final — que es donde quedaban ventas sin facturar.
     // `permitirDuplicados`: claves que la pantalla ya advirtió y el que carga autorizó a
     // mano. Solo llega con un click en "Emitir igual" (ver lib/facturaDuplicada.ts).
-    const { fecha, esperado, soloCliente, permitirDuplicados } = await req.json();
+    // `soloCargar`: cerrar la carga del día SIN facturar. Es lo normal desde que la
+    // factura sale cuando el reparto confirma el remito (ver /reparto). Se queda con toda
+    // la verificación de `esperado` —que es la que ataja una fila de otro cliente o una
+    // cantidad que no se guardó— y no emite nada.
+    const { fecha, esperado, soloCliente, permitirDuplicados, soloCargar } = await req.json();
     if (!fecha) return NextResponse.json({ error: 'fecha requerida' }, { status: 400 });
 
     const ventas = await leerVentasConIdsUnicos();
@@ -112,6 +116,14 @@ export async function POST(req: NextRequest) {
           diferencias,
         }, { status: 409 });
       }
+    }
+
+    // Cargar y listo: la venta queda esperando el remito. No se marca PENDIENTE ni se
+    // toca nada — 'PENDIENTE' es la cola de emisión, y una venta que espera el remito no
+    // está en ninguna cola: está esperando que alguien la entregue.
+    if (soloCargar) {
+      const clientes = new Set(aCargar.map((v) => String(v.id_control))).size;
+      return NextResponse.json({ ok: true, cargadas: true, clientes, lineas: aCargar.length });
     }
 
     await batchUpdateRows('Ventas', 'id_venta', aCargar.map(v => ({
