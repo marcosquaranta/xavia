@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reparto — pantalla de muestra</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; background: #e5e7eb; font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif; padding: 24px 16px; }
+  .hoja { max-width: 880px; margin: 0 auto; background: white; border-radius: 16px; padding: 26px 24px 30px; }
+  h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: -0.3px; color: #111827; }
+  .sub { margin: 0 0 22px; font-size: 14px; color: #6b7280; line-height: 1.5; }
+  .fila { display: flex; gap: 22px; flex-wrap: wrap; justify-content: center; }
+  .col { flex: 1 1 330px; max-width: 360px; }
+  .cap { font-size: 13px; font-weight: 800; color: #111827; margin: 0 0 8px; }
+  .cap span { font-weight: 400; color: #6b7280; }
+  .tel { border: 10px solid #111827; border-radius: 26px; overflow: hidden; background: #f3f4f6; }
+  .top { background: #111827; color: white; padding: 15px 15px 13px; }
+  .top h2 { margin: 0; font-size: 18px; font-weight: 800; }
+  .top .d { font-size: 12px; color: #9ca3af; margin-top: 3px; }
+  .barra { height: 7px; border-radius: 99px; background: #374151; overflow: hidden; margin-top: 10px; }
+  .barra i { display: block; height: 7px; width: 43%; background: #22c55e; }
+  .cuerpo { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .tarjeta { background: white; border: 1px solid #e5e7eb; border-radius: 11px; padding: 11px 13px; }
+  .tarjeta.proxima { border: 2px solid #166534; }
+  .tarjeta .n { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .tarjeta .n b { font-size: 15px; color: #111827; }
+  .tarjeta .n em { font-style: normal; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+  .tarjeta .s { font-size: 12px; color: #6b7280; margin: 3px 0 6px; }
+  .tarjeta .q { font-size: 13px; color: #374151; }
+  .item { background: white; border: 1px solid #e5e7eb; border-radius: 11px; padding: 10px 12px; display: flex; align-items: center; gap: 9px; }
+  .item.cambiado { background: #fffbeb; border: 2px solid #fcd34d; }
+  .item .t { flex: 1; min-width: 0; }
+  .item .t b { display: block; font-size: 14.5px; color: #111827; }
+  .item .t i { font-style: normal; font-size: 11.5px; color: #9ca3af; }
+  .item.cambiado .t i { color: #b45309; font-weight: 600; }
+  .paso { width: 40px; height: 40px; border-radius: 9px; border: 1px solid #d1d5db; background: white; font-size: 20px; color: #374151; }
+  .valor { min-width: 36px; text-align: center; font-size: 21px; font-weight: 800; color: #111827; }
+  .item.cambiado .valor { color: #b45309; }
+  .confirmar { margin: 10px 12px 16px; display: block; width: calc(100% - 24px); background: #166534; color: white; border: none; font-size: 15.5px; font-weight: 800; padding: 14px; border-radius: 11px; }
+  .pie { font-size: 11.5px; color: #6b7280; text-align: center; margin: 0 12px 14px; line-height: 1.45; }
+  .notas { margin: 24px 0 0; border-top: 1px solid #f3f4f6; padding-top: 16px; font-size: 13.5px; color: #374151; line-height: 1.6; }
+  .notas b { color: #111827; }
+</style>
+</head>
+<body>
+<div class="hoja">
+  <h1>Así se ve en el celular</h1>
+  <p class="sub">Dos pantallas: la lista de los clientes del día, y lo que se toca en cada cliente.</p>
+
+  <div class="fila">
+    <div class="col">
+      <p class="cap">1 · La lista del día <span>— se abre y están todos los clientes</span></p>
+      <div class="tel">
+        <div class="top">
+          <h2>Entregas de hoy</h2>
+          <div class="d">jue 27/11</div>
+          <div class="barra"><i></i></div>
+        </div>
+        <div class="cuerpo">
+          <div class="tarjeta proxima">
+            <div class="n"><b>La Esperanza</b><em style="color:#166534">Confirmar</em></div>
+            <div class="s">Uriburu 2500</div>
+            <div class="q">24 Rúcula · 12 Lechuga crespa · 6 Hoja de roble</div>
+          </div>
+          <div class="tarjeta proxima">
+            <div class="n"><b>Heroica</b><em style="color:#166534">Confirmar</em></div>
+            <div class="s">Güemes</div>
+            <div class="q">18 Rúcula · 9 Lechuga crespa</div>
+          </div>
+          <div class="tarjeta">
+            <div class="n"><b>Forno Viena</b><em style="color:#b45309">✓ con cambios</em></div>
+            <div class="s">Casa central · 10:14</div>
+            <div class="q">14 Rúcula</div>
+          </div>
+          <div class="tarjeta">
+            <div class="n"><b>Verdulería Pablito</b><em style="color:#166534">✓ tal cual</em></div>
+            <div class="s">Local · 09:38</div>
+            <div class="q">8 Rúcula · 8 Lechuga crespa</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <p class="cap">2 · Un cliente <span>— se toca solo lo que cambió</span></p>
+      <div class="tel">
+        <div class="top">
+          <h2>La Esperanza</h2>
+          <div class="d">Uriburu 2500 · 27/11</div>
+        </div>
+        <div class="cuerpo">
+          <div class="item">
+            <div class="t"><b>Rúcula</b><i>tal como se cargó</i></div>
+            <button class="paso" type="button" aria-label="Menos rúcula">−</button>
+            <span class="valor">24</span>
+            <button class="paso" type="button" aria-label="Más rúcula">+</button>
+          </div>
+          <div class="item cambiado">
+            <div class="t"><b>Lechuga crespa</b><i>se habían cargado 12</i></div>
+            <button class="paso" type="button" aria-label="Menos crespa">−</button>
+            <span class="valor">9</span>
+            <button class="paso" type="button" aria-label="Más crespa">+</button>
+          </div>
+          <div class="item">
+            <div class="t"><b>Hoja de roble</b><i>tal como se cargó</i></div>
+            <button class="paso" type="button" aria-label="Menos roble">−</button>
+            <span class="valor">6</span>
+            <button class="paso" type="button" aria-label="Más roble">+</button>
+          </div>
+          <div class="item">
+            <div class="t"><b>Cajones que me devolvieron</b><i>tienen 14 afuera</i></div>
+            <button class="paso" type="button" aria-label="Menos cajones">−</button>
+            <span class="valor">8</span>
+            <button class="paso" type="button" aria-label="Más cajones">+</button>
+          </div>
+        </div>
+        <button class="confirmar" type="button">Confirmar la entrega</button>
+        <p class="pie">Se va a facturar <b>24 Rúcula · 9 Lechuga crespa · 6 Hoja de roble</b></p>
+      </div>
+    </div>
+  </div>
+
+  <div class="notas">
+    <b>En amarillo</b> queda lo que cambiaste, y debajo dice cuánto se había cargado.<br>
+    <b>Si dejaste lo mismo</b>, no tocás nada: apretás Confirmar y listo.<br>
+    <b>Sin señal</b> podés confirmar igual: queda guardado en el celular y se manda solo cuando vuelve.
+  </div>
+</div>
+</body>
+</html>
