@@ -1,4 +1,6 @@
-export type Rol = 'admin' | 'usuario';
+// 'reparto' es mas chico que 'usuario', no una variante: ve UNA pantalla (/reparto) y
+// nada mas. Lo usa el que entrega, desde el celular, para decir que dejo en cada cliente.
+export type Rol = 'admin' | 'usuario' | 'reparto';
 export type Fase = 'plantin' | 'fase_1' | 'fase_2';
 export type EstadoLote = 'activo' | 'cosechado' | 'descartado' | 'borrado';
 export type TipoMovimiento = 'siembra' | 'trasplante' | 'cosecha' | 'descarte' | 'division';

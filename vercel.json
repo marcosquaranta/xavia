@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/cierre-entregas",
+      "schedule": "0 19 * * *"
+    },
+    {
       "path": "/api/reportes/semanal",
       "schedule": "0 12 * * 5"
     },

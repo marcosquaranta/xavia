@@ -8,6 +8,11 @@ import Header from '@/components/Header';
 import FacturacionManager from './FacturacionManager';
 import { leerComprobantesCache } from '@/lib/xubioCache';
 import { desajustesDeLetra, letrasPorPuntoDeVenta } from '@/lib/controlLetra';
+import EsperandoReparto from '@/components/EsperandoReparto';
+import { entregasDelDia } from '@/lib/entregas';
+import { leerEntregas } from '@/lib/entregasServer';
+import { clavesDeVenta } from '@/lib/clavesVenta';
+import { fechaArgentinaHoy } from '@/lib/ocupacion';
 
 import { ARTICULOS } from '@/lib/articulos';
 export const dynamic = 'force-dynamic';
@@ -110,12 +115,26 @@ export default async function FacturacionPage() {
   const desajustes = desajustesDeLetra(emitidos, clientes);
   const porPV = letrasPorPuntoDeVenta(emitidos);
 
+  // Las entregas de hoy que el reparto todavia no confirmo. Si algo falla al leerlas, la
+  // pantalla sale igual sin la franja: Facturacion no se puede caer por un aviso.
+  let esperando: { cliente: string; sucursal: string }[] = [];
+  try {
+    const hoyAR = fechaArgentinaHoy();
+    const [entregasHoy, clavesVenta] = await Promise.all([leerEntregas(), clavesDeVenta()]);
+    esperando = entregasDelDia(ventas, clientes, entregasHoy, hoyAR, clavesVenta)
+      .filter((e) => e.estado === 'sin_confirmar' && !e.yaFacturada)
+      .map((e) => ({ cliente: e.cliente, sucursal: e.sucursal }));
+  } catch (e) {
+    console.error('[facturacion] entregas del dia:', e);
+  }
+
   return (
     <>
       <Header user={user} current="ventas" />
       <div className="container">
         <Link href="/ventas" style={{ fontSize: '13px', display: 'inline-block', marginBottom: '14px' }}>← Volver a Ventas</Link>
         <h1 className="page-title">Facturación</h1>
+        <EsperandoReparto entregas={esperando} />
         <p className="page-subtitle">
           Acá se <strong>emiten</strong> las facturas: lo cargado que todavía no se mandó a Xubio.{' '}
           <Link href="/ventas/historial" style={{ color: '#2563eb', fontWeight: 600 }}>Historial de facturación</Link>{' '}

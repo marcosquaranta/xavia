@@ -119,6 +119,12 @@ export const AVISOS: AvisoConfigurable[] = [
     porDefecto: ['marcos.quaranta@gmail.com'],
   },
   {
+    clave: 'email_diferencias_entrega',
+    titulo: 'Diferencias entre lo cargado y lo entregado (Juan Pablo)',
+    descripcion: 'Todos los dias a las 16, solo si hubo diferencias. Que recibio cada cliente contra lo que le habiamos cargado, valorizado, y que pedidos fijos quedaron viejos. Lo confirma el reparto desde el celular.',
+    porDefecto: ['juanpablosoroeta@gmail.com'],
+  },
+  {
     clave: 'email_cobro_automatico',
     titulo: 'Cobros que se registran solos',
     descripcion: 'En el momento en que pasa. Cuando llega un aviso de pago y las facturas que nombra suman exactamente lo que declara, la app registra la cobranza en Xubio sola y avisa al instante, con el detalle y el link para anularla.',
